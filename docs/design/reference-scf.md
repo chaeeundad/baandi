@@ -2070,3 +2070,87 @@ The [single-run dev08 request](../performance/lanes/RSCF/fft2-dev08-request.md)
 contains validation scope, results and remote gates. Shared ledger/log,
 README evidence and dashboard updates belong to the master integration;
 this ticket edits only its owned accounting section and request.
+
+## Per-map energy cost
+
+P3-ENERGY is derived from the own-words `qe-scf-cycle.md`, sections 7–9,
+not QE source. It does not repeat ENERGY-IDENTITY (which merely replaced a
+nonlocal term and did not improve wall time): it defers the entire independent
+output audit until needed. `BAANDI_REFSCF_LEAN_ENERGY=on`, or
+`[performance] refscf_lean_energy=true`, is experimental and **default off**.
+
+Here R is the owned real grid size, G the owned orbital rows, B the band count,
+and P the projector count. A field evaluation consists of one forward and one
+inverse distributed full-box FFT, a reciprocal Poisson pass, pointwise LDA and
+real-grid integrals (plus rank reductions). These are logical costs, not timings.
+
+| Computation | Cost per evaluation | Consumer | Lean policy |
+| --- | --- | --- | --- |
+| Input Hartree/XC fields | 2 FFTs, O(R) Poisson/XC/integral passes | Hamiltonian, diagonal mean, double counting, Harris–Foulkes | Reuse preceding mixed fields |
+| Orbital density | Inverse FFT per occupied orbital pair, O(R B) accumulation | Stop dr2, mixing, delivered density | Unchanged |
+| Reciprocal output/residual | 1 density forward transform, reciprocal metric pass | Stop, ethr/redo, Broyden | Unchanged |
+| True orbital residuals | O(G B) from retained HX, band reduction | Verification residual guard, records | Unchanged |
+| Kinetic energy | O(G B) pass | Direct audit, records, delivery | Deferred |
+| Nonlocal energy | Second projection O(G P B), coupling, reductions | Direct audit, records, delivery | Deferred |
+| Ionic local and zero-mode terms | O(R) integrals | Direct audit, records, delivery | Deferred |
+| Band sum | O(B) | Variational energy, Harris–Foulkes, records | Retained |
+| Output density times input HXC | O(R) integral and reduction | Variational double counting | Retained |
+| Output Hartree/XC | 2 FFTs and field passes | Direct/band-form audit, energy verification, delivery | Deferred |
+| Functional-difference bound | 2 O(R) residual/input-potential integrals and O(B) residual sum | Audit records only | Deferred |
+| Mixed-density fields | 2 FFTs and field passes | descf, variational Hartree/XC, next Hamiltonian | Retained and cached |
+| descf | O(R) integral and reduction | Variational trace energy | Unchanged |
+| Independent verification | Fresh solve and full map audit | Coulomb or ADR 0044 energy verdict | Full audit |
+
+No direct audit energy enters the stopping estimator, ethr ratchet, redo, or
+Broyden update. Candidate maps at an estimator stop are audited before any
+verification attempt, including failed attempts. Predictor-skipped candidates
+remain lean unless they must be delivered at the iteration limit. All verification maps
+are fully audited. Maximum-iteration and mixer-failure deliveries are audited
+without another solve or density construction. Thus every delivered ScfResult
+has a complete finite energy audit; deferred work is charged to map/energy time.
+
+Intermediate records retain their existing keys. In lean mode the unavailable
+direct total, kinetic, ionic local/zero mode, nonlocal, output Hartree/XC,
+band-form and functional-difference-bound slots are JSON **null** (not zero,
+not the mixed-density variational energy). The shared in-memory EnergyAudit
+uses NaN for these unavailable slots; no numerical decision reads them. A
+history energy difference involving an unavailable direct total is null too.
+Band sum, double counting, Ewald, Harris–Foulkes and the separately labelled
+mixed-density variational energy remain available. Trace uses the latter.
+
+A call-owned, one-entry exact-density cache is active in both arms. It stores
+only owned density/field planes, never gathers a grid. All ranks agree on a
+cache hit before skipping collectives; density bits, including signed zero,
+must match. Functional, cell and layout are fixed for the cache lifetime.
+This removes mixed-fields → next-input and candidate-output → verification-input
+duplicates. A miss replaces the entry; nonconsecutive duplicates can still miss.
+The cache adds one scalar agreement reduction and owned-plane comparisons/copies;
+its net speed is for dev08 to measure. No wall-time gain is claimed on Mac.
+
+For an ordinary continuing map without retries, the old path had six field
+FFTs (input, output and mixed density pairs). Exact mixed-input reuse reduces
+this to four with lean off; lean on reduces it to two after the first map.
+These counts exclude orbital-density transforms, the stopping transform,
+verification and the final audit. They are a work model, not measured speed.
+
+### P3-ENERGY Mac validation
+
+The synthetic `lean_energy_preserves_delivery_and_counts` test compares 12
+configurations (cubic, skewed, elongated; verification off, Coulomb verification,
+energy verification, and one-iteration exhaustion), each on two simulated ranks.
+Delivered total energy difference is exactly 0 Ha and density difference exactly
+0 electron/Bohr^3; mixed variational energy bits, dr2, first stop, verification
+call count, SCF count, Davidson iterations and H columns agree. The three-rank
+field-cache test compares fresh/cached Hartree, XC and potential integrals by
+bits and both potential arrays, including a miss on just one rank. CLI tests
+check that unavailable direct audit terms serialize as null in Ha and Ry.
+
+Mac gates: refscf 29 passed / 1 ignored (external Si matrix, dev08 only); CLI
+reference and numerics switches pass; cache test, fmt and clippy pass. The
+additional `scripts/check.sh fast dft-engine dft-cli dft-numerics` reports
+build/fmt/clippy PASS, test FAIL: 552 passed, 3 failed, 148 ignored. All three
+failures are existing CLI pseudo-cache tests rejecting the sandbox scratch path
+inside the checkout (`pseudopotential cache must be outside repositories`). No
+cache policy or test tolerance was changed. This is synthetic correctness
+validation, not real-material/dev08 performance acceptance. Request:
+`docs/performance/lanes/RSCF/energy-dev08-request.md`.

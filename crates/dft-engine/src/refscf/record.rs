@@ -106,6 +106,8 @@ pub struct Record {
     /// - integral (x_next-y) (V_H[x_next]+V_xc[x_next]) dr, in Ha.
     pub descf_ha: f64,
     pub variational_energy_ha: f64,
+    /// Intermediate lean maps use NaN for unavailable audit terms (JSON null).
+    /// Delivery and verification candidates always carry a full audit.
     pub energy: EnergyAudit,
     /// E_H and E_xc at the density used in the QE-style variational energy.
     pub variational_hartree_ha: f64,

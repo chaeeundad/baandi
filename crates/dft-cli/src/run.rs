@@ -3686,6 +3686,44 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reference_lean_audit_serializes_unavailable_terms_as_null() {
+        let energy = dft_engine::energy::EnergyAudit {
+            xc_floor: None,
+            nlcc: None,
+            kinetic: f64::NAN,
+            local: f64::NAN,
+            local_zero_mode: f64::NAN,
+            nonlocal: f64::NAN,
+            hartree: f64::NAN,
+            xc: f64::NAN,
+            ewald: 1.,
+            band_sum: 2.,
+            double_counting: 3.,
+            band_form: f64::NAN,
+            harris_foulkes: 4.,
+            functional_difference_bound: f64::NAN,
+        };
+        let value = super::energy_json(&energy);
+        for key in [
+            "kinetic",
+            "local",
+            "local_zero_mode",
+            "nonlocal",
+            "hartree",
+            "xc",
+            "band_form",
+            "functional_difference_bound",
+            "total",
+        ] {
+            assert!(value[key]["ha"].is_null());
+            assert!(value[key]["ry"].is_null());
+        }
+        assert_eq!(value["band_sum"]["ha"], 2.);
+        assert_eq!(value["double_counting"]["ha"], 3.);
+        assert_eq!(value["harris_foulkes"]["ha"], 4.);
+    }
+
     use super::*;
     #[test]
     fn reference_lazy_output_preserves_json_science_and_density_bytes() {

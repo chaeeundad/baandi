@@ -6,6 +6,10 @@ mod adapter;
 pub use adapter::*;
 #[cfg(feature = "mkl")]
 mod keep;
+#[cfg(any(feature = "mkl", test))]
+mod lane_diagnostics;
+#[cfg(feature = "mkl")]
+pub use lane_diagnostics::LaneDiagnostics;
 
 // Shared by the FFI entry and its no-MKL contract tests.
 #[cfg(any(feature = "mkl", test))]

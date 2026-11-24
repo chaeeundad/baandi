@@ -2821,3 +2821,365 @@ fn rmm_default_nonlocal_strict_energy_gate() {
         1e-8,
     );
 }
+
+/// Plans are cached per run, not globally or by grid shape alone. Exercise
+/// different sparse supports, axis choices, empty ranks and private workspaces.
+#[test]
+fn setup4_fft_plan_cache_and_workspace_identity() {
+    use dft_numerics::switches::RunConfig;
+    use dft_solvers::distributed_fft::{DistributedPairFft, PlanCache};
+    for shape in [[4, 4, 4], [3, 5, 7]] {
+        let indices: Vec<_> = (0..shape[0])
+            .flat_map(|i| (0..shape[1]).flat_map(move |j| (0..shape[2]).map(move |k| [i, j, k])))
+            .collect();
+        for ranks in [1, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                for vendor in [false, true] {
+                    let config = RunConfig::from_pairs(&[
+                        ("fft_fused_rows", "on"),
+                        ("fft_sparse_clear", "on"),
+                    ])
+                    .unwrap();
+                    let _config = config.enter();
+                    let cache = PlanCache::default();
+                    for sparse in [false, true] {
+                        let used = if sparse {
+                            &indices[..shape[2]]
+                        } else {
+                            &indices[..]
+                        };
+                        let mut private =
+                            DistributedPairFft::with_lanes(shape, used, comm.rank(), ranks, vendor)
+                                .unwrap();
+                        assert!(private.shared_workspace().is_none());
+                        let scope = cache.enter();
+                        let mut shared =
+                            DistributedPairFft::with_lanes(shape, used, comm.rank(), ranks, vendor)
+                                .unwrap();
+                        let counts = cache.counts();
+                        let repeated =
+                            DistributedPairFft::with_lanes(shape, used, comm.rank(), ranks, vendor)
+                                .unwrap();
+                        assert_eq!(cache.counts(), counts, "no repeated kernel plans");
+                        let mut fork = shared.shared_workspace().unwrap();
+                        assert_eq!(cache.counts(), counts, "no planning in workspace copy");
+                        drop(repeated);
+                        drop(scope);
+                        let local: Vec<_> = private
+                            .local_positions()
+                            .iter()
+                            .map(|&i| C::new((i as f64 * 0.37).sin(), (i as f64 * 0.21).cos()))
+                            .collect();
+                        let potential: Vec<_> = (0..shape.iter().product())
+                            .map(|i| (i as f64 * 0.03).cos())
+                            .collect();
+                        for scale in [1., 0.2, -0.7] {
+                            let input: Vec<_> = local.iter().map(|z| z * scale).collect();
+                            let mut expected = input.clone();
+                            private
+                                .apply_local_batch(comm, &mut expected, &potential, 1)
+                                .unwrap();
+                            for fft in [&mut shared, &mut fork] {
+                                let mut actual = input.clone();
+                                fft.apply_local_batch(comm, &mut actual, &potential, 1)
+                                    .unwrap();
+                                let bits = |v: &[C]| {
+                                    v.iter()
+                                        .flat_map(|z| [z.re.to_bits(), z.im.to_bits()])
+                                        .collect::<Vec<_>>()
+                                };
+                                assert_eq!(bits(&actual), bits(&expected));
+                            }
+                        }
+                    }
+                    if !vendor || !dft_numerics::MKL_BACKEND {
+                        assert_eq!(
+                            cache.counts(),
+                            (if shape[0] == shape[1] { 2 } else { 6 }, 0)
+                        );
+                    } else {
+                        assert!(cache.counts().1 > 0);
+                    }
+                    assert_eq!(PlanCache::default().counts(), (0, 0));
+                }
+            });
+        }
+    }
+}
+
+/// Cubic, skew multi-species, elongated and slab starts, including J>B and
+/// kinetic completion, odd pairs, nonlocal projectors and empty row owners.
+#[test]
+fn setup4_start_switches_preserve_fields_and_ritz() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::{Id, RunConfig};
+    for id in [
+        Id::REFSTART_FFT_SHARE,
+        Id::REFSTART_SINGLE_GEMM,
+        Id::REFSTART_LOCAL_SHELLS,
+    ] {
+        assert!(!RunConfig::from_pairs(&[]).unwrap().on(id));
+    }
+    for (shape, rows) in [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        [[8., 0., 0.], [0., 8., 0.], [0., 0., 4.]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let pp = common::potential_with_atomic_start(2., 1.8, shape != 3, 161, "SLA PZ");
+        let pp2 = common::potential_with_atomic_start(2., 2., false, 161, "SLA PZ");
+        let atoms = [
+            dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+            dft_geometry::Atom::new("Yy", [0.57, 0.68, 0.71]),
+        ];
+        let potentials = [
+            dft_engine::SpeciesPotential {
+                label: "Xx",
+                potential: &pp,
+            },
+            dft_engine::SpeciesPotential {
+                label: "Yy",
+                potential: if shape == 1 { &pp2 } else { &pp },
+            },
+        ];
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let build = |fft, gram, shells, threads| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refstart_fft_share", fft),
+                        ("refstart_single_gemm", gram),
+                        ("refstart_local_shells", shells),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    let options = dft_engine::ScfOptions {
+                        cutoff_hartree: if shape == 0 { 8. } else { 2. },
+                        bands: Some(if shape == 3 { 9 } else { 5 }),
+                        gamma_real: dft_engine::GammaReal::On,
+                        threads,
+                        ..Default::default()
+                    };
+                    start(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        comm,
+                    )
+                    .unwrap()
+                };
+                let base = build("off", "off", "off", 1);
+                if shape == 0 && ranks == 1 {
+                    assert!(
+                        base.orbitals.rows() > 256,
+                        "exercise a multi-panel Gram reduction"
+                    );
+                }
+                let fields = |s: &dft_engine::refstart::StartState| {
+                    s.density
+                        .iter()
+                        .chain(&s.ionic)
+                        .chain(&s.potential)
+                        .chain(&s.diagonal_static)
+                        .map(|x| x.to_bits())
+                        .chain(
+                            s.density_g
+                                .iter()
+                                .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                        )
+                        .collect::<Vec<_>>()
+                };
+                for (fft, gram, shells) in [
+                    ("on", "off", "off"),
+                    ("off", "off", "on"),
+                    ("off", "on", "off"),
+                    ("on", "on", "on"),
+                ] {
+                    let mut previous = None;
+                    for threads in [1, 2] {
+                        let mut candidate = build(fft, gram, shells, threads);
+                        assert_eq!(fields(&base), fields(&candidate));
+                        let delta = base
+                            .ritz_values_hartree
+                            .iter()
+                            .zip(&candidate.ritz_values_hartree)
+                            .map(|(a, b)| (a - b).abs())
+                            .fold(0., f64::max);
+                        assert!(delta < 1e-12, "Ritz error {delta:e} Ha");
+                        let bands = candidate.orbitals.cols();
+                        let mut dots = vec![0.; 2 * bands * bands];
+                        for j in 0..bands {
+                            for i in 0..bands {
+                                for r in 0..candidate.orbitals.rows() {
+                                    dots[i + j * bands] +=
+                                        base.orbitals[(r, i)] * candidate.orbitals[(r, j)];
+                                    dots[bands * bands + i + j * bands] +=
+                                        candidate.orbitals[(r, i)] * candidate.orbitals[(r, j)];
+                                }
+                            }
+                        }
+                        let mut global = vec![0.; dots.len()];
+                        comm.tree_sum_f64(&dots, &mut global).unwrap();
+                        for j in 0..bands {
+                            for i in 0..bands {
+                                assert!(
+                                    (global[bands * bands + i + j * bands] - f64::from(i == j))
+                                        .abs()
+                                        < 1e-12
+                                );
+                            }
+                        }
+                        assert!(
+                            setup3_projection_residual(
+                                comm,
+                                &base.orbitals,
+                                &candidate.orbitals,
+                                &global[..bands * bands]
+                            ) < 1e-12
+                        );
+
+                        let bits = candidate
+                            .orbitals
+                            .as_slice()
+                            .iter()
+                            .chain(&candidate.ritz_values_hartree)
+                            .map(|v| v.to_bits())
+                            .collect::<Vec<_>>();
+                        if gram == "off" || !dft_numerics::MKL_BACKEND {
+                            assert_eq!(
+                                base.orbitals
+                                    .as_slice()
+                                    .iter()
+                                    .chain(&base.ritz_values_hartree)
+                                    .map(|v| v.to_bits())
+                                    .collect::<Vec<_>>(),
+                                bits
+                            );
+                        }
+                        if let Some(prev) = &previous {
+                            assert_eq!(prev, &bits);
+                        }
+                        previous = Some(bits);
+                        // The same tuned operator remains usable after the
+                        // constructor cache scope has ended.
+                        let mut hx = dft_numerics::RealMatrix::zeros(
+                            candidate.orbitals.rows(),
+                            candidate.orbitals.cols(),
+                        )
+                        .unwrap();
+                        candidate
+                            .operator
+                            .apply_block(comm, &candidate.orbitals, &mut hx)
+                            .unwrap();
+                        assert!(hx.as_slice().iter().all(|v| v.is_finite()));
+                    }
+                }
+            });
+        }
+    }
+}
+
+#[test]
+fn setup4_shared_density_plan_verified_trajectory() {
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    for rows in [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let atoms = [
+            dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+            dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+        ];
+        let potentials = [dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = dft_engine::ScfOptions {
+            cutoff_hartree: 2.,
+            bands: Some(5),
+            max_iterations: 100,
+            gamma_real: dft_engine::GammaReal::On,
+            ..Default::default()
+        };
+        for ranks in [1, 3] {
+            dft_mpi::simulate(ranks, |comm| {
+                let run = |value| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refstart_fft_share", value),
+                        ("refstart_local_shells", value),
+                        ("refstart_single_gemm", "off"),
+                        ("refscf_verify_energy", "off"),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    dft_engine::refscf::driver::run_with(
+                        dft_engine::refstart::StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile::default(),
+                        comm,
+                    )
+                    .unwrap()
+                };
+                let base = run("off");
+                let candidate = run("on");
+                assert!(
+                    candidate.outcome.converged
+                        && candidate
+                            .outcome
+                            .result
+                            .verification
+                            .as_ref()
+                            .unwrap()
+                            .passed()
+                );
+                assert_eq!(
+                    base.outcome.result.energy.total_hartree().to_bits(),
+                    candidate.outcome.result.energy.total_hartree().to_bits()
+                );
+                assert_eq!(
+                    base.outcome
+                        .result
+                        .density
+                        .as_slice()
+                        .unwrap()
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>(),
+                    candidate
+                        .outcome
+                        .result
+                        .density
+                        .as_slice()
+                        .unwrap()
+                        .iter()
+                        .map(|v| v.to_bits())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(base.records.len(), candidate.records.len());
+                for (a, b) in base.records.iter().zip(&candidate.records) {
+                    assert_eq!(a.dr2_ry.to_bits(), b.dr2_ry.to_bits());
+                    assert_eq!(a.h_columns, b.h_columns);
+                    assert_eq!(a.calls.len(), b.calls.len());
+                }
+                if comm.rank() == 0 {
+                    eprintln!(
+                        "P3-SETUP4 verified P={ranks}: delta_E=0 Ha density_bits_equal=true maps={}",
+                        candidate.records.len()
+                    );
+                }
+            });
+        }
+    }
+}

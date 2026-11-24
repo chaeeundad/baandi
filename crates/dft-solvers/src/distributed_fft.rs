@@ -48,7 +48,8 @@ use dft_mpi::{Collective, MpiError};
 use dft_numerics::FftError;
 use dft_numerics::fused_pair_plan::BackendLanes;
 use num_complex::Complex64 as C;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -57,6 +58,142 @@ pub enum DistFftError {
     Fft(#[from] FftError),
     #[error("MPI: {0}")]
     Mpi(#[from] MpiError),
+}
+
+/// A constructor-only cache owned by one run/rank. rustfft caches by length and
+/// direction; MKL descriptors additionally depend on batch count. No global
+/// cache survives a run. Work arrays remain private to each FFT workspace.
+#[derive(Clone, Default)]
+pub struct PlanCache(Arc<Mutex<CachedPlans>>);
+struct CachedPlans {
+    rust: rustfft::FftPlanner<f64>,
+    lengths: BTreeSet<usize>,
+    vendor: BTreeMap<(usize, usize), Arc<Mutex<BackendLanes>>>,
+}
+impl Default for CachedPlans {
+    fn default() -> Self {
+        Self {
+            rust: rustfft::FftPlanner::new(),
+            lengths: BTreeSet::new(),
+            vendor: BTreeMap::new(),
+        }
+    }
+}
+thread_local! {
+    static PLAN_CACHE: std::cell::RefCell<Option<PlanCache>> = const { std::cell::RefCell::new(None) };
+}
+/// Constructor scope only; intentionally cannot move to a worker thread.
+pub struct PlanScope {
+    previous: Option<PlanCache>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+impl Drop for PlanScope {
+    fn drop(&mut self) {
+        PLAN_CACHE.with(|c| *c.borrow_mut() = self.previous.take());
+    }
+}
+impl PlanCache {
+    pub fn enter(&self) -> PlanScope {
+        PlanScope {
+            previous: PLAN_CACHE.with(|c| c.replace(Some(self.clone()))),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    /// Distinct rustfft (length, direction) requests and MKL batch descriptors.
+    /// Counts are construction evidence, not hot-loop instrumentation.
+    pub fn counts(&self) -> (usize, usize) {
+        let c = self.0.lock().unwrap();
+        (2 * c.lengths.len(), c.vendor.len())
+    }
+    fn rust_pair(&self, n: usize) -> [Arc<dyn rustfft::Fft<f64>>; 2] {
+        let mut c = self.0.lock().unwrap();
+        c.lengths.insert(n);
+        [c.rust.plan_fft_forward(n), c.rust.plan_fft_inverse(n)]
+    }
+}
+
+enum Lanes {
+    Private(BackendLanes),
+    Shared(SharedLanes),
+}
+enum SharedLanes {
+    Rust {
+        plans: [[Arc<dyn rustfft::Fft<f64>>; 2]; 3],
+        scratch: Vec<C>,
+    },
+    Vendor([Option<Arc<Mutex<BackendLanes>>>; 3]),
+}
+impl Clone for SharedLanes {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Rust { plans, scratch } => Self::Rust {
+                plans: plans.clone(),
+                scratch: vec![C::default(); scratch.len()],
+            },
+            Self::Vendor(plans) => Self::Vendor(plans.clone()),
+        }
+    }
+}
+impl Lanes {
+    fn plan(n: [usize; 3], counts: [usize; 3], vendor: bool) -> Result<Self, FftError> {
+        let cache = PLAN_CACHE.with(|c| c.borrow().clone());
+        let Some(cache) = cache else {
+            return BackendLanes::plan(n, counts, vendor).map(Self::Private);
+        };
+        if vendor && dft_numerics::MKL_BACKEND {
+            let mut c = cache.0.lock().unwrap();
+            let mut plans = [None, None, None];
+            for a in 0..3 {
+                if counts[a] != 0 {
+                    let key = (n[a], counts[a]);
+                    if let std::collections::btree_map::Entry::Vacant(e) = c.vendor.entry(key) {
+                        // Only axis zero has a descriptor; zero-count axes do
+                        // not create MKL plans. Use the existing FFI adapter.
+                        e.insert(Arc::new(Mutex::new(BackendLanes::plan(
+                            [n[a], 1, 1],
+                            [counts[a], 0, 0],
+                            true,
+                        )?)));
+                    }
+                    plans[a] = Some(c.vendor[&key].clone());
+                }
+            }
+            Ok(Self::Shared(SharedLanes::Vendor(plans)))
+        } else {
+            let plans = n.map(|d| cache.rust_pair(d));
+            let scratch = plans
+                .iter()
+                .flatten()
+                .map(|p| p.get_inplace_scratch_len())
+                .max()
+                .unwrap();
+            Ok(Self::Shared(SharedLanes::Rust {
+                plans,
+                scratch: vec![C::default(); scratch],
+            }))
+        }
+    }
+    fn is_vendor(&self) -> bool {
+        match self {
+            Self::Private(p) => p.is_vendor(),
+            Self::Shared(SharedLanes::Vendor(_)) => true,
+            Self::Shared(SharedLanes::Rust { .. }) => false,
+        }
+    }
+    fn run(&mut self, axis: usize, inverse: bool, data: &mut [C]) -> Result<(), FftError> {
+        match self {
+            Self::Private(p) => p.run(axis, inverse, data),
+            Self::Shared(SharedLanes::Rust { plans, scratch }) => {
+                plans[axis][usize::from(inverse)].process_with_scratch(data, scratch);
+                Ok(())
+            }
+            Self::Shared(SharedLanes::Vendor(plans)) => match &plans[axis] {
+                Some(p) => p.lock().unwrap().run(0, inverse, data),
+                None if data.is_empty() => Ok(()),
+                None => Err(FftError::IncompatibleArray),
+            },
+        }
+    }
 }
 
 struct Partition {
@@ -243,6 +380,7 @@ pub fn position_owners(
 
 /// Complement of scatter destinations, coalesced once at construction. Clearing
 /// spans avoids both redundant zero stores and a per-point hole-index stream.
+#[derive(Clone)]
 struct HoleClear {
     spans: Vec<std::ops::Range<usize>>,
     points: usize,
@@ -291,9 +429,15 @@ struct FusedRows {
 }
 impl FusedRows {
     fn new(nz: usize) -> Self {
-        let mut planner = rustfft::FftPlanner::new();
-        let inverse = planner.plan_fft_inverse(nz);
-        let forward = planner.plan_fft_forward(nz);
+        let cache = PLAN_CACHE.with(|c| c.borrow().clone());
+        let [forward, inverse] = if let Some(cache) = cache {
+            cache.rust_pair(nz)
+        } else {
+            let mut planner = rustfft::FftPlanner::new();
+            let inverse = planner.plan_fft_inverse(nz);
+            let forward = planner.plan_fft_forward(nz);
+            [forward, inverse]
+        };
         let scratch = inverse
             .get_immutable_scratch_len()
             .max(forward.get_inplace_scratch_len());
@@ -332,7 +476,7 @@ pub struct DistributedPairFft {
     recv: Vec<f64>,
     /// 1D kernels: rustfft (default) or MKL DFTI batch lanes (`BAANDI_M2_FFT=mkl`
     /// on MKL builds). Lane buffers: local sticks, middle batch, plane slab.
-    lanes: BackendLanes,
+    lanes: Lanes,
     profile: dft_numerics::real::fft_profile::Probe,
     kept_fuse: bool,
     holes: Option<[HoleClear; 3]>,
@@ -411,7 +555,7 @@ impl DistributedPairFft {
             })
             .collect::<Vec<_>>();
         let local_sticks = counts[rank];
-        let lanes = BackendLanes::plan(n, [local_sticks, planes.len(), n[1]], vendor)?;
+        let lanes = Lanes::plan(n, [local_sticks, planes.len(), n[1]], vendor)?;
         let holes =
             dft_numerics::switches::on(dft_numerics::switches::Id::FFT_SPARSE_CLEAR).then(|| {
                 [
@@ -464,6 +608,47 @@ impl DistributedPairFft {
             lanes,
             profile: dft_numerics::real::fft_profile::Probe::new(n),
             kept_fuse: dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KEPT_FUSE),
+        })
+    }
+
+    /// Independent zeroed work buffers with the same layout and shared kernels.
+    /// Returns None for the historical private-plan path. No planning or
+    /// partitioning is repeated, and no mutable FFT buffer is shared.
+    pub fn shared_workspace(&self) -> Option<Self> {
+        let Lanes::Shared(lanes) = &self.lanes else {
+            return None;
+        };
+        Some(Self {
+            shape: self.shape,
+            first: self.first,
+            n: self.n,
+            total: self.total,
+            ranks: self.ranks,
+            rank: self.rank,
+            local_positions: self.local_positions.clone(),
+            scatter: self.scatter.clone(),
+            local_sticks: self.local_sticks,
+            max_planes: self.max_planes,
+            block: self.block,
+            plane_starts: self.plane_starts.clone(),
+            planes: self.planes.clone(),
+            occupied: self.occupied.clone(),
+            sticks: vec![C::default(); self.sticks.len()],
+            middle: vec![C::default(); self.middle.len()],
+            slab: vec![C::default(); self.slab.len()],
+            send: vec![0.; self.send.len()],
+            recv: vec![0.; self.recv.len()],
+            lanes: Lanes::Shared(lanes.clone()),
+            profile: dft_numerics::real::fft_profile::Probe::new(self.n),
+            kept_fuse: self.kept_fuse,
+            holes: self.holes.clone(),
+            fused_rows: self.fused_rows.as_ref().map(|r| FusedRows {
+                spectral: vec![C::default(); r.spectral.len()],
+                real: vec![C::default(); r.real.len()],
+                scratch: vec![C::default(); r.scratch.len()],
+                inverse: r.inverse.clone(),
+                forward: r.forward.clone(),
+            }),
         })
     }
 

@@ -157,6 +157,7 @@ pub struct DistributedRealHamiltonian {
     gemm: RealGemmWorkspace,
     /// `BAANDI_M2_DGEMM=on`: projector products through the per-panel dgemm route.
     dgemm: bool,
+    single_projection: bool,
     reference_profile: bool,
     apply_times: Option<[f64; 9]>,
     lane: lane_profile::Profile,
@@ -428,6 +429,9 @@ impl DistributedRealHamiltonian {
             image: RealMatrix::zeros(n_loc, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
             dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
+            single_projection: dft_numerics::switches::on(
+                dft_numerics::switches::Id::NONLOCAL_SINGLE_GEMM,
+            ),
             reference_profile: dft_numerics::switches::on(
                 dft_numerics::switches::Id::DAVIDSON_STAGES,
             ),
@@ -946,7 +950,16 @@ impl DistributedRealHamiltonian {
         let apply_clock = self.apply_clock();
         let arrival_start = dft_numerics::stage_clock::arrival::clock();
         if n_loc > 0 && self.dgemm {
-            self.gemm.multiply_slices_wide_into(
+            // Both entries fit p*b <= max(p, capacity)^2. The single entry
+            // removes repeated reduction-panel BLAS calls/packing on MKL;
+            // pure builds retain the same deterministic panel arithmetic.
+            let multiply = if self.single_projection {
+                RealGemmWorkspace::multiply_slices_single_into
+            } else {
+                RealGemmWorkspace::multiply_slices_wide_into
+            };
+            multiply(
+                &mut self.gemm,
                 GemmSite::Other,
                 self.projectors.as_slice(),
                 n_loc,
@@ -1789,6 +1802,113 @@ mod lane_identity_tests {
     use dft_geometry::Cell;
     use dft_numerics::switches::RunConfig;
     use dft_units::Hartree;
+
+    #[test]
+    fn nonlocal_single_projection_matches_panel_route() {
+        let mut worst = 0.0_f64;
+        let mut comparisons = 0;
+        for lattice in [
+            // More than 256 rows on rank 0 at P=1: cross the reduction-panel boundary.
+            [[20., 0., 0.], [0., 20., 0.], [0., 0., 20.]],
+            [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+            [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+            [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+        ] {
+            for ranks in [1, 2, 3, 8] {
+                let results = dft_mpi::simulate(ranks, |comm| {
+                    let cell = Cell::from_user_rows_bohr(lattice).unwrap();
+                    let basis = PlaneWaveBasis::new(&cell, Hartree(1.2)).unwrap();
+                    if lattice[0][0] == 20. && ranks == 1 {
+                        assert!(basis.vectors().len() > 256);
+                    }
+                    let grid = dft_basis::FftGridSpec::new(
+                        &basis,
+                        &basis.density_basis(&cell).unwrap(),
+                        None,
+                    )
+                    .unwrap();
+                    let atoms = [0, 1, 3, 5]
+                        .into_iter()
+                        .map(|nc| {
+                            let columns = (0..nc)
+                                .map(|j| {
+                                    basis
+                                        .momenta()
+                                        .iter()
+                                        .map(|g| {
+                                            C::from_polar(
+                                                0.1 / (1. + g.norm_squared),
+                                                g.cartesian[0] * (j + 1) as f64 * 0.13,
+                                            )
+                                        })
+                                        .collect()
+                                })
+                                .collect();
+                            let d = (0..nc * nc)
+                                .map(|i| if i / nc == i % nc { 0.7 } else { -0.03 })
+                                .collect();
+                            (columns, d)
+                        })
+                        .collect();
+                    let source = Hamiltonian::new(
+                        &cell,
+                        &basis,
+                        ndarray::Array3::zeros(grid.dims()),
+                        NonlocalOperator::from_columns(basis.momenta().to_vec(), atoms, 5),
+                    )
+                    .unwrap();
+                    let mut worst = 0.0_f64;
+                    for width in [0, 1, 2, 5, 17] {
+                        let mut baseline: Option<RealMatrix> = None;
+                        for single in ["off", "on"] {
+                            let cfg = RunConfig::from_pairs(&[
+                                ("nonlocal_single_gemm", single),
+                                ("m2_dgemm", "on"),
+                            ])
+                            .unwrap();
+                            let _scope = cfg.enter();
+                            let mut op = DistributedRealHamiltonian::new(
+                                &source,
+                                &basis,
+                                17,
+                                comm.rank(),
+                                ranks,
+                                WorkerPool::new(1).unwrap(),
+                            )
+                            .unwrap();
+                            let mut x = RealMatrix::zeros(op.local_len(), width).unwrap();
+                            for j in 0..width {
+                                for (i, &r) in op.local_rows().iter().enumerate() {
+                                    x[(i, j)] = ((r * 17 + j * 13) as f64).sin() / 10.;
+                                }
+                            }
+                            let mut y = RealMatrix::zeros(op.local_len(), width).unwrap();
+                            op.apply_block(comm, &x, &mut y).unwrap();
+                            if let Some(base) = &baseline {
+                                for (&a, &b) in base.as_slice().iter().zip(y.as_slice()) {
+                                    worst = worst.max((a - b).abs());
+                                    assert!((a - b).abs() < 1e-13 * a.abs().max(1.));
+                                    if !dft_numerics::MKL_BACKEND {
+                                        assert_eq!(a.to_bits(), b.to_bits());
+                                    }
+                                }
+                            } else {
+                                baseline = Some(y);
+                            }
+                        }
+                    }
+                    worst
+                });
+                for delta in results {
+                    worst = worst.max(delta);
+                }
+                comparisons += ranks * 5;
+            }
+        }
+        eprintln!(
+            "P3-NL: {comparisons} rank/block comparisons, max H component delta {worst:e} Ha"
+        );
+    }
 
     #[test]
     fn a2a_balance_h_equivalence() {

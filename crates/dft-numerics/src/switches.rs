@@ -536,6 +536,10 @@ table! {
         "P3-STREAM: reuse four initialized row buffers between successful solves on the calling thread; bit-identical; default off pending dev08";
     FFT_A2A_BALANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-A2A: cap rank stick counts to reduce padded FFT alltoall payload, preserving mirror units; use only if the block shrinks, row-reduction rounding class, default off pending dev08";
+    NONLOCAL_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-NL: one MKL projection over all local rows instead of 256-row reduction panels; requires M2_DGEMM, rounding class, default off pending dev08";
+    REFSCF_LAZY_OUTPUT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-NL: reference driver retains owned orbitals when the caller requests lazy delivery; requires M2_LAZY_RESULT and a registered MPI communicator; default off pending dev08";
 }
 
 struct Resolved {

@@ -85,7 +85,7 @@ pub struct Run {
 }
 pub fn run(input: StartInput<'_>, profile: Profile) -> Result<Run, ScfError> {
     if let Some(comm) = crate::parallel::SharedComm::active() {
-        run_with(input, profile, &comm)
+        run_inner(input, profile, &comm, Some(comm.clone()))
     } else {
         run_with(input, profile, &Serial)
     }
@@ -95,6 +95,17 @@ pub fn run_with<K: Collective>(
     input: StartInput<'_>,
     profile: Profile,
     comm: &K,
+) -> Result<Run, ScfError> {
+    run_inner(input, profile, comm, None)
+}
+
+// Only run() can attach the exact owned communicator to a lazy result.
+// Generic borrowed run_with() retains its eager public delivery contract.
+fn run_inner<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    comm: &K,
+    owned_comm: Option<crate::parallel::SharedComm>,
 ) -> Result<Run, ScfError> {
     let start = Instant::now();
     // Resolve once from this run's scope, never a process-cached profile flag.
@@ -590,7 +601,28 @@ pub fn run_with<K: Collective>(
             let density = state.fields.gather(&delivery_comm, &step.density)?;
             output.record("density_gather", phase);
             let phase = Instant::now();
-            let orbitals = gather_orbitals(&state, &delivery_comm, &step.solve.eigenvectors)?;
+            let lazy_comm = owned_comm.clone().filter(|_| {
+                config.on(Id::REFSCF_LAZY_OUTPUT) && crate::gamma_real::lazy_result_allowed()
+            });
+            let (orbitals, lazy) = if let Some(comm) = lazy_comm {
+                let placeholder = ComplexMatrix::zeros(0, bands).map_err(numerical)?;
+                let lazy = crate::gamma_real::LazyOrbitals::from_owned_handoff(
+                    std::mem::replace(
+                        &mut step.solve.eigenvectors,
+                        dft_numerics::RealMatrix::zeros(0, bands).map_err(numerical)?,
+                    ),
+                    state.operator.local_rows().to_vec(),
+                    state.half.clone(),
+                    comm,
+                    Vec::new(),
+                );
+                (placeholder, Some(lazy))
+            } else {
+                (
+                    gather_orbitals(&state, &delivery_comm, &step.solve.eigenvectors)?,
+                    None,
+                )
+            };
             output.record("orbital_gather_unpack", phase);
             output.collective_s = delivery_comm.seconds();
             let phase = Instant::now();
@@ -600,7 +632,7 @@ pub fn run_with<K: Collective>(
             };
             let k = KPointSolution {
                 point,
-                lazy: None,
+                lazy,
                 solution: EigenSolution {
                     locking: None,
                     spectral_completeness: None,
@@ -912,4 +944,104 @@ fn qe_clock_table(
         rows.push(QeClock::measured(name, seconds, calls, rank, "baandi_only"));
     }
     rows
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use dft_numerics::switches::RunConfig;
+    use std::sync::Arc;
+
+    #[test]
+    fn reference_lazy_delivery_preserves_science_and_materializes() {
+        for ranks in [2, 3] {
+            dft_mpi::simulate(ranks, |comm| {
+                crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
+                let pp = crate::scf::pool_fixture::potential_with_atomic_start(
+                    2., 1.8, true, 161, "SLA PZ",
+                );
+                let cell = dft_geometry::Cell::from_user_rows_bohr([
+                    [7., 0., 0.],
+                    [0.2, 7., 0.],
+                    [0., 0.1, 7.],
+                ])
+                .unwrap();
+                let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+                let potentials = [SpeciesPotential {
+                    label: "Xx",
+                    potential: &pp,
+                }];
+                let options = ScfOptions {
+                    cutoff_hartree: 1.,
+                    bands: Some(3),
+                    max_iterations: 100,
+                    gamma_real: crate::GammaReal::On,
+                    ..Default::default()
+                };
+                let mut baseline: Option<ScfResult> = None;
+                for (switch, needed) in [("off", false), ("on", false), ("on", true)] {
+                    let config = RunConfig::from_pairs(&[
+                        ("refscf_lazy_output", switch),
+                        ("m2_lazy_result", "on"),
+                    ])
+                    .unwrap();
+                    let _guard = config.enter();
+                    crate::gamma_real::set_delivered_orbitals(needed);
+                    let run = run(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile::default(),
+                    )
+                    .unwrap();
+                    assert!(run.outcome.converged);
+                    let mut r = run.outcome.result;
+                    assert!(r.verification.as_ref().unwrap().passed());
+                    assert_eq!(r.orbitals_delivered(), switch == "off" || needed);
+                    if !r.orbitals_delivered() {
+                        assert_eq!(r.orbitals.rows(), 0);
+                    }
+                    r.materialize_orbitals().unwrap();
+                    assert!(r.orbitals_delivered());
+                    if let Some(base) = &baseline {
+                        assert_eq!(
+                            base.energy.total_hartree().to_bits(),
+                            r.energy.total_hartree().to_bits()
+                        );
+                        assert_eq!(base.charge.to_bits(), r.charge.to_bits());
+                        assert_eq!(base.eigenvalues, r.eigenvalues);
+                        assert_eq!(base.occupations, r.occupations);
+                        assert_eq!(base.history.len(), r.history.len());
+                        assert_eq!(
+                            base.density
+                                .iter()
+                                .flat_map(|v| v.to_le_bytes())
+                                .collect::<Vec<_>>(),
+                            r.density
+                                .iter()
+                                .flat_map(|v| v.to_le_bytes())
+                                .collect::<Vec<_>>()
+                        );
+                        assert_eq!(
+                            (base.orbitals.rows(), base.orbitals.cols()),
+                            (r.orbitals.rows(), r.orbitals.cols())
+                        );
+                        for (a, b) in base.orbitals.as_slice().iter().zip(r.orbitals.as_slice()) {
+                            assert_eq!(
+                                (a.re.to_bits(), a.im.to_bits()),
+                                (b.re.to_bits(), b.im.to_bits())
+                            );
+                        }
+                    } else {
+                        baseline = Some(r);
+                    }
+                }
+                crate::gamma_real::set_delivered_orbitals(true);
+                crate::parallel::set_communicator(None);
+            });
+        }
+    }
 }

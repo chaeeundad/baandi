@@ -41,6 +41,9 @@
 //! retain the slab route. RustFFT only (vendor lanes fall back), conservatively
 //! rounding class; off retains the original transforms and data movement.
 //! No allocation after batch warmup; no unsafe; no logging.
+//! `BAANDI_FFT_A2A_BALANCE=on` caps sticks per rank (mirror units stay intact)
+//! only when it reduces the equal alltoall block. Transform arithmetic stays
+//! unchanged; downstream reductions over redistributed rows are rounding class.
 use dft_mpi::{Collective, MpiError};
 use dft_numerics::FftError;
 use dft_numerics::fused_pair_plan::BackendLanes;
@@ -139,6 +142,12 @@ fn partition(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partiti
             }
         }
     }
+    // P3-A2A: equal-block alltoall pays for the largest *stick count*, not
+    // coefficient load. Keep the historical assignment unless a count-capped
+    // assignment strictly reduces that block. No changes to FFT arithmetic.
+    if dft_numerics::switches::on(dft_numerics::switches::Id::FFT_A2A_BALANCE) {
+        balance_transpose_sticks(&sticks, &len, n, ranks, mirror, &mut owner);
+    }
     let mut local_index = vec![0usize; sticks.len()];
     let mut counts = vec![0usize; ranks];
     for s in 0..sticks.len() {
@@ -155,6 +164,65 @@ fn partition(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partiti
         local_index,
         counts,
     }
+}
+
+/// Minimize the maximum stick count without splitting a mirror unit. Units
+/// have size one or two: capacity c is feasible iff R*c >= S and
+/// R*floor(c/2) >= number_of_pairs. Assign pairs before singletons, longest
+/// coefficient work first within each class, to the least-loaded feasible rank.
+/// This is a layout change (reductions over coefficient rows can round
+/// differently), not compression or a change to the mathematical FFT support.
+fn balance_transpose_sticks(
+    sticks: &[(usize, usize)],
+    lengths: &[usize],
+    n: [usize; 3],
+    ranks: usize,
+    mirror: bool,
+    owner: &mut Vec<usize>,
+) {
+    let mut units = Vec::new();
+    for (s, &(z, y)) in sticks.iter().enumerate() {
+        let partner = if mirror {
+            sticks
+                .binary_search(&((n[2] - z) % n[2], (n[1] - y) % n[1]))
+                .unwrap_or(s)
+        } else {
+            s
+        };
+        if partner < s {
+            continue;
+        }
+        let size = 1 + usize::from(partner != s);
+        let work = lengths[s] + if partner != s { lengths[partner] } else { 0 };
+        units.push((s, partner, size, work));
+    }
+    let pairs = units.iter().filter(|u| u.2 == 2).count();
+    let mut cap = sticks.len().div_ceil(ranks);
+    if ranks * (cap / 2) < pairs {
+        cap += 1;
+    }
+    let mut old_counts = vec![0usize; ranks];
+    for &r in owner.iter() {
+        old_counts[r] += 1;
+    }
+    if cap >= old_counts.into_iter().max().unwrap_or(0) {
+        return;
+    }
+    units.sort_by(|a, b| b.2.cmp(&a.2).then(b.3.cmp(&a.3)).then(a.0.cmp(&b.0)));
+    let mut counts = vec![0usize; ranks];
+    let mut load = vec![0usize; ranks];
+    let mut candidate = vec![0; sticks.len()];
+    for (s, partner, size, work) in units {
+        let r = (0..ranks)
+            .filter(|&r| counts[r] + size <= cap)
+            .min_by_key(|&r| (load[r], counts[r], r))
+            .expect("feasible one/two-stick capacity");
+        candidate[s] = r;
+        candidate[partner] = r;
+        counts[r] += size;
+        load[r] += work;
+    }
+    *owner = candidate;
 }
 
 /// Owning rank of every global coefficient position (same partition as `new`).
@@ -1018,6 +1086,232 @@ mod tests {
     use dft_numerics::fused::FusedOperator;
     use dft_numerics::{Fft3d, FftPlan3d, PairFusedPlan};
     use ndarray::Array3;
+
+    #[test]
+    fn a2a_catalog_payload_accounting() {
+        use dft_numerics::switches::RunConfig;
+        // Geometry/cutoff from benchmarks/cases/si{64,128}-gamma.toml.
+        // No SCF or pseudopotential and no inference about remote timing.
+        for (shape, edges, npw, sticks, payload) in [
+            ([72, 72, 72], [20.522425713435865; 3], 23871, 1005, 145152),
+            (
+                [72, 72, 144],
+                [20.522425713435865, 20.522425713435865, 41.04485142687173],
+                47851,
+                2005,
+                290304,
+            ),
+        ] {
+            let signed = |i: usize, n: usize| {
+                if i <= n / 2 {
+                    i as f64
+                } else {
+                    i as f64 - n as f64
+                }
+            };
+            let mut idx = Vec::new();
+            for x in 0..shape[0] {
+                for y in 0..shape[1] {
+                    for z in 0..shape[2] {
+                        let pos = [x, y, z];
+                        let g2 = (0..3)
+                            .map(|a| {
+                                (std::f64::consts::TAU * signed(pos[a], shape[a]) / edges[a])
+                                    .powi(2)
+                            })
+                            .sum::<f64>();
+                        if g2 <= 30. {
+                            idx.push(pos);
+                        }
+                    }
+                }
+            }
+            assert_eq!(idx.len(), npw);
+            let mut original = None;
+            for arm in ["off", "on"] {
+                let config =
+                    RunConfig::from_pairs(&[("fft_a2a_balance", arm), ("m2_sticks", "mirror")])
+                        .unwrap();
+                let _scope = config.enter();
+                let p = partition(shape, &idx, 8);
+                assert_eq!(p.sticks.len(), sticks);
+                let bytes = 16 * 8 * p.counts.iter().max().unwrap() * p.n[0].div_ceil(8);
+                assert_eq!(bytes, payload);
+                if let Some(owner) = &original {
+                    assert_eq!(&p.owner, owner);
+                } else {
+                    original = Some(p.owner);
+                }
+                eprintln!(
+                    "P3-A2A catalog {shape:?} {arm}: Npw={npw} S={sticks} counts={:?} payload={bytes} B/pair/rank/direction; useful mean={} B",
+                    p.counts,
+                    16 * sticks * p.n[0] / 8
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a2a_balance_preserves_fft_bits_and_minimizes_padding() {
+        type RankResult = (Vec<usize>, usize, Vec<(Vec<C>, Vec<C>)>);
+        use dft_numerics::real::fft_profile;
+        use dft_numerics::switches::{Id, RunConfig};
+        assert!(!RunConfig::from_pairs(&[]).unwrap().on(Id::FFT_A2A_BALANCE));
+        let mut fixtures = cases();
+        fixtures.extend([
+            ([5, 7, 11], sphere([5, 7, 11], 4., [0.; 3])),
+            ([7, 11, 13], sphere([7, 11, 13], 9., [0.; 3])),
+            ([2, 3, 5], vec![[0, 0, 0]]),
+            ([2, 3, 5], vec![]),
+        ]);
+        let bits = |v: &[C]| {
+            v.iter()
+                .map(|z| (z.re.to_bits(), z.im.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        let mut reductions = 0;
+        for (shape, idx) in fixtures {
+            let potential: Vec<_> = (0..shape.iter().product())
+                .map(|i| 0.5 + (i as f64).sin())
+                .collect();
+            for ranks in [1, 2, 3, 8] {
+                for mirror in ["greedy", "mirror"] {
+                    let run = |arm| {
+                        simulate(ranks, |comm| {
+                            let config = RunConfig::from_pairs(&[
+                                ("fft_a2a_balance", arm),
+                                ("m2_sticks", mirror),
+                                ("fft_profile", "on"),
+                                ("phase_profile", "on"),
+                                ("stage_timers", "off"),
+                            ])
+                            .unwrap();
+                            let _scope = config.enter();
+                            let owners = position_owners(shape, &idx, ranks).unwrap();
+                            let mut p =
+                                DistributedPairFft::new(shape, &idx, comm.rank(), ranks).unwrap();
+                            for &g in p.local_positions() {
+                                assert_eq!(owners[g], comm.rank());
+                            }
+                            if mirror == "mirror" {
+                                for (g, pos) in idx.iter().enumerate() {
+                                    let partner =
+                                        std::array::from_fn(|a| (shape[a] - pos[a]) % shape[a]);
+                                    if let Some(m) = idx.iter().position(|v| *v == partner) {
+                                        assert_eq!(owners[g], owners[m]);
+                                    }
+                                }
+                            }
+                            let mut outputs = Vec::new();
+                            let global_len = idx.len();
+                            // Grow, shrink, empty, and reuse the widest storage.
+                            p.reserve_batch(5);
+                            let pointers = (p.send.as_ptr(), p.recv.as_ptr());
+                            for np in [5, 1, 0, 3, 5] {
+                                let input = random_c(idx.len() * np, 99);
+                                let local: Vec<_> = (0..np)
+                                    .flat_map(|t| {
+                                        p.local_positions().iter().map({
+                                            let input = &input;
+                                            move |&g| input[t * global_len + g]
+                                        })
+                                    })
+                                    .collect();
+                                let before = fft_profile::snapshot();
+                                let mut out = local.clone();
+                                p.apply_local_batch(comm, &mut out, &potential, np).unwrap();
+                                let delta = fft_profile::snapshot().since(before);
+                                for stage in [3, 13] {
+                                    assert_eq!(
+                                        delta.0[stage][3],
+                                        (16 * ranks * p.block * np) as u64
+                                    );
+                                }
+                                // Standalone inverse and kept-plane API must
+                                // use precisely the same new ownership layout.
+                                p.begin_to_real_batch(comm, &local, np).unwrap();
+                                let mut planes = Vec::new();
+                                for t in 0..np {
+                                    for i in 0..p.plane_count() {
+                                        p.to_real_plane_in(t, np, i).unwrap();
+                                        planes.extend_from_slice(p.plane());
+                                    }
+                                }
+                                let mut kept = local;
+                                p.apply_local_batch_kept(
+                                    comm, &mut kept, &potential, np, np, &planes,
+                                )
+                                .unwrap();
+                                assert_eq!(bits(&out), bits(&kept));
+                                outputs.push((out, planes));
+                            }
+                            assert_eq!(pointers, (p.send.as_ptr(), p.recv.as_ptr()));
+                            (p.local_positions().to_vec(), p.block, outputs)
+                        })
+                    };
+                    let off = run("off");
+                    let on = run("on");
+                    assert!(on[0].1 <= off[0].1);
+                    if on[0].1 < off[0].1 {
+                        reductions += 1;
+                        eprintln!(
+                            "P3-A2A {shape:?} P={ranks} {mirror}: bytes/pair/rank/direction {} -> {}",
+                            16 * ranks * off[0].1,
+                            16 * ranks * on[0].1
+                        );
+                    } else {
+                        for (a, b) in off.iter().zip(&on) {
+                            assert_eq!(a.0, b.0, "no payload saving: retain original ownership");
+                        }
+                    }
+                    for (j, np) in [5, 1, 0, 3, 5].into_iter().enumerate() {
+                        let assemble = |parts: &[RankResult]| {
+                            let mut out = vec![C::default(); idx.len() * np];
+                            for (positions, _, values) in parts {
+                                for t in 0..np {
+                                    for (k, &g) in positions.iter().enumerate() {
+                                        out[t * idx.len() + g] =
+                                            values[j].0[t * positions.len() + k];
+                                    }
+                                }
+                            }
+                            bits(&out)
+                        };
+                        assert_eq!(assemble(&off), assemble(&on));
+                        for (a, b) in off.iter().zip(&on) {
+                            assert_eq!(bits(&a.2[j].1), bits(&b.2[j].1));
+                        }
+                    }
+                    // Independently compute the optimal mirror-safe capacity.
+                    let config = RunConfig::from_pairs(&[("m2_sticks", mirror)]).unwrap();
+                    let _scope = config.enter();
+                    let part = partition(shape, &idx, ranks);
+                    let pairs = if mirror == "mirror" {
+                        part.sticks
+                            .iter()
+                            .enumerate()
+                            .filter(|(s, (z, y))| {
+                                part.sticks
+                                    .binary_search(&(
+                                        (part.n[2] - z) % part.n[2],
+                                        (part.n[1] - y) % part.n[1],
+                                    ))
+                                    .is_ok_and(|m| m > *s)
+                            })
+                            .count()
+                    } else {
+                        0
+                    };
+                    let optimum = (0..=part.sticks.len())
+                        .find(|&c| ranks * c >= part.sticks.len() && ranks * (c / 2) >= pairs)
+                        .unwrap();
+                    assert_eq!(on[0].1, optimum * part.n[0].div_ceil(ranks));
+                }
+            }
+        }
+        assert!(reductions > 0);
+        eprintln!("P3-A2A: {reductions} layouts reduced; FFT max difference 0 (bitwise)");
+    }
 
     #[test]
     fn fused_rows_respects_backend_selection() {

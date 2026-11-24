@@ -3616,3 +3616,11 @@ identical (si128 H columns 14204 -> 14203), |E - E_D| <= 1.7e-13 Ha. Wall si64 7
 36.06, elongated 1.55 -> 1.45, rskew equal. si128 precondition 1.251 -> 0.252 s (0.6 -> 3.3 GFLOP/s),
 setup 0.934 -> 0.699 s, append copy moved into normalize/apply_check (net -0.06 s). Davidson stage sum
 29.21 -> 27.96 s. Default on. Evidence: dev08 /data/sig-dft/p3j/REPORT.md.
+
+### P3l (2026-11-25, development protocol): REFSTART_GENERALIZED, REFSTART_COMPACT_G, NONLOCAL_SINGLE_GEMM, REFSCF_LAZY_OUTPUT ADOPTED
+
+dev08 MPI8 one profiled run each at 31b23e11, all verified, counts identical, |E - E_D| <= 2.8e-13 Ha.
+Wall si64 7.20 -> 7.13, si128 35.67 -> 34.60, elongated 1.49 -> 1.42, rskew equal. si128 setup 2.647 ->
+2.297 s (generalized Ritz start replaces two QR passes), output 0.666 -> 0.009 s (orbitals stay owned),
+nonlocal projection 1.986 -> 1.708 s (124 projection GEMMs from 256-row panels to one call); add_vuspsi per
+call unchanged. Evidence: dev08 /data/sig-dft/p3l/REPORT.md.

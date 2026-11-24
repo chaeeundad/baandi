@@ -1754,6 +1754,9 @@ fn setup2_owned_start_identity_and_work() {
             let build = |diagonal, orbital, threads| {
                 dft_mpi::simulate(ranks, |comm| {
                     let config = RunConfig::from_pairs(&[
+                        // This test pins the QR start path (P3-SETUP2 phases).
+                        ("refstart_generalized", "off"),
+                        ("refstart_compact_g", "off"),
                         ("refstart_diagonal_reuse", diagonal),
                         ("refstart_orbital_reuse", orbital),
                         (
@@ -2010,7 +2013,7 @@ fn setup3_generalized_start_and_compact_g() {
     use dft_engine::refstart::{StartInput, start};
     use dft_numerics::switches::{Id, RunConfig};
     for id in [Id::REFSTART_GENERALIZED, Id::REFSTART_COMPACT_G] {
-        assert!(!RunConfig::from_pairs(&[]).unwrap().on(id));
+        assert!(RunConfig::from_pairs(&[]).unwrap().on(id)); // default on since 2026-11-25
     }
     for (shape, rows) in [
         [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],

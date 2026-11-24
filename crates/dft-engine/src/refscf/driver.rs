@@ -349,6 +349,7 @@ fn run_stage<K: Collective>(
     let lean = config.on(Id::REFSCF_LEAN_ENERGY);
     let permap = config.on(Id::REFSCF_PERMAP);
     let mut field_cache = None;
+    let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
     let mut kept = super::kept_hx::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
     for iteration in 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
@@ -472,6 +473,7 @@ fn run_stage<K: Collective>(
             map_s += elapsed.as_secs_f64();
         }
         let mut verification_energy = None;
+        let mut verification_warm = None;
         let mut actual_error_ha = None;
         let mut verification_s = 0.;
         let (mut verification_start_s, mut verification_end_s) = (None, None);
@@ -486,7 +488,11 @@ fn run_stage<K: Collective>(
             let tol = next_ethr_ry(ethr, dr2, state.electrons);
             let mut t = PhaseTimings::default();
             let first_call = verification_calls.len();
-            kept.invalidate();
+            if !warm_verification {
+                kept.invalidate();
+            }
+            kept.preserve_input(true);
+            let mut cold = super::kept_hx::KeptHx::new(false);
             let check = solve_map(
                 &mut state,
                 comm,
@@ -502,9 +508,15 @@ fn run_stage<K: Collective>(
                 &mut t,
                 &mut field_cache,
                 false,
-                &mut super::kept_hx::KeptHx::new(false),
+                if warm_verification {
+                    &mut kept
+                } else {
+                    &mut cold
+                },
             )?;
+            kept.preserve_input(false);
             let current_calls = &verification_calls[first_call..];
+            verification_warm = Some(check.warm_start);
             let mut checked = y.clone();
             plan.forward(comm, &check.density, &mut checked)?;
             for (v, y) in checked.iter_mut().zip(&y) {
@@ -740,6 +752,7 @@ fn run_stage<K: Collective>(
             pulay: None,
         });
         records.push(Record {
+            warm_start: step.warm_start && !calls.is_empty(),
             stage: if coarse { "coarse" } else { "fine" },
             iteration,
             verification_cost: (reuse || gate).then_some(VerificationCost {
@@ -755,6 +768,7 @@ fn run_stage<K: Collective>(
             map_start_s,
             estimator_s,
             verification_energy,
+            verification_warm,
             verification_start_s,
             verification_end_s,
             map_end_s: start.elapsed().as_secs_f64(),
@@ -1012,6 +1026,7 @@ fn solve_map<K: Collective>(
     // QE's documented bounded re-entry: at most six calls, retry when more
     // than max(5, bands/4) roots remain. Keep every flag/count in the record;
     // SCF and the independent certificate still decide delivered convergence.
+    let mut warm_start = false;
     for retry in 0..6 {
         if retry > 0 {
             kept.invalidate();
@@ -1031,6 +1046,8 @@ fn solve_map<K: Collective>(
             rmm,
             kept,
         )?;
+        warm_start |= step.warm_start;
+        step.warm_start = warm_start;
         let r = &step.solve.record;
         let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();
         calls.push(SolveRecord {

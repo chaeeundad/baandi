@@ -18,6 +18,7 @@ pub(super) struct Fields {
 }
 pub(super) struct Map {
     pub solve: ref_davidson::Solution,
+    pub warm_start: bool,
     pub density: Vec<f64>,
     pub residuals: Vec<f64>,
     pub energy: EnergyAudit,
@@ -257,6 +258,7 @@ pub(super) fn evaluate<K: Collective>(
         return Err(ScfError::NonFinite);
     }
     Ok(Map {
+        warm_start: initial_hx.is_some(),
         solve,
         density,
         residuals,

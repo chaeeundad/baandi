@@ -2456,3 +2456,100 @@ The delivery fingerprint test includes a verified two-rank skew/nonlocal SCF
 and repeatability. Mac evidence is correctness only; the exact four-run dev08
 request and evidence limits are in
 [the P3-KEPTHX2 request](../performance/lanes/RSCF/kepthx2-dev08-request.md).
+
+## Warm verification maps
+
+P3-VERWARM adds `BAANDI_REFSCF_VERIFY_WARM=on|off` (input
+`[performance] refscf_verify_warm="on"`), **default off**. It requires
+`REFSCF_KEPT_HX=on` (the adopted default); disabling the latter gives a cold
+fallback. This section supersedes the verification-boundary cache exclusion
+in the historical P3-KEPTHX section only when the new switch is on.
+
+### Independence and state contract
+
+The check remains a new evaluation of `F(y)` at `y = rho_out`, with a newly
+installed `H[y]`, a new Davidson solve and a newly accumulated density. The
+ordinary candidate's density is never substituted for that result. Both arms
+already start Davidson from the candidate's returned Ritz block X. W supplies
+`H_old X + (V[y] - V_old) X` instead of recomputing the initial full-H product.
+Kinetic energy and fixed nonlocal projectors cancel exactly in this identity;
+its floating-point evaluation is rounding class. The operator-instance token,
+bitwise X comparison, finite-value checks, potential epoch and collective
+eligibility agreement remain active. Every correction is applied with the
+current operator. The generalized overlap/Ritz criteria, retry policy and
+all residual diagnostics are unchanged.
+
+Independence here means a separate fixed-point map, not a statistically
+independent starting guess. Supplying an equivalent starting product does
+not turn the check into a replay of the old density. It also does not add a
+global uniqueness or spectral-completeness guarantee absent from the cold
+check. The check still measures `E_H[F(y)-y] < 5e-9 Ha` under the default
+profile, with the existing residual-guard policy. The energy criterion stays
+off under user decision C. No pass is inferred from a cache hit.
+
+The verification tolerance remains **exactly**
+`next_ethr_ry(ethr, dr2, electrons) / 2` Ha, including the existing per-band
+thresholds and retry semantics. The starting block is already warm in D;
+the fresh full-H starting application was an implementation choice. The
+threshold rule is a contract, not a cost knob changed by this experiment.
+
+During a warm check the cache retains the candidate X, original HX, original
+potential and its bounded slabs. The check clones only the supplied HX for
+the delta update; its density uses the ordinary accumulation kernel and
+neither reads cached density nor overwrites the candidate slabs. On failure,
+Broyden receives the same ordinary pair and the next ordinary map starts from
+the same candidate X. It can then form HX at the mixed recovery potential
+from the preserved **original** potential, not from the verification
+potential. No check-state orbitals or products enter delivery. There is no
+second slab cache. The extra HX copy is covered by the existing conservative
+retained-X/HX + supplied-HX + delta-workspace envelope; RSS still needs dev08
+measurement.
+
+Retries invalidate the entry as before, including during verification. RMM,
+changed vectors/operator/layout, first-step redo and cutoff handoff retain
+their cold fallbacks. Optional VERIFY_REUSE still consumes the failed map
+according to its existing contract; a preserved entry cannot hit its changed
+Ritz block and falls back collectively. No default for that rejected variant
+changes here.
+
+`Record.warm_start` records an actual supplied-product hit in an ordinary
+map (false for reuse of a whole map). `Record.verification_warm` is absent on skipped or
+nonattempt maps and otherwise says whether any call in that attempt was
+warm (retry calls can be cold). Reference verification JSON adds per-attempt
+`warm_start` and `h_columns`; the latter equals the existing `h_vectors`,
+including retries, and excludes delta-V columns. Aggregate `kept_hx` counts
+include verification hits. The stop-to-verified reader carries the optional
+flags as `verification_warm_starts`; old files remain readable and timing
+closure/decisions are unchanged.
+
+### Work accounting and scope
+
+A B-band hit removes B starting full-H columns: kinetic and nonlocal work,
+plus their starting full pair transforms. The delta still costs B local-V
+columns, normally `floor(B/2)` forward pair transforms using the candidate's
+retained real-space slabs; uncached pairs and an odd tail need inverses too.
+All correction columns, reduced eigensolves, new-density inverse transforms,
+potential construction, Coulomb metric and energy/residual audit remain.
+Thus H-column reduction is not a claim that those columns cost zero.
+
+For Si128's archived B=260, two eligible verification attempts replace **520
+full-H columns** with 520 delta-V columns. One first recovery after the failed
+attempt can replace a further **260 full-H columns**. Subsequent ordinary
+maps, including a gated skip, already use ordinary kept HX in D. These are
+conditional work estimates, not measured dev08 counts or a promised wall
+saving; retries/misses or a changed stopping trajectory must be reported.
+
+The task-relayed ac6aee9c MPI8 single run has Si128 verified/verify-off wall
+30.15/23.59 s, a **6.56 s** stop-to-delivery overhead containing attempts and
+recovery, not 6.56 s spent only in verification solves. It has 17 ordinary
+maps, two attempts and one gated skip. Si64's corresponding 6.40/4.57 s gap
+is **1.83 s**. These motivating observations are not reproduced here and
+are not new QE references. This change does not revisit the rejected RMM
+trajectory or failed-map reuse: it removes initial full-H work while retaining
+the same candidate state, mixer and eigensolve rules.
+
+Mac correctness evidence and the one-run-per-arm remote request are recorded
+in [verwarm-dev08-request.md](../performance/lanes/RSCF/verwarm-dev08-request.md).
+The Mac fixtures exercise cubic, skew, elongated, synthetic nonlocal and
+actual failed-verification recovery on 1/3/8 simulated ranks. They are small
+internal oracles, not a physical Si128 SCF or MPI/MKL speed evidence.

@@ -2806,6 +2806,19 @@ fn reference_verification_json(
 ) -> Value {
     use dft_numerics::switches::{Id, RunConfig};
     let mut result = verification_json(v);
+    for (value, attempt) in result["attempts"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .zip(&v.attempts)
+    {
+        value["warm_start"] = json!(
+            records[attempt.iteration - 1]
+                .verification_warm
+                .expect("reference verification attempt")
+        );
+        value["h_columns"] = json!(attempt.operator_applications);
+    }
     if RunConfig::current().on(Id::REFSCF_VERIFY_ENERGY) {
         result["mode"] = json!("energy_change");
         result["criterion"] = json!(

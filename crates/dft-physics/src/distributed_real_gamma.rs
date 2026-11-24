@@ -1744,10 +1744,17 @@ mod lane_identity_tests {
     use dft_numerics::switches::RunConfig;
     use dft_units::Hartree;
 
+    /// Both MPI-using tests share one Universe: its Drop finalizes MPI, and MPI
+    /// cannot be initialized twice in one process (--features mpi).
     #[test]
-    fn reference_h_apply_profile_is_bit_identical() {
-        use dft_solvers::ref_davidson::{Options, solve, take_apply_h_solves};
+    fn mpi_universe_tests() {
         let universe = dft_mpi::Universe::init().unwrap();
+        reference_h_apply_profile_is_bit_identical(&universe);
+        nonlocal_profile_preserves_operator_and_energy_bits(&universe);
+    }
+
+    fn reference_h_apply_profile_is_bit_identical(universe: &dft_mpi::Universe) {
+        use dft_solvers::ref_davidson::{Options, solve, take_apply_h_solves};
         let comm = universe.world();
         for bands in [2, 3] {
             let cell =
@@ -1866,11 +1873,7 @@ mod lane_identity_tests {
         }
     }
 
-    #[test]
-    fn nonlocal_profile_preserves_operator_and_energy_bits() {
-        // One Universe for the whole test: its Drop finalizes MPI, so it must
-        // outlive every loop iteration (with --features mpi).
-        let universe = dft_mpi::Universe::init().unwrap();
+    fn nonlocal_profile_preserves_operator_and_energy_bits(universe: &dft_mpi::Universe) {
         let mut comparisons = 0;
         for lattice in [
             [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],

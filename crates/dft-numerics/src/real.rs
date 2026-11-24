@@ -503,6 +503,72 @@ impl RealGemmWorkspace {
             out,
         )
     }
+    /// Try one sequential MKL C += A B directly into contiguous caller storage.
+    /// No tile/output-size bound or temporary, and no allocation. Returns false
+    /// without changing C or recording a product on pure builds/MKL_DGEMM=off;
+    /// the caller then uses its original panel-and-add path. Rounding class on
+    /// MKL, independent of the worker budget. Shapes are checked in every build.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_multiply_slices_single_add(
+        &mut self,
+        site: GemmSite,
+        a: &[f64],
+        m: usize,
+        k: usize,
+        lda: usize,
+        b: &[f64],
+        n: usize,
+        ldb: usize,
+        out: &mut RealMatrix,
+    ) -> Result<bool, LinalgError> {
+        let fits = |len: usize, rows: usize, cols: usize, ld: usize| {
+            ld >= rows
+                && (rows == 0
+                    || cols == 0
+                    || (cols - 1)
+                        .checked_mul(ld)
+                        .and_then(|x| x.checked_add(rows))
+                        .is_some_and(|need| need <= len))
+        };
+        if m > self.long
+            || k > self.short
+            || n > self.short
+            || out.rows() != m
+            || out.cols() != n
+            || !fits(a.len(), m, k, lda)
+            || !fits(b.len(), k, n, ldb)
+        {
+            return Err(LinalgError::Dimension);
+        }
+        #[cfg(feature = "mkl")]
+        if self.dgemm_rotation {
+            let route = if m == 0 || n == 0 || k == 0 {
+                Route::PureLayout
+            } else {
+                Route::MklSingle
+            };
+            let route = self.count_route(site.index(), route, [m, n, k], 1);
+            let _span = dispatch::span(site.index(), route, m, n, k);
+            dft_mkl::dgemm_add_at(
+                site.into(),
+                false,
+                m,
+                n,
+                k,
+                a,
+                lda,
+                b,
+                ldb,
+                out.as_mut_slice(),
+            )
+            .map_err(|_| LinalgError::Dimension)?;
+            finite(out.as_ref())?;
+            return Ok(true);
+        }
+        let _ = site;
+        Ok(false)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn multiply_slices_impl(
         &mut self,
@@ -2316,6 +2382,101 @@ mod tests {
     use super::*;
     use crate::linalg::{ComplexMatrix, GemmWorkspace, MatrixOp};
     use num_complex::Complex64;
+
+    #[test]
+    fn single_add_preserves_fallback_and_accumulates_beyond_tile_bounds() {
+        for mode in ["on", "off"] {
+            let config = crate::switches::RunConfig::from_pairs(&[("mkl_dgemm", mode)]).unwrap();
+            let _scope = config.enter();
+            for threads in [1, 4] {
+                let (m, n, k) = (513, 5, 7);
+                let mut ws =
+                    RealGemmWorkspace::with_pool(m, k, WorkerPool::new(threads).unwrap()).unwrap();
+                let a: Vec<f64> = (0..m * k).map(|i| (i % 7) as f64 - 3.).collect();
+                let b: Vec<f64> = (0..k * n).map(|i| (i % 5) as f64 - 2.).collect();
+                let mut c = RealMatrix::new(m, n, vec![11.; m * n]).unwrap();
+                let storage = c.as_slice().as_ptr();
+                let used = ws
+                    .try_multiply_slices_single_add(GemmSite::Other, &a, m, k, m, &b, n, k, &mut c)
+                    .unwrap();
+                assert_eq!(used, crate::MKL_BACKEND && mode == "on");
+                assert_eq!(storage, c.as_slice().as_ptr());
+                for j in 0..n {
+                    for i in 0..m {
+                        let expected = if used {
+                            11. + (0..k).map(|q| a[i + q * m] * b[q + j * k]).sum::<f64>()
+                        } else {
+                            11.
+                        };
+                        assert_eq!(c[(i, j)], expected);
+                    }
+                }
+                let before = c.clone();
+                assert_eq!(
+                    ws.try_multiply_slices_single_add(
+                        GemmSite::Other,
+                        &a[..a.len() - 1],
+                        m,
+                        k,
+                        m,
+                        &b,
+                        n,
+                        k,
+                        &mut c
+                    ),
+                    Err(LinalgError::Dimension)
+                );
+                assert_eq!(c, before);
+                assert_eq!(
+                    ws.try_multiply_slices_single_add(
+                        GemmSite::Other,
+                        &a,
+                        m,
+                        k,
+                        m - 1,
+                        &b,
+                        n,
+                        k,
+                        &mut c
+                    ),
+                    Err(LinalgError::Dimension)
+                );
+                assert_eq!(c, before);
+                assert_eq!(
+                    ws.try_multiply_slices_single_add(
+                        GemmSite::Other,
+                        &a,
+                        m,
+                        k,
+                        m,
+                        &b,
+                        n,
+                        k - 1,
+                        &mut c
+                    ),
+                    Err(LinalgError::Dimension)
+                );
+                assert_eq!(c, before);
+                if used {
+                    c[(0, 0)] = f64::NAN;
+                    assert_eq!(
+                        ws.try_multiply_slices_single_add(
+                            GemmSite::Other,
+                            &a,
+                            m,
+                            k,
+                            m,
+                            &b,
+                            n,
+                            k,
+                            &mut c
+                        ),
+                        Err(LinalgError::NonFinite)
+                    );
+                }
+            }
+        }
+    }
 
     /// The three input sweeps and the two output sweeps of `solve_into` before
     /// REDUCED-EIGEN-CHECKS, kept verbatim as the reference.

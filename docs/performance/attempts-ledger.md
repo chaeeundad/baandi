@@ -3687,3 +3687,13 @@ per arm at e9250e4c, all verified: si64 6.37 -> 6.30 s (density 0.389 -> 0.529, 
 of 12261 columns replaced, -27%). Cost: peak RSS +52 MB/rank (si64), +271 MB/rank (si128; slab 194 MB, the rest
 to be explained). Default on. Also found: dev08 mpi,mkl builds use baseline x86-64 (no target-cpu); QE is built
 for the host. Evidence: dev08 /scr/mino/rustdft/kh2/runs/.
+
+### Build flags (2026-11-26, dev08 si128 MPI8, one run per arm, two passes): no change
+
+RUSTFLAGS none / -C target-cpu=x86-64-v3 / -C target-cpu=native at fa454494, results bit-identical across builds.
+Light pass walls 31.34 / 30.67 / 32.06 s (rustfft), with MKL lanes 30.21 (v3) / 30.27 (native); profiled pass
+30.42 / 30.49 / 31.65, MKL 31.88 / 30.20. No consistent winner; native auto-vectorized AVX-512 slows the
+pure-Rust path (slab gather/scatter, kernels), consistent with the AVX-512 clock penalty seen in the MKL lane
+study (MKL_ENABLE_INSTRUCTIONS=AVX2 removed the neighbour slowdown but made MKL kernels 40-55% slower).
+Decision: keep the default build (no target-cpu). Single-run noise on si128 is about +-1 s.
+Evidence: dev08 /data/sig-dft/bflag/si128/, /scr/mino/rustdft/mkllane/runs/si128/.

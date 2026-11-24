@@ -393,6 +393,8 @@ struct WallMap {
 }
 #[derive(serde::Deserialize)]
 struct WallAttempt {
+    #[serde(default)]
+    warm_start: Option<bool>,
     iteration: usize,
     passed: bool,
 }
@@ -569,6 +571,10 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
         "parts_sum_checked":interval.is_some(),
         "diagnostic_on_off_delta":"separate measurement; may overlap this interval"
     });
+    if attempts.iter().any(|a| a.warm_start.is_some()) {
+        summary["verification_warm_starts"] =
+            json!(attempts.iter().map(|a| a.warm_start).collect::<Vec<_>>());
+    }
     if gate_enabled {
         summary["skipped"] = json!(skipped);
     }
@@ -741,4 +747,29 @@ fn reference_stage_field_keeps_stop_clock_fine_only() {
     assert_eq!(fine, stop_to_verified_summary(&doc).unwrap());
     doc["reference_scf"]["iterations"][0]["stage"] = json!("coarse");
     assert!(stop_to_verified_summary(&doc).is_err());
+}
+
+#[cfg(test)]
+#[test]
+fn stop_to_verified_warm_flag_preserves_verdict_and_clock_closure() {
+    let mut doc = json!({"run":{"completed":true},"reference_scf":{
+        "stop_to_verified_clock":"reference-scf-wall-1","threshold_ry":1e-8,
+        "verification":{"mode":"fixed_point","passed":true,
+            "attempts":[{"iteration":1,"passed":true}]},
+        "iterations":[{"iteration":1,"dr2_ry":1e-9,
+            "map_start_s":0.,"estimator_s":1.,"map_end_s":3.,
+            "verification_start_s":1.5,"verification_end_s":2.5}]
+    }});
+    let historical = stop_to_verified_summary(&doc).unwrap();
+    assert_eq!(historical["closure_error_s"], 0.);
+    for warm in [false, true] {
+        doc["reference_scf"]["verification"]["attempts"][0]["warm_start"] = json!(warm);
+        let mut summary = stop_to_verified_summary(&doc).unwrap();
+        assert_eq!(summary["verification_warm_starts"], json!([warm]));
+        summary
+            .as_object_mut()
+            .unwrap()
+            .remove("verification_warm_starts");
+        assert_eq!(summary, historical);
+    }
 }

@@ -69,12 +69,16 @@ impl VerificationEnergy {
 
 #[derive(Clone, Debug)]
 pub struct Record {
+    /// An ordinary solve call used supplied HX (false for a reused whole map).
+    pub warm_start: bool,
     pub stage: &'static str,
     pub iteration: usize,
     /// Present only when a verification-cost experiment is enabled.
     pub verification_cost: Option<VerificationCost>,
     /// Present for each attempted energy judgment; absent in the old mode.
     pub verification_energy: Option<VerificationEnergy>,
+    /// None on maps without an attempt; true when any attempt call used HX.
+    pub verification_warm: Option<bool>,
     /// Monotonic seconds since this rank entered the driver, at every diagnostic level.
     pub map_start_s: f64,
     /// Boundary after the stopping estimator is available, before verification.

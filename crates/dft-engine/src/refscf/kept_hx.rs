@@ -1,6 +1,8 @@
-//! Run-stage-owned starting products. No cache crosses a retry, verification
-//! boundary or cutoff handoff. The fixed operator token includes the basis and
-//! both row/plane layouts; orbital equality is bitwise, never a checksum.
+//! Run-stage-owned starting products. No cache crosses a retry or cutoff
+//! handoff. Warm verification borrows the candidate products without publishing
+//! its own products or density into the ordinary-map cache. The fixed operator
+//! token includes the basis and both row/plane layouts; orbital equality is
+//! bitwise, never a checksum.
 use super::numerical;
 use crate::ScfError;
 use dft_mpi::Collective;
@@ -44,11 +46,13 @@ struct Entry {
     pairs: usize,
 }
 
-/// A single-use cache bound to exact returned Ritz vectors. Disabling it keeps
+/// A cache bound to exact returned Ritz vectors, consumed by ordinary maps
+/// and borrowed by warm verification. Disabling it keeps
 /// the ordinary density and fresh-H path. Potential arguments are owned planes
 /// in the operator's layout and must already have been installed on the operator.
 pub struct KeptHx {
     enabled: bool,
+    preserve_input: bool,
     entry: Option<Entry>,
     // Storage belongs to the stage, not the single-use entry. Invalidation
     // drops eligibility, while the next density overwrites the same slabs.
@@ -61,6 +65,7 @@ impl KeptHx {
     pub fn new(enabled: bool) -> Self {
         Self {
             enabled,
+            preserve_input: false,
             entry: None,
             slabs: Vec::new(),
             hits: 0,
@@ -68,10 +73,16 @@ impl KeptHx {
             slab_bytes: 0,
         }
     }
+    /// Verification may read the candidate cache but must not replace it with
+    /// the check state: recovery still starts from the candidate Ritz block.
+    pub(super) fn preserve_input(&mut self, preserve: bool) {
+        self.preserve_input = preserve;
+    }
     pub fn invalidate(&mut self) {
         self.entry = None;
     }
-    /// Consume the previous entry. One collective agrees eligibility before any
+    /// Consume the previous entry unless verification is preserving it. A miss
+    /// always invalidates it. One collective agrees eligibility before any
     /// rank enters the delta kernel, including ranks with no rows or planes.
     pub fn prepare<K: Collective>(
         &mut self,
@@ -104,7 +115,7 @@ impl KeptHx {
         if misses[0] != 0. {
             return Ok(None);
         }
-        let mut e = old.expect("agreed cache hit");
+        let e = old.expect("agreed cache hit");
         let delta_planes: Vec<_> = potential
             .iter()
             .zip(&e.potential)
@@ -118,12 +129,19 @@ impl KeptHx {
         operator
             .apply_local_change(comm, x, &self.slabs, e.pairs, &delta, &mut change)
             .map_err(numerical)?;
-        for (h, d) in e.hx.as_mut_slice().iter_mut().zip(change.as_slice()) {
+        let mut hx = if self.preserve_input {
+            let hx = e.hx.clone();
+            self.entry = Some(e);
+            hx
+        } else {
+            e.hx
+        };
+        for (h, d) in hx.as_mut_slice().iter_mut().zip(change.as_slice()) {
             *h += d;
         }
         self.hits += 1;
         self.columns += x.cols();
-        Ok(Some(e.hx))
+        Ok(Some(hx))
     }
     /// Build density while retaining bounded leading pair slabs from the exact
     /// returned X. An odd last band (or pairs beyond the cap) is transformed
@@ -140,8 +158,10 @@ impl KeptHx {
         volume: f64,
         out: &mut [f64],
     ) -> Result<(), ScfError> {
-        self.invalidate();
-        if !self.enabled {
+        if !self.preserve_input {
+            self.invalidate();
+        }
+        if !self.enabled || self.preserve_input {
             operator
                 .band_density_sum(comm, x, occupations, volume, out)
                 .map_err(numerical)?;

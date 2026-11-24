@@ -4375,3 +4375,236 @@ fn fast_order_kept_hx_delivery_fingerprint() {
         }
     });
 }
+
+// P3-VERWARM: compare the complete delivered trajectory, including failed checks.
+fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recovery: bool) {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::driver, refstart};
+    use dft_numerics::switches::{Id, RunConfig};
+    assert!(
+        !RunConfig::from_pairs(&[])
+            .unwrap()
+            .on(Id::REFSCF_VERIFY_WARM)
+    );
+    let pp = common::potential_with_atomic_start(
+        if recovery { 4. } else { 2. },
+        if recovery { 1.2 } else { 1.8 },
+        nonlocal,
+        161,
+        "SLA PZ",
+    );
+    let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: if recovery { 2. } else { 1. },
+        bands: Some(3),
+        max_iterations: 120,
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    let profile = Profile {
+        history: if recovery { 4 } else { 8 },
+        ..Default::default()
+    };
+    let mut rank_energy: Option<f64> = None;
+    for ranks in [1, 3, 8] {
+        let outputs = dft_mpi::simulate(ranks, |comm| {
+            let run = |warm| {
+                let _scope = RunConfig::from_pairs(&[
+                    ("refscf_verify_warm", warm),
+                    ("refscf_kept_hx", "on"),
+                    ("refscf_verify_energy", "off"),
+                    ("refscf_verify_reuse", "off"),
+                    ("refscf_verify_gate", "on"),
+                    ("refscf_verify_gate_first", "off"),
+                ])
+                .unwrap()
+                .enter();
+                driver::run_with(
+                    refstart::StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    profile,
+                    comm,
+                )
+                .unwrap()
+            };
+            let cold = run("off");
+            let warm = run("on");
+            for r in [&cold, &warm] {
+                assert!(r.outcome.converged, "{label}: {}", r.exit_reason);
+                assert!(r.outcome.result.verification.as_ref().unwrap().passed());
+                stop_to_verified_clocks(r);
+                verify_cost_contract(r);
+            }
+            let attempts = |r: &driver::Run| {
+                r.outcome
+                    .result
+                    .verification
+                    .as_ref()
+                    .unwrap()
+                    .attempts
+                    .iter()
+                    .map(|a| (a.iteration, a.passed))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(attempts(&cold), attempts(&warm), "{label} ranks={ranks}");
+            assert_eq!(cold.first_reference_stop, warm.first_reference_stop);
+            assert_eq!(cold.records.len(), warm.records.len());
+            let delta = warm.outcome.result.total_hartree() - cold.outcome.result.total_hartree();
+            assert!(delta.abs() < 1e-12, "{label} ranks={ranks}: {delta:e} Ha");
+            let density_delta = warm
+                .outcome
+                .result
+                .density
+                .iter()
+                .zip(&cold.outcome.result.density)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f64::max);
+            assert!(
+                density_delta < 1e-10,
+                "density delta {density_delta:e} Bohr^-3"
+            );
+            if !recovery {
+                assert_eq!(
+                    warm.outcome.result.total_hartree().to_bits(),
+                    cold.outcome.result.total_hartree().to_bits()
+                );
+                assert!(
+                    warm.outcome
+                        .result
+                        .density
+                        .iter()
+                        .zip(&cold.outcome.result.density)
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+                );
+            }
+            let cols = |r: &driver::Run| {
+                r.verification_calls
+                    .iter()
+                    .map(|c| c.h_columns)
+                    .sum::<usize>()
+            };
+            assert!(cols(&warm) < cols(&cold));
+            assert!(
+                cold.records
+                    .iter()
+                    .filter_map(|r| r.verification_warm)
+                    .all(|v| !v)
+            );
+            assert!(
+                warm.records
+                    .iter()
+                    .filter_map(|r| r.verification_warm)
+                    .all(|v| v)
+            );
+            for (d, w) in cold
+                .outcome
+                .result
+                .verification
+                .as_ref()
+                .unwrap()
+                .attempts
+                .iter()
+                .zip(&warm.outcome.result.verification.as_ref().unwrap().attempts)
+            {
+                assert_eq!(d.threshold_ha, w.threshold_ha);
+                // The input estimator can differ by rounding after a recovery;
+                // every attempt still uses exactly the same next-ratchet rule.
+                for r in [&cold, &warm] {
+                    let a = &r.outcome.result.verification.as_ref().unwrap().attempts;
+                    let a = a.iter().find(|a| a.iteration == d.iteration).unwrap();
+                    let m = &r.records[a.iteration - 1];
+                    assert_eq!(
+                        a.eigen_tolerance_ha,
+                        next_ethr_ry(
+                            m.ethr_ry,
+                            m.dr2_ry,
+                            r.outcome.result.occupations.iter().sum()
+                        ) / 2.
+                    );
+                }
+            }
+            if recovery {
+                let failed = attempts(&warm)
+                    .into_iter()
+                    .find(|(_, passed)| !passed)
+                    .unwrap()
+                    .0;
+                assert!(!cold.records[failed].warm_start);
+                assert!(warm.records[failed].warm_start);
+                assert_eq!(
+                    warm.records[failed].h_columns + options.bands.unwrap(),
+                    cold.records[failed].h_columns,
+                    "first recovery must save its starting full-H block"
+                );
+            }
+            if comm.rank() == 0 {
+                eprintln!(
+                    "VERWARM {label} ranks={ranks} maps={} attempts={:?} verification_H={}->{} dE={delta:.17e} Ha max_drho={density_delta:.3e} Bohr^-3",
+                    warm.records.len(),
+                    attempts(&warm),
+                    cols(&cold),
+                    cols(&warm)
+                );
+            }
+            warm.outcome.result.total_hartree()
+        });
+        if let Some(e) = rank_energy {
+            assert!((outputs[0] - e).abs() < 1e-12);
+        } else {
+            rank_energy = Some(outputs[0]);
+        }
+    }
+}
+#[test]
+fn verify_warm_cubic() {
+    verify_warm_fixture(
+        "cubic",
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        false,
+        false,
+    );
+}
+#[test]
+fn verify_warm_skew() {
+    verify_warm_fixture(
+        "skew",
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        false,
+        false,
+    );
+}
+#[test]
+fn verify_warm_elongated() {
+    verify_warm_fixture(
+        "elongated",
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        false,
+        false,
+    );
+}
+#[test]
+fn verify_warm_nonlocal() {
+    verify_warm_fixture(
+        "nonlocal",
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        true,
+        false,
+    );
+}
+#[test]
+fn verify_warm_failed_recovery() {
+    verify_warm_fixture(
+        "recovery",
+        [[11., 0., 0.], [0.2, 11., 0.], [0., 0.1, 11.]],
+        true,
+        true,
+    );
+}

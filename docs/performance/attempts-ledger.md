@@ -3643,3 +3643,15 @@ density.bin and energies bit-identical on all cases (intermediate audit fields n
 si128 per-map energy 1.168 -> 0.275 s (verified) and 1.025 -> 0.173 s (verify off); si64 0.235 -> 0.059;
 elongated wall 1.48 -> 1.21 s. energy_correction (~0.25 s) untouched. Default on.
 Evidence: dev08 /data/sig-dft/p3q/REPORT.md.
+
+### P3r (2026-11-26, development protocol): REFSCF_RMM (QE-style rmm-davidson) not adopted, stays off
+
+Implemented from the own-words note docs/research/qe-study/qe-rmm-davidson.md (Davidson at SCF iterations
+1, 2 and every 5th, one RMM-DIIS sweep of at most 4 steps otherwise, verification maps Davidson). dev08
+MPI8 one run per arm at e5ec8ae: slower everywhere because it adds maps and H columns. si128 verified
+35.49 -> 43.56 s (17 -> 20 maps, H columns 14203 -> 17405), verify off 28.56 -> 31.57 s (15 -> 16 maps);
+si64 6.70 -> 7.62, elongated 1.29 -> 1.34. RMM sweeps on si128 cost 21.1 s for 14 sweeps (apply_h 11.7,
+Gram-Schmidt 3.9, DIIS 2.3) against QE rrmmdiagg 6.6 s for 10 calls; QE rmm itself is only 2-3% faster than
+QE Davidson on these cells (si128 21.89 vs 22.40 s). Lesson: on Si up to 128 atoms the Davidson trajectory
+already matches QE's; RMM pays only if its sweep overheads (GS, DIIS) are brought to QE's level and the map
+count does not grow. Kept as a switchable module (generality rule). Evidence: dev08 /scr/mino/rustdft/p3r/.

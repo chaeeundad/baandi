@@ -21,6 +21,278 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+// EXP-TABPFN-SCF: transport and persistence live exclusively at the CLI boundary.
+mod scf_experiment {
+    use super::*;
+    use dft_engine::refscf::{
+        experiment::{Action, Exploration, MapHook},
+        record::Record,
+    };
+    use dft_numerics::switches::{Id, RunConfig};
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        process::{Child, Command, Stdio},
+        sync::mpsc::{self, Receiver, Sender},
+        time::Duration,
+    };
+
+    const REPLY_LIMIT: u64 = 65536;
+    const DEADLINE: Duration = Duration::from_secs(30);
+
+    struct Controller {
+        child: Child,
+        requests: Sender<String>,
+        replies: Receiver<Result<String, String>>,
+    }
+    impl Controller {
+        fn start(path: &str) -> Result<Self, String> {
+            let mut child = Command::new(path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .map_err(|e| format!("spawn: {e}"))?;
+            let mut stdin = child.stdin.take().expect("piped stdin");
+            let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
+            let (requests, receiver) = mpsc::channel::<String>();
+            let (sender, replies) = mpsc::channel();
+            // Both write and read are off-thread: a child that stops reading
+            // stdin cannot defeat the same per-exchange deadline.
+            std::thread::spawn(move || {
+                for request in receiver {
+                    let reply = (|| -> Result<String, String> {
+                        writeln!(stdin, "{request}").map_err(|e| format!("write: {e}"))?;
+                        stdin.flush().map_err(|e| format!("flush: {e}"))?;
+                        let mut bytes = Vec::new();
+                        stdout
+                            .by_ref()
+                            .take(REPLY_LIMIT)
+                            .read_until(b'\n', &mut bytes)
+                            .map_err(|e| format!("read: {e}"))?;
+                        if bytes.last() != Some(&b'\n') {
+                            return Err("missing, unterminated or oversized reply".into());
+                        }
+                        String::from_utf8(bytes).map_err(|e| format!("utf8: {e}"))
+                    })();
+                    let failed = reply.is_err();
+                    if sender.send(reply).is_err() || failed {
+                        break;
+                    }
+                }
+            });
+            Ok(Self {
+                child,
+                requests,
+                replies,
+            })
+        }
+        fn exchange(&self, request: String) -> Result<Action, String> {
+            self.requests
+                .send(request)
+                .map_err(|e| format!("send: {e}"))?;
+            let reply = self
+                .replies
+                .recv_timeout(DEADLINE)
+                .map_err(|e| format!("reply deadline/disconnect: {e}"))??;
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Reply {
+                beta: f64,
+                reset_history: bool,
+            }
+            let reply: Reply =
+                serde_json::from_str(&reply).map_err(|e| format!("invalid JSON action: {e}"))?;
+            if !reply.beta.is_finite() || !(0. < reply.beta && reply.beta <= 1.5) {
+                return Err("beta outside (0,1.5]".into());
+            }
+            let mut action = Action::fixed(reply.beta);
+            action.reset_history = reply.reset_history;
+            action.controller_status = "accepted".into();
+            Ok(action)
+        }
+    }
+    impl Drop for Controller {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    pub(super) struct Hook {
+        trace: fs::File,
+        controller: Option<Controller>,
+        fallback: Option<String>,
+        exploration: Option<Exploration>,
+        previous_energy: Option<[f64; 5]>,
+        observation: Option<Value>,
+        startup_s: f64,
+    }
+    impl Hook {
+        pub(super) fn enabled() -> bool {
+            let config = RunConfig::current();
+            config.on(Id::EXP_SCF_TRACE)
+                || config
+                    .text(Id::EXP_SCF_CONTROLLER)
+                    .is_some_and(|s| !s.is_empty())
+                || config.text(Id::EXP_SCF_BETA_EXPLORE).is_some()
+        }
+        pub(super) fn new(
+            out: &Path,
+            reference: bool,
+            verified: bool,
+        ) -> Result<Option<Self>, RunError> {
+            let config = RunConfig::current();
+            let trace = config.on(Id::EXP_SCF_TRACE);
+            let path = config
+                .text(Id::EXP_SCF_CONTROLLER)
+                .filter(|s| !s.is_empty());
+            let seed = config.text(Id::EXP_SCF_BETA_EXPLORE);
+            if !trace && path.is_none() && seed.is_none() {
+                return Ok(None);
+            }
+            if !reference || crate::parallel::size() > 1 || !verified {
+                return Err(error(
+                    2,
+                    "EXP_SCF_* requires the serial reference driver and fixed_point verification",
+                ));
+            }
+            if path.is_some() && seed.is_some() {
+                return Err(error(
+                    2,
+                    "EXP_SCF_CONTROLLER and EXP_SCF_BETA_EXPLORE are mutually exclusive",
+                ));
+            }
+            let exploration = seed
+                .map(|s| s.parse::<u64>().map(Exploration::new))
+                .transpose()
+                .map_err(|e| error(2, format!("invalid exploration seed: {e}")))?;
+            let trace = fs::File::create(out.join("scf_trace.jsonl"))?;
+            let start = Instant::now();
+            let (controller, fallback) = match path.map(Controller::start) {
+                Some(Ok(child)) => (Some(child), None),
+                Some(Err(reason)) => (None, Some(reason)),
+                None => (None, None),
+            };
+            Ok(Some(Self {
+                trace,
+                controller,
+                fallback,
+                exploration,
+                previous_energy: None,
+                observation: None,
+                startup_s: if path.is_some() {
+                    start.elapsed().as_secs_f64()
+                } else {
+                    0.
+                },
+            }))
+        }
+        fn energies(r: &Record) -> [f64; 5] {
+            [
+                r.energy.band_sum,
+                r.energy.hartree,
+                r.energy.xc,
+                r.energy.total_hartree(),
+                r.variational_energy_ha,
+            ]
+        }
+        fn json(&self, r: &Record, complete: bool) -> Value {
+            let e = r.experiment.as_ref().expect("experiment record");
+            let energies = Self::energies(r);
+            let delta = self
+                .previous_energy
+                .map(|p| std::array::from_fn::<_, 5, _>(|i| energies[i] - p[i]));
+            let ritz = r.calls.last().and_then(|c| c.ritz_changes_ha.last());
+            let ritz_max = ritz
+                .filter(|v| !v.is_empty())
+                .map(|v| v.iter().copied().map(f64::abs).fold(0., f64::max));
+            let ritz_mean = ritz
+                .filter(|v| !v.is_empty())
+                .map(|v| v.iter().map(|x| x.abs()).sum::<f64>() / v.len() as f64);
+            let mut row = json!({
+                "schema":"exp-scf-trace-1", "phase":if complete {"complete"} else {"observation"},
+                "iteration":r.iteration, "dr2_ry":r.dr2_ry, "ethr_ry":r.ethr_ry,
+                "ethr_requested_ry":r.ethr_requested_ry, "first_iteration_redo":r.first_iteration_redo,
+                "beta_used":if complete && e.action_applied {Some(r.beta)} else {None},
+                "beta_selected":complete.then_some(e.action.beta),
+                "reset_history":complete.then_some(e.action.reset_history),
+                "action_applied":complete.then_some(e.action_applied),
+                "history_occupancy":r.mixing.occupancy,
+                "broyden_gamma_l2":complete.then_some(r.mixing.gamma_l2),
+                "broyden_gamma_max":complete.then_some(r.mixing.gamma_max),
+                "broyden_condition":if complete {r.mixing.condition} else {None},
+                "davidson_iterations":r.davidson_iterations, "h_columns":r.h_columns,
+                "ritz_last_max_change_ha":ritz_max, "ritz_last_mean_change_ha":ritz_mean,
+                "band_energy_ha":energies[0], "hartree_energy_ha":energies[1], "xc_energy_ha":energies[2],
+                "total_energy_ha":energies[3], "delta_band_energy_ha":delta.map(|d| d[0]),
+                "delta_hartree_energy_ha":delta.map(|d| d[1]), "delta_xc_energy_ha":delta.map(|d| d[2]),
+                "delta_total_energy_ha":delta.map(|d| d[3]),
+            });
+            let extra = json!({
+                "variational_energy_ha":complete.then_some(energies[4]),
+                "delta_variational_energy_ha":if complete {delta.map(|d| d[4])} else {None},
+                "variational_hartree_ha":complete.then_some(r.variational_hartree_ha),
+                "variational_xc_ha":complete.then_some(r.variational_xc_ha),
+                "double_counting_ha":r.energy.double_counting,"ewald_energy_ha":r.energy.ewald,
+                "descf_ha":complete.then_some(r.descf_ha), "estimator_stop":e.estimator_stop,
+                "verification_status":e.verification_status,"verification_error_ha":e.verification_error_ha,
+                "verification_h_columns":e.verification_h_columns,
+                "verification_davidson_iterations":e.verification_davidson_iterations,
+                "verification_wall_s":r.verification_s,"reused_from_iteration":e.reused_from,
+                "map_wall_s":r.map_end_s - r.map_start_s,
+                "controller_wall_s":complete.then_some(e.action.controller_wall_s),
+                "controller_startup_s":if r.iteration == 1 {self.startup_s} else {0.},
+                "controller_status":if complete {Some(&e.action.controller_status)} else {None},
+                "exploration_seed":e.action.exploration_seed.map(|s| s.to_string()),
+                "exploration_draw_u64":e.action.exploration_draw.map(|s| s.to_string()),
+                "mixing_error":e.mixing_error,
+            });
+            row.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            row
+        }
+    }
+    impl MapHook for Hook {
+        fn choose(&mut self, r: &Record) -> Action {
+            let start = Instant::now();
+            let observation = self.json(r, false);
+            let mut action = if let Some(exploration) = &mut self.exploration {
+                exploration.draw()
+            } else if let Some(controller) = &self.controller {
+                match controller.exchange(observation.to_string()) {
+                    Ok(action) => action,
+                    Err(reason) => {
+                        self.fallback = Some(reason);
+                        self.controller = None; // Kill/reap; never consume a late reply on another map.
+                        Action::fixed(r.beta)
+                    }
+                }
+            } else {
+                Action::fixed(r.beta)
+            };
+            if let Some(reason) = &self.fallback {
+                action.controller_status = format!("fallback: {reason}");
+            }
+            if self.controller.is_some() || self.fallback.is_some() {
+                action.controller_wall_s = start.elapsed().as_secs_f64();
+            }
+            self.observation = Some(observation);
+            action
+        }
+        fn complete(&mut self, r: &Record) -> Result<(), ScfError> {
+            let mut row = self.json(r, true);
+            // Preserve the exact causal observation sent to the controller.
+            row["observation"] = self.observation.take().unwrap_or(Value::Null);
+            writeln!(self.trace, "{row}")
+                .and_then(|_| self.trace.flush())
+                .map_err(|e| ScfError::Numerical(format!("SCF trace write: {e}")))?;
+            self.previous_energy = Some(Self::energies(r));
+            Ok(())
+        }
+    }
+}
+
 // Bootstrap stamps are also retained when detailed profiling is disabled.
 // Library callers have no main() boundary and report that interval as null.
 thread_local! {
@@ -1352,6 +1624,9 @@ fn execute_mode_inner(
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     launch::elapsed("run_config", config_clock);
     let reference = reference_requested(&config);
+    if scf_experiment::Hook::enabled() && !reference {
+        return Err(error(2, "EXP_SCF_* requires the reference driver"));
+    }
     let input_digest =
         reference.then(|| phase(true, &mut setup_seconds, "input_hash", || sha256(&bytes)));
     // Phase 0 only: no storage or additional clock reads when profiling is off.
@@ -1681,6 +1956,11 @@ fn execute_mode_inner(
     }
     let _restore_delivery = RestoreDelivery;
     dft_engine::gamma_real::set_delivered_orbitals(orbitals_needed);
+    let mut experiment = scf_experiment::Hook::new(
+        &out,
+        reference,
+        opts.verification == dft_engine::Verification::FixedPoint,
+    )?;
     let scf_clock = launch::clock();
     launch::mark("scf_entry");
     let driver_entry = Instant::now();
@@ -1689,9 +1969,19 @@ fn execute_mode_inner(
         crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
         let run = if reference {
-            dft_engine::refscf::driver::run(dft_engine::refstart::StartInput {
-                cell: &prepared.cell, atoms: &atoms, potentials: &refs, options: &opts,
-            }, reference_profile(&config)?).map(|run| {
+            let input = dft_engine::refstart::StartInput {
+                cell: &prepared.cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &opts,
+            };
+            let profile = reference_profile(&config)?;
+            let result = if let Some(hook) = &mut experiment {
+                dft_engine::refscf::driver::run_with_hook(input, profile, hook)
+            } else {
+                dft_engine::refscf::driver::run(input, profile)
+            };
+            result.map(|run| {
                 reference_return = Some(Instant::now());
                 reference_diagnostics = run.full_diagnostics;
                 reference_setup = json!({

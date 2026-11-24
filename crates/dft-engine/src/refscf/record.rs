@@ -51,6 +51,7 @@ pub struct VerificationCost {
 }
 #[derive(Clone, Debug)]
 pub struct Record {
+    pub experiment: Option<super::experiment::MapExperiment>,
     pub iteration: usize,
     /// Present only when a verification-cost experiment is enabled.
     pub verification_cost: Option<VerificationCost>,

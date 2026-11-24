@@ -147,6 +147,21 @@ fn relax_extrapolation_valid(v: &str) -> bool {
     matches!(v, "none" | "first_order" | "second_order")
 }
 
+// Experiment names intentionally have no BAANDI_ prefix.
+macro_rules! switch_name {
+    (EXP_SCF_TRACE) => {
+        "EXP_SCF_TRACE"
+    };
+    (EXP_SCF_CONTROLLER) => {
+        "EXP_SCF_CONTROLLER"
+    };
+    (EXP_SCF_BETA_EXPLORE) => {
+        "EXP_SCF_BETA_EXPLORE"
+    };
+    ($id:ident) => {
+        concat!("BAANDI_", stringify!($id))
+    };
+}
 macro_rules! table {
     ($($id:ident: $kind:expr, $default:expr, $allowed:expr, $meaning:expr;)*) => {
         /// Switch identifiers; the variable name is `BAANDI_<id>`.
@@ -156,7 +171,7 @@ macro_rules! table {
         /// The whole table, in `Id` order.
         pub static TABLE: &[Switch] = &[$(Switch {
             id: Id::$id,
-            name: concat!("BAANDI_", stringify!($id)),
+            name: switch_name!($id),
             kind: $kind,
             default: $default,
             allowed: $allowed,
@@ -504,6 +519,13 @@ table! {
         "P3-FFT: clear only holes before coefficient/middle/slab scatter using cached contiguous ranges; same FFT order, default off pending dev08";
     FFT_DIRECT_PACK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT: pack distributed real H input ORC rows directly into FFT sticks, avoiding the intermediate coefficient write/read; default off pending dev08";
+    EXP_SCF_TRACE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "experimental reference SCF per-map JSONL trace; CLI I/O only";
+    EXP_SCF_CONTROLLER: Kind::Override { valid: |_| true }, "unset", "executable path or empty",
+        "experimental serial reference SCF JSONL controller; empty disables";
+    EXP_SCF_BETA_EXPLORE: Kind::Override { valid: |s| s.parse::<u64>().is_ok() }, "unset", "u64 seed",
+        "experimental deterministic reference SCF beta exploration in [0.2,1.0]";
+
 }
 
 struct Resolved {
@@ -545,7 +567,8 @@ pub fn table_of(id: Id) -> Table {
         | FIRST_BLOCK | DGEMM_TIMERS | VERIFY_PROFILE => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
-        CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,
+        CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR | EXP_SCF_TRACE | EXP_SCF_CONTROLLER
+        | EXP_SCF_BETA_EXPLORE => Table::EnvOnly,
         _ => Table::Performance,
     }
 }

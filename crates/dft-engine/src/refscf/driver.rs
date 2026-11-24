@@ -95,11 +95,38 @@ pub fn run_with<K: Collective>(
     profile: Profile,
     comm: &K,
 ) -> Result<Run, ScfError> {
+    run_inner(input, profile, comm, None)
+}
+
+/// Experimental serial map boundary; existing entry points have no hook.
+pub fn run_with_hook(
+    input: StartInput<'_>,
+    profile: Profile,
+    hook: &mut dyn super::experiment::MapHook,
+) -> Result<Run, ScfError> {
+    if crate::parallel::SharedComm::active().is_some_and(|c| c.size() > 1) {
+        return Err(ScfError::InvalidInput("SCF experiments require one rank"));
+    }
+    if input.options.verification != Verification::FixedPoint {
+        return Err(ScfError::InvalidInput(
+            "SCF experiments require fixed-point verification",
+        ));
+    }
+    run_inner(input, profile, &Serial, Some(hook))
+}
+
+fn run_inner<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    comm: &K,
+    mut hook: Option<&mut dyn super::experiment::MapHook>,
+) -> Result<Run, ScfError> {
     let start = Instant::now();
     // Resolve once from this run's scope, never a process-cached profile flag.
     use dft_numerics::switches::{Id, RunConfig};
     let config = RunConfig::current();
     let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
+    let collect_details = full_diagnostics || hook.is_some();
     let reuse = config.on(Id::REFSCF_VERIFY_REUSE);
     let gate = config.on(Id::REFSCF_VERIFY_GATE);
     let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
@@ -241,7 +268,7 @@ pub fn run_with<K: Collective>(
                     &occupations,
                     ethr,
                     iteration == 1 && !redo,
-                    full_diagnostics,
+                    collect_details,
                     &mut calls,
                     &mut timings,
                 )?;
@@ -324,7 +351,7 @@ pub fn run_with<K: Collective>(
                 &occupations,
                 tol,
                 false,
-                full_diagnostics,
+                collect_details,
                 &mut verification_calls,
                 &mut t,
             )?;
@@ -399,6 +426,90 @@ pub fn run_with<K: Collective>(
         let mut variational = step.energy.band_form;
         let (mut vh, mut vx) = (step.energy.hartree, step.energy.xc);
         let mut failure = None;
+        let dav = calls.iter().map(|c| c.iterations).sum();
+        let columns = calls.iter().map(|c| c.h_columns).sum();
+        let mut record = Record {
+            experiment: hook.as_ref().map(|_| super::experiment::MapExperiment {
+                action: super::experiment::Action::fixed(profile.beta),
+                action_applied: false,
+                estimator_stop: stopped,
+                verification_status: if skipped {
+                    "skipped"
+                } else if actual_error_ha.is_some() {
+                    if finish { "passed" } else { "failed" }
+                } else {
+                    "not_attempted"
+                },
+                verification_error_ha: actual_error_ha,
+                verification_h_columns: verification_calls[verification_call_start..]
+                    .iter()
+                    .map(|c| c.h_columns)
+                    .sum(),
+                verification_davidson_iterations: verification_calls[verification_call_start..]
+                    .iter()
+                    .map(|c| c.iterations)
+                    .sum(),
+                reused_from,
+                mixing_error: None,
+            }),
+            iteration,
+            verification_cost: (reuse || gate).then_some(VerificationCost {
+                gate_enabled: gate,
+                first_gate_enabled: gate_first,
+                first_prediction_ha,
+                contraction_prediction_ha,
+                skipped,
+                predicted_error_ha,
+                actual_error_ha,
+                reused_from,
+            }),
+            map_start_s,
+            estimator_s,
+            verification_start_s,
+            verification_end_s,
+            map_end_s: start.elapsed().as_secs_f64(),
+            dr2_ry: dr2,
+            ethr_requested_ry: requested,
+            ethr_ry: ethr,
+            first_iteration_redo: redo,
+            beta: profile.beta,
+            mixing: diagnostics,
+            calls,
+            verification_calls: verification_call_start..verification_calls.len(),
+            davidson_iterations: dav,
+            h_columns: columns,
+            map_s,
+            solve_s: timings.diagonalization.as_secs_f64(),
+            density_s: timings.density.as_secs_f64(),
+            potential_s: timings.potential.as_secs_f64(),
+            energy_s: timings.energy.as_secs_f64(),
+            density_transform_s: transform_s,
+            metric_s,
+            mixing_s,
+            correction_s,
+            verification_s,
+            descf_ha: descf,
+            variational_energy_ha: variational,
+            energy: step.energy.clone(),
+            variational_hartree_ha: vh,
+            variational_xc_ha: vx,
+        };
+        if let Some(hook) = &mut hook {
+            let mut action = hook.choose(&record);
+            // Defend the in-memory API as well as the CLI protocol.
+            if !action.beta.is_finite() || !(0. < action.beta && action.beta <= 1.5) {
+                action.beta = profile.beta;
+                action.reset_history = false;
+                action.controller_status = "fallback: invalid action".into();
+            }
+            if !finish {
+                mixer.action(action.beta, action.reset_history)?;
+            }
+            record.beta = action.beta;
+            let experiment = record.experiment.as_mut().expect("hook metadata");
+            experiment.action_applied = !finish;
+            experiment.action = action;
+        }
         if !finish {
             let clock = Instant::now();
             match mixer.update(comm, &mut metric, &x, &f, &mut next) {
@@ -452,8 +563,6 @@ pub fn run_with<K: Collective>(
             &mut sums,
         )
         .map_err(numerical)?;
-        let dav = calls.iter().map(|c| c.iterations).sum();
-        let columns = calls.iter().map(|c| c.h_columns).sum();
         timings.mixing = Duration::from_secs_f64(mixing_s);
         history.push(IterationRecord {
             iteration,
@@ -484,49 +593,21 @@ pub fn run_with<K: Collective>(
             advance: None,
             pulay: None,
         });
-        records.push(Record {
-            iteration,
-            verification_cost: (reuse || gate).then_some(VerificationCost {
-                gate_enabled: gate,
-                first_gate_enabled: gate_first,
-                first_prediction_ha,
-                contraction_prediction_ha,
-                skipped,
-                predicted_error_ha,
-                actual_error_ha,
-                reused_from,
-            }),
-            map_start_s,
-            estimator_s,
-            verification_start_s,
-            verification_end_s,
-            map_end_s: start.elapsed().as_secs_f64(),
-            dr2_ry: dr2,
-            ethr_requested_ry: requested,
-            ethr_ry: ethr,
-            first_iteration_redo: redo,
-            beta: profile.beta,
-            mixing: diagnostics,
-            calls,
-            verification_calls: verification_call_start..verification_calls.len(),
-            davidson_iterations: dav,
-            h_columns: columns,
-            map_s,
-            solve_s: timings.diagonalization.as_secs_f64(),
-            density_s: timings.density.as_secs_f64(),
-            potential_s: timings.potential.as_secs_f64(),
-            energy_s: timings.energy.as_secs_f64(),
-            density_transform_s: transform_s,
-            metric_s,
-            mixing_s,
-            correction_s,
-            verification_s,
-            descf_ha: descf,
-            variational_energy_ha: variational,
-            energy: step.energy.clone(),
-            variational_hartree_ha: vh,
-            variational_xc_ha: vx,
-        });
+        record.mixing = diagnostics;
+        record.mixing_s = mixing_s;
+        record.correction_s = correction_s;
+        record.descf_ha = descf;
+        record.variational_energy_ha = variational;
+        record.variational_hartree_ha = vh;
+        record.variational_xc_ha = vx;
+        if let Some(experiment) = &mut record.experiment {
+            experiment.mixing_error = failure.clone();
+        }
+        record.map_end_s = start.elapsed().as_secs_f64();
+        if let Some(hook) = &mut hook {
+            hook.complete(&record)?;
+        }
+        records.push(record);
         if finish || failure.is_some() || iteration == o.max_iterations {
             let verified = verification.as_ref().is_none_or(VerificationReport::passed);
             let converged = stopped && verified && failure.is_none();

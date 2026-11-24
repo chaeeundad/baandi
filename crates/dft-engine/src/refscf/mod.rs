@@ -10,6 +10,7 @@
 pub mod broyden;
 pub mod density;
 pub mod driver;
+pub mod experiment;
 mod map;
 pub mod metric;
 pub mod profile;

@@ -112,6 +112,19 @@ impl Broyden {
             gamma: [0.; 25],
         })
     }
+    /// Experimental action, validated before mutating either beta or history.
+    /// Reset logically discards every secant and the previous input/residual.
+    pub fn action(&mut self, beta: f64, reset_history: bool) -> Result<(), Error> {
+        if !beta.is_finite() || !(0. < beta && beta <= 1.5) {
+            return Err(invalid("experimental beta must be finite and in (0,1.5]"));
+        }
+        self.profile.beta = beta;
+        if reset_history {
+            self.iteration = 0;
+            self.gamma.fill(0.);
+        }
+        Ok(())
+    }
     pub fn occupancy(&self) -> usize {
         self.iteration.saturating_sub(1).min(self.profile.history)
     }

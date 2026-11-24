@@ -3594,3 +3594,16 @@ class); to be re-measured in the consolidated precise campaign. Evidence: dev08 
   Davidson remainder 9.25 vs 5.29 s, reduced eigensolve 2.25 vs QE serial rdiaghg 4.17 s, setup 3.38 vs
   init_run 0.83 s, density 2.12 vs sum_band 1.84 s. QE ran -ndiag 1 (serial), not its earlier best 2x2.
 Evidence: dev08 /data/sig-dft/{p3f,p3g}/SCREEN.md, /data/sig-dft/qeclock/out/.
+
+### P3i (2026-11-25, development protocol): four bit-identical switches ADOPTED; first efficiency table
+
+REF_DAV_SWAP_BUFFERS, REF_DAV_LEAN_RESET (P3-DAVREM), REFSTART_DIAGONAL_REUSE, REFSTART_ORBITAL_REUSE
+(P3-SETUP2): dev08 MPI8 one profiled run each at 0f11a240, all bit-identical on four cases. Wall
+si64 7.75 -> 7.41, si128 38.15 -> 37.05, elongated 1.61 -> 1.43, rskew equal; si128 setup 3.39 -> 2.75 s
+(nonlocal_diagonal 0.549 -> 0.080, atomic_orbital_fill 0.377 -> 0.114). Default on.
+si128 per-stage efficiency (rank max, 20 solves): apply_h 15.78 s (alltoall 4.1 GB); restart 1.94 s at
+44 GFLOP/s per rank; border S/H 1.85/1.81 s at ~50; corrections 1.11 s at 33; return 1.03 s at 47;
+precondition 1.21 s for 0.7 GFLOP (scalar hypot bound); Davidson setup 0.96 s streaming 3.5 GB; normalize
+0.31 s at 0.2 GFLOP/s. GEMMs are now at 60-80% of the ~60 GFLOP/s per-core peak; the non-GEMM passes
+(precondition, setup, normalize, append, apply_check: ~3 s) are the cheap targets. Evidence: dev08
+/data/sig-dft/p3i/REPORT.md.

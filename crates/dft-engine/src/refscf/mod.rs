@@ -5,11 +5,12 @@
 //! 12807 (1988), doi:10.1103/PhysRevB.38.12807; difference-space Anderson/Pulay
 //! mixing, P. Pulay, Chem. Phys. Lett. 73, 393 (1980); G. Kresse and
 //! J. Furthmueller, Phys. Rev. B 54, 11169 (1996).
-//! No session or cutoff-ladder control flow is used here. The map adapter still
+//! No legacy session or ladder control flow is used here. The map adapter still
 //! reuses the Hamiltonian/density kernels and the new reference Davidson.
 pub mod broyden;
 pub mod density;
 pub mod driver;
+pub mod ladder;
 mod map;
 pub mod metric;
 pub mod profile;

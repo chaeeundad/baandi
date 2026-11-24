@@ -69,6 +69,7 @@ impl VerificationEnergy {
 
 #[derive(Clone, Debug)]
 pub struct Record {
+    pub stage: &'static str,
     pub iteration: usize,
     /// Present only when a verification-cost experiment is enabled.
     pub verification_cost: Option<VerificationCost>,

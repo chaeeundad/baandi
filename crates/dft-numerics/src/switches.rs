@@ -580,6 +580,8 @@ table! {
         "P3-PERMAP: calibrate rustfft/MKL per actual lane length, batch and direction once per run; pure builds retain rustfft";
     REFSCF_PERMAP: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-PERMAP: cache unchanged Broyden Gram entries and fuse descf with map diagnostic passes/reduction";
+    REFSCF_LADDER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-LADDER: reference coarse cutoff 0.5, exact owned prolongation, fresh fine Broyden history";
 }
 
 struct Resolved {

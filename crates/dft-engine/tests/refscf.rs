@@ -3375,3 +3375,146 @@ fn permap_gram_cache_ring_and_metric_invalidation() {
         new.iter().sum::<usize>()
     );
 }
+
+fn ladder_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool) {
+    use dft_engine::{GammaReal, ScfOptions, ScfProblem, SpeciesPotential, Verification};
+    use dft_numerics::switches::{Id, RunConfig};
+    assert!(!RunConfig::from_pairs(&[]).unwrap().on(Id::REFSCF_LADDER));
+    let pp = common::potential_with_atomic_start(2., 1.8, nonlocal, 161, "SLA PZ");
+    let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = [
+        dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+        dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+    ];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 2.,
+        bands: Some(5),
+        max_iterations: 120,
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    let strict_options = ScfOptions {
+        // Independent deterministic random start avoids the legacy atomic
+        // seed's incomplete occupied subspace on synthetic nonlocal projectors.
+        free_electron_initial_guess: false,
+        start_wavefunctions: dft_engine::StartWavefunctions::FreeElectron,
+        cutoff_hartree: 2.,
+        bands: Some(5),
+        max_iterations: 120,
+        gamma_real: GammaReal::On,
+        ..ScfOptions::strict_reference()
+    };
+    let strict = ScfProblem::new(&cell, &atoms, &potentials, strict_options)
+        .unwrap()
+        .run()
+        .unwrap();
+    assert!(strict.certified);
+    let reference = strict.energy.total_hartree();
+    let mut rank_results = Vec::new();
+    for ranks in [1, 3, 8] {
+        let results = dft_mpi::simulate(ranks, |comm| {
+            let run = |arm, threshold_ry, verify| {
+                let config = RunConfig::from_pairs(&[("refscf_ladder", arm)]).unwrap();
+                let _scope = config.enter();
+                let opts = ScfOptions {
+                    verification: verify,
+                    ..options.clone()
+                };
+                let run = dft_engine::refscf::driver::run_with(
+                    dft_engine::refstart::StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &opts,
+                    },
+                    Profile {
+                        threshold_ry,
+                        ..Default::default()
+                    },
+                    comm,
+                )
+                .unwrap();
+                assert!(
+                    run.outcome.converged,
+                    "{label} P={ranks} {arm}: {}",
+                    run.exit_reason
+                );
+                if verify == Verification::FixedPoint {
+                    assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+                } else {
+                    assert!(run.outcome.result.verification.is_none());
+                }
+                assert!(run.records.iter().all(|r| r.stage == "fine"));
+                assert_eq!(run.records[0].mixing.occupancy, 0);
+                assert_eq!(run.records[0].ethr_requested_ry, 1e-2);
+                let coarse = run.ladder.as_ref().map_or(0, |l| {
+                    assert!(
+                        l.coarse_records
+                            .iter()
+                            .all(|r| r.stage == "coarse" && r.verification_calls.is_empty())
+                    );
+                    assert_eq!(l.coarse_threshold_ry, 100. * threshold_ry);
+                    assert!(run.records[0].map_start_s >= l.coarse_seconds);
+                    l.coarse_records.len()
+                });
+                assert_eq!(run.ladder.is_some(), arm == "on");
+                let e = run.outcome.result.energy.total_hartree();
+                assert!(
+                    (e - reference).abs() < 5e-9,
+                    "{label} {arm} P={ranks} threshold={threshold_ry:e} E-Estrict={:e}",
+                    e - reference
+                );
+                if comm.rank() == 0 {
+                    eprintln!(
+                        "P3-LADDER {label} P={ranks} arm={arm} threshold={threshold_ry:e} Ry verify={verify:?} coarse={coarse} fine={} E={e:.17e} Ha E-Estrict={:.9e} Ha",
+                        run.records.len(),
+                        e - reference
+                    );
+                }
+                (e, run.records.len())
+            };
+            let d = run("off", 1e-12, Verification::FixedPoint);
+            let l = run("on", 1e-12, Verification::FixedPoint);
+            assert!(
+                (d.0 - l.0).abs() < 1e-10,
+                "{label}: tight L-D={:e} Ha",
+                l.0 - d.0
+            );
+            run("on", 1e-8, Verification::FixedPoint);
+            run("on", 1e-8, Verification::Off);
+            (d, l)
+        });
+        for r in &results[1..] {
+            assert_eq!(r, &results[0]);
+        }
+        rank_results.push(results[0]);
+    }
+    for r in &rank_results[1..] {
+        assert!((r.0.0 - rank_results[0].0.0).abs() < 1e-10);
+        assert!((r.1.0 - rank_results[0].1.0).abs() < 1e-10);
+    }
+}
+#[test]
+fn ladder_verified_cubic() {
+    ladder_fixture("cubic", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]], false);
+}
+#[test]
+fn ladder_verified_skew() {
+    ladder_fixture("skew", [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]], false);
+}
+#[test]
+fn ladder_verified_elongated() {
+    ladder_fixture(
+        "elongated",
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        false,
+    );
+}
+#[test]
+fn ladder_verified_nonlocal() {
+    ladder_fixture("nonlocal", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]], true);
+}

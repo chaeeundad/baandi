@@ -514,6 +514,10 @@ table! {
         "P3-DAVREM: reference Davidson restart/repair exchange equal-capacity basis and rotation buffers instead of copying rows; bit-identical, default off pending dev08";
     REF_DAV_LEAN_RESET: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-DAVREM: reference restart resets only C; fresh Gram/factor/transform overwrite H, S, T and A, and eigen/repair overwrite Y before use; bit-identical, default off pending dev08";
+    REFSTART_DIAGONAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP2: reference start caches one atom's owned projector values and reuses identical nonlocal diagonal values for adjacent ORC partner rows; bit-identical, default off pending dev08";
+    REFSTART_ORBITAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP2: reference start reuses exact radial-times-harmonic amplitudes across atoms of each species and radial orbital; bit-identical, default off pending dev08";
 }
 
 struct Resolved {

@@ -406,27 +406,62 @@ fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartSt
     let projector_count = nl.projector_count();
     let complex_projector_bytes = nl.table_bytes();
     let mut diagonal_static = Vec::with_capacity(operator.local_len());
+    let reuse_diagonal =
+        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_DIAGONAL_REUSE);
+    // One atom's owned projector values, not another G-by-projector table.
+    let mut beta = if reuse_diagonal {
+        vec![
+            C::default();
+            nl.atoms()
+                .iter()
+                .map(|a| a.channel_count())
+                .max()
+                .unwrap_or(0)
+        ]
+    } else {
+        Vec::new()
+    };
+    let mut previous = None;
     for &row in operator.local_rows() {
         let g = if row == 0 {
             0
         } else {
             half.plus()[row.div_ceil(2)] as usize
         };
+        // The real and imaginary ORC rows of one representative have the
+        // same diagonal. Compare indices explicitly, including empty owners.
+        if reuse_diagonal && previous == Some(g) {
+            diagonal_static.push(*diagonal_static.last().unwrap());
+            continue;
+        }
         let mut value = basis.vectors()[g].norm_squared / 2.;
         let mut offset = 0;
         for atom in nl.atoms() {
             let count = atom.channel_count();
+            if reuse_diagonal {
+                for (i, b) in beta[..count].iter_mut().enumerate() {
+                    *b = nl.owned_value(offset + i, g).expect("owned representative");
+                }
+            }
             for j in 0..count {
                 for i in 0..count {
-                    let bi = nl.owned_value(offset + i, g).expect("owned representative");
-                    let bj = nl.owned_value(offset + j, g).expect("owned representative");
+                    let (bi, bj) = if reuse_diagonal {
+                        (beta[i], beta[j])
+                    } else {
+                        (
+                            nl.owned_value(offset + i, g).expect("owned representative"),
+                            nl.owned_value(offset + j, g).expect("owned representative"),
+                        )
+                    };
                     value += atom.coupling_hartree()[i + count * j] * (bi * bj.conj()).re;
                 }
             }
             offset += count;
         }
         diagonal_static.push(value);
+        previous = Some(g);
     }
+    drop(beta);
     drop(nl);
     setup.record("nonlocal_diagonal", clock);
     let clock = Instant::now();
@@ -792,14 +827,25 @@ fn orthogonalize<K: Collective>(
     comm: &K,
     ws: &mut RealGemmWorkspace,
     raw: &RealMatrix,
+    setup: &mut crate::refscf::record::SetupTimings,
 ) -> Result<RealMatrix, ScfError> {
     let mut q = raw.clone();
     for first in [true, false] {
+        let clock = Instant::now();
         let g = gram(comm, ws, &q, &q)?;
-        let Some(t) = crate::AtomicStartReport::owned_qr_transform(&g, first)? else {
-            return mgs(comm, raw);
+        setup.record("atomic_qr_gram", clock);
+        let clock = Instant::now();
+        let transform = crate::AtomicStartReport::owned_qr_transform(&g, first)?;
+        setup.record("atomic_qr_factor_inverse", clock);
+        let Some(t) = transform else {
+            let clock = Instant::now();
+            let result = mgs(comm, raw);
+            setup.record("atomic_qr_mgs_fallback", clock);
+            return result;
         };
+        let clock = Instant::now();
         q = rotate(ws, &q, &t)?;
+        setup.record("atomic_qr_rotate", clock);
     }
     Ok(q)
 }
@@ -871,6 +917,8 @@ fn atomic_block<K: Collective>(
         })
         .sum();
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
+    let reuse_orbitals =
+        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_ORBITAL_REUSE);
     let mut phases = if reuse {
         vec![C::default(); l]
     } else {
@@ -882,7 +930,16 @@ fn atomic_block<K: Collective>(
         for sp in species {
             for c in sp.potential.atomic_wavefunctions().unwrap() {
                 let mut radial = BTreeMap::new();
-                for &pos in sp.positions_bohr {
+                // r(|G|) Y_lm(G) is independent of the atom position. Keep
+                // exactly the first atom's arithmetic and column order. No
+                // interpolation, symmetry tolerance or changed quadrature.
+                let cache = reuse_orbitals && sp.positions_bohr.len() > 1;
+                let mut amplitudes = if cache {
+                    vec![0.; l * (2 * c.l + 1)]
+                } else {
+                    Vec::new()
+                };
+                for (atom, &pos) in sp.positions_bohr.iter().enumerate() {
                     if reuse {
                         for (i, &row) in rows.iter().enumerate() {
                             let g = if row == 0 {
@@ -902,32 +959,42 @@ fn atomic_block<K: Collective>(
                                 half.plus()[row.div_ceil(2)] as usize
                             };
                             let g = &basis.momenta()[g];
-                            let r = if let Some(&v) = radial.get(&g.norm_squared.to_bits()) {
-                                v
+                            let slot = (m + c.l as isize) as usize * l + i;
+                            let amplitude = if cache && atom > 0 {
+                                amplitudes[slot]
                             } else {
-                                let v = projector_transform_with_rule(
-                                    sp.potential.mesh(),
-                                    c.l,
-                                    &c.radial_times_r,
-                                    g.norm_squared.sqrt(),
-                                    o.radial_even_rule,
-                                )
-                                .map_err(err)?
-                                    / cell.volume_bohr3().sqrt();
-                                radial.insert(g.norm_squared.to_bits(), v);
-                                v
-                            };
-                            let y = if g.norm_squared == 0. {
-                                if c.l == 0 { 1. / (4. * PI).sqrt() } else { 0. }
-                            } else {
-                                real_spherical_harmonic(c.l, m, g.cartesian).map_err(err)?
+                                let r = if let Some(&v) = radial.get(&g.norm_squared.to_bits()) {
+                                    v
+                                } else {
+                                    let v = projector_transform_with_rule(
+                                        sp.potential.mesh(),
+                                        c.l,
+                                        &c.radial_times_r,
+                                        g.norm_squared.sqrt(),
+                                        o.radial_even_rule,
+                                    )
+                                    .map_err(err)?
+                                        / cell.volume_bohr3().sqrt();
+                                    radial.insert(g.norm_squared.to_bits(), v);
+                                    v
+                                };
+                                let y = if g.norm_squared == 0. {
+                                    if c.l == 0 { 1. / (4. * PI).sqrt() } else { 0. }
+                                } else {
+                                    real_spherical_harmonic(c.l, m, g.cartesian).map_err(err)?
+                                };
+                                let amplitude = r * y;
+                                if cache {
+                                    amplitudes[slot] = amplitude;
+                                }
+                                amplitude
                             };
                             let phase = if reuse {
                                 phases[i]
                             } else {
                                 structure_factor(g.cartesian, &[pos])?
                             };
-                            let z = il * phase * (r * y);
+                            let z = il * phase * amplitude;
                             raw[(i, col)] = if row == 0 {
                                 z.re
                             } else if row % 2 == 1 {
@@ -959,8 +1026,9 @@ fn atomic_block<K: Collective>(
     setup.record("atomic_orbital_fill", clock);
     let clock = Instant::now();
     let mut ws = RealGemmWorkspace::with_pool(l, j.max(bands), pool).map_err(err)?;
-    let mut q = orthogonalize(comm, &mut ws, &raw)?;
+    let mut q = orthogonalize(comm, &mut ws, &raw, setup)?;
     drop(raw);
+    let completion_clock = Instant::now();
     if j < bands {
         let mut data = RealMatrix::zeros(l, bands).map_err(err)?;
         data.as_mut_slice()[..l * j].copy_from_slice(q.as_slice());
@@ -1029,6 +1097,7 @@ fn atomic_block<K: Collective>(
         }
         q = data;
     }
+    setup.record("atomic_completion", completion_clock);
     setup.record("atomic_orthonormalize_complete", clock);
     let clock = Instant::now();
     let k = q.cols();
@@ -1042,8 +1111,12 @@ fn atomic_block<K: Collective>(
         )
         .map_err(err)?;
         let mut hx = RealMatrix::zeros(l, width).map_err(err)?;
+        let h_clock = Instant::now();
         op.apply_block(comm, &x, &mut hx).map_err(err)?;
+        setup.record("atomic_h_apply", h_clock);
+        let gram_clock = Instant::now();
         let part = gram(comm, &mut ws, &q, &hx)?;
+        setup.record("atomic_h_gram", gram_clock);
         small.as_mut_slice()[first * k..(first + width) * k].copy_from_slice(part.as_slice());
     }
     for j in 0..k {

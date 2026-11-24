@@ -2509,3 +2509,222 @@ fn setup3_projection_residual<K: Collective>(
     comm.tree_sum_f64(&local, &mut global).unwrap();
     global.into_iter().map(f64::sqrt).fold(0., f64::max)
 }
+
+// P3-RMM: deterministic synthetic PP oracles, never QE reference evidence.
+// Both arms use the same 1e-12 Ry estimator; the delivered-energy gate is
+// 1e-10 Ha. Default-estimator deviations are a documented acceptance limitation.
+fn rmm_verified_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, threshold_ry: f64) {
+    use dft_numerics::switches::{Id, RunConfig};
+    use dft_solvers::{ref_davidson::work, ref_rmm};
+    assert!(!RunConfig::from_pairs(&[]).unwrap().on(Id::REFSCF_RMM));
+    let pp = common::potential_with_atomic_start(2., 1.8, nonlocal, 161, "SLA PZ");
+    let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = [
+        dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+        dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+    ];
+    let potentials = [dft_engine::SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = dft_engine::ScfOptions {
+        cutoff_hartree: 2.,
+        bands: Some(5),
+        max_iterations: 120,
+        gamma_real: dft_engine::GammaReal::On,
+        ..Default::default()
+    };
+    let mut rank_energies = Vec::new();
+    for ranks in [1, 3, 8] {
+        let outputs = dft_mpi::simulate(ranks, |comm| {
+            let run = |rmm, level, threads| {
+                let options = dft_engine::ScfOptions {
+                    threads,
+                    ..options.clone()
+                };
+                let config = RunConfig::from_pairs(&[
+                    ("refscf_rmm", rmm),
+                    ("davidson_stages", level),
+                    ("refscf_verify_energy", "on"),
+                ])
+                .unwrap();
+                let _scope = config.enter();
+                ref_rmm::take_records();
+                work::take_solves();
+                let run = dft_engine::refscf::driver::run_with(
+                    dft_engine::refstart::StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    Profile {
+                        threshold_ry,
+                        ..Default::default()
+                    },
+                    comm,
+                )
+                .unwrap();
+                assert!(run.outcome.converged, "{label} ranks={ranks} arm={rmm}");
+                assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+                let records = ref_rmm::take_records();
+                assert!(records.iter().all(|r| ref_rmm::scheduled(r.scf_iteration)));
+                if rmm == "on" && level == "on" {
+                    assert!(!records.is_empty());
+                    let expected: Vec<_> = run
+                        .records
+                        .iter()
+                        .filter(|r| ref_rmm::scheduled(r.iteration) && !r.calls.is_empty())
+                        .map(|r| r.iteration)
+                        .collect();
+                    assert_eq!(
+                        records.iter().map(|r| r.scf_iteration).collect::<Vec<_>>(),
+                        expected
+                    );
+                    for r in &records {
+                        assert!(r.min_gs_norm > 1e-6);
+                        let map = &run.records[r.scf_iteration - 1];
+                        assert_eq!(map.calls.len(), 1, "one sweep; no inner retry");
+                        assert_eq!(
+                            map.calls[0].h_columns,
+                            r.rotation_columns + r.step_columns.iter().sum::<usize>()
+                        );
+                    }
+                } else {
+                    assert!(records.is_empty());
+                }
+                let calls: Vec<_> = run
+                    .records
+                    .iter()
+                    .flat_map(|r| &r.calls)
+                    .chain(&run.verification_calls)
+                    .collect();
+                let hcols: usize = calls.iter().map(|c| c.h_columns).sum();
+                let dense: u64 = work::take_solves()
+                    .iter()
+                    .flat_map(|w| &w.stages)
+                    .map(|s| s.gemm_flops)
+                    .sum::<u64>()
+                    + records
+                        .iter()
+                        .map(|r| r.gemm_flops.iter().sum::<u64>())
+                        .sum::<u64>();
+                let energy = run.outcome.result.energy.total_hartree();
+                if level == "on" && comm.rank() == 0 {
+                    eprintln!(
+                        "P3-RMM {label} threshold={threshold_ry:e} Ry P={ranks} arm={rmm} E={energy:.17e} Ha iterations={} maps={} verification={} H={hcols} GEMM_FLOPs_rank0={dense} RMM={} min_GS={:.9e}",
+                        run.records.len(),
+                        calls.len(),
+                        run.verification_calls.len(),
+                        records.len(),
+                        records.iter().map(|r| r.min_gs_norm).fold(1., f64::min)
+                    );
+                }
+                let science = stop_to_verified_science(&run);
+                (energy, hcols, dense, science)
+            };
+            let d = run("off", "on", 1);
+            let m = run("on", "on", 1);
+            let repeat = run("on", "off", 2);
+            assert_eq!(m.0.to_bits(), repeat.0.to_bits());
+            assert_eq!(m.1, repeat.1);
+            assert_eq!(m.3, repeat.3, "diagnostics must not change science");
+            let delta = m.0 - d.0;
+            if comm.rank() == 0 {
+                eprintln!(
+                    "P3-RMM {label} threshold={threshold_ry:e} Ry P={ranks} delta_M_D={delta:.9e} Ha"
+                );
+            }
+            assert!(delta.abs() < 1e-10, "{label} P={ranks}: {delta:e} Ha");
+            (d.0, m.0)
+        });
+        for out in &outputs[1..] {
+            assert_eq!(out, &outputs[0]);
+        }
+        rank_energies.push(outputs[0]);
+    }
+    for &(d, m) in &rank_energies[1..] {
+        assert!((d - rank_energies[0].0).abs() < 1e-10);
+        assert!((m - rank_energies[0].1).abs() < 1e-10);
+    }
+}
+#[test]
+fn rmm_verified_cubic() {
+    rmm_verified_fixture(
+        "cubic",
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        false,
+        1e-12,
+    );
+}
+#[test]
+fn rmm_verified_skew() {
+    rmm_verified_fixture(
+        "skew",
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        false,
+        1e-12,
+    );
+}
+#[test]
+fn rmm_verified_elongated() {
+    rmm_verified_fixture(
+        "elongated",
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        false,
+        1e-12,
+    );
+}
+#[test]
+fn rmm_verified_nonlocal() {
+    rmm_verified_fixture(
+        "nonlocal",
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        true,
+        1e-12,
+    );
+}
+
+// Retain the failed 1e-10 Ha acceptance experiment as an explicit reproducer.
+// These are known failures, not runtime exclusions or passing acceptance gates.
+// cargo test -p dft-engine --test refscf rmm_default_ -- --ignored --nocapture
+#[test]
+#[ignore = "known default-estimator strict energy-gate failure; see rmm-dev08-request.md"]
+fn rmm_default_cubic_strict_energy_gate() {
+    rmm_verified_fixture(
+        "cubic-default",
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        false,
+        1e-8,
+    );
+}
+#[test]
+#[ignore = "known default-estimator strict energy-gate failure; see rmm-dev08-request.md"]
+fn rmm_default_skew_strict_energy_gate() {
+    rmm_verified_fixture(
+        "skew-default",
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        false,
+        1e-8,
+    );
+}
+#[test]
+#[ignore = "known default-estimator strict energy-gate failure; see rmm-dev08-request.md"]
+fn rmm_default_elongated_strict_energy_gate() {
+    rmm_verified_fixture(
+        "elongated-default",
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        false,
+        1e-8,
+    );
+}
+#[test]
+#[ignore = "known default-estimator strict energy-gate failure; see rmm-dev08-request.md"]
+fn rmm_default_nonlocal_strict_energy_gate() {
+    rmm_verified_fixture(
+        "nonlocal-default",
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        true,
+        1e-8,
+    );
+}

@@ -1,5 +1,10 @@
 //! Independent final-cutoff reference SCF. No ScfProblem/session/ladder or
 //! legacy solver dispatch is constructed, including during verification.
+// Reporting bridge for the CLI, whose production dependency is the engine.
+pub use dft_solvers::ref_rmm::{
+    STAGES as RMM_STAGES, scheduled as rmm_scheduled, take_records as take_rmm_records,
+};
+
 use super::{
     broyden::{Broyden, Diagnostics, PredictionScratch},
     density::DensityPlan,
@@ -112,6 +117,12 @@ fn run_inner<K: Collective>(
     use dft_numerics::switches::{Id, RunConfig};
     let config = RunConfig::current();
     let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
+    let rmm = config.on(Id::REFSCF_RMM).then(|| {
+        let mut options = dft_solvers::ref_rmm::Options::new(0, 0., 0);
+        options.steps = config.number(Id::REFSCF_RMM_STEPS).unwrap_or(4.) as usize;
+        options.block = config.number(Id::REFSCF_RMM_BLOCK).unwrap_or(16.) as usize;
+        options
+    });
     let qe_scope = full_diagnostics.then(dft_solvers::ref_davidson::QeClockScope::begin);
     let mut qe_verification = dft_solvers::ref_davidson::QeCounters::default();
     let mut qe_mixing_calls = 0;
@@ -267,6 +278,11 @@ fn run_inner<K: Collective>(
                     ethr,
                     iteration == 1 && !redo,
                     full_diagnostics,
+                    rmm.filter(|_| dft_solvers::ref_rmm::scheduled(iteration))
+                        .map(|mut o| {
+                            o.scf_iteration = iteration;
+                            o
+                        }),
                     &mut calls,
                     &mut timings,
                 )?;
@@ -352,6 +368,7 @@ fn run_inner<K: Collective>(
                 tol,
                 false,
                 full_diagnostics,
+                None, // Verification always uses a converged Davidson solve.
                 &mut verification_calls,
                 &mut t,
             )?;
@@ -753,6 +770,7 @@ fn solve_map<K: Collective>(
     ethr: f64,
     first: bool,
     diagnostics: bool,
+    rmm: Option<dft_solvers::ref_rmm::Options>,
     calls: &mut Vec<SolveRecord>,
     timings: &mut PhaseTimings,
 ) -> Result<map::Map, ScfError> {
@@ -770,6 +788,7 @@ fn solve_map<K: Collective>(
             ethr,
             first && retry == 0,
             diagnostics,
+            rmm,
         )?;
         let r = &step.solve.record;
         let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();
@@ -788,7 +807,7 @@ fn solve_map<K: Collective>(
             restarts: r.restarts,
             unconverged,
             ritz_changes_ha: std::mem::take(&mut step.solve.ritz_changes_ha),
-            inner_clocks: diagnostics.then(|| {
+            inner_clocks: (diagnostics && rmm.is_none()).then(|| {
                 let mut stages = [0.; 8];
                 for row in std::iter::once(&r.setup)
                     .chain(&r.iterations)
@@ -822,7 +841,7 @@ fn solve_map<K: Collective>(
         timings.diagonalization += step.timings.diagonalization;
         timings.density += step.timings.density;
         timings.energy += step.timings.energy;
-        if unconverged <= 5.max(occupations.len() / 4) {
+        if rmm.is_some() || unconverged <= 5.max(occupations.len() / 4) {
             return Ok(step);
         }
         if retry == 5 {

@@ -2070,3 +2070,77 @@ The [single-run dev08 request](../performance/lanes/RSCF/fft2-dev08-request.md)
 contains validation scope, results and remote gates. Shared ledger/log,
 README evidence and dashboard updates belong to the master integration;
 this ticket edits only its owned accounting section and request.
+
+## RMM-Davidson
+
+P3-RMM adds a default-off, standalone `dft_solvers::ref_rmm` module, derived
+only from the own-words [RMM note](../research/qe-study/qe-rmm-davidson.md).
+`[performance] refscf_rmm="on"` (`BAANDI_REFSCF_RMM=on`) selects Davidson
+at SCF iterations 1, 2 and multiples of five, and RMM on other iterations.
+The first-step redo retains index 1. Verification always calls Davidson;
+failed-verification reuse, when enabled, retains the already solved Davidson
+map and charges its work once. Existing ethr, stopping, energy and mixing
+rules are unchanged. There is no convergence retry or Davidson fallback
+inside an RMM map.
+
+Each call applies H to the n starting orbitals, measures both X^T X and
+X^T H X and performs the generalized Rayleigh-Ritz rotation through the
+existing reference Davidson workspace and reduced-EVD adapters. Both X
+and H X are rotated and retained. One sweep follows, at most four steps
+per band, with frozen bands excluded from subsequent H batches. Every
+history entry stores its own normalized state, H image and own-Rayleigh
+residual. DIIS minimizes residual norm with `v^T B v=1`; the canonical
+metric EVD keeps beta>1e-14 and falls back to the newest entry when at most
+one direction survives. Reduced problems are replicated on all ranks.
+
+The preconditioner uses the bare local-row kinetic energy, not Davidson's
+full Hamiltonian diagonal. With T=sum(t_G*x_G^2) in Ha and y=t_G/(1.5T),
+`K=-(4/3)/T*(27+18y+12y²+8y³)/(27+18y+12y²+8y³+16y⁴)`.
+For y>1 the reciprocal polynomial avoids overflow. At T=0 the limit is
+-1/t_G on nonzero kinetic rows and zero on G=0 (whose normalized constant
+state has zero residual component). ORC already encodes Gamma weights;
+no extra pair/G=0 factor is introduced.
+
+The normalized update uses the parabola through E(0), its exact slope and
+E(0.5), with step clamped to [0.05,1]. The curvature zero test is 5e-17 Ha
+(the note's 1e-16 Ry). Each band freezes when its eigenvalue change is
+strictly below ethr (occupied), or max(5*ethr,5e-6 Ha) (empty). Freeze flags
+only save work; an unconverged sweep is accepted by the SCF loop.
+
+Final band-order block Gram-Schmidt carries H X through every operation.
+A panel overlap and the existing guarded inverse-Cholesky adapter implement
+the positive-diagonal QR equivalent of classical GS, avoiding per-band
+MPI reductions in accepted panels. A rejected panel uses literal one-pass
+classical GS with measured norms; norm<1e-16 fails explicitly, without a
+solver fallback. Finished blocks project all later bands with one block
+overlap and two GEMMs. The minimum pre-normalization norm is recorded.
+Final eigenvalues are diagonal Rayleigh quotients; eigenvalues, X and H X
+are sorted together, without a final Ritz rotation or fresh H application.
+
+Exactly `n + sum_k u_k <= 5n` H columns are spent at default depth four.
+Scratch and histories are reserved before the sweep. Matrix products use
+the existing GEMM workspaces/routes and small EVD backend; no library,
+logging, file I/O or retained cross-SCF history is introduced. Options
+`refscf_rmm_steps` (default 4, 1–16) and `refscf_rmm_block` (default 16, 1–64)
+are explicit diagnostic parameters, not material-dependent rules.
+
+Full diagnostics retain per-SCF-iteration RMM records with exclusive stage
+seconds, per-stage GEMM FLOPs, H columns, per-step active counts, DIIS
+fallback/clamp counts and minimum GS norm. GEMM totals count nominal 2mnk
+only, excluding scalar band work and backend EVD internals. Operator H
+profiling uses the same scope as Davidson. Standard diagnostics retain no
+RMM stage records and execute identical numerical arithmetic. Existing
+Davidson stage tables exclude RMM; add the separate RMM totals for run
+work. Legacy iteration-count fields retain their names and count sweep
+steps on records tagged `solver="rmm"`. They are not Davidson iterations
+or a residual certificate.
+
+Local evidence, limitations and the one-run MPI8 request are in
+[the P3-RMM request](../performance/lanes/RSCF/rmm-dev08-request.md).
+
+The strict local fixtures (common 1e-12 Ry estimator) meet the 1e-10 Ha
+D/M energy gate. At the default 1e-8 Ry estimator all four synthetic
+fixtures converge and verify but fail that stricter comparison (maximum
+6.115339346e-10 Ha). This is a recorded acceptance blocker, not a relaxed
+test or a basis for default adoption; explicit ignored failure reproducers
+remain in `tests/refscf.rs` and the request gives their command and results.

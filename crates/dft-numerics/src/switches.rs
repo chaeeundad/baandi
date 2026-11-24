@@ -557,6 +557,12 @@ table! {
     // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
     NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-ADDV: one sequential MKL P W directly into HX with beta=1; requires M2_DGEMM and MKL_DGEMM, rounding class, default off pending dev08";
+    REFSCF_RMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-RMM: bounded RMM-DIIS sweeps between Davidson SCF iterations 1, 2 and multiples of five; verification always Davidson";
+    REFSCF_RMM_STEPS: Kind::Number { default: Some(4.), valid: |v| (1. ..=16.).contains(&v) && v.fract() == 0. }, "4", "integer 1..16",
+        "P3-RMM: maximum DIIS steps per sweep; default four, experimental overrides require multi-system evidence";
+    REFSCF_RMM_BLOCK: Kind::Number { default: Some(16.), valid: |v| (1. ..=64.).contains(&v) && v.fract() == 0. }, "16", "integer 1..64",
+        "P3-RMM: band-order Gram-Schmidt panel width; default sixteen";
 }
 
 struct Resolved {

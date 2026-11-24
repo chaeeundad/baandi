@@ -1658,6 +1658,7 @@ fn execute_mode_inner(
     let mut reference_qe_clock = Vec::new();
     let mut reference_stages = None;
     if reference {
+        dft_engine::refscf::driver::take_rmm_records();
         // Isolate the apply_h JSON from earlier in-process reference runs.
         dft_physics::distributed_real_gamma::take_apply_h_solves();
         if dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES) {
@@ -1729,6 +1730,7 @@ fn execute_mode_inner(
                 reference_stages = Some(json!({
                     "schema":"reference-davidson-stages-1",
                     "apply_h":reference_apply_h_json(),
+                    "rmm":reference_rmm_json(),
                     "stage_s":dft_engine::refscf::record::INNER_STAGES.into_iter().zip(seconds).map(|(name, seconds)|(name.to_string(), json!(seconds))).collect::<serde_json::Map<_, _>>(),
                     "measured":run.full_diagnostics,
                     "note":"exclusive reference Davidson stages; includes every SCF/retry/verification call; rank max with min_over_ranks; total process wall includes output"
@@ -3568,6 +3570,27 @@ fn algebra_stream_json() -> serde_json::Value {
     })
 }
 
+/// Full-diagnostic RMM records, reduced across ranks by the enclosing writer.
+fn reference_rmm_json() -> Value {
+    use dft_engine::refscf::driver::{RMM_STAGES as STAGES, take_rmm_records as take_records};
+    let records = take_records();
+    let solves: Vec<_> = records.iter().map(|r| json!({
+        "scf_iteration":r.scf_iteration, "solver":"rmm", "total_s":r.total_seconds,
+        "stage_s":STAGES.iter().zip(r.seconds).map(|(k,v)| (k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
+        "stage_gemm_flops":STAGES.iter().zip(r.gemm_flops).map(|(k,v)| (k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
+        "rotation_h_columns":r.rotation_columns, "sweep_h_columns":r.step_columns,
+        "h_columns":r.rotation_columns+r.step_columns.iter().sum::<usize>(),
+        "gemm_flops":r.gemm_flops.iter().sum::<u64>(),
+        "newest_fallbacks":r.newest_fallbacks, "clamped_low":r.clamped_low,
+        "clamped_high":r.clamped_high, "gs_fallbacks":r.gs_fallbacks,
+        "minimum_gs_norm":r.min_gs_norm, "unconverged_bands":r.unconverged,
+        "communication":{"reductions":r.communication.reductions,"reduction_bytes":r.communication.reduction_bytes,
+            "broadcasts":r.communication.broadcasts,"gathers":r.communication.gathers,"alltoalls":r.communication.alltoalls}
+    })).collect();
+    json!({"schema":"reference-rmm-stages-1", "solves":solves,
+        "note":"One bounded sweep per listed SCF iteration; verification always Davidson. Rank-local exclusive seconds; GEMM FLOPs exclude scalar band work and EVD internals. Off/standard diagnostics retain no RMM records. Small DIIS solves are replicated. Legacy inner clocks do not describe RMM stages; use this table."})
+}
+
 /// Per-solve operator records are consumed once after the reference driver.
 /// The surrounding over_ranks merge computes extrema of rank-local totals.
 fn reference_apply_h_json() -> Value {
@@ -3661,6 +3684,21 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
         "wall_s":{"map":r.map_s,"solve":r.solve_s,"density":r.density_s,"potential":r.potential_s,
             "energy":r.energy_s,"density_transform":r.density_transform_s,"metric":r.metric_s,
             "mix":r.mixing_s,"energy_correction":r.correction_s,"verification":r.verification_s}});
+    if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_RMM) {
+        let solver = if r.calls.is_empty() {
+            "davidson_reused_verification"
+        } else if dft_engine::refscf::driver::rmm_scheduled(r.iteration) {
+            "rmm"
+        } else {
+            "davidson"
+        };
+        record["solver"] = json!(solver);
+        if let Some(calls) = record["calls"].as_array_mut() {
+            for call in calls {
+                call["solver"] = json!(solver);
+            }
+        }
+    }
     record["map_start_s"] = json!(r.map_start_s);
     record["estimator_s"] = json!(r.estimator_s);
     record["verification_start_s"] = json!(r.verification_start_s);

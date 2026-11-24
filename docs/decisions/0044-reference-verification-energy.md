@@ -1,6 +1,16 @@
 # ADR 0044: Reference-driver verification by energy
 
 Accepted: user decision 2026-11-25, option B; ticket I25-VERIFY-ENERGY.
+
+**Status update 2026-11-25 (user decision C): implemented but default OFF.** dev08 MPI8 one-run screen at
+7b2c624 (P3f): the verification map's energy change tracks the Coulomb fixed-point error (ratio about
+0.85 at every attempt), so the energy rule rarely passes earlier: si64 7.62 -> 7.28 s (one map saved),
+si128 38.39 -> 40.64 s (three attempts instead of two because VERIFY_GATE is inactive in energy mode),
+elongated 1.51 -> 1.69 s, rskew equal; delivered energies within 5e-11 Ha of the strict reference in
+both modes. The reference driver keeps the Coulomb fixed-point rule with REFSCF_VERIFY_GATE; the energy
+rule stays available as BAANDI_REFSCF_VERIFY_ENERGY=on. Reporting rule (decision C): every QE comparison
+of the reference driver shows two BAANDI numbers, verification off (same conditions as QE, which runs no
+independent check) and verification on (default), see docs/performance/comparison-rules.md.
 This supersedes the reference driver's Coulomb acceptance rule only. ADR 0043
 and the legacy SCF driver retain their existing behavior.
 

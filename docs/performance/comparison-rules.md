@@ -45,6 +45,15 @@ fast jobs are limited to 600 s, authorized `final-` jobs to 7200 s.
 - The fixed-point verification is a production step (decision 2026-11-14), not profiling;
   it stays in the timed QE-comparison run and is charged as described below.
 
+## Two BAANDI numbers against QE (user decision C, 2026-11-25)
+
+QE stops on its estimated SCF accuracy and runs no independent fixed-point check. Every QE comparison of
+the reference driver therefore reports two BAANDI walls on the same input, cores and binding:
+(1) `verify = off`: the same stopping rule as QE, no independent verification (the condition QE runs in);
+(2) verification on (default): the delivered, independently verified result, with its verification and
+recovery cost included. Ratios are given for both; neither replaces the other. The accuracy classes and
+the stop-map energy error against the strict reference are reported for both.
+
 ## Statistics and delivered wall
 
 Use **the median for both BAANDI and QE**, with the same repetition/geometry

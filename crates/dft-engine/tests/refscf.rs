@@ -1498,8 +1498,9 @@ fn verification_energy_attempts_and_failure_recovery() {
         GammaReal, ScfOptions, SpeciesPotential, StartDensity, Verification, refscf::driver,
     };
     use dft_numerics::switches::{Id, RunConfig};
+    // Default off since 2026-11-25 (dev08 screen: no earlier pass, slower on si128); tested explicitly.
     assert!(
-        RunConfig::from_pairs(&[])
+        !RunConfig::from_pairs(&[])
             .unwrap()
             .on(Id::REFSCF_VERIFY_ENERGY)
     );
@@ -1548,9 +1549,10 @@ fn verification_energy_attempts_and_failure_recovery() {
             .unwrap()
         };
         let old = run(&[("refscf_verify_energy", "off")], &options, profile);
-        let energy = run(&[], &options, profile);
+        let energy = run(&[("refscf_verify_energy", "on")], &options, profile);
         let gates = run(
             &[
+                ("refscf_verify_energy", "on"),
                 ("refscf_verify_gate", "on"),
                 ("refscf_verify_gate_first", "on"),
             ],

@@ -522,13 +522,17 @@ table! {
     // Adopted 2026-11-25 (bit-identical; dev08 one-run P3i: si128 38.15 -> 37.05 s, setup 3.39 -> 2.75 s).
     REFSTART_ORBITAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-SETUP2: reference start reuses exact radial-times-harmonic amplitudes across atoms of each species and radial orbital; bit-identical, default off pending dev08";
-    REF_DAV_SQRT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
+    REF_DAV_SQRT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-STREAM: chunked residual/precondition/norm with sqrt instead of hypot; rounding class, extreme columns use hypot; default off pending dev08";
-    REF_DAV_FUSED_APPEND: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
+    REF_DAV_FUSED_APPEND: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-STREAM: store normalized corrections in E and V together; bit-identical; default off pending dev08";
-    REF_DAV_CHECK_APPEND: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
+    REF_DAV_CHECK_APPEND: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-STREAM: fuse correction H finite check and HV append; collective failure agreement retained, bit-identical; default off pending dev08";
-    REF_DAV_REUSE_ROWS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
+    REF_DAV_REUSE_ROWS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-STREAM: reuse four initialized row buffers between successful solves on the calling thread; bit-identical; default off pending dev08";
 }
 

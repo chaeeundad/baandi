@@ -3607,3 +3607,12 @@ precondition 1.21 s for 0.7 GFLOP (scalar hypot bound); Davidson setup 0.96 s st
 0.31 s at 0.2 GFLOP/s. GEMMs are now at 60-80% of the ~60 GFLOP/s per-core peak; the non-GEMM passes
 (precondition, setup, normalize, append, apply_check: ~3 s) are the cheap targets. Evidence: dev08
 /data/sig-dft/p3i/REPORT.md.
+
+### P3j (2026-11-25, development protocol): P3-STREAM switches ADOPTED
+
+REF_DAV_SQRT (vectorized residual/precondition/norm, sqrt instead of hypot; rounding class), REF_DAV_FUSED_APPEND,
+REF_DAV_CHECK_APPEND, REF_DAV_REUSE_ROWS. dev08 MPI8 one profiled run each at ec553c93, all verified, counts
+identical (si128 H columns 14204 -> 14203), |E - E_D| <= 1.7e-13 Ha. Wall si64 7.48 -> 7.18, si128 37.23 ->
+36.06, elongated 1.55 -> 1.45, rskew equal. si128 precondition 1.251 -> 0.252 s (0.6 -> 3.3 GFLOP/s),
+setup 0.934 -> 0.699 s, append copy moved into normalize/apply_check (net -0.06 s). Davidson stage sum
+29.21 -> 27.96 s. Default on. Evidence: dev08 /data/sig-dft/p3j/REPORT.md.

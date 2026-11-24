@@ -61,23 +61,58 @@ impl PairLanes for RustLanes {
 #[cfg(feature = "mkl")]
 pub struct MklLanes {
     plans: [Option<dft_mkl::Plan1dBatch>; 3],
+    diagnostic_shape: Option<([usize; 3], [usize; 3], u64)>,
 }
 #[cfg(feature = "mkl")]
 impl PairLanes for MklLanes {
     fn plan(n: [usize; 3], counts: [usize; 3]) -> Result<Self, FftError> {
+        let config = crate::switches::RunConfig::current();
+        let profile = config.on(crate::switches::Id::DAVIDSON_STAGES)
+            || (config.on(crate::switches::Id::FFT_PROFILE)
+                && config.on(crate::switches::Id::PHASE_PROFILE));
         let mut plans = [None, None, None];
         for axis in 0..3 {
             if counts[axis] > 0 {
-                plans[axis] = Some(dft_mkl::Plan1dBatch::new(n[axis], counts[axis])?);
+                let mut plan = dft_mkl::Plan1dBatch::new(n[axis], counts[axis])?;
+                plan.set_diagnostics_enabled(profile);
+                plans[axis] = Some(plan);
             }
         }
-        Ok(Self { plans })
+        Ok(Self {
+            plans,
+            diagnostic_shape: profile.then_some((n, counts, config.run_id())),
+        })
     }
     fn run(&mut self, axis: usize, inverse: bool, data: &mut [C]) -> Result<(), FftError> {
         match &mut self.plans[axis] {
             Some(plan) => Ok(plan.transform_in_place(data, inverse)?),
             None if data.is_empty() => Ok(()),
             None => Err(FftError::IncompatibleArray),
+        }
+    }
+}
+
+// Emit only at workspace teardown, outside numerical calls. This lets the
+// existing per-rank stderr capture expose counters without changing the CLI
+// schema or logging in hot loops. Abrupt process termination may lose records.
+#[cfg(feature = "mkl")]
+impl Drop for MklLanes {
+    fn drop(&mut self) {
+        use std::io::Write;
+        if let Some((n, counts, run)) = self.diagnostic_shape {
+            for axis in 0..3 {
+                if let Some(d) = self.plans[axis].as_ref().and_then(|p| p.diagnostics()) {
+                    // A closed diagnostic stream must not turn cleanup into
+                    // a panic, particularly while unwinding an FFT error.
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
+                        "P3_MKLLANE pid={} run={run:016x} length={} batch={} {d:?}",
+                        std::process::id(),
+                        n[axis],
+                        counts[axis],
+                    );
+                }
+            }
         }
     }
 }
@@ -135,6 +170,14 @@ fn calibrate(
     inverse: bool,
 ) -> Result<KernelChoice, FftError> {
     use std::time::Instant;
+    // Calibration must compare kernels without the optional per-call queries.
+    // Its calls are excluded from production diagnostic totals on both cached
+    // and newly measured choices.
+    let profiling = mkl.plans[axis].as_ref().unwrap().diagnostics().is_some();
+    mkl.plans[axis]
+        .as_mut()
+        .unwrap()
+        .set_diagnostics_enabled(false);
     let start = Instant::now();
     let input: Vec<_> = (0..length * batch)
         .map(|i| C::new((i as f64 * 0.37).sin(), (i as f64 * 0.19).cos()))
@@ -170,6 +213,10 @@ fn calibrate(
     let mut mkl_samples = samples.map(|s| s[1]);
     rust_samples.sort_by(f64::total_cmp);
     mkl_samples.sort_by(f64::total_cmp);
+    mkl.plans[axis]
+        .as_mut()
+        .unwrap()
+        .set_diagnostics_enabled(profiling);
     Ok(KernelChoice {
         length,
         batch,
@@ -774,6 +821,48 @@ mod tests {
         let isolated = crate::switches::RunConfig::from_pairs(&[]).unwrap();
         let _scope = isolated.enter();
         assert!(kernel_choices().is_empty(), "records are isolated per run");
+    }
+
+    #[cfg(feature = "mkl")]
+    #[test]
+    fn mkl_lane_profile_excludes_calibration_and_preserves_bits() {
+        let mut reference = Vec::new();
+        for enabled in ["off", "on"] {
+            let config = crate::switches::RunConfig::from_pairs(&[
+                ("fft_profile", enabled),
+                ("phase_profile", "on"),
+                ("davidson_stages", "off"),
+            ])
+            .unwrap();
+            let _scope = config.enter();
+            let mut mkl = MklLanes::plan([7, 3, 5], [3, 0, 0]).unwrap();
+            let mut rust = RustLanes::plan([7, 3, 5], [3, 0, 0]).unwrap();
+            calibrate(&mut rust, &mut mkl, 0, 7, 3, false).unwrap();
+            if enabled == "on" {
+                assert_eq!(
+                    mkl.plans[0].as_ref().unwrap().diagnostics().unwrap().calls,
+                    [0, 0]
+                );
+            }
+            let mut data = vec![C::new(0.3, -0.7); 21];
+            for inverse in [false, true] {
+                mkl.run(0, inverse, &mut data).unwrap();
+            }
+            let bits: Vec<_> = data
+                .iter()
+                .map(|z| (z.re.to_bits(), z.im.to_bits()))
+                .collect();
+            if enabled == "off" {
+                reference = bits;
+                assert!(mkl.plans[0].as_ref().unwrap().diagnostics().is_none());
+            } else {
+                assert_eq!(bits, reference);
+                let d = mkl.plans[0].as_ref().unwrap().diagnostics().unwrap();
+                assert_eq!(d.calls, [1, 1]);
+                assert_eq!(d.points, 42);
+                assert_eq!(d.explicit_copy_bytes, 0);
+            }
+        }
     }
 
     #[test]

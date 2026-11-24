@@ -1,3 +1,4 @@
+use crate::lane_diagnostics::{LaneDiagnostics, mxcsr};
 use num_complex::Complex64;
 use std::{
     cell::Cell,
@@ -17,6 +18,7 @@ unsafe extern "C" {
         ...
     ) -> c_long;
     fn DftiSetValue(handle: *mut c_void, parameter: c_int, ...) -> c_long;
+    fn DftiGetValue(handle: *mut c_void, parameter: c_int, ...) -> c_long;
     fn DftiCommitDescriptor(handle: *mut c_void) -> c_long;
     fn DftiComputeForward(handle: *mut c_void, data: *mut c_void, ...) -> c_long;
     fn DftiComputeBackward(handle: *mut c_void, data: *mut c_void, ...) -> c_long;
@@ -74,11 +76,15 @@ unsafe extern "C" {
 pub enum Error {
     Dimension,
     Dfti(c_long),
+    ThreadLimit(c_long),
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dimension => write!(f, "invalid MKL dimensions or buffer lengths"),
+            Self::ThreadLimit(n) => {
+                write!(f, "MKL lane descriptor thread limit is {n}, expected 1")
+            }
             Self::Dfti(status) => {
                 // SAFETY: DFTI returns a static NUL-terminated diagnostic for a status.
                 let message = unsafe { DftiErrorMessage(*status) };
@@ -218,6 +224,7 @@ impl Drop for Plan3d {
 pub struct Plan1dBatch {
     handle: *mut c_void,
     total: usize,
+    diagnostics: Option<Box<LaneDiagnostics>>,
     not_sync: PhantomData<Cell<()>>,
 }
 // SAFETY: as for Plan3d: unique descriptor ownership, no thread affinity, and
@@ -235,6 +242,7 @@ impl Plan1dBatch {
         let mut plan = Self {
             handle: ptr::null_mut(),
             total,
+            diagnostics: None,
             not_sync: PhantomData,
         };
         // SAFETY: writable handle; rank 1 passes its length as one C long by
@@ -248,9 +256,32 @@ impl Plan1dBatch {
             status(DftiSetValue(plan.handle, 7, howmany))?;
             status(DftiSetValue(plan.handle, 14, n))?;
             status(DftiSetValue(plan.handle, 15, n))?;
+            // DFTI_THREAD_LIMIT=27 takes MKL_LONG. The sequential link already
+            // forbids a worker pool; also state the budget to the planner and
+            // fail closed if a different runtime does not honor it.
+            status(DftiSetValue(plan.handle, 27, 1 as c_long))?;
             status(DftiCommitDescriptor(plan.handle))?;
         }
+        let limit = plan.thread_limit()?;
+        if limit != 1 {
+            return Err(Error::ThreadLimit(limit));
+        }
         Ok(plan)
+    }
+    /// Construction-time opt-in. No diagnostic FFI queries or FP-register
+    /// reads on ordinary transform calls. Re-enabling resets the counters.
+    pub fn set_diagnostics_enabled(&mut self, enabled: bool) {
+        self.diagnostics = enabled.then(Box::default);
+    }
+    pub fn diagnostics(&self) -> Option<LaneDiagnostics> {
+        self.diagnostics.as_deref().copied()
+    }
+    fn thread_limit(&self) -> Result<c_long, Error> {
+        let mut limit: c_long = 0;
+        // SAFETY: live committed descriptor; THREAD_LIMIT writes one MKL_LONG
+        // to the valid, uniquely borrowed output. It retains no pointer.
+        unsafe { status(DftiGetValue(self.handle, 27, &mut limit as *mut c_long))? };
+        Ok(limit)
     }
     /// Unscaled in-place transforms of exactly `len * count` elements;
     /// `inverse` selects the backward (+i) sign. On a DFTI error the contents
@@ -263,16 +294,37 @@ impl Plan1dBatch {
         if data.len() != self.total {
             return Err(Error::Dimension);
         }
+        let observation = if self.diagnostics.is_some() {
+            let limit = self.thread_limit()?;
+            if limit != 1 {
+                return Err(Error::ThreadLimit(limit));
+            }
+            Some((limit as u64, mxcsr()))
+        } else {
+            None
+        };
         // SAFETY: committed in-place batch descriptor whose lanes cover exactly
         // `total` contiguous Complex64 values (two C doubles each); the slice has
         // that length and is uniquely borrowed for the call; DFTI keeps no pointer.
-        unsafe {
+        let result = unsafe {
             status(if inverse {
                 DftiComputeBackward(self.handle, data.as_mut_ptr().cast())
             } else {
                 DftiComputeForward(self.handle, data.as_mut_ptr().cast())
             })
+        };
+        if let Some((limit, before)) = observation {
+            let after = mxcsr();
+            self.diagnostics.as_mut().unwrap().record(
+                inverse,
+                self.total,
+                limit,
+                before,
+                after,
+                result.is_err(),
+            );
         }
+        result
     }
 }
 impl Drop for Plan1dBatch {
@@ -661,6 +713,49 @@ fn dgemm_update_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lane_diagnostics_preserve_storage_bits_and_single_thread_contract() {
+        for (len, count) in [(1, 1), (7, 3), (12, 5), (25, 9), (36, 17)] {
+            let mut plain = Plan1dBatch::new(len, count).unwrap();
+            let mut profiled = Plan1dBatch::new(len, count).unwrap();
+            assert_eq!(plain.thread_limit().unwrap(), 1);
+            profiled.set_diagnostics_enabled(true);
+            // An offset caller slice exercises non-default alignment too.
+            let mut storage: Vec<_> = (0..len * count + 1)
+                .map(|i| Complex64::new((i as f64 * 0.3).sin(), 0.2))
+                .collect();
+            let pointer = storage.as_ptr();
+            let mut expected = storage[1..].to_vec();
+            for inverse in [false, true, false, true] {
+                plain.transform_in_place(&mut expected, inverse).unwrap();
+                profiled
+                    .transform_in_place(&mut storage[1..], inverse)
+                    .unwrap();
+                assert_eq!(storage.as_ptr(), pointer);
+                for (a, b) in storage[1..].iter().zip(&expected) {
+                    assert_eq!(
+                        (a.re.to_bits(), a.im.to_bits()),
+                        (b.re.to_bits(), b.im.to_bits())
+                    );
+                }
+            }
+            assert!(plain.diagnostics().is_none());
+            let d = profiled.diagnostics().unwrap();
+            assert_eq!(d.calls, [2, 2]);
+            assert_eq!(d.points, (4 * len * count) as u64);
+            assert_eq!((d.thread_limit_min, d.thread_limit_max), (1, 1));
+            assert_eq!(d.explicit_copy_bytes, 0);
+            assert_eq!(d.failed_calls, 0);
+            assert_eq!(d.mxcsr_control_changes, 0);
+            assert_eq!(
+                profiled.transform_in_place(&mut [], true),
+                Err(Error::Dimension)
+            );
+            assert_eq!(profiled.diagnostics(), Some(d));
+            profiled.set_diagnostics_enabled(false);
+            assert!(profiled.diagnostics().is_none());
+        }
+    }
     #[test]
     fn dfti_error_is_typed_and_has_diagnostic() {
         let plan = Plan3d::new([2, 3, 4]).unwrap();

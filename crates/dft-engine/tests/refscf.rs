@@ -1718,3 +1718,287 @@ fn verification_energy_threshold_is_strict_and_finite() {
         assert!(!assess(bad, bad));
     }
 }
+
+/// P3-SETUP2: compare every owned start value, including off-diagonal projector
+/// couplings, mixed species, missing-band completion and J > B Ritz truncation.
+#[test]
+fn setup2_owned_start_identity_and_work() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::RunConfig;
+    let shapes = [
+        ("cubic", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]),
+        ("skew", [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]),
+        ("elongated", [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]]),
+        ("slab", [[8., 0., 0.], [0., 8., 0.], [0., 0., 4.]]),
+    ];
+    for (shape, (label, rows)) in shapes.into_iter().enumerate() {
+        let pp = common::potential_with_atomic_start(2., 1.8, shape != 3, 161, "SLA PZ");
+        let pp2 = common::potential_with_atomic_start(2., 2., false, 161, "SLA PZ");
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let mut atoms = vec![
+            dft_geometry::Atom::new("Xx", [0., 0., 0.]),
+            dft_geometry::Atom::new("Xx", [0.43, 0.51, 0.32]),
+        ];
+        let mut potentials = vec![dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        if shape == 1 {
+            atoms.push(dft_geometry::Atom::new("Yy", [0.1, 0.7, 0.8]));
+            potentials.push(dft_engine::SpeciesPotential {
+                label: "Yy",
+                potential: &pp2,
+            });
+        }
+        for ranks in [1, 3, 8] {
+            let build = |diagonal, orbital, threads| {
+                dft_mpi::simulate(ranks, |comm| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refstart_diagonal_reuse", diagonal),
+                        ("refstart_orbital_reuse", orbital),
+                        (
+                            "refscf_setup_phase_reuse",
+                            if shape % 2 == 0 { "on" } else { "off" },
+                        ),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    let options = dft_engine::ScfOptions {
+                        cutoff_hartree: 2.,
+                        bands: Some([6, 13, 8, 9][shape]),
+                        threads,
+                        gamma_real: dft_engine::GammaReal::On,
+                        ..Default::default()
+                    };
+                    let s = start(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        comm,
+                    )
+                    .unwrap();
+                    let bits: Vec<_> = s
+                        .orbitals
+                        .as_slice()
+                        .iter()
+                        .chain(&s.ritz_values_hartree)
+                        .chain(&s.density)
+                        .chain(&s.ionic)
+                        .chain(&s.potential)
+                        .chain(&s.diagonal_static)
+                        .map(|v| v.to_bits())
+                        .chain(
+                            s.density_g
+                                .iter()
+                                .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                        )
+                        .collect();
+                    assert!(!s.setup.phases.contains_key("atomic_qr_mgs_fallback"));
+                    let p = &s.setup.phases;
+                    assert!(
+                        p["atomic_qr_gram"]
+                            + p["atomic_qr_factor_inverse"]
+                            + p["atomic_qr_rotate"]
+                            + p["atomic_completion"]
+                            <= p["atomic_orthonormalize_complete"]
+                    );
+                    assert!(p["atomic_h_apply"] + p["atomic_h_gram"] <= p["atomic_h_apply_gram"]);
+                    if comm.rank() == 0 && threads == 1 {
+                        let m = &s.memory;
+                        let (l, j, b) = (m.owned_rows, m.atomic_columns, m.bands);
+                        let k = j.max(b);
+                        eprintln!(
+                            "P3-SETUP2 {label} ranks={ranks} D={diagonal} O={orbital}: G={} L={l} J={j} B={b} F={} qr_flops={} hgram_flops={} rotate_flops={} qr_reduce_bytes={} hgram_reduce_bytes={} H_columns={k} {:?}",
+                            m.wave_rows,
+                            m.grid_points,
+                            8 * l * j * j,
+                            2 * l * k * k,
+                            2 * l * k * b,
+                            16 * j * j,
+                            8 * k * k,
+                            s.setup
+                        );
+                    }
+                    bits
+                })
+            };
+            let baseline = build("off", "off", 1);
+            for (diagonal, orbital) in [("on", "off"), ("off", "on"), ("on", "on")] {
+                for threads in [1, 2] {
+                    assert_eq!(
+                        baseline,
+                        build(diagonal, orbital, threads),
+                        "{label} ranks={ranks} D={diagonal} O={orbital} threads={threads}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// P3-SETUP2: the complete verified trajectory, not only the starting energy.
+#[test]
+fn setup2_verified_trajectory_identity() {
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    for (label, rows) in [
+        ("cubic", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]),
+        ("skew", [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]),
+        ("elongated", [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]]),
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let atoms = [
+            dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+            dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+        ];
+        let potentials = [dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = dft_engine::ScfOptions {
+            cutoff_hartree: 2.,
+            bands: Some(5),
+            max_iterations: 100,
+            gamma_real: dft_engine::GammaReal::On,
+            ..Default::default()
+        };
+        let mut baseline = None;
+        for (diagonal, orbital) in [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")] {
+            let config = RunConfig::from_pairs(&[
+                ("refstart_diagonal_reuse", diagonal),
+                ("refstart_orbital_reuse", orbital),
+                ("refscf_verify_energy", "off"),
+            ])
+            .unwrap();
+            let _scope = config.enter();
+            let run = dft_engine::refscf::driver::run_with(
+                dft_engine::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &Serial,
+            )
+            .unwrap();
+            assert!(
+                run.outcome.converged && run.outcome.result.verification.as_ref().unwrap().passed()
+            );
+            let science = stop_to_verified_science(&run);
+            if let Some(previous) = &baseline {
+                assert_eq!(&science, previous);
+            } else {
+                baseline = Some(science);
+            }
+            let calls: Vec<_> = run
+                .records
+                .iter()
+                .flat_map(|r| &r.calls)
+                .chain(&run.verification_calls)
+                .collect();
+            eprintln!(
+                "P3-SETUP2 verified {label} D={diagonal} O={orbital}: E={:.17e} Ha maps={} Dav={} H={} setup={:?}",
+                run.outcome.result.energy.total_hartree(),
+                run.records.len(),
+                calls.iter().map(|c| c.iterations).sum::<usize>(),
+                calls.iter().map(|c| c.h_columns).sum::<usize>(),
+                run.setup
+            );
+        }
+    }
+}
+
+/// Cross the 256-row GEMM panel boundary with more atoms/bands than the small
+/// trajectory fixtures. Timings are observations; this test has no speed gate.
+#[test]
+fn setup2_larger_start_profile() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
+    let atoms: Vec<_> = (0..4)
+        .flat_map(|i| {
+            (0..2).flat_map(move |j| {
+                (0..2).map(move |k| {
+                    dft_geometry::Atom::new("Xx", [i as f64 / 4., j as f64 / 2., k as f64 / 2.])
+                })
+            })
+        })
+        .collect();
+    let potentials = [dft_engine::SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = dft_engine::ScfOptions {
+        cutoff_hartree: 4.,
+        bands: Some(34),
+        gamma_real: dft_engine::GammaReal::On,
+        ..Default::default()
+    };
+    for (label, rows) in [
+        ("large-cubic", [[14., 0., 0.], [0., 14., 0.], [0., 0., 14.]]),
+        (
+            "large-skew",
+            [[14., 0., 0.], [0.7, 14., 0.], [0.2, 0.3, 14.]],
+        ),
+        (
+            "large-elongated",
+            [[10., 0., 0.], [0., 10., 0.], [0., 0., 24.]],
+        ),
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let mut baseline = None;
+        for (diagonal, orbital) in [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")] {
+            let config = RunConfig::from_pairs(&[
+                ("refstart_diagonal_reuse", diagonal),
+                ("refstart_orbital_reuse", orbital),
+            ])
+            .unwrap();
+            let _scope = config.enter();
+            let s = start(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                &Serial,
+            )
+            .unwrap();
+            let bits: Vec<_> = s
+                .orbitals
+                .as_slice()
+                .iter()
+                .chain(&s.ritz_values_hartree)
+                .chain(&s.diagonal_static)
+                .chain(&s.density)
+                .chain(&s.ionic)
+                .chain(&s.potential)
+                .map(|v| v.to_bits())
+                .chain(
+                    s.density_g
+                        .iter()
+                        .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                )
+                .collect();
+            if let Some(previous) = &baseline {
+                assert_eq!(&bits, previous);
+            } else {
+                baseline = Some(bits);
+            }
+            let k = s.memory.atomic_columns.max(s.memory.bands);
+            let b = s.memory.bands;
+            let h_collectives = (0..k)
+                .step_by(b)
+                .map(|first| s.operator.collectives_per_apply(b.min(k - first)))
+                .fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+            eprintln!(
+                "P3-SETUP2 {label} D={diagonal} O={orbital}: memory={:?} H_collectives={h_collectives:?} setup={:?}",
+                s.memory, s.setup
+            );
+        }
+    }
+}

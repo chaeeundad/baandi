@@ -1193,6 +1193,75 @@ and included conservatively in the named-array peak envelope. The atomic
 coefficient builder still works on owned G rows only. Real MPI/MKL timing and
 identity remain dev08 gates even though the pure-Rust local tests are exact.
 
+
+### P3-SETUP2: remaining work and exact reuse experiments
+
+At base `0e5cfa6`, `REFSTART_MKL` and `REFSCF_SETUP_PHASE_REUSE` are already
+**on** (the earlier default-off paragraph above describes their original
+experiments). This task adds two independent **default-off** switches:
+
+- `REFSTART_DIAGONAL_REUSE`: load each atom's owned complex projector values
+  once per representative, then preserve the original coupling traversal,
+  complex product and scalar accumulation. Copy the result for the adjacent
+  ORC partner row only when its representative index is identical. No zero
+  coupling is skipped. Scratch: 16 max(c_a) bytes, dropped with the sparse
+  complex projectors; no full-G table or new collective.
+- `REFSTART_ORBITAL_REUSE`: retain the first atom's exact `r(|G|)*Y_lm(G)`
+  values and use them at subsequent atoms of that species. Scratch per radial
+  channel: 8 L (2l+1) bytes, freed before QR; bypassed for a single atom. The
+  phase multiplication, column order, radial quadrature and exact-bit shell
+  keys are unchanged. No interpolation, harmonic approximation or shell
+  tolerance. This scratch, like existing radial caches, is outside
+  `StartMemory.principal_peak_bound_bytes`; it is reported analytically here.
+
+Both preserve starting values and verified fixture trajectories bit for bit
+on the tested pure Mac build. They do not change any legacy start. Exact
+state equality on dev08 MKL/MPI remains a required measurement, not a claim.
+
+Notation extends Start above: c_a projector channels on atom a,
+Q=sum(c_a), C2=sum(c_a^2), A_s atoms of species s, M_c=2l_c+1,
+U_c distinct *bit patterns* of squared momentum on this rank, R_c radial
+mesh points, W=ceil(K/B), K=max(J,B). FLOPs use 2mnk per real GEMM.
+Byte counts below are logical array payload/read-write traffic, not cache
+misses, allocator peaks or MPI wire bytes. A tree reduction's stated bytes
+are its local input payload (the result has the same size).
+
+| Setup item | Arithmetic / scaling | Principal bytes and collectives; remaining excess |
+| --- | --- | --- |
+| Species validation | O(atoms + radial metadata); no dense algebra | Small replicated metadata; scalar agreement. |
+| Basis/G-vectors and ownership | Enumerate full wave/density integer boxes, norms and sort/layout; O(G+D+F) metadata on every rank | Replicated basis/grid/index arrays, no field values; no collective in enumeration. Layouts are rebuilt, not cached between runs. |
+| Ewald | Real/reciprocal candidate enumeration and accepted pair sums; exp/erfc are not assigned fictional FLOPs | 8 times accepted local terms for P>1, P broadcasts of 24 bytes in fixed rank order; serial streams. No algorithm change. |
+| Field/operator/density FFT plans | Three distinct role-specific layouts; no transform FLOPs during planning | Layout-dependent O(F+G) indices, local sticks/planes and padded send/receive buffers. No plan-construction collectives. RustLanes creates a new FftPlanner per plan, shares equal axis lengths only within that planner; no cross-run cache. MKL descriptors likewise belong to each plan. Safe reusable immutable plans require adapter ownership, outside this ticket. |
+| Nonlocal tables | Exact shell transforms per species/projector plus angular/phase evaluation on owned representatives (including mirrors needed by H) | Sparse complex 16 H_r Q then real 8 L Q; complex source released after diagonal. Scalar failure agreement. Already distributed; not G*Q on every rank. |
+| Nonlocal diagonal | Baseline L C2 coupling terms, **2 L C2 binary searches** of the owned-index list. Real part of each complex term needs 5 useful real FLOPs including coupling multiply/add (full complex expression may execute more). | Baseline logical projector loads 32 L C2 bytes, coupling loads 8 L C2, output 8 L. D arm: H_r' C2 terms and H_r' Q searches/loads (16 H_r' Q bytes), where H_r' is this rank's representative count; ~half the terms and far fewer searches. No reductions in either arm. Not an all-G replicated diagonal. |
+| Local/atomic field tables and phases | Exact-bit shell cache per species; O(U_s R_s) radial work, O(D_r atoms) direct phases and coefficient accumulation | 32 S_r output bytes; radial scratch O(R_s+U_s), phase scratch 16 max(A_s). One failure agreement. Existing phase reuse retained. Skew cells have many more U_s; interpolating them would change the start and is deferred. |
+| Atomic density | Two inverse field FFTs, clipping/charge normalization, one forward FFT | Owned 8 F_r real and 16 S_r complex arrays; three transpose all-to-alls, each with padded send payload 16 P max_sticks max_planes bytes. Three scalar transform agreements plus one charge sum. G=0 fixed exactly. |
+| Initial potential and redistribution | O(S_r) Hartree multiplier/metric geometry, one inverse FFT, O(F_r) LDA and pointwise additions | One padded field transpose, inverse-finiteness and XC scalar agreements; existing PlaneMap redistribution. No extra density FFT. |
+| Atomic orbital fill | Baseline U_c radial transforms per channel (already memoized, **not recomputed at every atom**); sum_c A_s M_c L shell lookups/harmonics. O arm keeps radial transform count, reduces lookups/harmonics to sum_c M_c L for repeated species. | Raw 8 L J bytes; cache writes/reads 8 L M_c and 8 (A_s-1) L M_c per channel. Phase work unchanged from the existing phase-reuse choice. Two scalar failure/finite agreements. |
+| CholQR2 Gram / rotations | Two Grams + two rotations: **8 L J^2 FLOPs**. Each Gram and rotation costs 2 L J^2. | Two reductions of 8 J^2 bytes each. Per Gram logical GEMM payload 8(2LJ+J^2); per rotation 8(2LJ+J^2), plus Q clone and reduced-result copies. Do not remove the second pass: conditioning/orthogonality contract still applies. |
+| CholQR2 factor/inverse | Replicated O(J^3), currently the legacy complex scalar Cholesky/back-substitution helper even for real Gram data. Two passes each perform binomial(J,3) Cholesky off-diagonal complex MACs and J(J^2-1)/6 inverse complex MACs, plus diagonal norms, scaling and divisions. | O(J^2) real/complex factor temporaries; no collective. This serial cubic term does not shrink with ranks. A real/library triangular adapter is follow-up work; no numerical factor/guard change here. |
+| MGS fallback / completion | Fallback: two-pass MGS, about 4 L J(J-1) dot/update FLOPs plus normalization. Completion: each attempted column against q accepted columns costs 8 L q dot/update FLOPs plus norm. | Fallback J(J+1) scalar sums; completion 2q+1 scalar sums per attempted column. Same dependence/pivot thresholds and kinetic ordering. Fallback was not reached in the recorded valid fixtures; no inference that it never occurs. |
+| Atomic H application / Gram | Apply H to **K** columns in B-sized chunks, not only B: all atomic columns are needed to diagonalize in the same span. Gram **2 L K^2 FLOPs**. Nonlocal H about 4 L Q K + 2 K C2 FLOPs; FFT work is sum over chunk widths of ceil(width/2) inverse/forward complex pairs. | Q 8 L K, chunk input/output 16 L width, K-square Gram 8 K^2. W Gram sums totaling 8 K^2 bytes; if Q>0, W projector sums totaling 8 Q K. Batched H has two transpose all-to-alls/chunk plus two mirror exchanges if split; payload includes padding, not just useful G. No full HQ is retained. |
+| Atomic eigensolve / final rotation | Replicated symmetric K-square EVD, backend-dependent O(K^3); selected rotation **2 L K B FLOPs** | EVD O(K^2); selected coefficient copy 16 K B read/write bytes; rotation payload 8(LK+KB+LB). No collective. Selecting only B input atomic columns changes the Ritz space and is not equivalent. |
+| Mixer/metric initial transform | Driver-owned metric/history setup plus initial density transform; no new work here | Local field/history buffers and existing scalar reductions/transpose; recorded separately from start(). |
+
+New nested setup clocks are `atomic_qr_gram`, `atomic_qr_factor_inverse`,
+`atomic_qr_rotate`, `atomic_qr_mgs_fallback` (present only if taken),
+`atomic_completion`, `atomic_h_apply` and `atomic_h_gram`. They are ordinary
+setup-boundary clocks, with no barriers or reductions added; sum repeated
+chunk/pass entries within each name. QR/completion children overlap
+`atomic_orthonormalize_complete`; H children overlap `atomic_h_apply_gram`.
+These and the pre-existing four atomic children all overlap
+`atomic_block_total`. Do not add nested times to totals. A zero-duration
+completion clock can simply mean no missing columns and clock resolution.
+
+Mac observations, exact fixture counts, validation commands and the
+**one profiled run per arm/case** dev08 request are in
+[setup2-dev08-request.md](../performance/lanes/RSCF/setup2-dev08-request.md).
+Derived from the initialization/shell-cache principles in the own-words
+`qe-scf-cycle.md` and `qe-stage-by-stage.md`; no QE source accessed. A52's
+rejected QR substitution is not repeated, and no numerical defaults change.
+
 ## H-apply FFT cost accounting
 
 P3-FFT (2026-11-24), audited against local base

@@ -510,6 +510,10 @@ table! {
         "reference SCF only: accept the independent verification map when the variational energy change is below 5e-9 Ha; Coulomb/residual diagnostics retained, predictor gates inactive; off restores the old fixed-point rule";
     FFT_FUSED_ROWS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT2: stream distributed local-potential last-axis inverse/multiply/forward through reusable rows with immutable zero-hole input; rustfft lanes only, rounding class, default off pending dev08";
+    REFSTART_DIAGONAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP2: reference start caches one atom's owned projector values and reuses identical nonlocal diagonal values for adjacent ORC partner rows; bit-identical, default off pending dev08";
+    REFSTART_ORBITAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP2: reference start reuses exact radial-times-harmonic amplitudes across atoms of each species and radial orbital; bit-identical, default off pending dev08";
 }
 
 struct Resolved {

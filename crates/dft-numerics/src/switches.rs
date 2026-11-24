@@ -536,6 +536,10 @@ table! {
         "P3-STREAM: reuse four initialized row buffers between successful solves on the calling thread; bit-identical; default off pending dev08";
     FFT_A2A_BALANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-A2A: cap rank stick counts to reduce padded FFT alltoall payload, preserving mirror units; use only if the block shrinks, row-reduction rounding class, default off pending dev08";
+    REFSTART_GENERALIZED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP3: reference atomic start uses raw-overlap generalized Rayleigh-Ritz without wide QR passes when J >= bands and the guarded metric reduction passes; otherwise legacy CholQR2/completion; rounding class, default off pending dev08";
+    REFSTART_COMPACT_G: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP3: reference atomic fields map density Miller indices directly into sorted owned FFT positions, omitting the duplicate density-grid reverse map and tree lookup table; bit-identical, default off pending dev08";
 }
 
 struct Resolved {

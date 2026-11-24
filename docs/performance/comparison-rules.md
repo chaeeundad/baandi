@@ -45,6 +45,13 @@ fast jobs are limited to 600 s, authorized `final-` jobs to 7200 s.
 - The fixed-point verification is a production step (decision 2026-11-14), not profiling;
   it stays in the timed QE-comparison run and is charged as described below.
 
+## Target metric (user decision A, 2026-11-26)
+
+The target (BAANDI <= 0.90x the fastest QE configuration per case and parallel model) is judged on the BAANDI
+`verify = "off"` wall, which uses the same stopping rule as QE. The verified wall (production default) is still
+reported beside it, with its verification cost, but is not the target metric. Baseline: precise campaign
+2026-11-26, docs/performance/precise-2026-11-26.md.
+
 ## Two BAANDI numbers against QE (user decision C, 2026-11-25)
 
 QE stops on its estimated SCF accuracy and runs no independent fixed-point check. Every QE comparison of

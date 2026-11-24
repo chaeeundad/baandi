@@ -1803,12 +1803,18 @@ mod lane_identity_tests {
                         let source = Hamiltonian::new(&cell, &basis, potential, nl).unwrap();
                         let pool = WorkerPool::new(1).unwrap();
                         let mut reference = Vec::new();
-                        for (direct, sparse) in
-                            [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")]
-                        {
+                        for (direct, sparse, rows) in [
+                            ("off", "off", "off"),
+                            ("on", "off", "off"),
+                            ("off", "on", "off"),
+                            ("on", "on", "off"),
+                            ("off", "off", "on"),
+                            ("on", "on", "on"),
+                        ] {
                             let config = RunConfig::from_pairs(&[
                                 ("fft_direct_pack", direct),
                                 ("fft_sparse_clear", sparse),
+                                ("fft_fused_rows", rows),
                                 ("m2_sticks", mirror),
                             ])
                             .unwrap();
@@ -1846,14 +1852,14 @@ mod lane_identity_tests {
                                     bits.extend(y.as_slice().iter().map(|v| v.to_bits()));
                                 }
                             }
-                            if direct == "off" && sparse == "off" {
+                            if direct == "off" && sparse == "off" && rows == "off" {
                                 reference = bits;
                             } else {
                                 assert_eq!(bits, reference, "ranks {ranks} mirror {mirror}");
                             }
                         }
                     });
-                    comparisons += ranks * 3 * 2 * 5;
+                    comparisons += ranks * 5 * 2 * 5;
                 }
             }
         }

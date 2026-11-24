@@ -1791,6 +1791,152 @@ mod lane_identity_tests {
     use dft_units::Hartree;
 
     #[test]
+    fn a2a_balance_h_equivalence() {
+        type RankResult = (Vec<usize>, usize, Vec<(RealMatrix, (usize, usize))>);
+        let mut worst = 0.0f64;
+        let mut changed = 0;
+        for (lattice, shape) in [
+            ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], [12, 12, 12]),
+            (
+                [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+                [11, 13, 17],
+            ),
+            ([[4., 0., 0.], [0., 5., 0.], [0., 0., 12.]], [7, 11, 23]),
+        ] {
+            for ranks in [1, 2, 3, 8] {
+                for mirror in ["greedy", "mirror"] {
+                    for channels in [0, 3] {
+                        let run = |arm| {
+                            dft_mpi::simulate(ranks, |comm| {
+                                let config = RunConfig::from_pairs(&[
+                                    ("fft_a2a_balance", arm),
+                                    ("m2_sticks", mirror),
+                                    ("fft_direct_pack", "on"),
+                                    ("fft_sparse_clear", "on"),
+                                ])
+                                .unwrap();
+                                let _scope = config.enter();
+                                let cell = Cell::from_user_rows_bohr(lattice).unwrap();
+                                let basis = PlaneWaveBasis::new(&cell, Hartree(1.2)).unwrap();
+                                let atoms = if channels == 0 {
+                                    vec![]
+                                } else {
+                                    [1, channels, 5]
+                                        .into_iter()
+                                        .map(|nc| {
+                                            let columns = (0..nc)
+                                                .map(|j| {
+                                                    basis
+                                                        .momenta()
+                                                        .iter()
+                                                        .map(|g| {
+                                                            C::from_polar(
+                                                                0.1 / (1. + g.norm_squared),
+                                                                g.cartesian[0]
+                                                                    * (j + 1) as f64
+                                                                    * 0.13,
+                                                            )
+                                                        })
+                                                        .collect()
+                                                })
+                                                .collect();
+                                            let coupling = (0..nc * nc)
+                                                .map(|i| if i / nc == i % nc { 0.7 } else { -0.03 })
+                                                .collect();
+                                            (columns, coupling)
+                                        })
+                                        .collect()
+                                };
+                                let nl = NonlocalOperator::from_columns(
+                                    basis.momenta().to_vec(),
+                                    atoms,
+                                    5,
+                                );
+                                let potential =
+                                    ndarray::Array3::from_shape_fn(shape, |(i, j, k)| {
+                                        0.1 * ((i + 2 * j + 3 * k) as f64).sin()
+                                    });
+                                let source =
+                                    Hamiltonian::new(&cell, &basis, potential, nl).unwrap();
+                                let mut op = DistributedRealHamiltonian::new(
+                                    &source,
+                                    &basis,
+                                    16,
+                                    comm.rank(),
+                                    ranks,
+                                    WorkerPool::new(1).unwrap(),
+                                )
+                                .unwrap();
+                                let mut results = Vec::new();
+                                for batched in [true, false] {
+                                    op.set_batched(batched);
+                                    for m in [16, 1, 2, 5, 0] {
+                                        let x = RealMatrix::new(
+                                            op.local_len(),
+                                            m,
+                                            (0..m)
+                                                .flat_map(|t| {
+                                                    op.local_rows().iter().map(move |&g| {
+                                                        ((g * 17 + t * 13) as f64).sin() * 0.5
+                                                    })
+                                                })
+                                                .collect(),
+                                        )
+                                        .unwrap();
+                                        let mut y = RealMatrix::zeros(op.local_len(), m).unwrap();
+                                        op.apply_block(comm, &x, &mut y).unwrap();
+                                        results.push((y, op.collectives_per_apply(m)));
+                                    }
+                                }
+                                (op.local_rows().to_vec(), op.global_len(), results)
+                            })
+                        };
+                        let off = run("off");
+                        let on = run("on");
+                        if off.iter().zip(&on).any(|(a, b)| a.0 != b.0) {
+                            changed += 1;
+                        }
+                        for (j, m) in [16, 1, 2, 5, 0].into_iter().cycle().take(10).enumerate() {
+                            let assemble = |parts: &[RankResult]| {
+                                let mut out = vec![0.; parts[0].1 * m];
+                                for (rows, n, results) in parts {
+                                    for t in 0..m {
+                                        for (k, &g) in rows.iter().enumerate() {
+                                            out[t * n + g] = results[j].0[(k, t)];
+                                        }
+                                    }
+                                }
+                                out
+                            };
+                            let a = assemble(&off);
+                            let b = assemble(&on);
+                            for (a, b) in a.iter().zip(&b) {
+                                worst = worst.max((a - b).abs());
+                                assert!(
+                                    (a - b).abs() < 1e-12,
+                                    "H difference {shape:?} ranks={ranks} {mirror}"
+                                );
+                                if channels == 0 || ranks == 1 {
+                                    assert_eq!(a.to_bits(), b.to_bits());
+                                }
+                            }
+                            if mirror == "mirror" {
+                                for (a, b) in off.iter().zip(&on) {
+                                    assert_eq!(a.2[j].1, b.2[j].1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(changed > 0, "exercise changed ownership, not just fallback");
+        eprintln!(
+            "P3-A2A: H max absolute difference {worst:e} Ha; {changed} layouts changed; local+kinetic bit-identical"
+        );
+    }
+
+    #[test]
     fn fft_pack_switches_preserve_distributed_h_bits() {
         let mut comparisons = 0;
         for lattice in [

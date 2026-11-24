@@ -534,6 +534,8 @@ table! {
     // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
     REF_DAV_REUSE_ROWS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-STREAM: reuse four initialized row buffers between successful solves on the calling thread; bit-identical; default off pending dev08";
+    FFT_A2A_BALANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-A2A: cap rank stick counts to reduce padded FFT alltoall payload, preserving mirror units; use only if the block shrinks, row-reduction rounding class, default off pending dev08";
 }
 
 struct Resolved {

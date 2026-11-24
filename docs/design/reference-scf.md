@@ -1579,6 +1579,129 @@ The [dev08 request](../performance/lanes/RSCF/fft-dev08-request.md) owns the
 screen and A/A + crossed A/B protocol. Default promotion, real MPI/MKL,
 full convergence and external-reference accuracy remain remote gates.
 
+### P3-A2A: payload minimum and capped stick ownership
+
+Audited at `ee6a0c40d7ce8c197e570681247bc6744ff45c67`. Derived from BAANDI
+code and the own-words notes `fft-call-structure.md` and `qe-hpsi-and-fft.md`;
+no QE source was read. Ticket-supplied ec553c93 Si128 MPI8 motivation:
+206 alltoalls, 4134 MB outgoing payload/rank, 103 projector sums (58 MB),
+about 2.0 s collectives, 15.9 s H apply, 28 s Davidson stage sum, 3.5 s FFT
+movement and 4.9 s kernels. These rounded componentwise rank maxima are not
+additive elapsed wall. The supplied QE h_psi 11.25 s / 82 calls is not new
+reference evidence; this experiment supplies no QE run or speed ratio.
+MB below means decimal 10^6 bytes; confirm the remote counter's formatting
+before matching its rounded aggregate to the exact byte formulas.
+
+#### Exact payload versus useful data
+
+For `q=ceil(m/2)` packed pairs, the current collective sends
+`16*q*R*s_max*p_max` bytes/rank/direction, including self. Useful inverse
+send/rank is `16*q*s_r*n0`, useful forward send is `16*q*p_r*S`.
+Their difference from the padded total is unused slots, not extra support.
+Padding can contain stale values after reuse; receivers never read it.
+Entirely empty reciprocal columns are **already absent**. Zeros within an
+occupied stick are filled before the first inverse, after which all n0
+spatial samples are generally nonzero. Filtering those transformed samples
+by the original G-sphere would be incorrect. The forward route also gathers
+only S occupied sticks, not the full n1*n2 rectangle.
+
+For Hermitian spectra A and B of two real orbitals, C(G)=A(G)+i B(G), but
+C(-G)=conj(A(G))+i conj(B(G)), not conj(C(G)). Both mirror sticks contain
+independent data for the **two** real bands. The narrowest exact type for
+this contract is therefore complex f64 (16 bytes/sample), not real f64 or
+f32. Self-mirror sticks do not make C real. An odd tail has a zero partner
+but still uses the full complex route; a separate Hermitian single-band
+algorithm would need another contract and is not implemented here.
+
+The global useful minimum for this transpose layout is `16*q*S*n0`
+bytes/direction; mean/rank is `16*q*S*n0/R`. Only
+`16*q*(S*n0-sum(s_r*p_r))` useful bytes cross rank boundaries. Counters
+record outgoing send bytes including self, not send+receive or transport
+protocol overhead. There is no second factor-of-two Gamma saving. A
+variable-count collective could eliminate padding; the existing equal-block
+interface instead pays the maximum stick and plane counts on every edge.
+
+`a2a_catalog_payload_accounting` enumerates the 30 Ry = 15 Ha spheres for
+the lattice/grid sizes of `benchmarks/cases/si{64,128}-gamma.toml`, then
+executes the actual mirror partition at MPI8. This is local catalog
+accounting without UPF/SCF, not proof that remote input hashes match it.
+
+| Catalog, MPI8 | Grid | Npw | S | s_r, rank order | p_r | Sent bytes/pair/rank/direction | Useful mean bytes | Padding |
+| --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Si64 | 72x72x72 | 23871 | 1005 | 125,124,126,126,126,126,126,126 | 9 | 145152 | 144720 | 432 (0.2976%) |
+| Si128 | 72x72x144 | 47851 | 2005 | 251,250,250,250,250,250,252,252 | 9 | 290304 | 288720 | 1584 (0.5456%) |
+
+Si128 inverse useful bytes/rank/pair range 288000..290304; forward useful
+bytes are 288720 on every rank. Across ranks/direction: 2322432 submitted,
+2309760 useful, 12672 padding, 2021040 useful off-rank bytes. A full
+260-band starting block (130 pairs) submits 37739520 bytes/rank/direction.
+The rounded 4134 MB is consistent with 7120 pairs over 103 H calls
+(`2*7120*290304 = 4133928960` bytes), but does not prove that pair count;
+request actual widths. Even eliminating all padding would save only about
+22.6 MB of 4134 MB. Both catalog layouts already attain the smallest
+mirror-preserving equal-block capacity; the candidate leaves them unchanged.
+
+#### Calls, latency and the earlier overlap rejection
+
+With mirror ownership, each nonempty H block uses exactly two FFT alltoalls
+and one projector sum (zero sums without projectors). Greedy ownership can
+add two mirror exchanges. Unbatched diagnostics use `2*ceil(m/2)` FFT
+alltoalls; density uses one inverse transpose outside these H counts. Empty
+H blocks do no collectives. The low-level FFT API retains its historical
+zero-width calls for nonempty support. No call order/count is changed here.
+
+4134 MB / 206 is about **20.07 MB/call/rank**. Since 2.0 s includes sums,
+alltoall mean residence is at most **9.71 ms/call**, not measured latency.
+In `T = calls*alpha + payload/bandwidth + arrival/progress wait`, alpha,
+bandwidth and wait cannot be separated from that aggregate. Pure latency
+share is unknown: at most 12.58% of the H stage or 7.14% of the stage sum,
+with the same rank-max caveat. Never call 9.71 ms startup latency or assign
+all 2.0 s to alltoall. Per-rank FFT stage 3/13 clocks and existing arrival
+sites 104/114 are needed to separate arrival imbalance from residence.
+
+MPI-REMAINING-ASYNC-ALLTOALL rejected overlap at Si32 sizes. Si128 messages
+are larger, but the aggregate still does not show alltoall alone above that
+analysis's roughly 10%-of-solve reopening premise. `dft-mpi::Collective` and
+World only expose blocking equal-count alltoall: no alltoallv, Ialltoall,
+request/test/wait or progress guarantee. Overlap needs the wrapper, safe
+buffer/request lifetimes, double buffers, error/unwind and communicator-order
+rules, simulator tests, and forwarding through accounting/engine wrappers.
+A new trait method with a padded fallback would not remove traffic through
+those wrappers. No FFI is added. The old rejection is not silently reversed;
+Si128 asynchronous progress and overlap benefit remain unmeasured.
+
+#### Implemented reduction: FFT_A2A_BALANCE (default off)
+
+The switch minimizes the largest removable part **within the existing
+equal-block transport and mirror constraint**. Construction first performs
+the unchanged coefficient-weighted greedy assignment. With the switch on,
+form indivisible size-1/size-2 mirror units (only size-1 under greedy mode).
+For K size-2 units, the smallest feasible capacity c obeys `R*c >= S` and
+`R*floor(c/2) >= K`: ceil(S/R), or that value plus one. Assign pairs before
+singletons, decreasing coefficient weight within each class, to the feasible
+rank with least coefficient load (ties: stick count then rank). This secondary
+objective limits, but does not guarantee against, coefficient-load imbalance.
+
+Use the candidate **only if c < old s_max**; otherwise preserve old owners
+exactly, including empty support and single rank. Savings per rank/direction
+are `16*q*R*(old_s_max-c)*p_max` bytes, also removed from each transpose
+buffer. Plane padding and indivisible-mirror padding remain. Savings can be
+zero, as on both catalog Si cells. Existing collective/FFT counters record
+the smaller buffer exactly. No per-call allocation, logging, new backend,
+kernel, collective or batching policy is introduced; metadata is built at
+partition construction only. The switch affects all partition users,
+including density/operator rows, not just reference SCF.
+
+FFT arithmetic and spatial-plane order are unchanged; assembled transforms
+and local+kinetic H must be bit-identical. Projector/Gram sums and SCF can
+round differently when coefficient rows change owner: this is a
+**rounding-class** experiment. Check remote counts, verification and load
+imbalance explicitly. Lower bytes are not a speed result. See the
+[one-run-per-arm request](../performance/lanes/RSCF/a2a-dev08-request.md)
+for local validation and pending remote evidence. Shared ledger/log,
+README evidence and dashboard integration remain the master's work outside
+this ticket's OWNED_FILES.
+
 ## Verification by energy
 
 ADR [0044](../decisions/0044-reference-verification-energy.md) changes only the

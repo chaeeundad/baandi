@@ -3663,3 +3663,18 @@ dev08 MPI8 one profiled run per arm at 79cf8703 (all three on vs off): all verif
 si64 6.56 -> 6.66 (noise), si128 32.47 -> 32.15, elongated 1.35 -> 1.17. si128 setup 2.343 -> 2.254 s:
 density FFT plan 0.252 -> 0.115 (FFT_SHARE), atomic overlap Gram 0.086 -> 0.062 (SINGLE_GEMM); LOCAL_SHELLS
 showed no gain (local tables 0.415 -> 0.457) and stays off. Evidence: dev08 /data/sig-dft/p3t/REPORT.md.
+
+### Work-order screen (2026-11-26, user work order "reduce full-cost SCF work"), dev08 Si64 MPI8, one run per arm at bb416c73
+
+Archived vc Si64 input (sha af97b69b...), strict -253.3781677212637 Ha, socket 0 cores 0-7, verify on, 120 s limit.
+| arm | status | wall s | E - E_strict | fine maps | fine full-H cols | attempts | peak RSS/rank |
+|---|---|---|---|---|---|---|---|
+| D | verified | 6.41 | +1.15e-10 | 13 | 6094 | 2 | 206 MB |
+| H (REFSCF_KEPT_HX) | verified | 6.60 | +1.15e-10 | 13 | 4642 (-24%) | 2 | 259 MB |
+| L (REFSCF_LADDER) | verified | 6.73 | +4.86e-11 | 10 (+9 coarse) | 5166 | 2 | 219 MB |
+Decisions (work-order wording): H "work reduced, speed unresolved": 11 cache hits, 1452 starting full-H columns
+replaced, solve -0.15 s but density +0.48 s (retained-block density pass) and +53 MB/rank. L "not a follow-up
+candidate as configured": fine saving ~1.22 s < coarse stage 1.72 s (9 coarse maps to 1e-6 Ry). Both stay off.
+Also si128 FFT_KERNEL_BY_LENGTH (now wired): all 10 lane shapes choose MKL (16-40% faster per batch in
+calibration); wall 33.63 -> 33.46 s; kernels -0.9 s but slab gather/scatter, middle pack/unpack and multiply +0.5 s
+(same pattern as M2_FFT=mkl in P3e). Evidence: dev08 /data/sig-dft/wo/RESULT.md.

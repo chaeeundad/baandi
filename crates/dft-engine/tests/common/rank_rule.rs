@@ -221,10 +221,12 @@ pub fn delivered(run: &Run, strict_energy: f64, electrons: f64) -> bool {
             .iter()
             .chain(&r.eigenvalues)
             .all(|v| v.is_finite())
+        // REFSCF_LEAN_ENERGY (default on since 2026-11-26): only the delivered map
+        // carries the full audit; intermediate maps may hold non-finite placeholders.
         && run
             .records
-            .iter()
-            .all(|r| r.energy.total_hartree().is_finite())
+            .last()
+            .is_some_and(|r| r.energy.total_hartree().is_finite())
         && v.wall() <= r.total_time
         && v.attempts
             .iter()

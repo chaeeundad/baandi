@@ -210,7 +210,10 @@ fn run_inner<K: Collective>(
                 + 16 * x.len() * (2 * profile.history + 12)
                 + 8 * state.operator.local_len() * (5 * cap + 3 * bands),
         )
-        + if gate_first { 32 * x.len() + 8 * 76 } else { 0 };
+        + if gate_first { 32 * x.len() + 8 * 76 } else { 0 }
+        // Exact field cache (density + HXC + VH), retained candidate/check
+        // input fields and a temporary cloned field pair.
+        + 8 * n.len() * 9;
     let mut peaks = vec![0.; comm.size()];
     let mut local_peak = peaks.clone();
     local_peak[comm.rank()] = peak as f64;
@@ -232,6 +235,8 @@ fn run_inner<K: Collective>(
     let mut first_reference_stop = None;
     let mut pending: Option<(map::Map, f64, usize)> = None;
     let mut predictor = VerificationPredictor::default();
+    let lean = config.on(Id::REFSCF_LEAN_ENERGY);
+    let mut field_cache = None;
     for iteration in 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
@@ -269,6 +274,8 @@ fn run_inner<K: Collective>(
                     full_diagnostics,
                     &mut calls,
                     &mut timings,
+                    &mut field_cache,
+                    lean,
                 )?;
                 map_s += clock.elapsed().as_secs_f64();
                 step
@@ -327,6 +334,23 @@ fn run_inner<K: Collective>(
             && stopped
             && verification.is_some()
             && predictor.skip(predicted_error_ha, profile.threshold_ry / 2.);
+        if ((stopped && !skipped) || iteration == o.max_iterations) && step.energy.kinetic.is_nan()
+        {
+            let clock = Instant::now();
+            map::complete_audit(
+                &mut step,
+                &mut state,
+                comm,
+                cell,
+                o.functional,
+                &n,
+                &occupations,
+                &mut field_cache,
+            )?;
+            let elapsed = clock.elapsed();
+            timings.energy += elapsed;
+            map_s += elapsed.as_secs_f64();
+        }
         let mut verification_energy = None;
         let mut actual_error_ha = None;
         let mut verification_s = 0.;
@@ -354,6 +378,8 @@ fn run_inner<K: Collective>(
                 full_diagnostics,
                 &mut verification_calls,
                 &mut t,
+                &mut field_cache,
+                false,
             )?;
             let current_calls = &verification_calls[first_call..];
             let mut checked = y.clone();
@@ -462,7 +488,14 @@ fn run_inner<K: Collective>(
             mixing_s = clock.elapsed().as_secs_f64();
             if failure.is_none() {
                 let clock = Instant::now();
-                let fields = map::fields(&mut state, comm, cell, o.functional, &next_planes)?;
+                let fields = map::cached_fields(
+                    &mut state,
+                    comm,
+                    cell,
+                    o.functional,
+                    &next_planes,
+                    &mut field_cache,
+                )?;
                 let local = -dv
                     * next_planes
                         .iter()
@@ -482,6 +515,25 @@ fn run_inner<K: Collective>(
                     + descf;
                 correction_s = clock.elapsed().as_secs_f64();
             }
+        }
+        if failure.is_some() && step.energy.kinetic.is_nan() {
+            let clock = Instant::now();
+            map::complete_audit(
+                &mut step,
+                &mut state,
+                comm,
+                cell,
+                o.functional,
+                &n,
+                &occupations,
+                &mut field_cache,
+            )?;
+            let elapsed = clock.elapsed();
+            timings.energy += elapsed;
+            map_s += elapsed.as_secs_f64();
+            variational = step.energy.band_form;
+            vh = step.energy.hartree;
+            vx = step.energy.xc;
         }
         let mut sums = [0.; 3];
         comm.tree_sum_f64(
@@ -504,7 +556,8 @@ fn run_inner<K: Collective>(
             energy: step.energy.clone(),
             energy_change: history
                 .last()
-                .map(|r| step.energy.total_hartree() - r.energy.total_hartree()),
+                .map(|r| step.energy.total_hartree() - r.energy.total_hartree())
+                .filter(|e| e.is_finite()),
             standard_error_ha: Some(dr2 / 2.),
             standard_redo: redo,
             density_residual: (dv * sums[0]).sqrt(),
@@ -755,6 +808,8 @@ fn solve_map<K: Collective>(
     diagnostics: bool,
     calls: &mut Vec<SolveRecord>,
     timings: &mut PhaseTimings,
+    cache: &mut Option<(Vec<f64>, map::Fields)>,
+    lean: bool,
 ) -> Result<map::Map, ScfError> {
     // QE's documented bounded re-entry: at most six calls, retry when more
     // than max(5, bands/4) roots remain. Keep every flag/count in the record;
@@ -770,6 +825,8 @@ fn solve_map<K: Collective>(
             ethr,
             first && retry == 0,
             diagnostics,
+            cache,
+            lean,
         )?;
         let r = &step.solve.record;
         let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();

@@ -557,6 +557,9 @@ table! {
     // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
     NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-ADDV: one sequential MKL P W directly into HX with beta=1; requires M2_DGEMM and MKL_DGEMM, rounding class, default off pending dev08";
+    REFSCF_LEAN_ENERGY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "Reference SCF intermediate band energy with full delivery and verification audits";
+
 }
 
 struct Resolved {

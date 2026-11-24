@@ -2509,3 +2509,97 @@ fn setup3_projection_residual<K: Collective>(
     comm.tree_sum_f64(&local, &mut global).unwrap();
     global.into_iter().map(f64::sqrt).fold(0., f64::max)
 }
+
+#[test]
+fn lean_energy_preserves_delivery_and_counts() {
+    use dft_engine::refscf::driver::run_with;
+    use dft_engine::{ScfOptions, SpeciesPotential, Verification, refstart::StartInput};
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for rows in [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 12.]],
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        for (verification, max_iterations, energy_rule) in [
+            (Verification::Off, 100, "off"),
+            (Verification::FixedPoint, 100, "off"),
+            (Verification::FixedPoint, 100, "on"),
+            (Verification::Off, 1, "off"),
+        ] {
+            dft_mpi::simulate(2, |comm| {
+                let options = ScfOptions {
+                    cutoff_hartree: 1.,
+                    bands: Some(3),
+                    gamma_real: dft_engine::GammaReal::On,
+                    max_iterations,
+                    verification,
+                    ..Default::default()
+                };
+                let run = |lean| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refscf_lean_energy", lean),
+                        ("refscf_verify_energy", energy_rule),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    run_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile::default(),
+                        comm,
+                    )
+                    .unwrap()
+                };
+                let a = run("off");
+                let b = run("on");
+                assert_eq!(a.first_reference_stop, b.first_reference_stop);
+                assert_eq!(a.verification_calls.len(), b.verification_calls.len());
+                for (a, b) in a.records.iter().zip(&b.records) {
+                    assert_eq!(
+                        a.variational_energy_ha.to_bits(),
+                        b.variational_energy_ha.to_bits()
+                    );
+                    assert_eq!(a.dr2_ry.to_bits(), b.dr2_ry.to_bits());
+                    if !b.energy.kinetic.is_finite() {
+                        assert!(b.energy.band_sum.is_finite());
+                        assert!(b.energy.double_counting.is_finite());
+                        assert!(b.energy.functional_difference_bound.is_nan());
+                    }
+                }
+                let ar = &a.outcome.result;
+                let br = &b.outcome.result;
+                assert_eq!(a.outcome.converged, b.outcome.converged);
+                assert_eq!(
+                    ar.energy.total_hartree().to_bits(),
+                    br.energy.total_hartree().to_bits()
+                );
+                assert_eq!(ar.density, br.density);
+                assert_eq!(ar.history.len(), br.history.len());
+                for (a, b) in ar.history.iter().zip(&br.history) {
+                    assert_eq!(a.davidson_iterations, b.davidson_iterations);
+                    assert_eq!(a.operator_applications, b.operator_applications);
+                    assert_eq!(a.standard_error_ha, b.standard_error_ha);
+                }
+                assert!(
+                    br.history
+                        .last()
+                        .unwrap()
+                        .energy
+                        .total_hartree()
+                        .is_finite()
+                );
+            });
+        }
+    }
+}

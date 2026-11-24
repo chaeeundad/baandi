@@ -1353,3 +1353,24 @@ oracles remain. These are correctness tests, not Mac performance evidence.
 The [dev08 request](../performance/lanes/RSCF/fft-dev08-request.md) owns the
 screen and A/A + crossed A/B protocol. Default promotion, real MPI/MKL,
 full convergence and external-reference accuracy remain remote gates.
+
+## Verification by energy
+
+ADR [0044](../decisions/0044-reference-verification-energy.md) changes only the
+reference driver's default verification judgment. `REFSCF_VERIFY_ENERGY=on`
+requires `abs(E(rho_out -> F(rho_out)) - E(rho_in -> rho_out)) < 5e-9 Ha`,
+using each map's `energy.band_form`: band sum minus the output-density integral
+of the input Hartree/XC potential, plus output-density Hartree/XC energies and
+Ewald energy. Neither value includes the subsequent mixed-density `descf`
+correction. The delivered state stays the stop map's state. The independent
+map, its tolerance, all diagnostics, failed-attempt recovery and work charging
+are retained. Coulomb error and the empirical residual estimate are diagnostic
+only; no density fixed-point accuracy guarantee follows from an energy pass.
+
+Both verification predictor gates are inactive in energy mode, so every
+estimator stop attempts a fresh verification (unless verification is explicitly
+off). Results label the mode `energy_change`, store both variational energies
+and their absolute difference per attempt, and retain the old diagnostic
+fields. `refscf-check --stop-to-verified` accepts either judgment without
+reinterpreting its recorded verdict. `REFSCF_VERIFY_ENERGY=off` restores the
+old acceptance rule and configured gates; the legacy driver is unaffected.

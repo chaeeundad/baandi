@@ -221,6 +221,8 @@ fn cli_roundtrip(active: bool) {
         text.to_string()
     };
     for (variant, reuse, gate, first) in [
+        ("energy_default", "off", "on", "off"),
+        ("energy_first", "off", "on", "on"),
         ("off", "off", "off", "off"),
         ("default", "off", "on", "off"),
         ("first", "off", "on", "on"),
@@ -243,6 +245,11 @@ fn cli_roundtrip(active: bool) {
                 if key.to_string_lossy().starts_with("BAANDI_") {
                     command.env_remove(key);
                 }
+            }
+            // This matrix tests the historical Coulomb gate/reuse behavior.
+            let energy_mode = variant.starts_with("energy_");
+            if !energy_mode {
+                command.env("BAANDI_REFSCF_VERIFY_ENERGY", "off");
             }
             if variant != "default" {
                 command
@@ -268,6 +275,35 @@ fn cli_roundtrip(active: bool) {
             assert_eq!(r["stop_to_verified_clock"], "reference-scf-wall-1");
             let expected = reader::stop_to_verified_summary(&doc).unwrap();
             assert_eq!(expected["status"], "VERIFIED");
+            assert_eq!(r["verification"], doc["verification"]);
+            if energy_mode {
+                assert_eq!(r["verification"]["mode"], "energy_change");
+                assert_eq!(expected["verification_mode"], "energy_change");
+                assert_eq!(r["verification"]["gate_enabled"], false);
+                assert_eq!(expected["attempt_count"], if active { 2 } else { 1 });
+                let attempts = r["verification"]["attempts"].as_array().unwrap();
+                let a = attempts.last().unwrap();
+                let delta = (a["verification_variational_energy_ha"].as_f64().unwrap()
+                    - a["delivered_variational_energy_ha"].as_f64().unwrap())
+                .abs();
+                assert_eq!(a["energy_change_ha"], delta);
+                assert!(delta < 5e-9);
+                assert_eq!(a["threshold_ha"], 5e-9);
+                assert!(a["residual_bound_ha"].is_number());
+                assert!(a["density_residual"].is_number());
+                if active {
+                    let first = &attempts[0];
+                    assert_eq!(first["iteration"], expected["first_stop_map"]);
+                    assert_eq!(first["passed"], false);
+                    assert!(first["energy_change_ha"].as_f64().unwrap() >= 5e-9);
+                    assert!(first["coulomb_error_ha"].as_f64().unwrap() > 5e-9);
+                    assert!(expected["ordinary_scf_after_failure_s"].as_f64().unwrap() > 0.);
+                } else {
+                    assert_eq!(expected["first_stop_map"], expected["passing_map"]);
+                }
+            } else {
+                assert_eq!(r["verification"]["mode"], "fixed_point");
+            }
             if variant == "first" {
                 let first_stop = expected["first_stop_map"].as_u64().unwrap() as usize - 1;
                 for field in ["first_prediction_ha", "contraction_prediction_ha"] {
@@ -278,7 +314,7 @@ fn cli_roundtrip(active: bool) {
                 }
             }
             let costs = &r["verification_cost"];
-            if variant == "off" || variant == "first_inert" {
+            if energy_mode || variant == "off" || variant == "first_inert" {
                 assert!(r.get("verification_cost").is_none());
                 assert!(expected.get("skipped").is_none());
             } else {
@@ -345,7 +381,7 @@ fn cli_roundtrip(active: bool) {
                     map.get("verification_cost"),
                     history["reference_scf"].get("verification_cost")
                 );
-                if variant == "off" || variant == "first_inert" {
+                if energy_mode || variant == "off" || variant == "first_inert" {
                     assert!(map.get("verification_cost").is_none());
                 } else {
                     let cost = &map["verification_cost"];

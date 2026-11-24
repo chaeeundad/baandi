@@ -7,7 +7,7 @@ use super::{
     metric::{Metric, Serial},
     numerical,
     profile::{Profile, next_ethr_ry},
-    record::{CorrectionRecord, Record, SolveRecord, VerificationCost},
+    record::{CorrectionRecord, Record, SolveRecord, VerificationCost, VerificationEnergy},
 };
 use crate::{
     refstart::{self, StartInput, StartState},
@@ -101,7 +101,17 @@ pub fn run_with<K: Collective>(
     let config = RunConfig::current();
     let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
     let reuse = config.on(Id::REFSCF_VERIFY_REUSE);
-    let gate = config.on(Id::REFSCF_VERIFY_GATE);
+    let energy_judgment = config.on(Id::REFSCF_VERIFY_ENERGY);
+    let gate = !energy_judgment && config.on(Id::REFSCF_VERIFY_GATE);
+    if energy_judgment {
+        for id in [Id::REFSCF_VERIFY_GATE, Id::REFSCF_VERIFY_GATE_FIRST] {
+            config.note_path(
+                id,
+                "inactive",
+                Some("REFSCF_VERIFY_ENERGY uses energy, not Coulomb prediction"),
+            );
+        }
+    }
     let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
     let profile = profile.validate()?;
     let o = input.options;
@@ -302,6 +312,7 @@ pub fn run_with<K: Collective>(
             && stopped
             && verification.is_some()
             && predictor.skip(predicted_error_ha, profile.threshold_ry / 2.);
+        let mut verification_energy = None;
         let mut actual_error_ha = None;
         let mut verification_s = 0.;
         let (mut verification_start_s, mut verification_end_s) = (None, None);
@@ -372,7 +383,7 @@ pub fn run_with<K: Collective>(
                 std::iter::once((1., check.residuals.as_slice())),
                 &occupations,
             );
-            let attempt = crate::assess_fixed_point(
+            let mut attempt = crate::assess_fixed_point(
                 &options,
                 iteration,
                 tol / 2.,
@@ -381,6 +392,17 @@ pub fn run_with<K: Collective>(
                 &record,
                 clock.elapsed(),
             );
+            if energy_judgment {
+                // Same variational functional on each map's output density.
+                // Do not use the mixed-next-density correction computed below.
+                let energy = VerificationEnergy {
+                    delivered_ha: step.energy.band_form,
+                    checked_ha: check.energy.band_form,
+                };
+                attempt.passed = energy.passed();
+                attempt.threshold_ha = VerificationEnergy::THRESHOLD_HA;
+                verification_energy = Some(energy);
+            }
             if reuse && !attempt.passed && iteration < o.max_iterations {
                 pending = Some((check, tol, iteration));
             }
@@ -498,6 +520,7 @@ pub fn run_with<K: Collective>(
             }),
             map_start_s,
             estimator_s,
+            verification_energy,
             verification_start_s,
             verification_end_s,
             map_end_s: start.elapsed().as_secs_f64(),
@@ -533,11 +556,16 @@ pub fn run_with<K: Collective>(
             let exit_reason = failure.unwrap_or_else(|| {
                 if !stopped {
                     "reference SCF maximum iterations reached".into()
+                } else if !verified && energy_judgment {
+                    "reference estimator stop reached; independent energy verification failed"
+                        .into()
                 } else if !verified {
                     "reference estimator stop reached; independent fixed-point verification failed"
                         .into()
                 } else if verification.is_none() {
                     "reference estimator stop reached; verification explicitly off".into()
+                } else if energy_judgment {
+                    "reference estimator stop and independent energy verification passed".into()
                 } else {
                     "reference estimator stop and independent fixed-point verification passed"
                         .into()

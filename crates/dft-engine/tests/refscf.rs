@@ -404,6 +404,9 @@ fn qe_si8_committed_trajectory() {
 mod common;
 #[test]
 fn driver_owned_maps_and_real_verification() {
+    let config =
+        dft_numerics::switches::RunConfig::from_pairs(&[("refscf_verify_energy", "off")]).unwrap();
+    let _scope = config.enter();
     use dft_engine::{
         GammaReal, ScfOptions, SpeciesPotential, StartDensity, Verification, refscf::driver,
     };
@@ -613,7 +616,9 @@ fn stop_to_verified_first_pass_all_diagnostics() {
     };
     let mut previous = None;
     for level in ["off", "on"] {
-        let scope = RunConfig::from_pairs(&[("davidson_stages", level)]).unwrap();
+        let scope =
+            RunConfig::from_pairs(&[("davidson_stages", level), ("refscf_verify_energy", "off")])
+                .unwrap();
         let _guard = scope.enter();
         // Control-flow fixture only: the existing first-pass case, not a new default.
         let run = driver::run(
@@ -741,6 +746,7 @@ fn stop_to_verified_si8_displaced() {
     ] {
         let mut pairs = pairs;
         pairs.push(("davidson_stages", level));
+        pairs.push(("refscf_verify_energy", "off"));
         let scope = RunConfig::from_pairs(&pairs).unwrap();
         let reuse = if scope.on(dft_numerics::switches::Id::REFSCF_VERIFY_REUSE) {
             "on"
@@ -1043,6 +1049,8 @@ fn verification_cost_fixture(active: bool) {
             vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "on")],
         ),
     ] {
+        let mut pairs = pairs;
+        pairs.push(("refscf_verify_energy", "off"));
         let config = RunConfig::from_pairs(&pairs).unwrap();
         let _guard = config.enter();
         let run = driver::run(
@@ -1481,5 +1489,230 @@ fn setup_phase_reuse_preserves_verified_science_at_both_diagnostic_levels() {
                 run.records.len()
             );
         }
+    }
+}
+
+#[test]
+fn verification_energy_attempts_and_failure_recovery() {
+    use dft_engine::{
+        GammaReal, ScfOptions, SpeciesPotential, StartDensity, Verification, refscf::driver,
+    };
+    use dft_numerics::switches::{Id, RunConfig};
+    assert!(
+        RunConfig::from_pairs(&[])
+            .unwrap()
+            .on(Id::REFSCF_VERIFY_ENERGY)
+    );
+    for active in [false, true] {
+        let (z, rc, length, bands) = if active {
+            (4., 1.2, 11., 3)
+        } else {
+            (2., 1.8, 7., 2)
+        };
+        let pp = common::potential_with_atomic_start(z, rc, active, 161, "SLA PZ");
+        let cell = dft_geometry::Cell::from_user_rows_bohr([
+            [length, 0., 0.],
+            [0.2, length, 0.],
+            [0., 0.1, length],
+        ])
+        .unwrap();
+        let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            start_density: StartDensity::Atomic,
+            gamma_real: GammaReal::On,
+            cutoff_hartree: 2.,
+            bands: Some(bands),
+            max_iterations: 100,
+            ..Default::default()
+        };
+        let profile = Profile {
+            history: if active { 4 } else { 8 },
+            ..Default::default()
+        };
+        let run = |pairs: &[(&str, &str)], options: &ScfOptions, profile| {
+            let config = RunConfig::from_pairs(pairs).unwrap();
+            let _scope = config.enter();
+            driver::run(
+                dft_engine::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &species,
+                    options,
+                },
+                profile,
+            )
+            .unwrap()
+        };
+        let old = run(&[("refscf_verify_energy", "off")], &options, profile);
+        let energy = run(&[], &options, profile);
+        let gates = run(
+            &[
+                ("refscf_verify_gate", "on"),
+                ("refscf_verify_gate_first", "on"),
+            ],
+            &options,
+            profile,
+        );
+        assert_eq!(
+            stop_to_verified_science(&energy),
+            stop_to_verified_science(&gates)
+        );
+        assert!(energy.outcome.converged);
+        let attempts = &energy
+            .outcome
+            .result
+            .verification
+            .as_ref()
+            .unwrap()
+            .attempts;
+        assert_eq!(attempts.len(), if active { 2 } else { 1 });
+        assert_eq!(Some(attempts[0].iteration), energy.first_reference_stop);
+        assert_eq!(energy.records.len(), attempts.last().unwrap().iteration);
+        assert!(!energy.verification_calls.is_empty());
+        assert!(energy.records.iter().all(|r| r.verification_cost.is_none()));
+        let last = energy.records.last().unwrap();
+        let e = last.verification_energy.as_ref().unwrap();
+        assert_eq!(
+            e.delivered_ha.to_bits(),
+            last.variational_energy_ha.to_bits()
+        );
+        assert_eq!(last.descf_ha, 0.);
+        assert!(e.passed());
+        assert_eq!(attempts[0].threshold_ha, 5e-9);
+        assert!(attempts[0].residual_bound_ha.unwrap().is_finite());
+        assert!(attempts[0].density_residual.is_finite());
+        let delta =
+            (energy.outcome.result.total_hartree() - old.outcome.result.total_hartree()).abs();
+        assert!(delta < 5e-9, "delivered difference {delta} Ha");
+        if active {
+            assert!(
+                old.outcome
+                    .result
+                    .verification
+                    .as_ref()
+                    .unwrap()
+                    .attempts
+                    .len()
+                    > 1
+            );
+            assert!(attempts[0].coulomb_error_ha > 5e-9);
+            assert!(!attempts[0].passed);
+            assert!(
+                energy.records[attempts[0].iteration - 1]
+                    .verification_energy
+                    .as_ref()
+                    .unwrap()
+                    .change_ha()
+                    >= 5e-9
+            );
+            assert!(energy.records.len() < old.records.len());
+        }
+        // Verification must not replace any part of the candidate state,
+        // whether the first attempt passes or fails.
+        let candidate = run(
+            &[],
+            &ScfOptions {
+                max_iterations: attempts[0].iteration,
+                ..options.clone()
+            },
+            profile,
+        );
+        let unverified = run(
+            &[],
+            &ScfOptions {
+                verification: Verification::Off,
+                ..options.clone()
+            },
+            profile,
+        );
+        assert_eq!(
+            format!("{:?}", candidate.outcome.result.energy),
+            format!("{:?}", unverified.outcome.result.energy)
+        );
+        assert_eq!(
+            candidate.outcome.result.density,
+            unverified.outcome.result.density
+        );
+        assert_eq!(
+            candidate.outcome.result.orbitals,
+            unverified.outcome.result.orbitals
+        );
+        assert_eq!(
+            candidate.outcome.result.eigenvalues,
+            unverified.outcome.result.eigenvalues
+        );
+        stop_to_verified_clocks(&energy);
+        println!(
+            "VERIFY_ENERGY active={active} first_stop={} old_maps={} new_maps={} attempts={} delta_old_ha={delta:.17e} energy_change_ha={:.17e} coulomb_ha={:.17e}",
+            attempts[0].iteration,
+            old.records.len(),
+            energy.records.len(),
+            attempts.len(),
+            e.change_ha(),
+            attempts[0].coulomb_error_ha
+        );
+        // Force two early stops: the fixed energy threshold must still reject,
+        // charge both attempts, perform recovery and leave the run unverified.
+        let failed = run(
+            &[],
+            &ScfOptions {
+                max_iterations: 2,
+                ..options.clone()
+            },
+            Profile {
+                threshold_ry: 1e6,
+                ..profile
+            },
+        );
+        assert!(!failed.outcome.converged);
+        let attempts = &failed
+            .outcome
+            .result
+            .verification
+            .as_ref()
+            .unwrap()
+            .attempts;
+        assert_eq!(attempts.len(), 2);
+        assert!(attempts.iter().all(|a| !a.passed && a.threshold_ha == 5e-9));
+        assert!(
+            failed
+                .records
+                .iter()
+                .all(|r| r.verification_energy.as_ref().is_some_and(|e| !e.passed()))
+        );
+        assert!(failed.records[0].mixing_s > 0.);
+        assert!(
+            failed
+                .records
+                .iter()
+                .all(|r| r.verification_start_s.unwrap() >= r.estimator_s
+                    && r.verification_end_s.unwrap() >= r.verification_start_s.unwrap()
+                    && r.map_end_s >= r.verification_end_s.unwrap())
+        );
+    }
+}
+
+#[test]
+fn verification_energy_threshold_is_strict_and_finite() {
+    use dft_engine::refscf::record::VerificationEnergy;
+    let assess = |delivered_ha, checked_ha| {
+        VerificationEnergy {
+            delivered_ha,
+            checked_ha,
+        }
+        .passed()
+    };
+    assert!(assess(0., 4.999e-9));
+    assert!(assess(0., -4.999e-9));
+    assert!(!assess(0., 5e-9));
+    assert!(!assess(0., -5e-9));
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(!assess(bad, 0.));
+        assert!(!assess(0., bad));
+        assert!(!assess(bad, bad));
     }
 }

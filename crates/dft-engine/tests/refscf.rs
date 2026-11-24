@@ -3713,7 +3713,7 @@ fn fast_order_kept_hx_delta_and_invalidation() {
         switches::{Id, RunConfig},
     };
     use dft_solvers::ref_davidson::{self, Options};
-    assert!(!RunConfig::from_pairs(&[]).unwrap().on(Id::REFSCF_KEPT_HX));
+    assert!(RunConfig::from_pairs(&[]).unwrap().on(Id::REFSCF_KEPT_HX)); // default on since 2026-11-26
     let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
     let cell =
         dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])

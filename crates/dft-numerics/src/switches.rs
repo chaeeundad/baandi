@@ -582,7 +582,8 @@ table! {
         "P3-PERMAP: cache unchanged Broyden Gram entries and fuse descf with map diagnostic passes/reduction";
     REFSCF_LADDER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-LADDER: reference coarse cutoff 0.5, exact owned prolongation, fresh fine Broyden history";
-    REFSCF_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-26 (dev08 one-run KEPTHX2: si128 32.82 -> 31.40 s, si64 6.37 -> 6.30; +271 MB/rank peak RSS on si128).
+    REFSCF_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-KEPTHX: exact retained Ritz HX plus local-potential delta on ordinary warm starts; bounded pair slabs; default off pending dev08";
 }
 

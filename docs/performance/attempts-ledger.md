@@ -3678,3 +3678,12 @@ candidate as configured": fine saving ~1.22 s < coarse stage 1.72 s (9 coarse ma
 Also si128 FFT_KERNEL_BY_LENGTH (now wired): all 10 lane shapes choose MKL (16-40% faster per batch in
 calibration); wall 33.63 -> 33.46 s; kernels -0.9 s but slab gather/scatter, middle pack/unpack and multiply +0.5 s
 (same pattern as M2_FFT=mkl in P3e). Evidence: dev08 /data/sig-dft/wo/RESULT.md.
+
+### KEPTHX2 (2026-11-26, development protocol): REFSCF_KEPT_HX ADOPTED
+
+Kept slabs now written inside the density accumulation loop with buffers reused across maps. dev08 MPI8 one run
+per arm at e9250e4c, all verified: si64 6.37 -> 6.30 s (density 0.389 -> 0.529, solve 4.017 -> 3.829; 1452 of
+5044 ordinary full-H columns replaced); si128 32.82 -> 31.40 s (solve 23.20 -> 21.06, density 2.12 -> 2.80; 3900
+of 12261 columns replaced, -27%). Cost: peak RSS +52 MB/rank (si64), +271 MB/rank (si128; slab 194 MB, the rest
+to be explained). Default on. Also found: dev08 mpi,mkl builds use baseline x86-64 (no target-cpu); QE is built
+for the host. Evidence: dev08 /scr/mino/rustdft/kh2/runs/.

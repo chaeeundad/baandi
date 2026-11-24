@@ -3566,3 +3566,11 @@ diagnostics, 20 A/A + 30 crossed pairs per case, all samples VERIFIED and identi
 si64 log ratio -0.0178 +- 0.0036 (x0.982, 7.951 -> 7.826 s); si128 -0.0347 +- 0.0034 (x0.966,
 40.501 -> 39.075 s); elongated and rskew inconclusive. Not slower anywhere -> default on. Setup on si128
 4.83 -> 3.36 s (profiled screen). Evidence: dev08 /data/sig-dft/p3b/<case>/TABLE.md.
+
+### P3c timed (2026-11-25): REF_DAV_SINGLE_GEMM and FFT_DIRECT_PACK/FFT_SPARSE_CLEAR not adopted (inconclusive)
+
+dev08 MPI8 mpi,mkl e62f85a6, lightweight, 20 A/A + 30 crossed pairs per arm and case, all samples verified.
+GF (all three) vs default: si128 -0.0181 +- 0.0049 (z 3.7 but 2.7F < 3F; medians 40.488 -> 39.726 s),
+si64 -0.0103 +- 0.0056, elongated/rskew inconclusive. F alone (bit-identical): inconclusive everywhere
+(si128 -0.0047 +- 0.0037). Profiled screen showed border 5.07 -> 3.59 s with G, so a G-only campaign
+with more pairs may resolve the si128 trend. Switches stay default off. Evidence: dev08 /data/sig-dft/p3c/.

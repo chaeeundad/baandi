@@ -11,6 +11,7 @@
 //! unconverged result, so the driver can retry with the returned vectors.
 
 mod accounting;
+mod stream;
 pub mod work;
 mod workspace;
 pub use accounting::{
@@ -150,10 +151,21 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     work::add(options.profile, |s| {
         // Explicit arrays of Workspace::new; shared adapter scratch excluded.
         let doubles =
-            4 * start.rows() * cap + 2 * start.rows() * n + 6 * cap * cap + 3 * cap + n + 2;
+            4 * start.rows() * cap + 2 * start.rows() * n + 6 * cap * cap + 3 * cap + n + 2
+                - w.reused_elements;
         s.zeroed_bytes += 8 * doubles as u64;
         s.streamed_bytes += 8 * doubles as u64;
     });
+    if w.sqrt_precondition {
+        w.diagonal_bounds = hamiltonian_diagonal
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &h| {
+                (lo.min(h), hi.max(h))
+            });
+        work::add(options.profile, |s| {
+            s.streamed_bytes += 8 * start.rows() as u64
+        });
+    }
     // Resolve once per solve. The reference workspace resets C to identity
     // on contraction, even though it remeasures S/H and their factor afterward.
     // Only the immediately following correction can use these stored Ritz rows.
@@ -312,6 +324,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     }
     record.apply_h = apply_h_scope.finish();
     work_scope.finish();
+    w.recycle_rows();
     Ok(Solution {
         ritz_values_ha,
         band_thresholds_ha: (0..n).map(|i| options.band_threshold(i)).collect(),
@@ -345,47 +358,40 @@ fn restart_corrections<C: Collective>(
     let rows = w.v.rows();
     let k = active.len();
     w.e.reshape_within_storage(rows, k)?;
-    norms[..k].fill(0.0);
-    for (j, &band) in active.iter().enumerate() {
-        for (i, &h) in diagonal.iter().enumerate() {
-            let z = (w.hv[(i, band)] - w.values[band] * w.v[(i, band)])
-                / preconditioner_denominator(h, w.values[band]);
-            w.e[(i, j)] = z;
-            norms[j] += z * z;
+    if w.sqrt_precondition {
+        let mut sqrt_columns = 0;
+        for (j, &band) in active.iter().enumerate() {
+            let x = &w.v.as_slice()[band * rows..(band + 1) * rows];
+            let hx = &w.hv.as_slice()[band * rows..(band + 1) * rows];
+            let out = &mut w.e.as_mut_slice()[j * rows..(j + 1) * rows];
+            let safe = stream::sqrt_safe(w.diagonal_bounds, w.values[band]);
+            norms[j] = if safe {
+                stream::column::<true>(diagonal, x, hx, out, w.values[band])
+            } else {
+                stream::column::<false>(diagonal, x, hx, out, w.values[band])
+            };
+            sqrt_columns += usize::from(safe);
         }
+        stream::count(profile, rows, sqrt_columns, k - sqrt_columns);
+    } else {
+        norms[..k].fill(0.0);
+        for (j, &band) in active.iter().enumerate() {
+            for (i, &h) in diagonal.iter().enumerate() {
+                let z = (w.hv[(i, band)] - w.values[band] * w.v[(i, band)])
+                    / preconditioner_denominator(h, w.values[band]);
+                w.e[(i, j)] = z;
+                norms[j] += z * z;
+            }
+        }
+        work::add(profile, |s| {
+            s.scalar_flops += 13 * (rows * k) as u64;
+            s.hypot_calls += (rows * k) as u64;
+            s.zeroed_bytes += 8 * k as u64;
+            s.streamed_bytes += 32 * (rows * k) as u64 + 8 * k as u64;
+        });
     }
-    work::add(profile, |s| {
-        s.scalar_flops += 13 * (rows * k) as u64;
-        s.hypot_calls += (rows * k) as u64;
-        s.zeroed_bytes += 8 * k as u64;
-        s.streamed_bytes += 32 * (rows * k) as u64 + 8 * k as u64;
-    });
     drop(precondition);
-    let _normalize = span(profile, Stage::Normalize);
-    c.tree_sum_f64(&norms[..k], &mut sums[..k]).map_err(error)?;
-    let mut kept = 0;
-    for (j, sum) in sums[..k].iter().enumerate() {
-        let norm = sum.sqrt();
-        if !norm.is_finite() {
-            return Err(SolverError::Application(
-                "nonfinite reference correction".into(),
-            ));
-        }
-        if norm <= 32.0 * f64::EPSILON {
-            r.dropped_corrections += 1;
-            continue;
-        }
-        for i in 0..rows {
-            w.e[(i, kept)] = w.e[(i, j)] / norm;
-        }
-        kept += 1;
-    }
-    work::add(profile, |s| {
-        s.sqrt_calls += k as u64;
-        s.scalar_flops += (rows * kept) as u64;
-        s.streamed_bytes += 16 * (rows * kept) as u64;
-    });
-    w.e.reshape_within_storage(rows, kept)?;
+    w.normalize_restart(c, norms, sums, r, profile)?;
     r.seconds[4] += elapsed(t);
     Ok(())
 }
@@ -898,6 +904,269 @@ mod diagnostic_tests {
             x[(0, 0)] = 1.;
             solve(comm, &mut op, &x, &diag, options).unwrap();
             assert_eq!(work::take_solves().len(), 1);
+        });
+    }
+    #[test]
+    fn stream_switches_preserve_decisions_and_columns() {
+        use dft_numerics::switches::RunConfig;
+        for (dim, n, capacity, clustered) in [(12, 3, 6, false), (17, 5, 15, true), (7, 4, 7, true)]
+        {
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let mut op = Partitioned {
+                        dim,
+                        rows: (comm.rank()..dim).step_by(ranks).collect(),
+                        clustered,
+                    };
+                    let rows = op.rows.len();
+                    let mut x = RealMatrix::zeros(rows, n).unwrap();
+                    for j in 0..n {
+                        for (i, &row) in op.rows.iter().enumerate() {
+                            x[(i, j)] = if row == j {
+                                1.0
+                            } else {
+                                0.03 * ((row * 7 + j * 13 + 1) as f64).sin()
+                            };
+                        }
+                    }
+                    let diag: Vec<_> = op
+                        .rows
+                        .iter()
+                        .map(|&row| op.diagonal(row) + 0.03 * ((row + 1) as f64).sin().powi(2))
+                        .collect();
+                    for restart in ["off", "on"] {
+                        let config = |mask: usize| {
+                            RunConfig::from_pairs(&[
+                                ("ref_dav_sqrt", if mask & 1 != 0 { "on" } else { "off" }),
+                                (
+                                    "ref_dav_fused_append",
+                                    if mask & 2 != 0 { "on" } else { "off" },
+                                ),
+                                (
+                                    "ref_dav_check_append",
+                                    if mask & 4 != 0 { "on" } else { "off" },
+                                ),
+                                (
+                                    "ref_dav_reuse_rows",
+                                    if mask & 8 != 0 { "on" } else { "off" },
+                                ),
+                                ("ref_dav_restart_corrections", restart),
+                            ])
+                            .unwrap()
+                        };
+                        let mut options = Options::new(n, 1e-10, n - 1);
+                        options.capacity = capacity;
+                        options.max_iterations = 40;
+                        options.profile = true;
+                        options.return_hx = true;
+                        work::take_solves();
+                        let a = {
+                            let _g = config(0).enter();
+                            solve(comm, &mut op, &x, &diag, options).unwrap()
+                        };
+                        let aw = work::take_solves().pop().unwrap();
+                        assert!(a.converged.iter().all(|&v| v));
+                        for mask in [1, 2, 4, 8, 14, 15] {
+                            // Two solves exercise both cold and reused buffers.
+                            for repeat in 0..2 {
+                                let b = {
+                                    let _g = config(mask).enter();
+                                    solve(comm, &mut op, &x, &diag, options).unwrap()
+                                };
+                                let bw = work::take_solves().pop().unwrap();
+                                assert_eq!(a.converged, b.converged);
+                                assert_eq!(
+                                    a.record.h_columns, b.record.h_columns,
+                                    "mask={mask} dim={dim} ranks={ranks}"
+                                );
+                                assert_eq!(a.record.h_calls, b.record.h_calls);
+                                assert_eq!(a.record.communication, b.record.communication);
+                                assert_eq!(a.record.iterations.len(), b.record.iterations.len());
+                                for (a, b) in a.record.iterations.iter().zip(&b.record.iterations) {
+                                    assert_eq!(a.active_bands, b.active_bands);
+                                    assert_eq!(a.reduced_order, b.reduced_order);
+                                    assert_eq!(a.repairs, b.repairs);
+                                    assert_eq!(a.dropped_corrections, b.dropped_corrections);
+                                    assert_eq!(a.gemms, b.gemms);
+                                }
+                                let delta = a
+                                    .eigenvalues
+                                    .iter()
+                                    .zip(&b.eigenvalues)
+                                    .map(|(a, b)| (a - b).abs())
+                                    .fold(0.0, f64::max);
+                                assert!(delta < 1e-12, "delta={delta:e} Ha mask={mask} dim={dim}");
+                                if mask & 1 == 0 {
+                                    same_bits(&a.eigenvalues, &b.eigenvalues);
+                                    same_bits(a.eigenvectors.as_slice(), b.eigenvectors.as_slice());
+                                    same_bits(
+                                        a.hx.as_ref().unwrap().as_slice(),
+                                        b.hx.as_ref().unwrap().as_slice(),
+                                    );
+                                    assert_eq!(a.ritz_values_ha, b.ritz_values_ha);
+                                } else {
+                                    assert_eq!(
+                                        bw.stages[Stage::Precondition as usize].hypot_calls,
+                                        0
+                                    );
+                                }
+                                if mask & 8 != 0 && repeat == 1 {
+                                    assert_eq!(
+                                        aw.stages[Stage::Setup as usize].zeroed_bytes
+                                            - bw.stages[Stage::Setup as usize].zeroed_bytes,
+                                        16 * (rows * (capacity + n)) as u64
+                                    );
+                                }
+                                if comm.rank() == 0 && repeat == 1 {
+                                    eprintln!(
+                                        "STREAM dim={dim} bands={n} ranks={ranks} restart={restart} mask={mask} H={} iterations={} delta_e_Ha={delta:e} decisions=identical",
+                                        a.record.h_columns,
+                                        a.record.iterations.len()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+    #[test]
+    fn stream_check_append_agrees_errors_and_nonfinite_on_one_rank() {
+        use dft_numerics::switches::RunConfig;
+        struct Failing {
+            op: Partitioned,
+            calls: usize,
+            nan: bool,
+        }
+        impl DistributedRealOperator for Failing {
+            fn global_len(&self) -> usize {
+                self.op.global_len()
+            }
+            fn local_rows(&self) -> &[usize] {
+                self.op.local_rows()
+            }
+            fn apply_block<C: Collective>(
+                &mut self,
+                c: &C,
+                x: &RealMatrix,
+                y: &mut RealMatrix,
+            ) -> Result<(), SolverError> {
+                self.op.apply_block(c, x, y)?;
+                self.calls += 1;
+                if self.calls == 2 && c.rank() == 1 {
+                    if self.nan {
+                        y[(0, 0)] = f64::NAN;
+                    } else {
+                        return Err(SolverError::Application("injected".into()));
+                    }
+                }
+                Ok(())
+            }
+        }
+        for nan in [false, true] {
+            dft_mpi::simulate(3, |comm| {
+                let _g = RunConfig::from_pairs(&[
+                    ("ref_dav_check_append", "on"),
+                    ("ref_dav_reuse_rows", "on"),
+                ])
+                .unwrap()
+                .enter();
+                let rows: Vec<_> = (comm.rank()..12).step_by(3).collect();
+                let mut x = RealMatrix::zeros(rows.len(), 3).unwrap();
+                for (i, &row) in rows.iter().enumerate() {
+                    if row < 3 {
+                        x[(i, row)] = 1.0;
+                    }
+                }
+                let diag: Vec<_> = rows.iter().map(|&i| 1.0 + i as f64 * 0.4).collect();
+                let mut op = Failing {
+                    op: Partitioned {
+                        dim: 12,
+                        rows,
+                        clustered: false,
+                    },
+                    calls: 0,
+                    nan,
+                };
+                let mut options = Options::new(3, 1e-10, 3);
+                options.profile = true;
+                work::take_solves();
+                assert!(solve(comm, &mut op, &x, &diag, options).is_err());
+                assert!(work::take_solves().is_empty());
+                // A failed solve must neither publish work nor retain dirty buffers.
+                solve(comm, &mut op.op, &x, &diag, options).unwrap();
+                assert_eq!(work::take_solves().len(), 1);
+            });
+        }
+    }
+    #[test]
+    fn stream_extreme_columns_use_hypot_and_fusions_save_counted_reads() {
+        use dft_numerics::switches::RunConfig;
+        dft_mpi::simulate(1, |comm| {
+            let mut op = Tridiagonal((0..12).collect());
+            let mut x = RealMatrix::zeros(12, 3).unwrap();
+            for j in 0..3 {
+                x[(j, j)] = 1.0;
+            }
+            let mut diag: Vec<_> = (1..=12).map(f64::from).collect();
+            let mut options = Options::new(3, 1e-10, 3);
+            options.profile = true;
+            options.max_iterations = 1;
+            for extreme in [false, true] {
+                if extreme {
+                    diag[0] = -f64::MAX / 8.0;
+                }
+                work::take_solves();
+                let a = {
+                    let _g = RunConfig::from_pairs(&[
+                        ("ref_dav_sqrt", "off"),
+                        ("ref_dav_fused_append", "off"),
+                        ("ref_dav_check_append", "off"),
+                    ])
+                    .unwrap()
+                    .enter();
+                    solve(comm, &mut op, &x, &diag, options).unwrap()
+                };
+                let aw = work::take_solves().pop().unwrap();
+                let b = {
+                    let _g = RunConfig::from_pairs(&[
+                        ("ref_dav_sqrt", "on"),
+                        ("ref_dav_fused_append", "on"),
+                        ("ref_dav_check_append", "on"),
+                    ])
+                    .unwrap()
+                    .enter();
+                    solve(comm, &mut op, &x, &diag, options).unwrap()
+                };
+                let bw = work::take_solves().pop().unwrap();
+                assert_eq!(a.record.h_columns, b.record.h_columns);
+                assert_eq!(
+                    bw.stages[Stage::Precondition as usize].hypot_calls,
+                    if extreme { 36 } else { 0 }
+                );
+                assert_eq!(
+                    bw.stages[Stage::Precondition as usize].sqrt_calls,
+                    if extreme { 0 } else { 36 }
+                );
+                if extreme {
+                    same_bits(&a.eigenvalues, &b.eigenvalues);
+                }
+                let traffic = |w: &work::Work| {
+                    [Stage::Normalize, Stage::Append, Stage::ApplyCheck]
+                        .iter()
+                        .map(|&s| w.stages[s as usize].streamed_bytes)
+                        .sum::<u64>()
+                };
+                let retained = a.record.h_columns - 3;
+                // Some normalized columns fail the factor test and are repaired
+                // before H. Count normalization stores independently of H work.
+                let normalized_rows = aw.stages[Stage::Normalize as usize].scalar_flops;
+                assert_eq!(
+                    traffic(&aw) - traffic(&bw),
+                    8 * (normalized_rows + 12 * retained as u64)
+                );
+            }
         });
     }
 }

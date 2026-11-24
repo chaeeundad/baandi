@@ -425,7 +425,10 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
         .as_ref()
         .map_or(&[][..], |v| v.attempts.as_slice());
     if let Some(v) = &run.verification {
-        require(v.mode == "fixed_point", "verification is not fixed_point")?;
+        require(
+            matches!(v.mode.as_str(), "fixed_point" | "energy_change"),
+            "unsupported verification judgment",
+        )?;
         require(
             v.passed == attempts.last().is_some_and(|a| a.passed),
             "inconsistent verification verdict",
@@ -546,6 +549,7 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
     }
     let mut summary = json!({
         "schema":"stop-to-verified-1",
+        "verification_mode":run.verification.as_ref().map(|v| v.mode.as_str()),
         "status":if passing_map.is_some() {"VERIFIED"} else {"UNVERIFIED"},
         "first_stop_map":first_stop,"passing_map":passing_map,
         "attempt_count":attempted,

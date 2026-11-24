@@ -505,6 +505,8 @@ table! {
         "P3-FFT: clear only holes before coefficient/middle/slab scatter using cached contiguous ranges; same FFT order, default off pending dev08";
     FFT_DIRECT_PACK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT: pack distributed real H input ORC rows directly into FFT sticks, avoiding the intermediate coefficient write/read; default off pending dev08";
+    REFSCF_VERIFY_ENERGY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "reference SCF only: accept the independent verification map when the variational energy change is below 5e-9 Ha; Coulomb/residual diagnostics retained, predictor gates inactive; off restores the old fixed-point rule";
 }
 
 struct Resolved {

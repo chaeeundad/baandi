@@ -1926,7 +1926,7 @@ fn execute_mode_inner(
                 "iteration_alias":"convergence.history[].reference_scf duplicates reference_scf.iterations[] for compatibility"},
             "mixing_input":config.scf.as_ref().and_then(|s|s.reference_mixing_input.as_ref().or(s.mixing.as_ref())),
             "mixing_implementation":"modified_broyden_difference_history",
-            "verification":r.verification.as_ref().map(verification_json),
+            "verification":r.verification.as_ref().map(|v| reference_verification_json(v, &reference_records)),
             "iterations":reference_records.iter().map(reference_record_json).collect::<Vec<_>>(),
             "run":reference_summary,
             "threshold_ha":reference_profile(&config)?.threshold_ry/2.,
@@ -2057,7 +2057,11 @@ fn execute_mode_inner(
     result["single_path"] = single_path_json(&scf_path, &opts);
     if let Some(v) = &r.verification {
         result["verified"] = json!(v.passed());
-        result["verification"] = verification_json(v);
+        result["verification"] = if reference {
+            reference_verification_json(v, &reference_records)
+        } else {
+            verification_json(v)
+        };
         result["timings"]["verification_s"] = json!(v.wall().as_secs_f64());
         println!(
             "verification: fixed_point; passed: {}; attempts: {}; verification_s: {:.6}",
@@ -2705,6 +2709,38 @@ pub(crate) fn driver_standard_json(
             }
         }
     }
+}
+
+/// Reference-only extension; the shared legacy report remains unchanged.
+fn reference_verification_json(
+    v: &dft_engine::VerificationReport,
+    records: &[dft_engine::refscf::record::Record],
+) -> Value {
+    use dft_numerics::switches::{Id, RunConfig};
+    let mut result = verification_json(v);
+    if RunConfig::current().on(Id::REFSCF_VERIFY_ENERGY) {
+        result["mode"] = json!("energy_change");
+        result["criterion"] = json!(
+            "abs(verification_variational_energy_ha - delivered_variational_energy_ha) < 5e-9 Ha; Coulomb error, residual_bound_ha, density residual and strict criteria are diagnostics only"
+        );
+        result["gate_enabled"] = json!(false);
+        result["gate_reason"] = json!("Coulomb predictors inactive under REFSCF_VERIFY_ENERGY");
+        for (value, attempt) in result["attempts"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(&v.attempts)
+        {
+            let energy = records[attempt.iteration - 1]
+                .verification_energy
+                .as_ref()
+                .expect("reference energy attempt");
+            value["delivered_variational_energy_ha"] = json!(energy.delivered_ha);
+            value["verification_variational_energy_ha"] = json!(energy.checked_ha);
+            value["energy_change_ha"] = json!(energy.change_ha());
+        }
+    }
+    result
 }
 
 /// ADR 0043 verification record: every attempt, the pass criterion (Coulomb

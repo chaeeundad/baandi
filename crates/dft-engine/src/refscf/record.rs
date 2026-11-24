@@ -49,11 +49,31 @@ pub struct VerificationCost {
     /// solves and timings are charged there, never counted twice here.
     pub reused_from: Option<usize>,
 }
+/// Independent-map variational energies before any recovery mixing (Ha).
+#[derive(Clone, Debug)]
+pub struct VerificationEnergy {
+    pub delivered_ha: f64,
+    pub checked_ha: f64,
+}
+impl VerificationEnergy {
+    pub const THRESHOLD_HA: f64 = 5e-9;
+    pub fn change_ha(&self) -> f64 {
+        (self.checked_ha - self.delivered_ha).abs()
+    }
+    pub fn passed(&self) -> bool {
+        self.delivered_ha.is_finite()
+            && self.checked_ha.is_finite()
+            && self.change_ha() < Self::THRESHOLD_HA
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Record {
     pub iteration: usize,
     /// Present only when a verification-cost experiment is enabled.
     pub verification_cost: Option<VerificationCost>,
+    /// Present for each attempted energy judgment; absent in the old mode.
+    pub verification_energy: Option<VerificationEnergy>,
     /// Monotonic seconds since this rank entered the driver, at every diagnostic level.
     pub map_start_s: f64,
     /// Boundary after the stopping estimator is available, before verification.

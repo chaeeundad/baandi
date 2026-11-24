@@ -1559,7 +1559,8 @@ same owned G subset. Radials and structure factors were already evaluated
 only at used owned G; no claim of removing all-rank numerical tables is made.
 No interpolation, radial quadrature, FFT order or coefficient arithmetic changes.
 
-Remaining ownership boundary: the driver constructs DensityPlan's full-grid
+Historical P3-SETUP3 ownership boundary (FFT part superseded by P3-SETUP4 below):
+the driver constructs DensityPlan's full-grid
 FFT and density basis again after start(). Both it and StartFields have
 private mutable FFT buffers, with no public plan transfer/cache constructor.
 DistributedPairFft also creates its own lanes/layouts; a dimensions-only cache
@@ -1571,6 +1572,43 @@ They are **not implemented here**. Wave/density basis enumeration and sorting
 also remain in the basis crate; only redundant grid metadata is removed.
 The exact follow-up boundary and one-run diagnostic request are in
 [setup3-dev08-request.md](../performance/lanes/RSCF/setup3-dev08-request.md).
+
+### P3-SETUP4: run-owned FFT kernels and atomic Gram
+
+Three independent default-off switches, with no production default changes:
+
+- `REFSTART_FFT_SHARE`: one constructor-scoped cache for the start and H
+  plans, rustfft by length/direction and MKL by length/batch count. Identical
+  kernels can serve different sparse/full layouts. DensityPlan copies the
+  existing full-grid layout into fresh mutable buffers and clones shared
+  kernel handles; no repeated partition or FFT plan construction. No global
+  cache and no shared coefficient/transpose buffers. MKL's mutable descriptor
+  API is protected by a mutex; pure rustfft retains private scratch and no
+  execution lock. The unused zero-count MKL lanes allocate no descriptors.
+- `REFSTART_SINGLE_GEMM`: atomic S and H Gram rectangles use the existing
+  single-call MKL entry, guarded by REFSTART_MKL and the backend's MKL_DGEMM
+  setting. Rounding class on MKL, unchanged pure arithmetic. Rotations already
+  use the wide route. H already uses the same operator/apply_block as SCF,
+  including batched pairs and adopted nonlocal projection/back-accumulation
+  switches. Keep all J atomic columns and B-wide chunks; no separate H kernel.
+- `REFSTART_LOCAL_SHELLS`: build exact-bit owned shell IDs/square roots once
+  for every species; evaluate species-specific radial tables once per shell.
+  Independent-row angle/accumulation passes preserve the original dot product,
+  species/atom sums and quadrature. Both arms already operate only on owned G.
+  Additional temporaries scale with owned rows/shells, never grid times atoms.
+
+Sharing removes repeated planning, not remaining density-basis construction,
+layout copying or buffer allocation. The existing field/operator/density plan
+clocks retain these costs. S and all H borders each cost 2 L_r J^2 FLOPs;
+single-call dispatch changes the reduction grouping, not that mathematical
+work or the rank reduction. All existing nested setup clock boundaries remain.
+
+The cache API restores its calling-thread constructor scope on exit, including
+errors; returned plans retain their handles. It is not a cross-run cache.
+Private constructors remain the default, and the reference driver's fork uses
+the exact original rank, backend, support, axis and distribution metadata.
+See [setup4-dev08-request.md](../performance/lanes/RSCF/setup4-dev08-request.md)
+for the audit, correctness checks, limits and one-run/four-case dev08 screen.
 
 ## H-apply FFT cost accounting
 

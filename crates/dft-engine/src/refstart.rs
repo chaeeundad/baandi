@@ -15,7 +15,7 @@ use dft_physics::{
     ewald::{self, EwaldOptions, Ion},
     hamiltonian::{NonlocalOperator, Species, structure_factor},
 };
-use dft_solvers::distributed_fft::DistributedPairFft;
+use dft_solvers::distributed_fft::{DistributedPairFft, PlanCache};
 use dft_upf::radial::{projector_transform_with_rule, real_spherical_harmonic, spherical_bessel};
 use std::{
     collections::BTreeMap,
@@ -102,6 +102,9 @@ impl StartFields {
             fft: DistributedPairFft::new(dims, &indices, comm.rank(), comm.size()).map_err(err)?,
             dims,
         })
+    }
+    pub(crate) fn shared_fft(&self) -> Option<DistributedPairFft> {
+        self.fft.shared_workspace()
     }
     pub fn reciprocal_indices(&self) -> &[usize] {
         self.fft.local_positions()
@@ -248,6 +251,9 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
 pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartState, ScfError> {
     let clock = Instant::now();
+    let cache = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_FFT_SHARE)
+        .then(PlanCache::default);
+    let _plans = cache.as_ref().map(PlanCache::enter);
     let timed = TimedCollective::new(comm);
     let mut state = start_inner(input, &timed)?;
     state.setup.total_s = clock.elapsed().as_secs_f64();
@@ -701,6 +707,78 @@ fn atomic_fields(
         }
         represented
     };
+    if dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_LOCAL_SHELLS) {
+        // Geometry is common to every species. Build owned shell IDs and sqrt
+        // values once, keeping first-encounter ordering and exact norm bits.
+        let mut shell_ids = BTreeMap::new();
+        let mut q = Vec::new();
+        let shells: Vec<_> = represented
+            .iter()
+            .map(|&(_, g)| {
+                *shell_ids
+                    .entry(g.norm_squared.to_bits())
+                    .or_insert_with(|| {
+                        q.push(g.norm_squared.sqrt());
+                        q.len() - 1
+                    })
+            })
+            .collect();
+        let mut rho = vec![C::default(); fields.fft.local_len()];
+        let mut ion = rho.clone();
+        let mut angles = vec![0.; represented.len()];
+        let mut factors = vec![C::default(); represented.len()];
+        for s in species {
+            let mesh = s.potential.mesh();
+            let samples = &s.potential.raw().rhoatom.values;
+            let local = s
+                .potential
+                .local_transform_with_conventions(volume, o.local_mesh, o.radial_even_rule)
+                .map_err(err)?;
+            let mut work = vec![0.; samples.len()];
+            let radial: Vec<_> = q
+                .iter()
+                .map(|&q| {
+                    for ((v, &r), &f) in work.iter_mut().zip(mesh.r()).zip(samples) {
+                        *v = if q == 0. {
+                            f
+                        } else {
+                            f * spherical_bessel(0, q * r).map_err(err)?
+                        };
+                    }
+                    let r = mesh.integrate(&work).map_err(err)? / volume;
+                    let v = if q == 0. {
+                        local.alpha_z()
+                    } else {
+                        local.at_g(q)
+                    }
+                    .map_err(err)?;
+                    Ok((r, v))
+                })
+                .collect::<Result<_, ScfError>>()?;
+            factors.fill(C::default());
+            for &pos in s.positions_bohr {
+                // Separate contiguous angle and accumulation passes expose
+                // independent G rows to vectorization, without changing the
+                // dot-product order or using factored/interpolated phases.
+                for (angle, &(_, g)) in angles.iter_mut().zip(&represented) {
+                    *angle = g.cartesian.iter().zip(pos).map(|(g, r)| g * r).sum();
+                }
+                if angles.iter().any(|v| !v.is_finite()) {
+                    return Err(err("non-finite atomic structure-factor angle"));
+                }
+                for (a, (&(i, _), &shell)) in represented.iter().zip(&shells).enumerate() {
+                    let phase = C::from_polar(1., -angles[a]);
+                    // The old single-atom structure_factor sums from zero.
+                    rho[i] += (C::default() + phase) * radial[shell].0;
+                    factors[a] += phase;
+                }
+            }
+            for (a, (&(i, _), &shell)) in represented.iter().zip(&shells).enumerate() {
+                ion[i] += radial[shell].1 * factors[a];
+            }
+        }
+        return Ok((rho, ion));
+    }
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
     let mut phases = if reuse {
         Vec::with_capacity(
@@ -785,7 +863,14 @@ fn gram<K: Collective>(
     let mut g = RealMatrix::zeros(a.cols(), b.cols()).map_err(err)?;
     if a.rows() > 0 {
         if mkl_start() {
-            ws.multiply_slices_into(
+            let product =
+                if dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_SINGLE_GEMM) {
+                    RealGemmWorkspace::multiply_slices_single_into
+                } else {
+                    RealGemmWorkspace::multiply_slices_into
+                };
+            product(
+                ws,
                 GemmSite::Other,
                 a.as_slice(),
                 a.rows(),

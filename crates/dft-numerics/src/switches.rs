@@ -567,6 +567,13 @@ table! {
         "P3-RMM: maximum DIIS steps per sweep; default four, experimental overrides require multi-system evidence";
     REFSCF_RMM_BLOCK: Kind::Number { default: Some(16.), valid: |v| (1. ..=64.).contains(&v) && v.fract() == 0. }, "16", "integer 1..64",
         "P3-RMM: band-order Gram-Schmidt panel width; default sixteen";
+    REFSTART_FFT_SHARE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP4: run-owned FFT kernel cache and shared start/density layout; bit-identical, pending dev08";
+    REFSTART_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP4: one MKL call per atomic overlap/H Gram rectangle; requires REFSTART_MKL, rounding class";
+    REFSTART_LOCAL_SHELLS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP4: dense owned-shell indexing reused across species and batched direct ionic phases; bit-identical";
+
 }
 
 struct Resolved {

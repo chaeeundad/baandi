@@ -173,12 +173,13 @@ fn run_inner<K: Collective>(
     let occupations: Vec<_> = (0..bands)
         .map(|b| if b < occupied { 2. } else { 0. })
         .collect();
-    let mut plan = DensityPlan::new(
+    let mut plan = DensityPlan::with_fft(
         &prep_comm,
         cell,
         dims,
         4. * o.cutoff_hartree,
         4. * o.cutoff_hartree,
+        state.fields.shared_fft(),
     )?;
     if plan.first_axis() != state.fields.first_axis() || plan.plane_len() != state.density.len() {
         return Err(ScfError::InvalidInput("reference field layouts differ"));

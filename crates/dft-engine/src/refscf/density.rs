@@ -43,15 +43,28 @@ impl DensityPlan {
         dense_cutoff_ha: f64,
         smooth_cutoff_ha: f64,
     ) -> Result<Self, Error> {
+        Self::with_fft(comm, cell, dims, dense_cutoff_ha, smooth_cutoff_ha, None)
+    }
+    pub(crate) fn with_fft<K: Collective>(
+        comm: &K,
+        cell: &Cell,
+        dims: [usize; 3],
+        dense_cutoff_ha: f64,
+        smooth_cutoff_ha: f64,
+        shared: Option<DistributedPairFft>,
+    ) -> Result<Self, Error> {
         if smooth_cutoff_ha <= 0.0 || smooth_cutoff_ha > dense_cutoff_ha {
             return Err(invalid("density cutoffs"));
         }
         let basis = PlaneWaveBasis::new(cell, Hartree(dense_cutoff_ha)).map_err(numerical)?;
-        let indices: Vec<_> = (0..dims[0])
-            .flat_map(|i| (0..dims[1]).flat_map(move |j| (0..dims[2]).map(move |k| [i, j, k])))
-            .collect();
-        let fft =
-            DistributedPairFft::new(dims, &indices, comm.rank(), comm.size()).map_err(numerical)?;
+        let fft = if let Some(fft) = shared {
+            fft
+        } else {
+            let indices: Vec<_> = (0..dims[0])
+                .flat_map(|i| (0..dims[1]).flat_map(move |j| (0..dims[2]).map(move |k| [i, j, k])))
+                .collect();
+            DistributedPairFft::new(dims, &indices, comm.rank(), comm.size()).map_err(numerical)?
+        };
         let local: std::collections::HashMap<_, _> = fft
             .local_positions()
             .iter()

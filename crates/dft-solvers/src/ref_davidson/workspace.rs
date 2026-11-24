@@ -46,6 +46,9 @@ pub(super) struct Workspace {
     single_gemm: bool,
     swap_buffers: bool,
     lean_reset: bool,
+    ideal_reset: bool,
+    reset_disabled: bool,
+    contractions: usize,
     pub sqrt_precondition: bool,
     pub diagonal_bounds: (f64, f64),
     fused_append: bool,
@@ -112,6 +115,9 @@ impl Workspace {
             n,
             cap,
             single_gemm,
+            ideal_reset: on(Id::REF_DAV_IDEAL_RESET),
+            reset_disabled: false,
+            contractions: 0,
             lean_reset: dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_LEAN_RESET),
             swap_buffers: dft_numerics::switches::on(
                 dft_numerics::switches::Id::REF_DAV_SWAP_BUFFERS,
@@ -734,10 +740,31 @@ impl Workspace {
         self.lean.a.reshape_within_storage(self.n, self.n)?;
         self.lean.c.reshape_within_storage(self.n, self.n)?;
         self.y.reshape_within_storage(self.n, self.n)?;
+        self.contractions += 1;
+        let mut ideal = false;
+        if self.ideal_reset {
+            r.resets.attempts += 1;
+            if self.reset_disabled {
+                r.resets.disabled_refreshes += 1;
+            } else if self
+                .contractions
+                .is_multiple_of(super::ideal_reset::REFRESH_INTERVAL)
+            {
+                r.resets.periodic_refreshes += 1;
+            } else if self.reset_norm_guard(c, profile)? {
+                ideal = true;
+                r.resets.ideal += 1;
+            } else {
+                self.reset_disabled = true;
+                r.resets.guard_fallbacks += 1;
+            }
+        }
+        #[cfg(test)]
+        super::ideal_reset::audit_restart(c, &self.v);
         for j in 0..self.n {
             for i in 0..self.n {
                 let id = f64::from(i == j);
-                if self.lean_reset {
+                if self.lean_reset && !ideal {
                     self.lean.c[(i, j)] = id;
                 } else {
                     let h = if i == j { self.values[i] } else { 0.0 };
@@ -751,14 +778,62 @@ impl Workspace {
             }
         }
         work::add(profile, |s| {
-            let matrices = if self.lean_reset { 1 } else { 6 };
+            let matrices = if self.lean_reset && !ideal { 1 } else { 6 };
             s.zeroed_bytes += matrices * 8 * (self.n * (self.n - 1)) as u64;
             s.streamed_bytes += matrices * 8 * (self.n * self.n) as u64;
         });
         r.restarts += 1;
         r.seconds[6] += elapsed(t);
-        self.refresh(c, self.n, r, profile)?;
+        if !ideal {
+            self.refresh(c, self.n, r, profile)?;
+            // Periodic full S checks also catch unit-norm but correlated columns.
+            // Once unsafe, retain measured arithmetic for the rest of this solve.
+            if self.ideal_reset && !self.reset_disabled {
+                let t = clock(profile);
+                let mut defect: f64 = 0.0;
+                for j in 0..self.n {
+                    for i in 0..self.n {
+                        let d = (self.lean.s[(i, j)] - f64::from(i == j)).abs();
+                        if !d.is_finite() || d > super::ideal_reset::ORTHOGONALITY_LIMIT {
+                            self.reset_disabled = true;
+                        }
+                        defect = defect.max(d);
+                    }
+                }
+                work::add(profile, |s| {
+                    s.scalar_flops += (self.n * self.n) as u64;
+                    s.streamed_bytes += 8 * (self.n * self.n) as u64;
+                });
+                r.resets.max_measured_defect = r.resets.max_measured_defect.max(defect);
+                if self.reset_disabled {
+                    r.resets.guard_fallbacks += 1;
+                }
+                r.seconds[6] += elapsed(t);
+            }
+        }
         Ok(())
+    }
+    /// One O(rows * bands) pass and one bands-wide sum; no scratch allocation.
+    fn reset_norm_guard<C: Collective>(
+        &mut self,
+        c: &C,
+        profile: bool,
+    ) -> Result<bool, SolverError> {
+        for j in 0..self.n {
+            self.norms[j] = self.v.as_slice()[j * self.rows..(j + 1) * self.rows]
+                .iter()
+                .map(|v| v * v)
+                .sum();
+        }
+        c.tree_sum_f64(&self.norms[..self.n], &mut self.sums[..self.n])
+            .map_err(error)?;
+        work::add(profile, |s| {
+            s.scalar_flops += (2 * self.rows * self.n + self.n) as u64;
+            s.streamed_bytes += 8 * (self.rows * self.n + 2 * self.n) as u64;
+        });
+        Ok(self.sums[..self.n]
+            .iter()
+            .all(|v| v.is_finite() && (v - 1.0).abs() <= super::ideal_reset::ORTHOGONALITY_LIMIT))
     }
     fn refresh<C: Collective>(
         &mut self,
@@ -1105,5 +1180,91 @@ mod single_gemm_tests {
                 prior = Some(state);
             }
         });
+    }
+    #[test]
+    fn ideal_reset_guard_fallback_and_periodic_refresh() {
+        for ranks in [1, 3, 8] {
+            for correlated in [false, true] {
+                dft_mpi::simulate(ranks, |c| {
+                    let _scope = RunConfig::from_pairs(&[("ref_dav_ideal_reset", "on")])
+                        .unwrap()
+                        .enter();
+                    let op = Operator {
+                        dim: 7,
+                        rows: (c.rank()..7).step_by(ranks).collect(),
+                        clustered: false,
+                        threads: 1,
+                    };
+                    let mut w = Workspace::new(&op, 4, 7, false).unwrap();
+                    w.v.reshape_within_storage(op.rows.len(), 4).unwrap();
+                    w.hv.reshape_within_storage(op.rows.len(), 4).unwrap();
+                    w.lean.c.reshape_within_storage(4, 4).unwrap();
+                    for j in 0..4 {
+                        w.values[j] = 1.0;
+                        w.lean.c[(j, j)] = 1.0;
+                        for (i, &row) in op.rows.iter().enumerate() {
+                            let v = if correlated && j == 1 {
+                                if row == 0 {
+                                    1e-4
+                                } else if row == 1 {
+                                    (1.0_f64 - 1e-8).sqrt()
+                                } else {
+                                    0.0
+                                }
+                            } else if row == j {
+                                if !correlated && j == 0 { 1.1 } else { 1.0 }
+                            } else {
+                                0.0
+                            };
+                            w.v[(i, j)] = v;
+                            w.hv[(i, j)] = v;
+                        }
+                    }
+                    let mut record =
+                        crate::ref_davidson::Record::new(8, 7, false, ReducedPlacement::Root);
+                    // Unit-norm correlated columns pass the diagonal guard, then
+                    // the periodic full S catches the off-diagonal defect.
+                    let trip = if correlated { 4 } else { 1 };
+                    for step in 0..trip + 1 {
+                        w.contract(c, 4, &mut record.iterations[step], false)
+                            .unwrap();
+                    }
+                    record.summarize();
+                    let stats = record.resets;
+                    for r in &record.iterations[..trip + 1] {
+                        let refresh_products = r
+                            .gemms
+                            .iter()
+                            .filter(|g| {
+                                matches!(g.stage, "border_s" | "border_h" | "refresh_transform")
+                            })
+                            .count();
+                        assert_eq!(refresh_products, if r.resets.ideal > 0 { 0 } else { 4 });
+                        assert_eq!(r.h_columns, 0);
+                        assert_eq!(r.reduced_solves, 0);
+                    }
+                    assert_eq!(stats.guard_fallbacks, 1);
+                    assert_eq!(stats.disabled_refreshes, 1);
+                    assert_eq!(stats.periodic_refreshes, usize::from(correlated));
+                    assert_eq!(stats.ideal, if correlated { 3 } else { 0 });
+                    assert!(w.reset_disabled);
+                    // Fallback actually measured and factored S; it is not an
+                    // identity reset with only a counter claiming a refresh.
+                    if correlated {
+                        assert!((w.lean.s[(0, 1)] - 1e-4).abs() < 1e-14);
+                    } else {
+                        assert!((w.lean.s[(0, 0)] - 1.21).abs() < 1e-14);
+                    }
+                    let expected = if correlated { 1.0 } else { 1.0 / 1.1 };
+                    assert!((w.lean.t[(0, 0)] - expected).abs() < 1e-14);
+                    // A non-finite norm is rejected collectively even on ranks
+                    // with no local rows. This test calls only the norm guard.
+                    if let Some(v) = w.v.as_mut_slice().first_mut() {
+                        *v = f64::NAN;
+                    }
+                    assert!(!w.reset_norm_guard(c, false).unwrap());
+                });
+            }
+        }
     }
 }

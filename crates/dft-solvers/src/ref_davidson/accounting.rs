@@ -62,6 +62,7 @@ pub struct Iteration {
     /// Actual backend calls on this rank (zero on non-root in Root mode).
     pub backend_solves: usize,
     pub restarts: usize,
+    pub resets: super::ResetStats,
     pub repairs: usize,
     pub dropped_corrections: usize,
     pub unconverged: usize,
@@ -81,6 +82,7 @@ impl Iteration {
             reduced_solves: 0,
             backend_solves: 0,
             restarts: 0,
+            resets: super::ResetStats::default(),
             repairs: 0,
             dropped_corrections: 0,
             unconverged: 0,
@@ -112,6 +114,7 @@ pub struct Record {
     pub reduced_solves: usize,
     pub backend_solves: usize,
     pub restarts: usize,
+    pub resets: super::ResetStats,
     pub gemm_flops: u64,
     pub profile: bool,
     pub placement: ReducedPlacement,
@@ -130,6 +133,7 @@ impl Record {
             reduced_solves: 0,
             backend_solves: 0,
             restarts: 0,
+            resets: super::ResetStats::default(),
             gemm_flops: 0,
             profile,
             placement,
@@ -146,6 +150,7 @@ impl Record {
             self.reduced_solves += r.reduced_solves;
             self.backend_solves += r.backend_solves;
             self.restarts += r.restarts;
+            self.resets.add(r.resets);
             self.gemm_flops += r.gemms.iter().map(|g| g.flops).sum::<u64>();
         }
     }

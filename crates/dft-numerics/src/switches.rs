@@ -548,6 +548,8 @@ table! {
     // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
     REFSCF_LAZY_OUTPUT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-NL: reference driver retains owned orbitals when the caller requests lazy delivery; requires M2_LAZY_RESULT and a registered MPI communicator; default off pending dev08";
+    REF_DAV_IDEAL_RESET: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-RESET: ideal Ritz contraction with norm guard and every-fourth measured refresh; default off pending multi-system accuracy and dev08 evidence";
 }
 
 struct Resolved {

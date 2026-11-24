@@ -4175,3 +4175,203 @@ fn fast_order_ladder_exact_injection_and_verified_delivery() {
         }
     });
 }
+
+/// Isolate the process-wide counter enable flag from parallel SCF tests.
+#[test]
+fn fast_order_keeping_density_fft_counts_and_bits() {
+    const CHILD: &str = "BAANDI_TEST_KEPTHX2_COUNTER_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fast_order_keeping_density_fft_counts_and_bits",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refstart};
+    use dft_numerics::{RealMatrix, stage_clock::local};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 8., 0.], [0., 0.1, 6.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let bits = |v: &[f64]| v.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+    for ranks in [1, 2, 5] {
+        for bands in [3, 4] {
+            let options = ScfOptions {
+                cutoff_hartree: 1.,
+                bands: Some(bands),
+                gamma_real: GammaReal::On,
+                ..Default::default()
+            };
+            dft_mpi::simulate(ranks, |comm| {
+                let mut state = refstart::start(
+                    refstart::StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    comm,
+                )
+                .unwrap();
+                local::enable(true);
+                let x = &state.orbitals;
+                let op = &mut state.operator;
+                let points = op.plane_points();
+                let weights: Vec<_> = (0..bands)
+                    .map(|b| if b == 1 { 0. } else { 2. / (b + 1) as f64 })
+                    .collect();
+                let mut plain = vec![0.; points];
+                let before = local::snapshot();
+                op.band_density_sum(comm, x, &weights, cell.volume_bohr3(), &mut plain)
+                    .unwrap();
+                let plain_counts = local::snapshot().since(&before);
+                assert_eq!(
+                    plain_counts.calls[local::OP_COUNT + 3],
+                    bands.div_ceil(2) as u64
+                );
+                assert_eq!(plain_counts.calls[local::OP_COUNT + 2], 0);
+                // The unchanged non-keeping value path supplies an independent
+                // slab/layout oracle, including zero-occupation buffer bands.
+                let mut values = vec![0.; bands * points];
+                op.band_values(comm, x, &mut values).unwrap();
+                for pairs in [0, 1, bands / 2] {
+                    let oracle: Vec<_> = (0..pairs)
+                        .flat_map(|t| {
+                            let values = &values;
+                            (0..points).map(move |p| {
+                                C::new(values[2 * t * points + p], values[(2 * t + 1) * points + p])
+                            })
+                        })
+                        .collect();
+                    let mut keep = vec![C::new(f64::NAN, f64::NAN); pairs * points];
+                    let mut density = vec![f64::NAN; points];
+                    let before = local::snapshot();
+                    op.band_density_sum_keeping(
+                        comm,
+                        x,
+                        &weights,
+                        cell.volume_bohr3(),
+                        &mut density,
+                        &mut keep,
+                    )
+                    .unwrap();
+                    let counts = local::snapshot().since(&before);
+                    for slot in [local::OP_COUNT + 2, local::OP_COUNT + 3] {
+                        assert_eq!(counts.calls[slot], plain_counts.calls[slot]);
+                    }
+                    assert_eq!(bits(&density), bits(&plain));
+                    for (a, b) in keep.iter().zip(&oracle) {
+                        assert_eq!(
+                            (a.re.to_bits(), a.im.to_bits()),
+                            (b.re.to_bits(), b.im.to_bits())
+                        );
+                    }
+                    let delta: Vec<_> = (0..op.potential().len())
+                        .map(|g| 0.02 * (g as f64).sin())
+                        .collect();
+                    let mut kept_change = RealMatrix::zeros(x.rows(), bands).unwrap();
+                    let mut old_change = kept_change.clone();
+                    op.apply_local_change(comm, x, &keep, pairs, &delta, &mut kept_change)
+                        .unwrap();
+                    op.apply_local_change(comm, x, &oracle, pairs, &delta, &mut old_change)
+                        .unwrap();
+                    assert_eq!(bits(kept_change.as_slice()), bits(old_change.as_slice()));
+                }
+            });
+            eprintln!(
+                "KEPTHX2 ranks={ranks} bands={bands}: plain/keeping inverse={} forward=0; density/slab/delta bits identical",
+                bands.div_ceil(2)
+            );
+        }
+    }
+}
+
+#[test]
+fn fast_order_kept_hx_delivery_fingerprint() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refstart};
+    use dft_numerics::switches::RunConfig;
+    use std::hash::{Hash, Hasher};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    dft_mpi::simulate(2, |comm| {
+        let _scope = RunConfig::from_pairs(&[("refscf_kept_hx", "on")])
+            .unwrap()
+            .enter();
+        let mut previous = None;
+        for _ in 0..2 {
+            let run = dft_engine::refscf::driver::run_with(
+                refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile {
+                    threshold_ry: 1e-12,
+                    ..Default::default()
+                },
+                comm,
+            )
+            .unwrap();
+            assert!(run.outcome.converged, "{}", run.exit_reason);
+            let result = &run.outcome.result;
+            assert!(result.verification.as_ref().unwrap().passed());
+            assert!(run.kept_hx.cache_hits > 0);
+            let mut hash = std::collections::hash_map::DefaultHasher::new();
+            for v in result
+                .density
+                .iter()
+                .chain(&result.eigenvalues)
+                .chain(&result.occupations)
+            {
+                v.to_bits().hash(&mut hash);
+            }
+            for v in result.orbitals.as_slice() {
+                v.re.to_bits().hash(&mut hash);
+                v.im.to_bits().hash(&mut hash);
+            }
+            result.total_hartree().to_bits().hash(&mut hash);
+            result.charge.to_bits().hash(&mut hash);
+            run.records.len().hash(&mut hash);
+            run.kept_hx.cache_hits.hash(&mut hash);
+            run.kept_hx.full_h_starting_columns_replaced.hash(&mut hash);
+            let fingerprint = hash.finish();
+            if let Some(previous) = previous {
+                assert_eq!(fingerprint, previous);
+            } else if comm.rank() == 0 {
+                eprintln!(
+                    "KEPTHX2 delivery fingerprint={fingerprint:016x} energy={:.17e} Ha maps={} hits={} replaced={}",
+                    result.total_hartree(),
+                    run.records.len(),
+                    run.kept_hx.cache_hits,
+                    run.kept_hx.full_h_starting_columns_replaced
+                );
+            }
+            previous = Some(fingerprint);
+        }
+    });
+}

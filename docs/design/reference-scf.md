@@ -2364,7 +2364,7 @@ consume or publish kept products. Verification results reused as ordinary
 maps carry no retained HX cache into subsequent entries.
 
 `band_density_sum_keeping` retains leading complete real-space pair slabs
-while constructing the usual density. Storage is capped at **32 MiB per rank**;
+while constructing the usual density. Storage is capped at **512 MiB per rank**;
 a replicated upper bound on plane ownership selects the same retained pair
 count everywhere. `apply_local_change` reuses these slabs and transforms any
 remaining pairs, including an odd final band. Thus a B-band hit replaces
@@ -2381,8 +2381,7 @@ not their sum and not RSS. Counts are available with lightweight diagnostics.
 No dev08 speedup or default adoption is claimed by the Mac correctness tests.
 
 Local screening command:
-`cargo test -p dft-engine --test refscf fast_order_ -- --nocapture` (exactly two
-tests). The nonlocal two-rank fixture compares the delta-updated product with
+`cargo test -p dft-engine --test refscf fast_order_ -- --nocapture`. The nonlocal two-rank fixture compares the delta-updated product with
 a direct H application at relative Frobenius error <= 1e-13, checks a B-column
 saving, and invalidates the orbital block on one rank. The two-rank skew-cell
 ladder screen checks bitwise raw injection and zero fill, Gamma pairs, charge
@@ -2408,3 +2407,52 @@ The screen also rejects a rebuilt equal-shaped operator, single-rank cache
 invalidation, rank-deficient starts, nonfinite supplied HX on one rank, and
 rank disagreement about supplied HX. These numbers establish correctness only;
 no performance adoption or external-code comparison follows from them.
+
+
+### P3-KEPTHX2: density-pass accounting and storage lifetime
+
+The pre-change kept path already did **ceil(B/2) inverse pair transforms and
+zero forward transforms**, exactly like the plain density sum. Both paths
+pack the same ORC columns, exchange the same mirror rows and do the same
+batched inverse transpose. No second FFT was responsible for the work-order
+density regression. At each pair/plane the old kept path made three scans of
+the inverse plane buffer: a complex slab copy, a real-band density update,
+and an imaginary-band density update. The plain path made the last two scans.
+In addition, `KeptHx::density` allocated and zero-initialized K*P complex values
+on every map, and `prepare` dropped them after each lookup. K is the retained
+complete-pair count and P is the rank's owned plane-point count. For a retained
+pair, the extra copy read and wrote 16*P bytes each; allocation also initialized
+16*P bytes. These are logical traffic counts, not measured DRAM traffic.
+
+The kept branch now loads each inverse-buffer complex value once, stores it
+in the retained slab and applies the two density updates at that point in
+ascending band order, retaining `weight * value * value / volume` exactly.
+It adds no separate full-buffer copy pass. The non-kept branch is unchanged.
+Slabs remain contiguous `[pair][owned plane][row][z]`, complex re/im for bands
+2t/2t+1, unscaled. The pair stride is P complex values, the plane stride is
+rows*nz, and z has unit stride. `apply_local_change` reads this same layout
+without repacking; no change to its transforms or arithmetic was needed.
+Zero-occupation buffer bands are stored too: the next starting HX requires
+them. An odd tail and pairs beyond the cap still take the existing fallback.
+
+Slab allocation belongs to the stage-owned `KeptHx`, separately from entry
+eligibility. The first density call sizes it; subsequent equal-shape maps
+reuse its length/capacity with no zeroing or allocation. Invalidation and a
+consumed or missed lookup discard only the entry, not this storage; a new
+entry is published only after density has overwritten the retained range.
+A new stage owns a new buffer, so operator changes and ladder handoffs cannot
+reuse stale values. Retained payload and the 512 MiB cap are unchanged; a lower
+RSS is not promised. Existing X/HX/potential snapshot allocations and the delta
+workspace remain; they are outside the removed slab allocation/pass. The
+reference map also allocates its plane-density output and redistributes it
+back to the field layout in both arms; neither operation changes here.
+
+Tests compare plain/kept inverse and forward counters, every density/slab bit,
+and delta-HX bits against slabs constructed by the unchanged `band_values`
+path (1/2/5 simulated ranks, odd/even bands, zero occupation, no/partial/full
+retention). A private cache test poisons the buffer and checks its pointer,
+capacity, complete overwrite and density bits across hits and invalidation.
+The delivery fingerprint test includes a verified two-rank skew/nonlocal SCF
+and repeatability. Mac evidence is correctness only; the exact four-run dev08
+request and evidence limits are in
+[the P3-KEPTHX2 request](../performance/lanes/RSCF/kepthx2-dev08-request.md).

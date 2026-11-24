@@ -41,7 +41,6 @@ struct Entry {
     hx: RealMatrix,
     potential: Vec<f64>,
     epoch: u64,
-    slabs: Vec<Complex64>,
     pairs: usize,
 }
 
@@ -51,6 +50,9 @@ struct Entry {
 pub struct KeptHx {
     enabled: bool,
     entry: Option<Entry>,
+    // Storage belongs to the stage, not the single-use entry. Invalidation
+    // drops eligibility, while the next density overwrites the same slabs.
+    slabs: Vec<Complex64>,
     hits: usize,
     columns: usize,
     slab_bytes: usize,
@@ -60,6 +62,7 @@ impl KeptHx {
         Self {
             enabled,
             entry: None,
+            slabs: Vec::new(),
             hits: 0,
             columns: 0,
             slab_bytes: 0,
@@ -113,7 +116,7 @@ impl KeptHx {
         operator.write_planes(&delta_planes, &mut delta);
         let mut change = RealMatrix::zeros(x.rows(), x.cols()).map_err(numerical)?;
         operator
-            .apply_local_change(comm, x, &e.slabs, e.pairs, &delta, &mut change)
+            .apply_local_change(comm, x, &self.slabs, e.pairs, &delta, &mut change)
             .map_err(numerical)?;
         for (h, d) in e.hx.as_mut_slice().iter_mut().zip(change.as_slice()) {
             *h += d;
@@ -150,18 +153,18 @@ impl KeptHx {
         let max_points =
             dims[axis].div_ceil(comm.size()) * dims.iter().product::<usize>() / dims[axis];
         let pairs = (x.cols() / 2).min(SLAB_LIMIT_BYTES / (16 * max_points.max(1)));
-        let mut slabs = vec![Complex64::default(); pairs * operator.plane_points()];
+        self.slabs
+            .resize(pairs * operator.plane_points(), Complex64::default());
         operator
-            .band_density_sum_keeping(comm, x, occupations, volume, out, &mut slabs)
+            .band_density_sum_keeping(comm, x, occupations, volume, out, &mut self.slabs)
             .map_err(numerical)?;
-        self.slab_bytes = self.slab_bytes.max(slabs.len() * 16);
+        self.slab_bytes = self.slab_bytes.max(self.slabs.len() * 16);
         self.entry = Some(Entry {
             identity: operator.kept_identity(),
             x: x.clone(),
             hx: hx.clone(),
             potential: potential.to_vec(),
             epoch: operator.owned_epoch().expect("owned potential"),
-            slabs,
             pairs,
         });
         Ok(())
@@ -177,5 +180,99 @@ impl KeptHx {
             delta_v_columns: self.columns,
             retained_slab_bytes_per_rank: all.into_iter().map(|v| v as usize).collect(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slab_storage_survives_consumption_and_invalidation() {
+        let pp =
+            crate::scf::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let cell =
+            dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+                .unwrap();
+        let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+        let potentials = [crate::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = crate::ScfOptions {
+            cutoff_hartree: 1.,
+            bands: Some(3),
+            gamma_real: crate::GammaReal::On,
+            ..Default::default()
+        };
+        dft_mpi::simulate(2, |comm| {
+            let mut state = crate::refstart::start(
+                crate::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                comm,
+            )
+            .unwrap();
+            let x = &state.orbitals;
+            let op = &mut state.operator;
+            let v = vec![0.03; op.plane_points()];
+            op.set_owned_potential(&v, 1).unwrap();
+            let mut hx = RealMatrix::zeros(x.rows(), x.cols()).unwrap();
+            op.apply_block(comm, x, &mut hx).unwrap();
+            let mut density = vec![0.; v.len()];
+            let mut kept = KeptHx::new(true);
+            kept.density(
+                comm,
+                op,
+                x,
+                &hx,
+                &v,
+                &[2., 0., 0.],
+                cell.volume_bohr3(),
+                &mut density,
+            )
+            .unwrap();
+            let pointer = kept.slabs.as_ptr();
+            let capacity = kept.slabs.capacity();
+            assert!(capacity > 0);
+            let original: Vec<_> = density.iter().map(|v| v.to_bits()).collect();
+            for epoch in 2..=4 {
+                op.set_owned_potential(&v, epoch).unwrap();
+                if epoch == 3 {
+                    kept.invalidate();
+                    assert!(kept.prepare(comm, op, x, &v).unwrap().is_none());
+                } else {
+                    assert!(kept.prepare(comm, op, x, &v).unwrap().is_some());
+                }
+                // Poison the reused storage: the next map must overwrite every
+                // retained value before publishing eligibility again.
+                kept.slabs.fill(Complex64::new(f64::NAN, f64::NAN));
+                kept.density(
+                    comm,
+                    op,
+                    x,
+                    &hx,
+                    &v,
+                    &[2., 0., 0.],
+                    cell.volume_bohr3(),
+                    &mut density,
+                )
+                .unwrap();
+                assert_eq!(kept.slabs.as_ptr(), pointer);
+                assert_eq!(kept.slabs.capacity(), capacity);
+                assert!(
+                    kept.slabs
+                        .iter()
+                        .all(|v| v.re.is_finite() && v.im.is_finite())
+                );
+                assert_eq!(
+                    density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    original
+                );
+            }
+        });
     }
 }

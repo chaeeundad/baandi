@@ -878,11 +878,24 @@ impl DistributedRealHamiltonian {
                 self.fft.to_real_plane_in(t, pairs, i)?;
                 let slab = self.fft.plane();
                 let base = i * line;
-                // MPI-KEPT-START: the pair's slab for the next solve's potential change.
+                // Keep directly from the inverse buffer while it supplies the
+                // density. Each point still sees ca before cb, with identical
+                // arithmetic; no separate slab copy or second density scan.
                 if let Some(k) = keep.as_deref_mut()
                     && (t + 1) * pp <= k.len()
                 {
-                    k[t * pp + base..t * pp + base + line].copy_from_slice(&slab[..line]);
+                    for (j, (dst, v)) in k[t * pp + base..t * pp + base + line]
+                        .iter_mut()
+                        .zip(&slab[..line])
+                        .enumerate()
+                    {
+                        *dst = *v;
+                        sink(ca, base + j, v.re);
+                        if let Some(cb) = cb {
+                            sink(cb, base + j, v.im);
+                        }
+                    }
+                    continue;
                 }
                 for (j, v) in slab.iter().take(line).enumerate() {
                     sink(ca, base + j, v.re);

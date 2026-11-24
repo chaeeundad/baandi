@@ -73,6 +73,7 @@ pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
 }
 
 pub struct Run {
+    pub kept_hx: super::kept_hx::Report,
     pub ladder: Option<super::ladder::Report>,
     pub qe_clock: Vec<super::record::QeClock>,
     pub full_diagnostics: bool,
@@ -103,6 +104,30 @@ pub fn run_with<K: Collective>(
     comm: &K,
 ) -> Result<Run, ScfError> {
     run_inner(input, profile, comm, None)
+}
+
+/// Continue an owned coarse seed through fresh fine-stage setup and verified
+/// delivery. No mixer or kept-HX cache is transferred. This shares the exact
+/// handoff used by `REFSCF_LADDER` and permits inspecting injection beforehand.
+pub fn run_seeded_with<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    comm: &K,
+    seed: super::ladder::Seed,
+) -> Result<Run, ScfError> {
+    let StageRun::Fine(run) = run_stage(
+        input,
+        profile,
+        comm,
+        None,
+        Some(seed),
+        false,
+        Instant::now(),
+    )?
+    else {
+        unreachable!()
+    };
+    Ok(*run)
 }
 
 // Only run() can attach the exact owned communicator to a lazy result.
@@ -151,6 +176,9 @@ fn run_inner<K: Collective>(
     else {
         unreachable!()
     };
+    if let Some(coarse) = &report {
+        run.kept_hx.merge(&coarse.kept_hx);
+    }
     run.ladder = report;
     Ok(*run)
 }
@@ -285,7 +313,16 @@ fn run_stage<K: Collective>(
         + if gate_first { 32 * x.len() + 8 * 76 } else { 0 }
         // Exact field cache (density + HXC + VH), retained candidate/check
         // input fields and a temporary cloned field pair.
-        + 8 * n.len() * 9;
+        + 8 * n.len() * 9
+        + if config.on(Id::REFSCF_KEPT_HX) {
+            // Retained X/HX, supplied HX and delta workspace, owned potentials,
+            // bounded slabs and the existing full-index delta-kernel adapter.
+            32 * state.operator.local_len() * bands
+                + 24 * state.operator.plane_points()
+                + (16 * (bands / 2) * state.operator.plane_points())
+                    .min(super::kept_hx::SLAB_LIMIT_BYTES)
+                + 8 * dims.iter().product::<usize>()
+        } else { 0 };
     let mut peaks = vec![0.; comm.size()];
     let mut local_peak = peaks.clone();
     local_peak[comm.rank()] = peak as f64;
@@ -310,6 +347,7 @@ fn run_stage<K: Collective>(
     let lean = config.on(Id::REFSCF_LEAN_ENERGY);
     let permap = config.on(Id::REFSCF_PERMAP);
     let mut field_cache = None;
+    let mut kept = super::kept_hx::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
     for iteration in 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
@@ -354,6 +392,7 @@ fn run_stage<K: Collective>(
                     &mut timings,
                     &mut field_cache,
                     lean,
+                    &mut kept,
                 )?;
                 map_s += clock.elapsed().as_secs_f64();
                 step
@@ -371,6 +410,7 @@ fn run_stage<K: Collective>(
             if iteration == 1 && !redo && dr2 < ethr * state.electrons.max(1.) {
                 ethr = next_ethr_ry(ethr, dr2, state.electrons);
                 redo = true;
+                kept.invalidate();
                 state.orbitals = step.solve.eigenvectors;
                 continue;
             }
@@ -444,6 +484,7 @@ fn run_stage<K: Collective>(
             let tol = next_ethr_ry(ethr, dr2, state.electrons);
             let mut t = PhaseTimings::default();
             let first_call = verification_calls.len();
+            kept.invalidate();
             let check = solve_map(
                 &mut state,
                 comm,
@@ -459,6 +500,7 @@ fn run_stage<K: Collective>(
                 &mut t,
                 &mut field_cache,
                 false,
+                &mut super::kept_hx::KeptHx::new(false),
             )?;
             let current_calls = &verification_calls[first_call..];
             let mut checked = y.clone();
@@ -779,6 +821,7 @@ fn run_stage<K: Collective>(
                 return Ok(StageRun::Coarse(
                     Box::new(seed),
                     super::ladder::Report {
+                        kept_hx: kept.report(comm)?,
                         coarse_records: records,
                         coarse_setup: setup,
                         coarse_seconds: stage_start.elapsed().as_secs_f64(),
@@ -908,6 +951,7 @@ fn run_stage<K: Collective>(
                 )
             });
             return Ok(StageRun::Fine(Box::new(Run {
+                kept_hx: kept.report(comm)?,
                 ladder: None,
                 qe_clock,
                 setup,
@@ -961,11 +1005,15 @@ fn solve_map<K: Collective>(
     timings: &mut PhaseTimings,
     cache: &mut Option<(Vec<f64>, map::Fields)>,
     lean: bool,
+    kept: &mut super::kept_hx::KeptHx,
 ) -> Result<map::Map, ScfError> {
     // QE's documented bounded re-entry: at most six calls, retry when more
     // than max(5, bands/4) roots remain. Keep every flag/count in the record;
     // SCF and the independent certificate still decide delivered convergence.
     for retry in 0..6 {
+        if retry > 0 {
+            kept.invalidate();
+        }
         let mut step = map::evaluate(
             state,
             comm,
@@ -979,6 +1027,7 @@ fn solve_map<K: Collective>(
             cache,
             lean,
             rmm,
+            kept,
         )?;
         let r = &step.solve.record;
         let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();

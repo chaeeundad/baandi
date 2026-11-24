@@ -118,6 +118,8 @@ struct Coupling {
 }
 
 pub struct DistributedRealHamiltonian {
+    /// Unique immutable basis/operator/row/plane-layout instance for kept HX.
+    kept_identity: Arc<()>,
     rank: usize,
     ranks: usize,
     n_global: usize,
@@ -405,6 +407,7 @@ impl DistributedRealHamiltonian {
         let pairs = capacity.div_ceil(2);
         let local_len = fft.local_len();
         Ok(Self {
+            kept_identity: Arc::new(()),
             rank,
             ranks,
             n_global: n,
@@ -507,6 +510,13 @@ impl DistributedRealHamiltonian {
         write_planes(&self.fft, planes, &mut self.potential);
         self.owned_epoch = Some(epoch);
         Ok(())
+    }
+
+    /// Identity of this immutable fixed operator and distribution. Rebuilding
+    /// even an equal-shaped operator creates a fresh token; potential updates
+    /// preserve it. Holding the token prevents address-reuse false hits.
+    pub fn kept_identity(&self) -> Arc<()> {
+        self.kept_identity.clone()
     }
 
     /// Epoch of the owned field the potential holds (None: full grid).

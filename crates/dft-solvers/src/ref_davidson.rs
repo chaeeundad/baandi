@@ -98,7 +98,7 @@ pub struct Solution {
 /// between its real/imaginary rows, without pair weights. Options are replicated.
 /// The row partitions must cover the global dimension once (operator contract).
 /// The communicator supplies fixed-tree sums; only rounding changes with ranks.
-/// No retained H X is accepted: every call applies H to all starting columns.
+/// This entry always applies H to all starting columns.
 /// Scratch and trace storage are reserved once, before the iteration loop.
 pub fn solve<C: Collective, O: DistributedRealOperator>(
     comm: &C,
@@ -106,6 +106,21 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     start: &RealMatrix,
     hamiltonian_diagonal: &[f64],
     options: Options,
+) -> Result<Solution, SolverError> {
+    solve_with_initial_hx(comm, operator, start, hamiltonian_diagonal, options, None)
+}
+
+/// As `solve`, with an optional H(start) supplied by the caller. The caller
+/// guarantees the exact start, fixed operator and current potential identity.
+/// All ranks must supply a product or none. Shape, finiteness, overlap, rank and
+/// convergence checks remain active; the start is not rotated before use.
+pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
+    comm: &C,
+    operator: &mut O,
+    start: &RealMatrix,
+    hamiltonian_diagonal: &[f64],
+    options: Options,
+    initial_hx: Option<&RealMatrix>,
 ) -> Result<Solution, SolverError> {
     let apply_h_scope = accounting::ApplyHScope::new(options.profile, options.max_iterations + 1);
     let total_clock = clock(options.profile);
@@ -119,7 +134,9 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     }
     .min(dim);
     let work_scope = work::Scope::new(options.profile, options.max_iterations, cap);
-    let bad = n == 0
+    let bad = initial_hx.is_some_and(|hx| {
+        hx.rows() != start.rows() || hx.cols() != n || hx.as_slice().iter().any(|v| !v.is_finite())
+    }) || n == 0
         || n > dim
         || cap < n.saturating_mul(2).min(dim)
         || options.occupied > n
@@ -139,10 +156,13 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         s.streamed_bytes += 8 * (start.rows() * n + start.rows()) as u64
     });
     // Agree on local invalid inputs before any rank enters operator collectives.
-    let mut bad_sum = [0.0];
-    c.tree_sum_f64(&[f64::from(bad)], &mut bad_sum)
-        .map_err(error)?;
-    if bad_sum[0] != 0.0 {
+    let mut bad_sum = [0.0; 2];
+    c.tree_sum_f64(
+        &[f64::from(bad), f64::from(initial_hx.is_some())],
+        &mut bad_sum,
+    )
+    .map_err(error)?;
+    if bad_sum[0] != 0.0 || (bad_sum[1] != 0.0 && bad_sum[1] != comm.size() as f64) {
         return Err(SolverError::InvalidParameter(
             "reference Davidson dimensions/threshold/start",
         ));
@@ -193,7 +213,12 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     w.v.reshape_within_storage(start.rows(), n)?;
     w.hv.reshape_within_storage(start.rows(), n)?;
     let t = clock(options.profile);
-    w.apply(&c, operator, start, true, &mut record.setup)?;
+    if let Some(hx) = initial_hx {
+        w.hv.as_mut_slice().copy_from_slice(hx.as_slice());
+        work::copy(options.profile, start.rows() * n);
+    } else {
+        w.apply(&c, operator, start, true, &mut record.setup)?;
+    }
     record.setup.seconds[0] += elapsed(t);
     w.border(&c, 0, n, false, &mut record.setup, options.profile)?;
     if !w.factor(0, n, &mut record.setup, options.profile)? {

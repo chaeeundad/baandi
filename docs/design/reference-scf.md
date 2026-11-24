@@ -2338,3 +2338,73 @@ Its interval is still first **fine** estimator stop to passing verification.
 Local tests and the one-run-per-arm dev08 request are recorded in
 [ladder-dev08-request.md](../performance/lanes/RSCF/ladder-dev08-request.md).
 No performance promotion follows from Mac correctness or map counts.
+
+## Kept HX warm start
+
+P3-KEPTHX adds `BAANDI_REFSCF_KEPT_HX=on` (or `[performance]
+refscf_kept_hx="on"`), default **off**. An ordinary reference Davidson map
+retains its exact returned Ritz block X, HX, and the owned input local
+potential in the Hamiltonian's plane layout. The next eligible map supplies
+`HX_old + (V_new - V_old) X` as its starting product. The fixed kinetic and
+nonlocal operators cancel in this difference. Generalized overlap, rank,
+Ritz-change convergence and independent fixed-point verification are unchanged.
+The solver's supplied-product entry validates shape and finite values and
+rejects disagreement about presence across ranks in its existing input check.
+
+The cache holds a unique immutable operator-instance token (basis, kinetic,
+projectors, row and plane layout), a bitwise copy of X, and a monotonic owned
+potential epoch. It compares the entire retained X, not its address or a hash.
+The actual old/new owned potentials form the delta; epochs alone never stand
+in for potential data. One fixed-tree collective agrees a cache hit before any
+rank enters the delta kernel. An entry is consumed on lookup, including on a
+miss. The first map, first-iteration redo, bounded eigensolver retries,
+independent verification maps, and rebuilt cutoff/layout stages use fresh H.
+A new fine-stage cache is constructed at a ladder handoff. RMM maps do not
+consume or publish kept products. Verification results reused as ordinary
+maps carry no retained HX cache into subsequent entries.
+
+`band_density_sum_keeping` retains leading complete real-space pair slabs
+while constructing the usual density. Storage is capped at **32 MiB per rank**;
+a replicated upper bound on plane ownership selects the same retained pair
+count everywhere. `apply_local_change` reuses these slabs and transforms any
+remaining pairs, including an odd final band. Thus a B-band hit replaces
+exactly B full-H starting columns regardless of the slab cap. Retained X, HX
+and owned potential storage are additional to the slab limit. The existing
+kernel requires full-grid indexing for a transient delta buffer; only owned
+planes are populated and read, and other slots are NaN.
+
+`results.json.reference_scf.kept_hx` records `cache_hits`,
+`full_h_starting_columns_replaced`, `delta_v_columns`, and
+`retained_slab_bytes_per_rank`. Counts include the coarse and fine stages;
+slab bytes are the maximum retained payload on each rank across those stages,
+not their sum and not RSS. Counts are available with lightweight diagnostics.
+No dev08 speedup or default adoption is claimed by the Mac correctness tests.
+
+Local screening command:
+`cargo test -p dft-engine --test refscf fast_order_ -- --nocapture` (exactly two
+tests). The nonlocal two-rank fixture compares the delta-updated product with
+a direct H application at relative Frobenius error <= 1e-13, checks a B-column
+saving, and invalidates the orbital block on one rank. The two-rank skew-cell
+ladder screen checks bitwise raw injection and zero fill, Gamma pairs, charge
+error <= 1e-12 e, orbital Gram change <= 1e-12, and verified fine/direct energy
+agreement <= 1e-10 Ha at a tight threshold. These are synthetic internal
+oracles, not QE references. The mechanism follows the already adopted older
+MPI starting-product reuse (ledger M2-STICKS-START-REUSE-DEV08-ADOPT); this new
+reference path still requires its own dev08 common-input and full-convergence
+measurements before promotion.
+
+Local Mac screen (2026-11-25, synthetic fixtures, the command above): **2 passed,
+0 failed, 0 ignored**. B = 3: relative product error
+4.39708409238569948e-17; fresh/hit/invalidated starting full-H columns = 3/0/3;
+one hit, three replaced columns, three delta-V columns; retained slab payload
+[4096, 4096] bytes. The skew-cell injection preserves copied and zero-filled
+ORC bits without arithmetic in the test gather, preserves Gamma conjugacy,
+has charge error 6.21724893790087663e-15 e and maximum Gram-entry change 0.
+Verified ladder versus direct fresh-H fine delivery differs by
+1.26565424807267846e-14 Ha; continuing the exact inspected seed through the
+same fine-stage driver differs by 1.48769885299770976e-14 Ha. The direct fine
+energy is -1.10503701509437602 Ha. Independent verification remains enabled.
+The screen also rejects a rebuilt equal-shaped operator, single-rank cache
+invalidation, rank-deficient starts, nonfinite supplied HX on one rank, and
+rank disagreement about supplied HX. These numbers establish correctness only;
+no performance adoption or external-code comparison follows from them.

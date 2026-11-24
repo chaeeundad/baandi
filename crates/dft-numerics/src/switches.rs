@@ -510,6 +510,10 @@ table! {
         "reference SCF only: accept the independent verification map when the variational energy change is below 5e-9 Ha; Coulomb/residual diagnostics retained, predictor gates inactive; off restores the old fixed-point rule";
     FFT_FUSED_ROWS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT2: stream distributed local-potential last-axis inverse/multiply/forward through reusable rows with immutable zero-hole input; rustfft lanes only, rounding class, default off pending dev08";
+    REF_DAV_SWAP_BUFFERS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-DAVREM: reference Davidson restart/repair exchange equal-capacity basis and rotation buffers instead of copying rows; bit-identical, default off pending dev08";
+    REF_DAV_LEAN_RESET: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-DAVREM: reference restart resets only C; fresh Gram/factor/transform overwrite H, S, T and A, and eigen/repair overwrite Y before use; bit-identical, default off pending dev08";
 }
 
 struct Resolved {

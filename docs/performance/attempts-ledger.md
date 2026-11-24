@@ -3574,3 +3574,11 @@ GF (all three) vs default: si128 -0.0181 +- 0.0049 (z 3.7 but 2.7F < 3F; medians
 si64 -0.0103 +- 0.0056, elongated/rskew inconclusive. F alone (bit-identical): inconclusive everywhere
 (si128 -0.0047 +- 0.0037). Profiled screen showed border 5.07 -> 3.59 s with G, so a G-only campaign
 with more pairs may resolve the si128 trend. Switches stay default off. Evidence: dev08 /data/sig-dft/p3c/.
+
+### REF_DAV_SINGLE_GEMM provisionally ADOPTED (2026-11-25, development protocol)
+
+User rule 2026-11-25: during development single-run screens decide; precise campaigns later for the stacked
+defaults. Evidence: P3c screen border 5.07 -> 3.59 s (si128), P3c GF vs D si128 -1.8% (z 3.7, below 3F),
+partial P3d G-only si128 (9e99bd3, 7 A/A + 20 crossed pairs): medians 39.126 -> 38.518 s, mean log ratio
+-0.0120 +- 0.0045. All samples verified, counts identical, E - E_strict unchanged. Default on (rounding
+class); to be re-measured in the consolidated precise campaign. Evidence: dev08 /data/sig-dft/p3d/si128/TABLE.md.

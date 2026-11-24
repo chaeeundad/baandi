@@ -179,9 +179,9 @@ mod tests {
     #[test]
     fn ideal_reset_accuracy_decisions_and_restart_orthogonality() {
         assert!(
-            !RunConfig::from_pairs(&[])
+            RunConfig::from_pairs(&[])
                 .unwrap()
-                .on(Id::REF_DAV_IDEAL_RESET)
+                .on(Id::REF_DAV_IDEAL_RESET) // default on since 2026-11-25
         );
         for (dim, bands, occupied, capacity, cluster) in [
             (32, 8, 6, 16, false),

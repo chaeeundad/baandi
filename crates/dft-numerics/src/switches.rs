@@ -548,11 +548,14 @@ table! {
     // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
     REFSCF_LAZY_OUTPUT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-NL: reference driver retains owned orbitals when the caller requests lazy delivery; requires M2_LAZY_RESULT and a registered MPI communicator; default off pending dev08";
-    REF_DAV_IDEAL_RESET: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
+    REF_DAV_IDEAL_RESET: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-RESET: ideal Ritz contraction with norm guard and every-fourth measured refresh; default off pending multi-system accuracy and dev08 evidence";
-    NONLOCAL_FUSE_COUPLING: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
+    NONLOCAL_FUSE_COUPLING: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-ADDV: store DQ in the dead local projection buffer after rank reduction, omitting separate W storage; bit-identical, default off pending dev08";
-    NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
+    NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-ADDV: one sequential MKL P W directly into HX with beta=1; requires M2_DGEMM and MKL_DGEMM, rounding class, default off pending dev08";
 }
 

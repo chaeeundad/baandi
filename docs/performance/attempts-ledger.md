@@ -3624,3 +3624,13 @@ Wall si64 7.20 -> 7.13, si128 35.67 -> 34.60, elongated 1.49 -> 1.42, rskew equa
 2.297 s (generalized Ritz start replaces two QR passes), output 0.666 -> 0.009 s (orbitals stay owned),
 nonlocal projection 1.986 -> 1.708 s (124 projection GEMMs from 256-row panels to one call); add_vuspsi per
 call unchanged. Evidence: dev08 /data/sig-dft/p3l/REPORT.md.
+
+### P3m (2026-11-25, development protocol): REF_DAV_IDEAL_RESET, NONLOCAL_FUSE_COUPLING, NONLOCAL_BACK_ACCUM ADOPTED
+
+The ideal reset (S = I, H = diag(theta) after a restart, orthogonality guard, full refresh every 4th
+restart) was rejected earlier under a bit-identity premise (1.0e-11 Ha drift); re-evaluated under the
+strict 1e-10 / standard 5e-9 classes. dev08 MPI8 one profiled run per arm at c9abca1b, all verified,
+counts identical, |E - E_D| <= 2.3e-13 Ha, E - E_strict <= 1.2e-10. Wall D/R/N/RN si64 6.89/6.83/6.97/6.79,
+si128 35.57/33.47/33.70/34.33 (RN single-run noise; stage savings additive), elongated 1.44/1.31/1.28/1.26.
+si128 R: border S+H 3.75 -> 2.80 s (26 fewer GEMM pairs), factor/transform -0.16 s; N: add_vuspsi per call
+0.0250 -> 0.0203 s (back_and_add 2.37 -> 1.97 s). Default on. Evidence: dev08 /data/sig-dft/p3m/REPORT.md.

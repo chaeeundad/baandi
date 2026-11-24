@@ -709,6 +709,7 @@ mod diagnostic_tests {
     fn davrem_switches_preserve_bits_and_account_for_removed_work() {
         use dft_numerics::switches::RunConfig;
         let base = RunConfig::from_pairs(&[
+            ("ref_dav_ideal_reset", "off"),
             ("ref_dav_swap_buffers", "off"),
             ("ref_dav_lean_reset", "off"),
         ])
@@ -720,6 +721,7 @@ mod diagnostic_tests {
                     swap,
                     reset,
                     RunConfig::from_pairs(&[
+                        ("ref_dav_ideal_reset", "off"),
                         ("ref_dav_swap_buffers", swap),
                         ("ref_dav_lean_reset", reset),
                     ])

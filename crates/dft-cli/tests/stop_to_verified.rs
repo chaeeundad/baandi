@@ -248,9 +248,10 @@ fn cli_roundtrip(active: bool) {
             }
             // This matrix tests the historical Coulomb gate/reuse behavior.
             let energy_mode = variant.starts_with("energy_");
-            if !energy_mode {
-                command.env("BAANDI_REFSCF_VERIFY_ENERGY", "off");
-            }
+            command.env(
+                "BAANDI_REFSCF_VERIFY_ENERGY",
+                if energy_mode { "on" } else { "off" },
+            );
             if variant != "default" {
                 command
                     .env("BAANDI_REFSCF_VERIFY_REUSE", reuse)

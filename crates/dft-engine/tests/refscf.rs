@@ -1660,7 +1660,7 @@ fn verification_energy_attempts_and_failure_recovery() {
         // Force two early stops: the fixed energy threshold must still reject,
         // charge both attempts, perform recovery and leave the run unverified.
         let failed = run(
-            &[],
+            &[("refscf_verify_energy", "on")],
             &ScfOptions {
                 max_iterations: 2,
                 ..options.clone()

@@ -507,6 +507,8 @@ table! {
         "P3-FFT: pack distributed real H input ORC rows directly into FFT sticks, avoiding the intermediate coefficient write/read; default off pending dev08";
     REFSCF_VERIFY_ENERGY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference SCF only: accept the independent verification map when the variational energy change is below 5e-9 Ha; Coulomb/residual diagnostics retained, predictor gates inactive; off restores the old fixed-point rule";
+    FFT_FUSED_ROWS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-FFT2: stream distributed local-potential last-axis inverse/multiply/forward through reusable rows with immutable zero-hole input; rustfft lanes only, rounding class, default off pending dev08";
 }
 
 struct Resolved {

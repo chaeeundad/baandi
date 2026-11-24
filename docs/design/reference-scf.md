@@ -1432,3 +1432,139 @@ remainder from global clocks. Scope/condition identity requires the manifest
 review described in [the dev08 request](../performance/lanes/RSCF/qeclock-dev08-request.md).
 Headline comparisons keep detailed profiling **off**; no performance default
 or optimization is adopted by adding these clocks.
+### P3-FFT2: pass ledger and row-fused experiment
+
+Source base `8d1f3584eaa634f24b2bd2d11a1c1c341489919f`. The ticket's
+**relayed**, single-profile motivation at `9e99bd3`, Si128 MPI8, rank max:
+FFT forward + inverse 10.2 s, of which approximately 4.9 s is 1D kernels;
+alltoall 0.86 + 0.98 s, middle pack/unpack 0.69 + 0.91 s, slab gather/scatter
+0.53 + 0.70 s, transpose pack/unpack 0.47 + 0.40 s, multiply 0.56 s.
+These maxima overlap in rank attribution and are not an additive wall model.
+QE FFTW's supplied 6.7 s is motivation only, not a newly executed comparison.
+P3-FFT direct packing and sparse clearing had no measurable dev08 gain;
+M2_FFT=mkl was not adopted (small lengths lose). No backend default changes.
+
+#### Every buffer traversal, one pair, one direction
+
+Use the symbols above. `R(X,q)` / `W(X,q)` denote reading/writing q complex
+values of buffer X. Rows for a real-space plane repeat p_r times; `P` is the
+**same allocation as slab**, exposed by `plane()`, not a second buffer.
+The potential is real (8 bytes/value), all other value streams are 16 bytes.
+The MPI row counts the application-visible send read and receive write;
+internal MPI copies, staging, cache-line effects and FFT scratch remain excluded.
+Padding is sent/read even though the transform never consumes it.
+
+| Direction / operation | Explicit streams on this rank, one pair |
+| --- | --- |
+| G -> r: initialize sticks | W(sticks,A_r) |
+| coefficient scatter | R(coefficients,L_r), W(sticks,L_r) |
+| first-axis inverse | R(sticks,A_r), W(sticks,A_r), plus backend scratch |
+| transpose pack | R(sticks,A_r), W(send,A_r) |
+| one inverse alltoall | R(send,R*b), W(recv,R*b) |
+| initialize middle, per plane | W(middle,M) |
+| middle unpack, per plane | R(recv,S), W(middle,S) |
+| second-axis inverse, per plane | R(middle,M), W(middle,M), plus backend scratch |
+| initialize slab, per plane | W(P,F) |
+| slab scatter, per plane | R(middle,M), W(P,M) |
+| last-axis inverse, per plane | R(P,F), W(P,F), plus backend scratch |
+| potential multiply (once per round trip), per plane | R(P,F), R(V,F real values), W(P,F) |
+| r -> G: last-axis forward, per plane | R(P,F), W(P,F), plus backend scratch |
+| slab gather, per plane | R(P,M), W(middle,M) |
+| second-axis forward, per plane | R(middle,M), W(middle,M), plus backend scratch |
+| middle pack, per plane | R(middle,S), W(send,S) |
+| one forward alltoall | R(send,R*b), W(recv,R*b) |
+| transpose unpack | R(recv,A_r), W(sticks,A_r) |
+| first-axis forward | R(sticks,A_r), W(sticks,A_r), plus backend scratch |
+| gather + 1/N | R(sticks,L_r), W(coefficients,L_r) |
+
+A **standalone transfer pass** below means a copy between two named work
+buffers, separate from a transform; sparse accesses count as one pass over
+the selected elements, not as full dense scans. Coefficient scatter/gather
+is separately counted, so it cannot disappear through a naming change.
+
+| Pass class | Current G -> r | Current r -> G | Ideal one-transpose, fused interfaces (each direction) |
+| --- | --- | --- | --- |
+| MPI collectives | 1 | 1 | 1; same useful payload, padding is a separate issue |
+| Standalone transfers between FFT/MPI buffers | 3: sticks->send, recv->middle, middle->P | 3: P->middle, middle->send, recv->sticks | 0 standalone: transform output stores to send, recv unpack supplies plane transform input, adjacent local transforms share scratch |
+| Separate initialization sweeps | 3: sticks, middle, P | 0 | 0 separate sweeps if every transform input is defined by fused value/zero fill or immutable zero holes |
+| Coefficient input/output passes | 1 scatter | 1 gather/scale | 1 at each boundary, fused with first-axis load/store where supported |
+| Transform stages | 3 | 3 | 3, same transform points; fusion does not remove arithmetic |
+| Separate full-plane multiply sweep | 1 at turnaround | 0 | 0 standalone: V is read and multiplied while final-axis data are resident |
+
+The ideal column is an **interface target**, not a claim of zero reads/writes
+inside transforms. It still needs useful send writes A_r / p_r*S and useful
+receive reads p_r*S / A_r in the two directions, MPI send reads + receive
+writes of R*b each, all three axes' arithmetic/scratch, and F real-potential
+reads per owned plane. Arbitrary sparse/rank-owned y positions cannot be
+transformed in place in the present receive layout: source-rank-major padded
+blocks are not contiguous y lanes. Achieving that ideal needs strided or
+fused gather/scatter backend interfaces or a new communication layout; the
+existing `BackendLanes` takes whole contiguous buffers. More band batching
+cannot remove any collective here: M2d already batches the whole H block.
+
+#### Implemented subset: `BAANDI_FFT_FUSED_ROWS=on` (default off)
+
+Ordinary distributed `apply_local`, `apply_local_batch` and the direct-input
+variant now optionally perform the last-axis inverse, V multiply and
+forward together for **one row**. A construction-sized spectral input row
+receives the active-z middle entries. RustFFT's immutable-input inverse
+writes a second row, the unchanged scalar multiply updates it, the forward
+runs in place, and only active z values are written back to middle. Rows are
+independent: overwriting middle[k*n1+y] cannot affect a later y. The first
+and second axes, their operation order, ORC input/output, final 1/N and both
+collectives are unchanged. No tolerance, grid, stick partition or batch
+width changes. No hand-written FFT or new dependency.
+
+Inactive spectral-row entries remain exactly zero because the inverse never
+modifies its input. Thus the entire repeated slab initialization disappears,
+not just the overwritten stores removed by P3-FFT. The full slab is never
+read or written by this apply route. Its allocation remains for the public
+plane API, density and kept-plane entry points, which retain the old path.
+The row pair plus RustFFT scratch is allocated only at construction. This
+is a working-set/traffic change, **not a peak-allocation reduction**.
+
+Exact abstract interface-byte saving per pair/rank is `16*p_r*F` with sparse
+clear off, or `16*p_r*(F-M)` relative to sparse clear on. Other interface
+byte counts do not fall: middle->row and row->middle still copy M elements
+per plane, and inverse/multiply/forward still read/write F values, now in
+reused O(n2) row storage instead of distinct rows of an O(n1*n2) slab.
+No six-pass or DRAM-byte speedup is claimed from this cache-local schedule.
+It targets the last-axis turnaround working set (slab scatter/gather and
+multiply), not the larger but layout-constrained middle/MPI pack passes.
+Immutable FFT scratch traffic and per-row dispatch can offset the benefit;
+dev08 decides. For example, an F=36*36 slab formerly has 20,736 repeated
+zero-store bytes per plane; a 72*36 slab has 41,472. These are derived counts,
+not measured machine traffic or speed.
+
+The switch is resolved once at plan creation through RunConfig, with normal
+input key `fft_fused_rows`, manifest consultation and MPI agreement hashing.
+With MKL lanes explicitly requested it records a `slab` fallback (immutable
+row support is not exposed by that adapter), retaining MKL arithmetic.
+An MKL **build** with the default rustfft M2 lanes uses the experiment.
+Off selects the unchanged slab operations; middle helpers merely share the
+existing unpack/FFT and FFT/pack code. The immutable and in-place RustFFT
+interfaces do not promise identical rounding on every architecture/length,
+so the candidate is conservatively **rounding class**, even where bits match.
+
+The existing FFT profile retains all stage names and point/byte meanings.
+Stages 6 through 10 are now called n1 times per plane, each for one row;
+point totals stay equal, stage 6 bytes drop by the formula, and stages 7/9
+flop estimates can differ by integer rounding of per-call estimates only.
+Calls are instrumentation regions, not 3D transform counts. More timer reads
+can perturb a profiled row arm; keep the outer H total/unattributed remainder
+and report the effect as a single-run development observation. No added
+barrier, collective, allocation or clock occurs with profiling disabled.
+
+Derived from the own-words notes `fft-call-structure.md`, `qe-hpsi-and-fft.md`,
+`qe-gamma-real-path.md` and this engine's code. A26/PFFT-3/P39A already fuse
+at plane scale; this experiment narrows the final turnaround to one row and
+uses immutable zero holes. P39A-4 resolved P39A-3's accuracy objection, not
+a proof of speed for this change. A11/PFFT-4 per-lane overhead and P3-FFT's
+neutral byte-removal screen remain counterevidence, explicitly retained.
+The new premise is the supplied reference-driver movement profile and the
+P3-FFT2 work order, not a repeat of lane batching, indexed transposes or MKL.
+
+The [single-run dev08 request](../performance/lanes/RSCF/fft2-dev08-request.md)
+contains validation scope, results and remote gates. Shared ledger/log,
+README evidence and dashboard updates belong to the master integration;
+this ticket edits only its owned accounting section and request.

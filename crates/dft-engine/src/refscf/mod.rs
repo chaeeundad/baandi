@@ -10,6 +10,7 @@
 pub mod broyden;
 pub mod density;
 pub mod driver;
+pub mod kept_hx;
 pub mod ladder;
 mod map;
 pub mod metric;

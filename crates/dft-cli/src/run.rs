@@ -1655,6 +1655,7 @@ fn execute_mode_inner(
     let mut reference_status = None;
     let mut reference_summary = None;
     let mut reference_ladder = Value::Null;
+    let mut reference_kept_hx = Value::Null;
     let mut reference_diagnostics = false;
     let mut reference_qe_clock = Vec::new();
     let mut reference_stages = None;
@@ -1748,6 +1749,13 @@ fn execute_mode_inner(
                     "measured":run.full_diagnostics,
                     "note":"exclusive reference Davidson stages; includes every SCF/retry/verification call; rank max with min_over_ranks; total process wall includes output"
                 }));
+                reference_kept_hx = json!({
+                    "cache_hits":run.kept_hx.cache_hits,
+                    "full_h_starting_columns_replaced":run.kept_hx.full_h_starting_columns_replaced,
+                    "delta_v_columns":run.kept_hx.delta_v_columns,
+                    "retained_slab_bytes_per_rank":run.kept_hx.retained_slab_bytes_per_rank,
+                    "scope":"whole run including coarse stage; slab bytes are per-rank high water, not RSS"
+                });
                 reference_summary = Some(json!({
                     "start_s":run.start_s,"materialize_s":run.output_s,"first_estimator_stop_iteration":run.first_reference_stop,
                     "peak_bytes_per_rank":run.peak_payload_bytes_per_rank,
@@ -1947,6 +1955,7 @@ fn execute_mode_inner(
         result["reference_scf"] = json!({"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
             "stop_to_verified_clock":"reference-scf-wall-1",
             "cutoff_ladder":reference_ladder,
+            "kept_hx":reference_kept_hx,
             "diagnostics":{"schema":"reference-scf-diagnostics-1",
                 "level":if reference_diagnostics {"full"} else {"lightweight"},
                 "setting":"profile.davidson_stages / BAANDI_DAVIDSON_STAGES",
@@ -3952,7 +3961,7 @@ mod tests {
             let input = dir.join(format!("{verify}.toml"));
             fs::write(
                 &input,
-                format!("{base}verify='{verify}'\n[performance]\nrefscf_ladder='on'\n"),
+                format!("{base}verify='{verify}'\n[performance]\nrefscf_ladder='on'\nrefscf_kept_hx='on'\n"),
             )
             .unwrap();
             let out = dir.join(verify);
@@ -3961,6 +3970,15 @@ mod tests {
                 serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
             assert_eq!(result["convergence"]["converged"], true);
             let r = &result["reference_scf"];
+            let kept = &r["kept_hx"];
+            let hits = kept["cache_hits"].as_u64().unwrap();
+            assert!(hits > 0);
+            assert_eq!(kept["full_h_starting_columns_replaced"], 3 * hits);
+            assert_eq!(kept["delta_v_columns"], 3 * hits);
+            let bytes = kept["retained_slab_bytes_per_rank"].as_array().unwrap();
+            assert_eq!(bytes.len(), 1);
+            assert!(bytes[0].as_u64().unwrap() > 0);
+            assert!(bytes[0].as_u64().unwrap() <= 32 * 1024 * 1024);
             let coarse = r["cutoff_ladder"]["iterations"].as_array().unwrap();
             let fine = r["iterations"].as_array().unwrap();
             assert!(!coarse.is_empty() && !fine.is_empty());

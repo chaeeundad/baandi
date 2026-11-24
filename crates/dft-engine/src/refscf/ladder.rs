@@ -17,6 +17,7 @@ pub const THRESHOLD_RATIO: f64 = 100.;
 pub const MAX_COARSE_MAPS: usize = 30;
 
 pub struct Report {
+    pub kept_hx: super::kept_hx::Report,
     pub coarse_records: Vec<Record>,
     pub coarse_setup: SetupTimings,
     /// Setup + maps + export + teardown; no coarse verification or public result assembly.
@@ -25,7 +26,9 @@ pub struct Report {
     pub coarse_stopped: bool,
 }
 
-pub(crate) struct Seed {
+/// Owned coarse state for exact injection before fine-stage reorthogonalization.
+#[derive(Clone)]
+pub struct Seed {
     pub basis: PlaneWaveBasis,
     pub grid: FftGridSpec,
     pub half: HalfSphere,
@@ -35,7 +38,7 @@ pub(crate) struct Seed {
     pub indices: Vec<usize>,
 }
 impl Seed {
-    pub(crate) fn inject<K: Collective>(
+    pub fn inject<K: Collective>(
         self,
         basis: &PlaneWaveBasis,
         grid: &FftGridSpec,

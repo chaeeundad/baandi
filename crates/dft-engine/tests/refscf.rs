@@ -3704,3 +3704,474 @@ fn ladder_verified_elongated() {
 fn ladder_verified_nonlocal() {
     ladder_fixture("nonlocal", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]], true);
 }
+
+#[test]
+fn fast_order_kept_hx_delta_and_invalidation() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::kept_hx::KeptHx, refstart};
+    use dft_numerics::{
+        RealMatrix,
+        switches::{Id, RunConfig},
+    };
+    use dft_solvers::ref_davidson::{self, Options};
+    assert!(!RunConfig::from_pairs(&[]).unwrap().on(Id::REFSCF_KEPT_HX));
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    dft_mpi::simulate(2, |comm| {
+        let _scope = RunConfig::from_pairs(&[("refscf_kept_hx", "on")])
+            .unwrap()
+            .enter();
+        let mut state = refstart::start(
+            refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            comm,
+        )
+        .unwrap();
+        let x = state.orbitals.clone();
+        let b = x.cols();
+        let offsets = state.operator.plane_grid_offsets();
+        let old: Vec<_> = offsets.iter().map(|&g| 0.03 * (g as f64).sin()).collect();
+        let new: Vec<_> = offsets
+            .iter()
+            .map(|&g| 0.04 * (0.7 * g as f64).cos())
+            .collect();
+        state.operator.set_owned_potential(&old, 1).unwrap();
+        let mut kept = KeptHx::new(true);
+        assert!(
+            kept.prepare(comm, &mut state.operator, &x, &old)
+                .unwrap()
+                .is_none()
+        );
+        let mut hx = RealMatrix::zeros(x.rows(), b).unwrap();
+        state.operator.apply_block(comm, &x, &mut hx).unwrap();
+        let mut density = vec![0.; old.len()];
+        kept.density(
+            comm,
+            &mut state.operator,
+            &x,
+            &hx,
+            &old,
+            &[2., 0., 0.],
+            cell.volume_bohr3(),
+            &mut density,
+        )
+        .unwrap();
+        state.operator.set_owned_potential(&new, 2).unwrap();
+        let reused = kept
+            .prepare(comm, &mut state.operator, &x, &new)
+            .unwrap()
+            .unwrap();
+        let mut direct = RealMatrix::zeros(x.rows(), b).unwrap();
+        state.operator.apply_block(comm, &x, &mut direct).unwrap();
+        let local = [
+            reused
+                .as_slice()
+                .iter()
+                .zip(direct.as_slice())
+                .map(|(a, b)| (a - b).powi(2))
+                .sum(),
+            direct.as_slice().iter().map(|v| v * v).sum(),
+        ];
+        let mut total = [0.; 2];
+        comm.tree_sum_f64(&local, &mut total).unwrap();
+        assert!(total[1] > 0.);
+        let relative = (total[0] / total[1]).sqrt();
+        assert!(relative <= 1e-13, "relative Frobenius error={relative:e}");
+        let mut opts = Options::new(b, 1e-12, b);
+        opts.max_iterations = 1;
+        let fresh =
+            ref_davidson::solve(comm, &mut state.operator, &x, &state.diagonal_static, opts)
+                .unwrap();
+        let hit = ref_davidson::solve_with_initial_hx(
+            comm,
+            &mut state.operator,
+            &x,
+            &state.diagonal_static,
+            opts,
+            Some(&reused),
+        )
+        .unwrap();
+        assert_eq!(fresh.record.setup.h_columns, b);
+        assert_eq!(hit.record.setup.h_columns, 0);
+        assert_eq!(fresh.record.h_columns - hit.record.h_columns, b);
+        let report = kept.report(comm).unwrap();
+        assert_eq!(report.cache_hits, 1);
+        assert_eq!(report.full_h_starting_columns_replaced, b);
+        assert_eq!(report.delta_v_columns, b);
+        assert!(
+            report
+                .retained_slab_bytes_per_rank
+                .iter()
+                .all(|&n| n > 0 && n <= dft_engine::refscf::kept_hx::SLAB_LIMIT_BYTES)
+        );
+        // A change on only one rank invalidates the entire distributed block.
+        kept.density(
+            comm,
+            &mut state.operator,
+            &x,
+            &direct,
+            &new,
+            &[2., 0., 0.],
+            cell.volume_bohr3(),
+            &mut density,
+        )
+        .unwrap();
+        let mut changed = x.clone();
+        if comm.rank() == 0 {
+            changed[(0, 0)] += 1e-8;
+        }
+        state.operator.set_owned_potential(&old, 3).unwrap();
+        let invalid = kept
+            .prepare(comm, &mut state.operator, &changed, &old)
+            .unwrap();
+        assert!(invalid.is_none());
+        let miss = ref_davidson::solve_with_initial_hx(
+            comm,
+            &mut state.operator,
+            &changed,
+            &state.diagonal_static,
+            opts,
+            invalid.as_ref(),
+        )
+        .unwrap();
+        assert_eq!(miss.record.setup.h_columns, b);
+        assert_eq!(kept.report(comm).unwrap().cache_hits, 1);
+        // An equal-shaped rebuilt operator must not accept the old token.
+        state.operator.set_owned_potential(&new, 4).unwrap();
+        kept.density(
+            comm,
+            &mut state.operator,
+            &x,
+            &direct,
+            &new,
+            &[2., 0., 0.],
+            cell.volume_bohr3(),
+            &mut density,
+        )
+        .unwrap();
+        let mut rebuilt = refstart::start(
+            refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            comm,
+        )
+        .unwrap();
+        rebuilt.operator.set_owned_potential(&old, 5).unwrap();
+        assert!(
+            kept.prepare(comm, &mut rebuilt.operator, &x, &old)
+                .unwrap()
+                .is_none()
+        );
+        // Rank-local invalidation also forces a collective miss everywhere.
+        kept.density(
+            comm,
+            &mut state.operator,
+            &x,
+            &direct,
+            &new,
+            &[2., 0., 0.],
+            cell.volume_bohr3(),
+            &mut density,
+        )
+        .unwrap();
+        if comm.rank() == 1 {
+            kept.invalidate();
+        }
+        state.operator.set_owned_potential(&old, 5).unwrap();
+        assert!(
+            kept.prepare(comm, &mut state.operator, &x, &old)
+                .unwrap()
+                .is_none()
+        );
+        // Supplied products cannot bypass rank or finite-input checks.
+        let zero = RealMatrix::zeros(x.rows(), b).unwrap();
+        assert!(
+            ref_davidson::solve_with_initial_hx(
+                comm,
+                &mut state.operator,
+                &zero,
+                &state.diagonal_static,
+                opts,
+                Some(&zero)
+            )
+            .is_err()
+        );
+        let mut invalid_hx = reused.clone();
+        if comm.rank() == 0 {
+            invalid_hx[(0, 0)] = f64::NAN;
+        }
+        assert!(
+            ref_davidson::solve_with_initial_hx(
+                comm,
+                &mut state.operator,
+                &x,
+                &state.diagonal_static,
+                opts,
+                Some(&invalid_hx)
+            )
+            .is_err()
+        );
+        assert!(
+            ref_davidson::solve_with_initial_hx(
+                comm,
+                &mut state.operator,
+                &x,
+                &state.diagonal_static,
+                opts,
+                (comm.rank() == 0).then_some(&reused)
+            )
+            .is_err()
+        );
+        if comm.rank() == 0 {
+            eprintln!(
+                "KEPT_HX relative_Frobenius={relative:.17e} hit_start_H=0 fresh_start_H={b} invalid_start_H={b} replaced={b} delta_V={b} slab_bytes={:?}",
+                report.retained_slab_bytes_per_rank
+            );
+        }
+    });
+}
+
+#[test]
+fn fast_order_ladder_exact_injection_and_verified_delivery() {
+    use dft_engine::{
+        GammaReal, ScfOptions, SpeciesPotential, Verification, refscf::ladder::Seed, refstart,
+    };
+    use dft_numerics::{RealMatrix, switches::RunConfig};
+    let pp = common::potential_with_atomic_start(2., 1.8, false, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let fine_options = ScfOptions {
+        cutoff_hartree: 2.,
+        bands: Some(3),
+        max_iterations: 120,
+        gamma_real: GammaReal::On,
+        verification: Verification::FixedPoint,
+        ..Default::default()
+    };
+    let coarse_options = ScfOptions {
+        cutoff_hartree: 1.,
+        ..fine_options.clone()
+    };
+    dft_mpi::simulate(2, |comm| {
+        let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+        let input = |options| refstart::StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options,
+        };
+        let mut coarse = refstart::start(input(&coarse_options), comm).unwrap();
+        let mut fine = refstart::start(input(&fine_options), comm).unwrap();
+        let gather = |n: usize, rows: &[usize], x: &RealMatrix| {
+            // Transport without addition so even signed-zero bits survive.
+            let width = n * (x.cols() + 1);
+            let mut local = vec![0.; width];
+            for (i, &r) in rows.iter().enumerate() {
+                local[r] = 1.;
+                for j in 0..x.cols() {
+                    local[n + j * n + r] = x[(i, j)];
+                }
+            }
+            let mut packets = vec![0.; width * comm.size()];
+            comm.allgatherv_f64(&local, &vec![width; comm.size()], &mut packets)
+                .unwrap();
+            let mut all = vec![0.; n * x.cols()];
+            for r in 0..n {
+                let owners: Vec<_> = packets.chunks_exact(width).filter(|p| p[r] == 1.).collect();
+                assert_eq!(owners.len(), 1);
+                for j in 0..x.cols() {
+                    all[j * n + r] = owners[0][n + j * n + r];
+                }
+            }
+            all
+        };
+        let nc = coarse.basis.vectors().len();
+        let nf = fine.basis.vectors().len();
+        let before = gather(nc, coarse.operator.local_rows(), &coarse.orbitals);
+        let mapping: Vec<_> = coarse
+            .basis
+            .vectors()
+            .iter()
+            .map(|g| {
+                fine.basis
+                    .vectors()
+                    .iter()
+                    .position(|f| f.miller == g.miller)
+                    .unwrap()
+            })
+            .collect();
+        let mut orc_map = vec![0; nc];
+        for p in 1..coarse.half.plus().len() {
+            let g = mapping[coarse.half.plus()[p] as usize];
+            let q = fine
+                .half
+                .plus()
+                .iter()
+                .position(|&v| v as usize == g)
+                .unwrap();
+            assert_eq!(
+                mapping[coarse.half.minus()[p] as usize],
+                fine.half.minus()[q] as usize
+            );
+            orc_map[2 * p - 1] = 2 * q - 1;
+            orc_map[2 * p] = 2 * q;
+        }
+        let dims = coarse.grid.dims();
+        let density: Vec<_> = coarse
+            .fields
+            .plane_offsets()
+            .iter()
+            .map(|&g| {
+                (2. + 0.1 * (TAU * (g / (dims[1] * dims[2])) as f64 / dims[0] as f64).cos())
+                    / cell.volume_bohr3()
+            })
+            .collect();
+        let density_g = coarse.fields.forward(comm, &density).unwrap();
+        let seed = Seed {
+            basis: coarse.basis,
+            grid: coarse.grid,
+            half: coarse.half,
+            rows: coarse.operator.local_rows().to_vec(),
+            orbitals: coarse.orbitals,
+            indices: coarse.fields.reciprocal_indices().to_vec(),
+            density_g,
+        };
+        let delivery_seed = seed.clone();
+        let (g, x) = seed
+            .inject(
+                &fine.basis,
+                &fine.grid,
+                &fine.half,
+                fine.operator.local_rows(),
+                &fine.fields,
+                comm,
+            )
+            .unwrap();
+        // Inspect raw injected ORC values before any fine-stage QR or eigensolve.
+        let after = gather(nf, fine.operator.local_rows(), &x);
+        let mut expected = vec![0f64; nf * 3];
+        for b in 0..3 {
+            for (i, &r) in orc_map.iter().enumerate() {
+                expected[b * nf + r] = before[b * nc + i];
+            }
+        }
+        for (a, b) in after.iter().zip(&expected) {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        let mut gram_change = 0f64;
+        for i in 0..3 {
+            for j in 0..3 {
+                let a: f64 = (0..nc)
+                    .map(|r| before[i * nc + r] * before[j * nc + r])
+                    .sum();
+                let b: f64 = (0..nf).map(|r| after[i * nf + r] * after[j * nf + r]).sum();
+                gram_change = gram_change.max((a - b).abs());
+            }
+        }
+        assert!(gram_change <= 1e-12);
+        for b in 0..3 {
+            let mut complex = vec![C::default(); nf];
+            fine.half
+                .unpack(&after[b * nf..(b + 1) * nf], &mut complex)
+                .unwrap();
+            for (&p, &m) in fine.half.plus().iter().zip(fine.half.minus()).skip(1) {
+                assert_eq!(
+                    complex[p as usize].re.to_bits(),
+                    complex[m as usize].re.to_bits()
+                );
+                assert_eq!(
+                    (-complex[p as usize].im).to_bits(),
+                    complex[m as usize].im.to_bits()
+                );
+            }
+        }
+        let planes = fine.fields.inverse(comm, &g).unwrap();
+        let local = planes.iter().sum::<f64>() * cell.volume_bohr3()
+            / fine.grid.dims().iter().product::<usize>() as f64;
+        let mut charge = [0.];
+        comm.tree_sum_f64(&[local], &mut charge).unwrap();
+        let charge_error = (charge[0] - 2.).abs();
+        assert!(charge_error <= 1e-12);
+        let run = |ladder| {
+            let _scope =
+                RunConfig::from_pairs(&[("refscf_ladder", ladder), ("refscf_kept_hx", ladder)])
+                    .unwrap()
+                    .enter();
+            let run = dft_engine::refscf::driver::run_with(
+                input(&fine_options),
+                Profile {
+                    threshold_ry: 1e-12,
+                    ..Default::default()
+                },
+                comm,
+            )
+            .unwrap();
+            assert!(run.outcome.converged, "{}", run.exit_reason);
+            assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+            assert_eq!(run.kept_hx.cache_hits > 0, ladder == "on");
+            assert_eq!(
+                run.kept_hx.full_h_starting_columns_replaced,
+                3 * run.kept_hx.cache_hits
+            );
+            run.outcome.result.energy.total_hartree()
+        };
+        let direct = run("off");
+        let ladder = run("on");
+        let seeded = {
+            let _scope = RunConfig::from_pairs(&[("refscf_kept_hx", "on")])
+                .unwrap()
+                .enter();
+            let run = dft_engine::refscf::driver::run_seeded_with(
+                input(&fine_options),
+                Profile {
+                    threshold_ry: 1e-12,
+                    ..Default::default()
+                },
+                comm,
+                delivery_seed,
+            )
+            .unwrap();
+            assert!(run.outcome.converged, "{}", run.exit_reason);
+            assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+            assert!(run.kept_hx.cache_hits > 0);
+            run.outcome.result.energy.total_hartree()
+        };
+        let seeded_delta = (direct - seeded).abs();
+        assert!(
+            seeded_delta <= 1e-10,
+            "inspected seed-direct={seeded_delta:e} Ha"
+        );
+        let delta = (direct - ladder).abs();
+        assert!(delta <= 1e-10, "ladder-direct={delta:e} Ha");
+        if comm.rank() == 0 {
+            eprintln!(
+                "LADDER copied_and_zero_bits=identical charge_error={charge_error:.17e} e max_Gram_change={gram_change:.17e} delta_E={delta:.17e} Ha inspected_seed_delta_E={seeded_delta:.17e} Ha direct_E={direct:.17e} Ha ladder_E={ladder:.17e} Ha"
+            );
+        }
+    });
+}

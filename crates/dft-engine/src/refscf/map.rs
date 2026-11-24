@@ -1,5 +1,5 @@
 //! Owned-row map for the reference loop. Explicit kernels and call-owned
-//! options only: no ScfProblem, session, retained-H or legacy solver dispatcher.
+//! options only: no ScfProblem, session or legacy solver dispatcher.
 use super::numerical;
 use crate::{Functional, PhaseTimings, ScfError, energy::EnergyAudit, refstart::StartState};
 use dft_geometry::Cell;
@@ -119,6 +119,7 @@ pub(super) fn evaluate<K: Collective>(
     cache: &mut Option<(Vec<f64>, Fields)>,
     lean: bool,
     rmm: Option<dft_solvers::ref_rmm::Options>,
+    kept: &mut super::kept_hx::KeptHx,
 ) -> Result<Map, ScfError> {
     let mut timings = PhaseTimings::default();
     let clock = Instant::now();
@@ -141,9 +142,15 @@ pub(super) fn evaluate<K: Collective>(
     );
     let mut op_potential = Vec::new();
     planes.a_to_b(comm, &potential, &mut op_potential)?;
+    let epoch = state
+        .operator
+        .owned_epoch()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or(ScfError::InvalidInput("reference potential epoch overflow"))?;
     state
         .operator
-        .set_owned_potential(&op_potential, 0)
+        .set_owned_potential(&op_potential, epoch)
         .map_err(numerical)?;
     timings.potential = clock.elapsed();
     let clock = Instant::now();
@@ -155,6 +162,14 @@ pub(super) fn evaluate<K: Collective>(
     options.first_step = first_step;
     options.return_hx = true;
     options.profile = diagnostics;
+    if rmm.is_some() {
+        kept.invalidate();
+    }
+    let initial_hx = if rmm.is_none() {
+        kept.prepare(comm, &mut state.operator, &state.orbitals, &op_potential)?
+    } else {
+        None
+    };
     let solve = if let Some(mut rmm) = rmm {
         // The RMM preconditioner needs bare t_G, not Davidson's full H diagonal.
         let kinetic: Vec<_> = state
@@ -176,12 +191,13 @@ pub(super) fn evaluate<K: Collective>(
         rmm.profile = options.profile;
         dft_solvers::ref_rmm::solve(comm, &mut state.operator, &state.orbitals, &kinetic, rmm)?
     } else {
-        ref_davidson::solve(
+        ref_davidson::solve_with_initial_hx(
             comm,
             &mut state.operator,
             &state.orbitals,
             &diagonal,
             options,
+            initial_hx.as_ref(),
         )?
     };
     // An exhausted inner solve must never be silently labelled converged.
@@ -189,16 +205,19 @@ pub(super) fn evaluate<K: Collective>(
     timings.diagonalization = clock.elapsed();
     let clock = Instant::now();
     let mut op_density = vec![0.; state.operator.plane_points()];
-    state
-        .operator
-        .band_density_sum(
-            comm,
-            &solve.eigenvectors,
-            occupations,
-            cell.volume_bohr3(),
-            &mut op_density,
-        )
-        .map_err(numerical)?;
+    kept.density(
+        comm,
+        &mut state.operator,
+        &solve.eigenvectors,
+        solve.hx.as_ref().expect("requested HX"),
+        &op_potential,
+        occupations,
+        cell.volume_bohr3(),
+        &mut op_density,
+    )?;
+    if rmm.is_some() {
+        kept.invalidate();
+    }
     let mut density = Vec::new();
     planes.b_to_a(comm, &op_density, &mut density)?;
     timings.density = clock.elapsed();

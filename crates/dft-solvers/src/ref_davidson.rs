@@ -13,8 +13,8 @@
 mod accounting;
 mod workspace;
 pub use accounting::{
-    APPLY_H_STAGES, ApplyH, Communication, Gemm, Iteration, Record, STAGES, apply_h_active,
-    record_apply_h, take_apply_h_solves,
+    APPLY_H_STAGES, ApplyH, Communication, Gemm, Iteration, QeClockScope, QeCounters, Record,
+    STAGES, apply_h_active, qe_clock_end, qe_clock_start, record_apply_h, take_apply_h_solves,
 };
 use accounting::{Counted, clock, elapsed};
 use workspace::Workspace;
@@ -273,6 +273,17 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     record.communication = c.snapshot();
     record.total_seconds = elapsed(total_clock);
     record.summarize();
+    if options.profile {
+        accounting::qe_clock_add(5, record.total_seconds, 1);
+        for r in std::iter::once(&record.setup)
+            .chain(&record.iterations)
+            .chain(std::iter::once(&record.finish))
+        {
+            accounting::qe_clock_add(6, r.seconds[0], r.h_calls);
+            accounting::qe_clock_add(7, r.seconds[3], r.reduced_solves);
+            accounting::qe_clock_add(8, r.seconds[2], 0);
+        }
+    }
     record.apply_h = apply_h_scope.finish();
     Ok(Solution {
         ritz_values_ha,
@@ -594,9 +605,16 @@ mod diagnostic_tests {
                 let mut options = Options::new(3, 1e-10, 2);
                 options.max_iterations = budget;
                 options.return_hx = true;
+                let qe_scope = QeClockScope::begin();
                 let light = solve(comm, &mut op, &initial, &diagonal, options).unwrap();
+                assert_eq!(qe_scope.snapshot().calls, [0; 9]);
                 options.profile = true;
                 let full = solve(comm, &mut op, &initial, &diagonal, options).unwrap();
+                let clocks = qe_scope.snapshot();
+                assert_eq!(clocks.calls[5], 1);
+                assert_eq!(clocks.calls[6], full.record.h_calls);
+                assert_eq!(clocks.calls[7], full.record.reduced_solves);
+                assert_eq!(clocks.seconds[5], full.record.total_seconds);
                 assert!(light.ritz_changes_ha.is_empty());
                 assert_eq!(light.ritz_changes_ha.capacity(), 0);
                 assert_eq!(light.record.total_seconds, 0.);

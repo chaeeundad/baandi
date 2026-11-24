@@ -1039,6 +1039,8 @@ impl DistributedRealHamiltonian {
         x: &RealMatrix,
         y: &mut RealMatrix,
     ) -> Result<(), DistributedRealError> {
+        use dft_solvers::ref_davidson::{qe_clock_end, qe_clock_start};
+        let qe_h = self.reference_profile.then(qe_clock_start).flatten();
         let n_loc = self.rows.len();
         let m = x.cols();
         if comm.size() != self.ranks
@@ -1059,6 +1061,7 @@ impl DistributedRealHamiltonian {
         // h_apply parts (BAANDI_DAVIDSON_STAGES=on; off: no clock, no-op).
         let mut parts = dft_numerics::work_timers::DistApply::begin();
 
+        let qe_local = self.reference_profile.then(qe_clock_start).flatten();
         // (1) mirror rows to the ranks that own the minus positions.
         let t0 = dft_numerics::stage_clock::start();
         let apply_clock = self.apply_clock();
@@ -1131,13 +1134,17 @@ impl DistributedRealHamiltonian {
         bump(Count::ForwardPairs, pairs);
         // (3) mirror h back, unpack; kinetic term.
         self.mirror_back_and_unpack(comm, m, y, Some(xs))?;
+        qe_clock_end(1, qe_local);
         parts.lap(dft_numerics::work_timers::DistPart::Local);
 
         // Nonlocal: P^T X local + tree_sum, replicated coupling, P W local.
         let t0 = dft_numerics::stage_clock::start();
         let count = self.count;
         if count > 0 {
+            let qe_projection = self.reference_profile.then(qe_clock_start).flatten();
             self.projections_reduced(comm, x)?;
+            qe_clock_end(3, qe_projection);
+            let qe_back = self.reference_profile.then(qe_clock_start).flatten();
             parts.lap(dft_numerics::work_timers::DistPart::Projection);
             let span = self
                 .lane
@@ -1191,6 +1198,7 @@ impl DistributedRealHamiltonian {
                 }
             }
             self.apply_elapsed(8, apply_clock);
+            qe_clock_end(4, qe_back);
         }
         stage_add(Stage::Nonlocal, t0);
         parts.lap(dft_numerics::work_timers::DistPart::Back);
@@ -1202,6 +1210,7 @@ impl DistributedRealHamiltonian {
         } as usize]
             .fetch_add(1, Ordering::Relaxed);
         bump(Count::Columns, m);
+        qe_clock_end(0, qe_h);
         Ok(())
     }
 
@@ -1278,12 +1287,17 @@ impl DistributedRealHamiltonian {
         }
         self.apply_elapsed(3, apply_clock);
         let apply_clock = self.apply_clock();
+        let qe_kinetic = self
+            .reference_profile
+            .then(dft_solvers::ref_davidson::qe_clock_start)
+            .flatten();
         if let Some(xs) = kinetic_x {
             for (j, (x, y)) in xs.iter().zip(y.as_mut_slice().iter_mut()).enumerate() {
                 *y += self.kinetic[j % n_loc] * x;
             }
         }
         self.apply_elapsed(4, apply_clock);
+        dft_solvers::ref_davidson::qe_clock_end(2, qe_kinetic);
         stage_add(Stage::PackUnpack, t0);
         Ok(())
     }
@@ -1940,8 +1954,21 @@ mod lane_identity_tests {
                 let mut options = Options::new(bands, 1e-7, bands);
                 options.profile = mode != "off";
                 options.return_hx = true;
+                let qe_scope = (mode != "off").then(dft_solvers::ref_davidson::QeClockScope::begin);
                 let fft_before = dft_numerics::real::fft_profile::snapshot();
                 let result = solve(&comm, &mut op, &x, &diagonal, options).unwrap();
+                if let Some(scope) = &qe_scope {
+                    let clocks = scope.snapshot();
+                    for slot in [0, 1, 2, 3, 4, 6] {
+                        assert_eq!(clocks.calls[slot], result.record.h_calls);
+                        assert!(clocks.seconds[slot] > 0.);
+                    }
+                    assert!(clocks.seconds[0] >= clocks.seconds[1]);
+                    assert!(clocks.seconds[1] >= clocks.seconds[2]);
+                    assert_eq!(clocks.calls[5], 1);
+                } else {
+                    assert!(dft_solvers::ref_davidson::qe_clock_start().is_none());
+                }
                 let bits = result
                     .eigenvalues
                     .iter()

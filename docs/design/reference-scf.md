@@ -1374,3 +1374,61 @@ and their absolute difference per attempt, and retain the old diagnostic
 fields. `refscf-check --stop-to-verified` accepts either judgment without
 reinterpreting its recorded verdict. `REFSCF_VERIFY_ENERGY=off` restores the
 old acceptance rule and configured gates; the legacy driver is unaffected.
+
+## QE-matched clock table
+
+P3-QECLOCK, diagnosis only. This map uses the own-words notes
+`research/qe-study/qe-stage-by-stage.md`, `qe-scf-cycle.md`,
+`qe-hpsi-and-fft.md`, and `davidson-iteration-structure-gamma.md`; implementers
+have not read QE source. Scope is NC, unpolarized real Gamma, fixed occupations,
+no symmetry, reference driver. Exact means the same mathematical operation
+and enclosing work, not identical algorithms, number of calls, or trajectory.
+
+With `BAANDI_DAVIDSON_STAGES=on`, `reference_scf.qe_clock` is an array of
+`{name, wall_s, calls, rank, boundary}` on rank 0 only. CPU seconds are **not
+measured**: the console says so, rather than labelling wall as CPU. Seconds are
+rank 0's local elapsed wall, including waits inside each operation; counts
+are invocations on that rank, not columns, pairs, iterations, or sums over
+ranks. Existing Davidson max/min statistics remain unchanged in their original
+location. No new barriers or timing collectives are introduced. The new fixed
+counter scope is absent when the switch is off: no clock reads, TLS counter
+access, hot-loop allocation, table allocation, serialization or console table
+on that path (cached-flag/Option branches remain; literal zero instructions is
+not claimed). The always-on pre-existing phase clocks are unchanged.
+
+| Requested QE line | QE includes | BAANDI boundary and status |
+|---|---|---|
+| `init_run` | Setup of grids, tables, initial fields and starting-wavefunction rotation, after input/setup decisions | **Unavailable/inexact.** `baandi_setup` is driver entry through reference state, density-plan and mixer workspace setup; CLI preflight/UPF parsing and some basis work have different ownership. Do not relabel it `init_run`. |
+| `electrons` | Entire electronic SCF procedure, including band driver, density, mixing, potentials, convergence and energy bookkeeping | **Unavailable/inexact.** `baandi_scf` spans first map entry through final map end, minus verification intervals. It includes direct energy audits and recovery work with no QE equivalent. It is not an `electrons` proxy. |
+| `c_bands` | Band-driver setup, diagonalization/re-entry for every k, threshold/convergence handling | **Unavailable/inexact.** `baandi_solve` sums existing map diagonalization intervals (options plus solver); diagonal setup is in the potential interval and retries interleave density/audits. Calls count actual map evaluations, including retries/redo, not `c_bands` invocations. |
+| `h_psi` | Complete kinetic, local-potential and nonlocal H application to one block | **Exact.** Whole distributed real operator application, including mirror exchanges, pair transforms/transposes, kinetic, projection reduction, coupling and back accumulation; one call per nonempty block. Includes atomic-start H as well as SCF H. |
+| `vloc_psi` | Pair packing, inverse FFT, real-space local-potential multiply, forward FFT and unpack | **Exact, derived on the same rank.** Mirror/pack through mirror-back/unpack, subtracting only the separately measured kinetic loop inside that interval. All communication and FFTs remain inside. One call per nonempty H block. |
+| `fftw` | Wavefunction FFT calls (both directions), also reached outside H, e.g. density/startup | **Unavailable/inexact.** Fused distributed transform instrumentation includes other work and batched calls have a different count unit. Neither sum of FFT kernels nor pair counts is emitted as `fftw`. Existing detailed FFT diagnostics remain available. |
+| `calbec` (`h_psi:calbec` in the QE printout) | H's projector overlaps and their reduction | **Exact** for H-scoped QE label only. Local projection plus deterministic rank sum; one call per H block with projectors, even on a rank with zero local rows. An unqualified global QE `calbec` label may contain other work; the parser marks it inexact. |
+| `add_vuspsi` | Nonlocal coupling of overlaps, back product and accumulation into H psi | **Exact.** Coupling, local projector back product and addition; one call per H block with projectors. Audit-only nonlocal energy calls are excluded. |
+| `regterg` | One complete real Davidson solve, including starting H, borders, reduced problems, corrections, contractions and returned vectors | **Exact.** Reference solver's inclusive solve interval (including workspace/trace setup and finish rotation). Calls count solver invocations, including re-entry and first-step redo; no verification calls. |
+| `rdiaghg` | Full generalized reduced eigensolve: overlap Cholesky, standard-form reduction, eigenproblem, back transform and root broadcast | **Unavailable/inexact.** Factor updates/pivot repair occur separately from the standard reduced eigensolve. `baandi_reduced_standard` is the latter interval, including transforms and broadcasts, with logical solve calls; it must not stand in for `rdiaghg`. |
+| Davidson remainder: `regterg - h_psi - rdiaghg` | Only children nested within those Davidson invocations | **Unavailable/inexact.** The matching generalized child boundary is absent; moreover QE's printed global H and reduced clocks include startup. Never subtract global clocks from a parent. `baandi_davidson_remainder` subtracts solver-internal H and standard-reduced intervals from its own total, so it still includes factor work; denominator is Davidson invocations. |
+| `sum_band` | Occupations/band sum and charge accumulation, transforms to reciprocal space and applicable symmetrization | **Unavailable/inexact.** `baandi_density` is real-space band accumulation and field-layout exchange only. Reciprocal transform and energy/occupation work are elsewhere; no sum of mixed phase buckets is labelled exact. |
+| `v_of_rho` | Hartree/XC potential and associated energies, including final output-density evaluation | **Unavailable/inexact.** `baandi_input_potential` additionally assembles ionic potential, Hamiltonian diagonal and field redistribution, while output-density Hartree/XC is buried in energy audit and mixed-density fields in correction. It is not a complete potential clock. |
+| `mix_rho` | Residual/error metric, history solve/update and density mixing | **Unavailable/inexact.** `baandi_mix` measures history update plus inverse transform/handoff; the stopping metric is evaluated separately before verification and on redo. It is not a QE mixing proxy. |
+| `verification` | No counterpart | **BAANDI only.** All attempted independent checks, including failures; skipped checks have no call. Failed checks reused as later maps are charged exactly once here. |
+| `output` | No counterpart with this boundary | **BAANDI only.** Materialization plus CLI output preparation/writes through the boundary just before final results serialization. Excludes final JSON write, console delivery and process/MPI exit. External delivered wall includes them. |
+
+Unavailable QE rows have `wall_s: null, calls: null, boundary: "unavailable"`,
+never fabricated zeroes. BAANDI-only measured alternatives have their own names.
+Measured exact rows use `boundary: "exact"`. All H/solver rows cover setup plus
+SCF, excluding verification snapshots on the **same rank**; verification is
+reported separately, never removed from production delivered wall. Rows overlap
+(parent/child), so adding them does not reconstruct total wall. The solver's
+H interval includes its operator dispatch wrapper; operator `h_psi` excludes
+that wrapper, which remains in the solver remainder.
+
+The parser `scripts/qe_clock_compare.py` reads one full QE stdout and rank-zero
+BAANDI results, emits seconds, calls and seconds/call side by side, preserves
+missing rows and QE's printed precision, and rejects conflicting duplicate QE
+rows (concatenated runs). It never computes speed ratios or fabricates a
+remainder from global clocks. Scope/condition identity requires the manifest
+review described in [the dev08 request](../performance/lanes/RSCF/qeclock-dev08-request.md).
+Headline comparisons keep detailed profiling **off**; no performance default
+or optimization is adopted by adding these clocks.

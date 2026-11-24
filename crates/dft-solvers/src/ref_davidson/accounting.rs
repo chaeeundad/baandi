@@ -308,3 +308,107 @@ pub fn record_apply_h(
         }
     });
 }
+
+/// Run-owned rank-local clocks. Fixed storage; no allocation in operator calls.
+/// Slots: H, local including kinetic, kinetic, projection, back, Davidson,
+/// Davidson H, reduced standard solve, overlap factor.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct QeCounters {
+    pub seconds: [f64; 9],
+    pub calls: [usize; 9],
+}
+impl QeCounters {
+    pub fn without(mut self, other: Self) -> Self {
+        for i in 0..9 {
+            self.seconds[i] -= other.seconds[i];
+            self.calls[i] -= other.calls[i];
+        }
+        self
+    }
+    pub fn add(&mut self, other: Self) {
+        for i in 0..9 {
+            self.seconds[i] += other.seconds[i];
+            self.calls[i] += other.calls[i];
+        }
+    }
+}
+thread_local! {
+    static QE_CLOCKS: Cell<Option<QeCounters>> = const { Cell::new(None) };
+}
+/// Installed by the reference driver only, including startup; dropped on errors.
+// A thread-local scope must be dropped on the thread that installed it.
+pub struct QeClockScope(std::marker::PhantomData<std::rc::Rc<()>>);
+impl QeClockScope {
+    pub fn begin() -> Self {
+        QE_CLOCKS.with(|s| {
+            assert!(s.get().is_none(), "nested QE clock scope");
+            s.set(Some(QeCounters::default()));
+        });
+        Self(std::marker::PhantomData)
+    }
+    pub fn snapshot(&self) -> QeCounters {
+        QE_CLOCKS.with(|s| s.get().expect("active QE clock scope"))
+    }
+}
+impl Drop for QeClockScope {
+    fn drop(&mut self) {
+        QE_CLOCKS.with(|s| s.set(None));
+    }
+}
+/// Caller checks its cached diagnostic flag before consulting this scope.
+pub fn qe_clock_start() -> Option<Instant> {
+    QE_CLOCKS.with(|s| s.get().is_some().then(Instant::now))
+}
+pub fn qe_clock_end(slot: usize, start: Option<Instant>) {
+    if let Some(start) = start {
+        qe_clock_add(slot, start.elapsed().as_secs_f64(), 1);
+    }
+}
+pub fn qe_clock_add(slot: usize, seconds: f64, calls: usize) {
+    QE_CLOCKS.with(|s| {
+        if let Some(mut v) = s.get() {
+            v.seconds[slot] += seconds;
+            v.calls[slot] += calls;
+            s.set(Some(v));
+        }
+    });
+}
+
+#[cfg(test)]
+mod qe_clock_tests {
+    use super::*;
+
+    #[test]
+    fn run_scope_is_inert_outside_run_and_cleans_up_on_error() {
+        assert!(qe_clock_start().is_none());
+        qe_clock_add(0, 10., 2);
+        {
+            let scope = QeClockScope::begin();
+            assert_eq!(scope.snapshot().calls, [0; 9]);
+            qe_clock_add(0, 3., 2);
+            let before = scope.snapshot();
+            qe_clock_add(0, 1., 1);
+            let verification = scope.snapshot().without(before);
+            let ordinary = scope.snapshot().without(verification);
+            assert_eq!(ordinary.calls[0], 2);
+            assert_eq!(ordinary.seconds[0], 3.);
+            // Drop is also the early-return/error cleanup path.
+        }
+        assert!(qe_clock_start().is_none());
+        let scope = QeClockScope::begin();
+        assert_eq!(scope.snapshot().calls, [0; 9]);
+    }
+
+    #[test]
+    fn ranks_keep_local_wall_and_invocation_counts() {
+        let ranks = dft_mpi::simulate(3, |comm| {
+            let scope = QeClockScope::begin();
+            qe_clock_add(0, comm.rank() as f64 + 0.5, comm.rank() + 1);
+            scope.snapshot()
+        });
+        for (rank, row) in ranks.iter().enumerate() {
+            assert_eq!(row.calls[0], rank + 1);
+            assert_eq!(row.seconds[0], rank as f64 + 0.5);
+        }
+    }
+}

@@ -593,6 +593,8 @@ table! {
     // Adopted 2026-11-26 (dev08 one-run: verification H columns -25 to -27%, si128 verification 4.03 -> 3.72 s; criterion unchanged).
     REFSCF_VERIFY_WARM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-VERWARM: reuse kept HX for independent verification and preserve candidate products for recovery; requires REFSCF_KEPT_HX; tolerance unchanged";
+    REFSCF_KEPT_RECOMPUTE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; requires REFSCF_KEPT_HX";
 }
 
 struct Resolved {

@@ -552,6 +552,45 @@ pub fn dgemm_at(
     ldb: usize,
     c: &mut [f64],
 ) -> Result<(), Error> {
+    dgemm_update_at(site, transpose_a, m, n, k, a, lda, b, ldb, c, false)
+}
+
+/// C += op(A) B in one sequential DGEMM (beta=1). C is contiguous m by n.
+/// Unlike replacement, a zero reduction length preserves C, including its bits.
+/// Dimensions/strides must fit LP64. For a nonempty product, A and B must
+/// contain every addressed element and lda/ldb must cover their stored rows.
+/// C must contain exactly m*n initialized elements; Rust borrowing excludes
+/// aliasing with the operands. Invalid dimensions fail before calling BLAS.
+#[allow(clippy::too_many_arguments)]
+pub fn dgemm_add_at(
+    site: DgemmSite,
+    transpose_a: bool,
+    m: usize,
+    n: usize,
+    k: usize,
+    a: &[f64],
+    lda: usize,
+    b: &[f64],
+    ldb: usize,
+    c: &mut [f64],
+) -> Result<(), Error> {
+    dgemm_update_at(site, transpose_a, m, n, k, a, lda, b, ldb, c, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dgemm_update_at(
+    site: DgemmSite,
+    transpose_a: bool,
+    m: usize,
+    n: usize,
+    k: usize,
+    a: &[f64],
+    lda: usize,
+    b: &[f64],
+    ldb: usize,
+    c: &mut [f64],
+    add: bool,
+) -> Result<(), Error> {
     let _ = crate::keep::anchor();
     let limit = c_int::MAX as usize;
     if m > limit || n > limit || k > limit || lda > limit || ldb > limit {
@@ -561,7 +600,9 @@ pub fn dgemm_at(
         return Err(Error::Dimension);
     }
     if m == 0 || n == 0 || k == 0 {
-        c.fill(0.0);
+        if !add {
+            c.fill(0.0);
+        }
         return Ok(());
     }
     let (a_rows, a_cols) = if transpose_a { (k, m) } else { (m, k) };
@@ -579,7 +620,8 @@ pub fn dgemm_at(
     // SAFETY: checked LP64 dimensions; A and B hold at least the addressed
     // (cols - 1) * ld + rows elements with ld >= rows; C is exactly m x n
     // contiguous with ldc = m >= 1; immutable inputs cannot overlap the uniquely
-    // borrowed output; the scalars are passed by value.
+    // borrowed output; C contains initialized f64 values when beta=1 reads it;
+    // the scalars are passed by value. No pointer escapes this synchronous call.
     unsafe {
         cblas_dgemm(
             102,
@@ -593,7 +635,7 @@ pub fn dgemm_at(
             lda as c_int,
             b.as_ptr(),
             ldb as c_int,
-            0.0,
+            if add { 1.0 } else { 0.0 },
             c.as_mut_ptr(),
             m as c_int,
         );

@@ -298,7 +298,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::M2_OWNED_INPUT), Value::Choice("off"));
     assert_eq!(value(Id::REFERENCE_SCF), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 158);
+    assert_eq!(TABLE.len(), 160);
 }
 
 #[test]

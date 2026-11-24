@@ -158,6 +158,8 @@ pub struct DistributedRealHamiltonian {
     /// `BAANDI_M2_DGEMM=on`: projector products through the per-panel dgemm route.
     dgemm: bool,
     single_projection: bool,
+    fuse_coupling: bool,
+    back_accum: bool,
     reference_profile: bool,
     apply_times: Option<[f64; 9]>,
     lane: lane_profile::Profile,
@@ -425,13 +427,24 @@ impl DistributedRealHamiltonian {
             hrecv: vec![0.; ranks * max_items * 2 * pairs],
             projections: RealMatrix::zeros(count, capacity)?,
             reduced: RealMatrix::zeros(count, capacity)?,
-            weights: RealMatrix::zeros(count, capacity)?,
+            weights: RealMatrix::zeros(
+                if dft_numerics::switches::on(dft_numerics::switches::Id::NONLOCAL_FUSE_COUPLING) {
+                    0
+                } else {
+                    count
+                },
+                capacity,
+            )?,
             image: RealMatrix::zeros(n_loc, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
             dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
             single_projection: dft_numerics::switches::on(
                 dft_numerics::switches::Id::NONLOCAL_SINGLE_GEMM,
             ),
+            fuse_coupling: dft_numerics::switches::on(
+                dft_numerics::switches::Id::NONLOCAL_FUSE_COUPLING,
+            ),
+            back_accum: dft_numerics::switches::on(dft_numerics::switches::Id::NONLOCAL_BACK_ACCUM),
             reference_profile: dft_numerics::switches::on(
                 dft_numerics::switches::Id::DAVIDSON_STAGES,
             ),
@@ -1163,6 +1176,14 @@ impl DistributedRealHamiltonian {
                 .lane
                 .start(lane_profile::Stage::Coupling, n_loc, count, m);
             let apply_clock = self.apply_clock();
+            // The local projection is dead after tree_sum. Fuse the coupling
+            // result into that storage, retaining the global Q and the exact
+            // atom/band/j/k arithmetic. No copy of W or in-place DQ hazard.
+            let weights = if self.fuse_coupling {
+                &mut self.projections
+            } else {
+                &mut self.weights
+            };
             for atom in &self.coupling {
                 for band in 0..m {
                     for j in 0..atom.count {
@@ -1171,7 +1192,7 @@ impl DistributedRealHamiltonian {
                             value += atom.values[j * atom.count + k]
                                 * self.reduced[(atom.start + k, band)];
                         }
-                        self.weights[(atom.start + j, band)] = value;
+                        weights[(atom.start + j, band)] = value;
                     }
                 }
             }
@@ -1179,7 +1200,30 @@ impl DistributedRealHamiltonian {
             drop(span);
             let apply_clock = self.apply_clock();
             let span = self.lane.start(lane_profile::Stage::Back, n_loc, count, m);
-            if n_loc > 0 && self.dgemm {
+            let weights = if self.fuse_coupling {
+                &self.projections
+            } else {
+                &self.weights
+            };
+            let accumulated = n_loc > 0
+                && self.dgemm
+                && self.back_accum
+                && self.gemm.try_multiply_slices_single_add(
+                    GemmSite::Other,
+                    self.projectors.as_slice(),
+                    n_loc,
+                    count,
+                    n_loc,
+                    &weights.as_slice()[..count * m],
+                    m,
+                    count,
+                    y,
+                )?;
+            if accumulated {
+                // HX already contains local+kinetic. Beta=1 consumed that value;
+                // neither the image buffer nor a separate Add pass is needed.
+                drop(span);
+            } else if n_loc > 0 && self.dgemm {
                 self.gemm.multiply_slices_wide_into(
                     GemmSite::Other,
                     self.projectors.as_slice(),
@@ -1187,7 +1231,7 @@ impl DistributedRealHamiltonian {
                     count,
                     n_loc,
                     RealOp::Identity,
-                    &self.weights.as_slice()[..count * m],
+                    &weights.as_slice()[..count * m],
                     m,
                     count,
                     self.image.as_mut().subcols_mut(0, m),
@@ -1201,7 +1245,7 @@ impl DistributedRealHamiltonian {
                 self.gemm.multiply_into(
                     self.projectors.as_ref(),
                     RealOp::Identity,
-                    self.weights.as_ref().subcols(0, m),
+                    weights.as_ref().subcols(0, m),
                     self.image.as_mut().subcols_mut(0, m),
                 )?;
                 drop(span);
@@ -1811,6 +1855,7 @@ mod lane_identity_tests {
             // More than 256 rows on rank 0 at P=1: cross the reduction-panel boundary.
             [[20., 0., 0.], [0., 20., 0.], [0., 0., 20.]],
             [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+            [[2., 0., 0.], [0., 2., 0.], [0., 0., 2.]],
             [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
             [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
         ] {
@@ -1860,10 +1905,21 @@ mod lane_identity_tests {
                     let mut worst = 0.0_f64;
                     for width in [0, 1, 2, 5, 17] {
                         let mut baseline: Option<RealMatrix> = None;
-                        for single in ["off", "on"] {
+                        let mut unfused: Option<RealMatrix> = None;
+                        let mut unfused_energies = Vec::new();
+                        for (single, fuse, back) in [
+                            ("off", "off", "off"),
+                            ("on", "off", "off"),
+                            ("on", "on", "off"),
+                            ("on", "off", "on"),
+                            ("on", "on", "on"),
+                        ] {
                             let cfg = RunConfig::from_pairs(&[
                                 ("nonlocal_single_gemm", single),
+                                ("nonlocal_fuse_coupling", fuse),
+                                ("nonlocal_back_accum", back),
                                 ("m2_dgemm", "on"),
+                                ("mkl_dgemm", "on"),
                             ])
                             .unwrap();
                             let _scope = cfg.enter();
@@ -1873,7 +1929,7 @@ mod lane_identity_tests {
                                 17,
                                 comm.rank(),
                                 ranks,
-                                WorkerPool::new(1).unwrap(),
+                                WorkerPool::new(if fuse == "on" { 3 } else { 1 }).unwrap(),
                             )
                             .unwrap();
                             let mut x = RealMatrix::zeros(op.local_len(), width).unwrap();
@@ -1883,7 +1939,36 @@ mod lane_identity_tests {
                                 }
                             }
                             let mut y = RealMatrix::zeros(op.local_len(), width).unwrap();
+                            op.image.as_mut_slice().fill(f64::NAN);
                             op.apply_block(comm, &x, &mut y).unwrap();
+                            if back == "on" && dft_numerics::MKL_BACKEND {
+                                assert!(op.image.as_slice().iter().all(|v| v.is_nan()));
+                            }
+                            let mut energies = vec![0.; width];
+                            op.nonlocal_band_energies(comm, &x, &mut energies).unwrap();
+                            if fuse == "on" {
+                                assert!(op.weights.as_slice().is_empty());
+                                for (&a, &b) in unfused
+                                    .as_ref()
+                                    .unwrap()
+                                    .as_slice()
+                                    .iter()
+                                    .zip(y.as_slice())
+                                {
+                                    assert_eq!(a.to_bits(), b.to_bits());
+                                }
+                                assert_eq!(energies, unfused_energies);
+                                // An energy audit overwrites the recycled local
+                                // projection. A subsequent H must still rebuild W.
+                                let mut again = RealMatrix::zeros(op.local_len(), width).unwrap();
+                                op.apply_block(comm, &x, &mut again).unwrap();
+                                for (&a, &b) in y.as_slice().iter().zip(again.as_slice()) {
+                                    assert_eq!(a.to_bits(), b.to_bits());
+                                }
+                            } else if single == "on" {
+                                unfused = Some(y.clone());
+                                unfused_energies = energies;
+                            }
                             if let Some(base) = &baseline {
                                 for (&a, &b) in base.as_slice().iter().zip(y.as_slice()) {
                                     worst = worst.max((a - b).abs());
@@ -1906,7 +1991,7 @@ mod lane_identity_tests {
             }
         }
         eprintln!(
-            "P3-NL: {comparisons} rank/block comparisons, max H component delta {worst:e} Ha"
+            "P3-ADDV: {comparisons} rank/block fixtures, projection and coupling arms, max H component delta {worst:e} Ha"
         );
     }
 

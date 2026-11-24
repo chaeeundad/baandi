@@ -548,6 +548,10 @@ table! {
     // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
     REFSCF_LAZY_OUTPUT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-NL: reference driver retains owned orbitals when the caller requests lazy delivery; requires M2_LAZY_RESULT and a registered MPI communicator; default off pending dev08";
+    NONLOCAL_FUSE_COUPLING: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-ADDV: store DQ in the dead local projection buffer after rank reduction, omitting separate W storage; bit-identical, default off pending dev08";
+    NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-ADDV: one sequential MKL P W directly into HX with beta=1; requires M2_DGEMM and MKL_DGEMM, rounding class, default off pending dev08";
 }
 
 struct Resolved {

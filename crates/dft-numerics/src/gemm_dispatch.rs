@@ -51,8 +51,10 @@ pub enum Route {
     PureDirect = 9,
     /// Streaming dot / update kernels of the NARROW switches (not a GEMM).
     Narrow = 10,
+    /// One sequential MKL call over the complete local reduction.
+    MklSingle = 11,
 }
-pub const ROUTES: [&str; 11] = [
+pub const ROUTES: [&str; 12] = [
     "mkl",
     "mkl_wide",
     "pure_build",
@@ -64,6 +66,7 @@ pub const ROUTES: [&str; 11] = [
     "pure_layout",
     "pure_direct",
     "narrow",
+    "mkl_single",
 ];
 const S: usize = SITES.len();
 const R: usize = ROUTES.len();
@@ -117,7 +120,7 @@ pub struct DispatchRow {
 impl DispatchRow {
     /// Whether this route ran the vendor library.
     pub fn is_mkl(&self) -> bool {
-        self.route == "mkl" || self.route == "mkl_wide"
+        matches!(self.route, "mkl" | "mkl_wide" | "mkl_single")
     }
 }
 

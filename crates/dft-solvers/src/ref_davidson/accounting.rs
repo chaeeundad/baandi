@@ -50,6 +50,7 @@ pub struct Gemm {
 }
 #[derive(Clone, Debug)]
 pub struct Iteration {
+    pub(crate) profile: bool,
     /// Incoming band indices, zero-based. Flags are recomputed, never locked.
     pub active_bands: Vec<usize>,
     pub basis_before: usize,
@@ -69,8 +70,9 @@ pub struct Iteration {
     pub seconds: [f64; 8],
 }
 impl Iteration {
-    fn new(cap: usize) -> Self {
+    fn new(cap: usize, profile: bool) -> Self {
         Self {
+            profile,
             active_bands: Vec::with_capacity(cap),
             basis_before: 0,
             h_calls: 0,
@@ -88,6 +90,7 @@ impl Iteration {
         }
     }
     pub(crate) fn gemm(&mut self, stage: &'static str, m: usize, n: usize, k: usize) {
+        super::work::gemm(self.profile, stage, m, n, k);
         self.gemms.push(Gemm {
             stage,
             m,
@@ -118,9 +121,9 @@ impl Record {
     pub(crate) fn new(it: usize, cap: usize, profile: bool, placement: ReducedPlacement) -> Self {
         Self {
             apply_h: None,
-            setup: Iteration::new(cap),
-            iterations: (0..it).map(|_| Iteration::new(cap)).collect(),
-            finish: Iteration::new(cap),
+            setup: Iteration::new(cap, profile),
+            iterations: (0..it).map(|_| Iteration::new(cap, profile)).collect(),
+            finish: Iteration::new(cap, profile),
             communication: Communication::default(),
             h_calls: 0,
             h_columns: 0,
@@ -155,12 +158,14 @@ pub(crate) fn elapsed(t: Option<Instant>) -> f64 {
 }
 pub(crate) struct Counted<'a, C> {
     inner: &'a C,
+    profile: bool,
     counts: Cell<Communication>,
 }
 impl<'a, C> Counted<'a, C> {
-    pub fn new(inner: &'a C) -> Self {
+    pub fn new(inner: &'a C, profile: bool) -> Self {
         Self {
             inner,
+            profile,
             counts: Cell::new(Communication::default()),
         }
     }
@@ -176,35 +181,70 @@ impl<C: Collective> Collective for Counted<'_, C> {
         self.inner.size()
     }
     fn barrier(&self) -> Result<(), MpiError> {
-        self.inner.barrier()
+        let t = clock(self.profile);
+        let result = self.inner.barrier();
+        super::work::add(self.profile, |s| {
+            s.collective_calls[0] += 1;
+            s.collective_bytes[0] += 0;
+            s.collective_seconds += elapsed(t);
+        });
+        result
     }
     fn tree_sum_f64(&self, a: &[f64], b: &mut [f64]) -> Result<(), MpiError> {
         let mut s = self.counts.get();
         s.reductions += 1;
         s.reduction_bytes += 8 * a.len() as u64;
         self.counts.set(s);
-        self.inner.tree_sum_f64(a, b)
+        let t = clock(self.profile);
+        let result = self.inner.tree_sum_f64(a, b);
+        super::work::add(self.profile, |s| {
+            s.collective_calls[1] += 1;
+            s.collective_bytes[1] += 8 * a.len() as u64;
+            s.collective_seconds += elapsed(t);
+        });
+        result
     }
     fn bcast_f64(&self, a: &mut [f64], root: usize) -> Result<(), MpiError> {
         let mut s = self.counts.get();
         s.broadcasts += 1;
         s.broadcast_bytes += 8 * a.len() as u64;
         self.counts.set(s);
-        self.inner.bcast_f64(a, root)
+        let t = clock(self.profile);
+        let result = self.inner.bcast_f64(a, root);
+        super::work::add(self.profile, |s| {
+            s.collective_calls[2] += 1;
+            s.collective_bytes[2] += 8 * a.len() as u64;
+            s.collective_seconds += elapsed(t);
+        });
+        result
     }
     fn allgatherv_f64(&self, a: &[f64], counts: &[usize], b: &mut [f64]) -> Result<(), MpiError> {
         let mut s = self.counts.get();
         s.gathers += 1;
         s.gather_bytes += 8 * a.len() as u64;
         self.counts.set(s);
-        self.inner.allgatherv_f64(a, counts, b)
+        let t = clock(self.profile);
+        let result = self.inner.allgatherv_f64(a, counts, b);
+        super::work::add(self.profile, |s| {
+            s.collective_calls[3] += 1;
+            s.collective_bytes[3] += 8 * a.len() as u64;
+            s.collective_seconds += elapsed(t);
+        });
+        result
     }
     fn alltoall_f64(&self, a: &[f64], block: usize, b: &mut [f64]) -> Result<(), MpiError> {
         let mut s = self.counts.get();
         s.alltoalls += 1;
         s.alltoall_bytes += 8 * a.len() as u64;
         self.counts.set(s);
-        self.inner.alltoall_f64(a, block, b)
+        let t = clock(self.profile);
+        let result = self.inner.alltoall_f64(a, block, b);
+        super::work::add(self.profile, |s| {
+            s.collective_calls[4] += 1;
+            s.collective_bytes[4] += 8 * a.len() as u64;
+            s.collective_seconds += elapsed(t);
+        });
+        result
     }
 }
 
@@ -219,6 +259,16 @@ pub struct ApplyH {
     pub odd_tails: usize,
     pub wide_calls: usize,
     pub direct_calls: usize,
+}
+impl ApplyH {
+    /// Reporting bridge through the reference diagnostic type already exported
+    /// by the physics adapter. Keeps CLI independent of the solver crate.
+    pub const DAVIDSON_WORK_STAGES: [&'static str; super::work::NAMES.len()] = super::work::NAMES;
+
+    /// Drain full reference-solve work independently of the H-only records.
+    pub fn take_davidson_work() -> Vec<super::work::Work> {
+        super::work::take_solves()
+    }
 }
 pub const APPLY_H_STAGES: [&str; 9] = [
     "total",

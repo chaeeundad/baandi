@@ -1660,6 +1660,9 @@ fn execute_mode_inner(
     if reference {
         // Isolate the apply_h JSON from earlier in-process reference runs.
         dft_physics::distributed_real_gamma::take_apply_h_solves();
+        if dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES) {
+            dft_physics::distributed_real_gamma::ApplyH::take_davidson_work();
+        }
     }
     let mut ladder_report = None;
     let atomic_density_built = reference
@@ -1918,6 +1921,14 @@ fn execute_mode_inner(
             "report_collectives_with_pack",
             || over_ranks(reference_stages.take().expect("reference stages")),
         )?;
+        if reference_diagnostics {
+            result["convergence"]["work"]["davidson_stages"]["work"] = phase(
+                reference,
+                &mut output_seconds,
+                "report_collectives_with_pack",
+                reference_davidson_work_json,
+            )?;
+        }
         result["reference_scf"] = json!({"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
             "stop_to_verified_clock":"reference-scf-wall-1",
             "diagnostics":{"schema":"reference-scf-diagnostics-1",
@@ -3151,6 +3162,168 @@ pub fn first_block_json(records: &[dft_engine::first_block::Record]) -> serde_js
         "rank_1e1": r.rank_1e1, "rank_1e2": r.rank_1e2, "rank_1e3": r.rank_1e3, "rank_1e4": r.rank_1e4,
         "rank_above_residual_tolerance": r.rank_above_residual_tolerance,
     })).collect::<Vec<_>>())
+}
+
+/// Reference-only full diagnostics. Gather serialized rank records with variable
+/// lengths: zero-row ranks and root-only EVD need not have identical shapes.
+/// Reporting communication is outside the solve and never charged as solver work.
+fn reference_davidson_work_json() -> Result<serde_json::Value, RunError> {
+    use dft_physics::distributed_real_gamma::ApplyH;
+    let names = ApplyH::DAVIDSON_WORK_STAGES;
+    let solves = ApplyH::take_davidson_work();
+    let mut shapes = std::collections::BTreeMap::new();
+    let mut stages = serde_json::Map::new();
+    for (i, name) in names.iter().enumerate() {
+        let rows: Vec<_> = solves.iter().map(|s| &s.stages[i]).collect();
+        let seconds: f64 = rows.iter().map(|s| s.seconds).sum();
+        let flops: u64 = rows.iter().map(|s| s.gemm_flops + s.scalar_flops).sum();
+        let streamed: u64 = rows.iter().map(|s| s.streamed_bytes).sum();
+        let operands: u64 = rows.iter().map(|s| s.gemm_operand_bytes).sum();
+        let kinds = ["barrier", "tree_sum", "broadcast", "allgatherv", "alltoall"];
+        let communication: serde_json::Map<_, _> = kinds
+            .iter()
+            .enumerate()
+            .map(|(k, kind)| {
+                (
+                    kind.to_string(),
+                    json!({
+                        "calls":rows.iter().map(|s| s.collective_calls[k]).sum::<u64>(),
+                        "payload_bytes":rows.iter().map(|s| s.collective_bytes[k]).sum::<u64>(),
+                    }),
+                )
+            })
+            .collect();
+        stages.insert(name.to_string(), json!({
+            "seconds":seconds,
+            "calls":rows.iter().map(|s| s.calls).sum::<u64>(),
+            "nominal_flops":flops,
+            "gemm_calls":rows.iter().map(|s| s.gemm_calls).sum::<u64>(),
+            "gemm_flops":rows.iter().map(|s| s.gemm_flops).sum::<u64>(),
+            "gemm_operand_bytes":operands,
+            "scalar_flops":rows.iter().map(|s| s.scalar_flops).sum::<u64>(),
+            "hypot_calls":rows.iter().map(|s| s.hypot_calls).sum::<u64>(),
+            "sqrt_calls":rows.iter().map(|s| s.sqrt_calls).sum::<u64>(),
+            "copied_bytes":rows.iter().map(|s| s.copied_bytes).sum::<u64>(),
+            "zeroed_bytes":rows.iter().map(|s| s.zeroed_bytes).sum::<u64>(),
+            "streamed_bytes":streamed,
+            "collectives":communication,
+            "collective_seconds":rows.iter().map(|s| s.collective_seconds).sum::<f64>(),
+            "rejected_factor_panels":rows.iter().map(|s| s.rejected_factor_panels).sum::<u64>(),
+            "nominal_gflop_s":if seconds > 0. { Some(flops as f64 / seconds / 1e9) } else { None },
+            "logical_gb_s":if seconds > 0. { Some((operands + streamed) as f64 / seconds / 1e9) } else { None },
+        }));
+    }
+    for solve in &solves {
+        for g in &solve.gemms {
+            *shapes
+                .entry((g.stage, g.site, g.m, g.n, g.k))
+                .or_insert(0_u64) += 1;
+        }
+    }
+    let local = json!({
+        "solves":solves.len(), "stages":stages,
+        "gemm_shapes":shapes.iter().map(|(&(stage,site,m,n,k), &calls)| json!({
+            "stage":names[stage], "site":site, "m":m, "n":n, "k":k, "calls":calls,
+        })).collect::<Vec<_>>()
+    });
+    let comm = dft_engine::parallel::SharedComm::active();
+    reference_davidson_work_ranks(comm.as_ref().map(|c| c as &dyn dft_mpi::Collective), local)
+}
+
+fn reference_davidson_work_ranks(
+    comm: Option<&dyn dft_mpi::Collective>,
+    local: Value,
+) -> Result<Value, RunError> {
+    let per_rank = if let Some(comm) = comm {
+        let bytes = serde_json::to_vec(&local).map_err(|e| error(5, e))?;
+        let mut sizes = vec![0.; comm.size()];
+        comm.allgatherv_f64(&[bytes.len() as f64], &vec![1; comm.size()], &mut sizes)
+            .map_err(|e| error(5, e))?;
+        let counts: Vec<_> = sizes.iter().map(|&v| v as usize).collect();
+        let mut all = vec![0.; counts.iter().sum()];
+        let payload: Vec<_> = bytes.iter().map(|&v| f64::from(v)).collect();
+        comm.allgatherv_f64(&payload, &counts, &mut all)
+            .map_err(|e| error(5, e))?;
+        let mut at = 0;
+        let mut ranks = Vec::with_capacity(comm.size());
+        for count in counts {
+            let bytes: Vec<_> = all[at..at + count].iter().map(|&v| v as u8).collect();
+            ranks.push(
+                serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| error(5, e))?,
+            );
+            at += count;
+        }
+        ranks
+    } else {
+        vec![local]
+    };
+    fn maxima(out: &mut serde_json::Value, next: &serde_json::Value) {
+        if let (Some(a), Some(b)) = (out.as_object_mut(), next.as_object()) {
+            for (key, value) in a {
+                maxima(value, &b[key]);
+            }
+        } else if let (Some(a), Some(b)) = (out.as_u64(), next.as_u64()) {
+            if b > a {
+                *out = next.clone();
+            }
+        } else if next
+            .as_f64()
+            .is_some_and(|b| out.as_f64().is_none_or(|a| b > a))
+        {
+            *out = next.clone();
+        }
+    }
+    let mut max = per_rank[0]["stages"].clone();
+    for rank in &per_rank[1..] {
+        maxima(&mut max, &rank["stages"]);
+    }
+    Ok(json!({
+        "schema":"reference-davidson-work-1",
+        "rank0":per_rank[0], "max":max, "per_rank":per_rank,
+        "note":"Full diagnostics only; all completed reference solves including verification. Exclusive rank-local stage seconds; collective_seconds is a subset. Max is componentwise over rank-local totals/rates, not a summed critical path. GEMM shapes are logical adapter calls, not BLAS microtiles; H and EVD internals are opaque (their zero FLOPs/bytes are uncounted, not zero work). copied_bytes counts destination bytes; streamed_bytes includes read+write. Logical GB/s = (GEMM operand bytes + streamed bytes)/stage seconds, not hardware bandwidth. Scalar factor work is a nominal full-panel model; rejected panels flagged. Backend packing/scans/allocations and diagnostic storage are excluded."
+    }))
+}
+
+#[cfg(test)]
+mod davidson_work_json_tests {
+    use super::*;
+    use dft_mpi::Collective;
+
+    #[test]
+    fn variable_rank_shapes_and_integer_counts_survive_work_reporting() {
+        let outputs = dft_mpi::simulate(3, |c| {
+            let rank = c.rank();
+            let local = json!({"solves":2,"stages":{"border_s":{
+                "seconds":rank as f64 + 0.5,
+                "nominal_flops":9_007_199_254_740_992_u64 + rank as u64,
+                "logical_gb_s":if rank == 0 {None} else {Some(4./rank as f64)},
+                "collectives":{"tree_sum":{"calls":1,"payload_bytes":8*(rank+1)}}}},
+                "gemm_shapes":(0..rank).map(|i|json!({"m":i,"n":3,"k":rank})).collect::<Vec<_>>()});
+            reference_davidson_work_ranks(Some(c), local).unwrap()
+        });
+        assert!(outputs.windows(2).all(|v| v[0] == v[1]));
+        let w = &outputs[0];
+        assert_eq!(w["rank0"]["stages"]["border_s"]["seconds"], 0.5);
+        assert_eq!(w["max"]["border_s"]["seconds"], 2.5);
+        assert_eq!(
+            w["max"]["border_s"]["nominal_flops"],
+            9_007_199_254_740_994_u64
+        );
+        assert_eq!(w["max"]["border_s"]["logical_gb_s"], 4.);
+        assert_eq!(
+            w["max"]["border_s"]["collectives"]["tree_sum"]["payload_bytes"],
+            24
+        );
+        for rank in 0..3 {
+            assert_eq!(
+                w["per_rank"][rank]["gemm_shapes"].as_array().unwrap().len(),
+                rank
+            );
+        }
+        let serial = reference_davidson_work_ranks(None, w["rank0"].clone()).unwrap();
+        assert_eq!(serial["rank0"], w["rank0"]);
+        assert_eq!(serial["max"], w["rank0"]["stages"]);
+    }
 }
 
 /// Real-Davidson stage timers (`BAANDI_DAVIDSON_STAGES=on`; zeros otherwise),

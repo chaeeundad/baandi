@@ -11,12 +11,14 @@
 //! unconverged result, so the driver can retry with the returned vectors.
 
 mod accounting;
+pub mod work;
 mod workspace;
 pub use accounting::{
     APPLY_H_STAGES, ApplyH, Communication, Gemm, Iteration, QeClockScope, QeCounters, Record,
     STAGES, apply_h_active, qe_clock_end, qe_clock_start, record_apply_h, take_apply_h_solves,
 };
 use accounting::{Counted, clock, elapsed};
+use work::{Stage, span};
 use workspace::Workspace;
 
 use crate::{SolverError, distributed_davidson::DistributedRealOperator};
@@ -104,7 +106,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
 ) -> Result<Solution, SolverError> {
     let apply_h_scope = accounting::ApplyHScope::new(options.profile, options.max_iterations + 1);
     let total_clock = clock(options.profile);
-    let c = Counted::new(comm);
+    let c = Counted::new(comm, options.profile);
     let n = options.bands;
     let dim = operator.global_len();
     let cap = if options.capacity == 0 {
@@ -113,6 +115,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         options.capacity
     }
     .min(dim);
+    let work_scope = work::Scope::new(options.profile, options.max_iterations, cap);
     let bad = n == 0
         || n > dim
         || cap < n.saturating_mul(2).min(dim)
@@ -129,6 +132,9 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
             .iter()
             .chain(hamiltonian_diagonal)
             .all(|v| v.is_finite());
+    work::add(options.profile, |s| {
+        s.streamed_bytes += 8 * (start.rows() * n + start.rows()) as u64
+    });
     // Agree on local invalid inputs before any rank enters operator collectives.
     let mut bad_sum = [0.0];
     c.tree_sum_f64(&[f64::from(bad)], &mut bad_sum)
@@ -141,11 +147,24 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     let single_gemm = dft_numerics::switches::RunConfig::current()
         .on(dft_numerics::switches::Id::REF_DAV_SINGLE_GEMM);
     let mut w = Workspace::new(operator, n, cap, single_gemm)?;
+    work::add(options.profile, |s| {
+        // Explicit arrays of Workspace::new; shared adapter scratch excluded.
+        let doubles =
+            4 * start.rows() * cap + 2 * start.rows() * n + 6 * cap * cap + 3 * cap + n + 2;
+        s.zeroed_bytes += 8 * doubles as u64;
+        s.streamed_bytes += 8 * doubles as u64;
+    });
     // Resolve once per solve. The reference workspace resets C to identity
     // on contraction, even though it remeasures S/H and their factor afterward.
     // Only the immediately following correction can use these stored Ritz rows.
     let reuse_restart =
         dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_RESTART_CORRECTIONS);
+    work::add(options.profile, |s| {
+        if reuse_restart {
+            s.zeroed_bytes += 16 * n as u64;
+            s.streamed_bytes += 16 * n as u64;
+        }
+    });
     let mut restart_scratch = reuse_restart.then(|| (vec![0.0; n], vec![0.0; n]));
     let mut contracted = false;
     let mut record = Record::new(
@@ -155,6 +174,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         options.placement,
     );
     record.setup.communication = c.snapshot();
+    work::copy(options.profile, start.rows() * n);
     w.v.as_mut_slice()[..start.rows() * n].copy_from_slice(start.as_slice());
     w.v.reshape_within_storage(start.rows(), n)?;
     w.hv.reshape_within_storage(start.rows(), n)?;
@@ -186,6 +206,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         Vec::new()
     };
     for (step, r) in record.iterations.iter_mut().enumerate() {
+        let _glue = span(options.profile, Stage::Glue);
         let before = c.snapshot();
         r.active_bands.extend_from_slice(&active);
         r.basis_before = m;
@@ -223,7 +244,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         if m + k > cap || k == 0 {
             k = w.repair(&c, m, r, options.profile)?;
         } else {
-            w.append_e(m)?;
+            w.append_e(m, options.profile)?;
             w.border(&c, m, m + k, false, r, options.profile)?;
             if !w.factor(m, m + k, r, options.profile)? {
                 k = w.repair(&c, m, r, options.profile)?;
@@ -234,13 +255,16 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
             w.apply_corrections(&c, operator, m, r)?;
             r.seconds[0] += elapsed(t);
             w.border(&c, m, m + k, true, r, options.profile)?;
+            work::copy(options.profile, n);
             w.old_values.copy_from_slice(&w.values[..n]);
             w.eigen(&c, m, m + k, r, &options)?;
             m += k;
         } else {
+            work::copy(options.profile, n);
             w.old_values.copy_from_slice(&w.values[..n]);
             r.reduced_order = m;
         }
+        let decision_span = span(options.profile, Stage::Decisions);
         active.clear();
         for (i, flag) in converged.iter_mut().enumerate() {
             let change = (w.values[i] - w.old_values[i]).abs();
@@ -254,6 +278,8 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
             }
         }
         r.unconverged = active.len();
+        work::add(options.profile, |s| s.scalar_flops += n as u64);
+        drop(decision_span);
         r.communication = c.snapshot().difference(before);
         iterations = step + 1;
         if active.is_empty() || iterations == options.max_iterations {
@@ -285,6 +311,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         }
     }
     record.apply_h = apply_h_scope.finish();
+    work_scope.finish();
     Ok(Solution {
         ritz_values_ha,
         band_thresholds_ha: (0..n).map(|i| options.band_threshold(i)).collect(),
@@ -312,7 +339,9 @@ fn restart_corrections<C: Collective>(
     r: &mut Iteration,
     profile: bool,
 ) -> Result<(), SolverError> {
+    let _stage = span(profile, Stage::Corrections);
     let t = clock(profile);
+    let precondition = span(profile, Stage::Precondition);
     let rows = w.v.rows();
     let k = active.len();
     w.e.reshape_within_storage(rows, k)?;
@@ -325,6 +354,14 @@ fn restart_corrections<C: Collective>(
             norms[j] += z * z;
         }
     }
+    work::add(profile, |s| {
+        s.scalar_flops += 13 * (rows * k) as u64;
+        s.hypot_calls += (rows * k) as u64;
+        s.zeroed_bytes += 8 * k as u64;
+        s.streamed_bytes += 32 * (rows * k) as u64 + 8 * k as u64;
+    });
+    drop(precondition);
+    let _normalize = span(profile, Stage::Normalize);
     c.tree_sum_f64(&norms[..k], &mut sums[..k]).map_err(error)?;
     let mut kept = 0;
     for (j, sum) in sums[..k].iter().enumerate() {
@@ -343,6 +380,11 @@ fn restart_corrections<C: Collective>(
         }
         kept += 1;
     }
+    work::add(profile, |s| {
+        s.sqrt_calls += k as u64;
+        s.scalar_flops += (rows * kept) as u64;
+        s.streamed_bytes += 16 * (rows * kept) as u64;
+    });
     w.e.reshape_within_storage(rows, kept)?;
     r.seconds[4] += elapsed(t);
     Ok(())
@@ -652,6 +694,210 @@ mod diagnostic_tests {
                     assert!(full.converged.iter().all(|v| *v));
                 }
             }
+        });
+    }
+    #[test]
+    fn davrem_switches_preserve_bits_and_account_for_removed_work() {
+        use dft_numerics::switches::RunConfig;
+        let base = RunConfig::from_pairs(&[
+            ("ref_dav_swap_buffers", "off"),
+            ("ref_dav_lean_reset", "off"),
+        ])
+        .unwrap();
+        let arms: Vec<_> = [("on", "off"), ("off", "on"), ("on", "on")]
+            .into_iter()
+            .map(|(swap, reset)| {
+                (
+                    swap,
+                    reset,
+                    RunConfig::from_pairs(&[
+                        ("ref_dav_swap_buffers", swap),
+                        ("ref_dav_lean_reset", reset),
+                    ])
+                    .unwrap(),
+                )
+            })
+            .collect();
+        for (dim, n, capacity, clustered) in [(12, 3, 6, false), (17, 5, 15, true), (7, 4, 7, true)]
+        {
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let mut op = Partitioned {
+                        dim,
+                        rows: (comm.rank()..dim).step_by(ranks).collect(),
+                        clustered,
+                    };
+                    let rows = op.rows.len();
+                    let mut x = RealMatrix::zeros(rows, n).unwrap();
+                    for j in 0..n {
+                        for (i, &row) in op.rows.iter().enumerate() {
+                            x[(i, j)] = if row == j {
+                                1.
+                            } else {
+                                0.03 * ((row * 7 + j * 13 + 1) as f64).sin()
+                            };
+                        }
+                    }
+                    let diag: Vec<_> = op
+                        .rows
+                        .iter()
+                        .map(|&row| op.diagonal(row) + 0.03 * ((row + 1) as f64).sin().powi(2))
+                        .collect();
+                    for placement in [ReducedPlacement::Root, ReducedPlacement::Replicated] {
+                        let mut options = Options::new(n, 1e-10, n - 1);
+                        options.max_iterations = 40;
+                        options.capacity = capacity;
+                        options.placement = placement;
+                        options.return_hx = true;
+                        // Full vs off: no retained work, clocks or trace storage off.
+                        work::take_solves();
+                        let light = {
+                            let _g = base.enter();
+                            solve(comm, &mut op, &x, &diag, options).unwrap()
+                        };
+                        assert!(work::take_solves().is_empty());
+                        options.profile = true;
+                        let a = {
+                            let _g = base.enter();
+                            solve(comm, &mut op, &x, &diag, options).unwrap()
+                        };
+                        let aw = work::take_solves().pop().unwrap();
+                        same_bits(&light.eigenvalues, &a.eigenvalues);
+                        same_bits(light.eigenvectors.as_slice(), a.eigenvectors.as_slice());
+                        assert_eq!(light.record.h_columns, a.record.h_columns);
+                        assert_eq!(
+                            aw.stages.iter().map(|s| s.gemm_flops).sum::<u64>(),
+                            a.record.gemm_flops
+                        );
+                        let counts = a.record.communication;
+                        for (kind, calls, bytes) in [
+                            (1, counts.reductions, counts.reduction_bytes),
+                            (2, counts.broadcasts, counts.broadcast_bytes),
+                            (3, counts.gathers, counts.gather_bytes),
+                            (4, counts.alltoalls, counts.alltoall_bytes),
+                        ] {
+                            assert_eq!(
+                                aw.stages
+                                    .iter()
+                                    .map(|s| s.collective_calls[kind])
+                                    .sum::<u64>(),
+                                calls
+                            );
+                            assert_eq!(
+                                aw.stages
+                                    .iter()
+                                    .map(|s| s.collective_bytes[kind])
+                                    .sum::<u64>(),
+                                bytes
+                            );
+                        }
+                        let work_s: f64 = aw.stages.iter().map(|s| s.seconds).sum();
+                        assert!(work_s > 0.);
+                        assert!(aw.stages.iter().all(|s| s.collective_seconds <= s.seconds));
+                        assert!(a.converged.iter().all(|&v| v));
+                        for &(swap, reset, config) in &arms {
+                            let b = {
+                                let _g = config.enter();
+                                solve(comm, &mut op, &x, &diag, options).unwrap()
+                            };
+                            let bw = work::take_solves().pop().unwrap();
+                            same_bits(&a.eigenvalues, &b.eigenvalues);
+                            same_bits(a.eigenvectors.as_slice(), b.eigenvectors.as_slice());
+                            same_bits(
+                                a.hx.as_ref().unwrap().as_slice(),
+                                b.hx.as_ref().unwrap().as_slice(),
+                            );
+                            assert_eq!(a.converged, b.converged);
+                            assert_eq!(a.ritz_values_ha, b.ritz_values_ha);
+                            assert_eq!(a.record.communication, b.record.communication);
+                            assert_eq!(a.record.h_columns, b.record.h_columns);
+                            assert_eq!(a.record.h_calls, b.record.h_calls);
+                            assert_eq!(a.record.iterations.len(), b.record.iterations.len());
+                            for (a, b) in a.record.iterations.iter().zip(&b.record.iterations) {
+                                assert_eq!(a.active_bands, b.active_bands);
+                                assert_eq!(a.reduced_order, b.reduced_order);
+                                assert_eq!(a.repairs, b.repairs);
+                                assert_eq!(a.dropped_corrections, b.dropped_corrections);
+                                assert_eq!(a.gemms, b.gemms);
+                            }
+                            let restart = Stage::Restart as usize;
+                            let expected = if swap == "on" {
+                                16 * rows as u64 * n as u64 * a.record.restarts as u64
+                            } else {
+                                0
+                            };
+                            assert_eq!(
+                                aw.stages[restart].copied_bytes - bw.stages[restart].copied_bytes,
+                                expected
+                            );
+                            let reset_saved = if reset == "on" {
+                                40 * (n * n) as u64 * a.record.restarts as u64
+                            } else {
+                                0
+                            };
+                            assert_eq!(
+                                aw.stages[restart].streamed_bytes
+                                    - bw.stages[restart].streamed_bytes,
+                                2 * expected + reset_saved
+                            );
+                            if swap == "on" && dim < 2 * n && rows > 0 {
+                                assert!(
+                                    aw.stages[Stage::Repair as usize].copied_bytes
+                                        > bw.stages[Stage::Repair as usize].copied_bytes
+                                );
+                            }
+                            if comm.rank() == 0 && placement == ReducedPlacement::Root {
+                                eprintln!(
+                                    "DAVREM dim={dim} bands={n} ranks={ranks} swap={swap} reset={reset} H={} iterations={} restarts={} restart_copy_saved_B={expected} reset_write_saved_B={reset_saved} delta_e_Ha=0 bits=identical",
+                                    a.record.h_columns,
+                                    a.record.iterations.len(),
+                                    a.record.restarts
+                                );
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn davrem_one_correction_has_analytic_row_work_and_error_cleanup() {
+        dft_mpi::simulate(1, |comm| {
+            let mut op = Tridiagonal((0..12).collect());
+            let mut x = RealMatrix::zeros(12, 3).unwrap();
+            for j in 0..3 {
+                x[(j, j)] = 1.;
+            }
+            let diag: Vec<_> = (1..=12).map(f64::from).collect();
+            let mut options = Options::new(3, 1e-10, 3);
+            options.profile = true;
+            options.max_iterations = 1;
+            work::take_solves();
+            let a = solve(comm, &mut op, &x, &diag, options).unwrap();
+            let w = work::take_solves().pop().unwrap();
+            let pre = &w.stages[Stage::Precondition as usize];
+            assert_eq!(pre.hypot_calls, 36);
+            assert_eq!(pre.scalar_flops, 13 * 36);
+            assert_eq!(pre.streamed_bytes, 32 * 36 + 24);
+            assert_eq!(w.stages[Stage::Normalize as usize].sqrt_calls, 3);
+            assert_eq!(w.stages[Stage::Normalize as usize].collective_calls[1], 1);
+            assert_eq!(w.stages[Stage::Normalize as usize].collective_bytes[1], 24);
+            assert_eq!(w.stages[Stage::Return as usize].gemm_calls, 1);
+            assert_eq!(
+                w.gemms.len() as u64,
+                w.stages.iter().map(|s| s.gemm_calls).sum::<u64>()
+            );
+            assert_eq!(
+                w.stages.iter().map(|s| s.gemm_flops).sum::<u64>(),
+                a.record.gemm_flops
+            );
+            x[(0, 0)] = f64::NAN;
+            assert!(solve(comm, &mut op, &x, &diag, options).is_err());
+            assert!(work::take_solves().is_empty());
+            x[(0, 0)] = 1.;
+            solve(comm, &mut op, &x, &diag, options).unwrap();
+            assert_eq!(work::take_solves().len(), 1);
         });
     }
 }

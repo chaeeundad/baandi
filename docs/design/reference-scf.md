@@ -710,6 +710,85 @@ removing its measured Gram refresh is deliberately excluded by prior evidence.
 See the [dev08 request](../performance/lanes/RSCF/dav-dense-dev08-request.md)
 for independent arms, full-run verification and remaining measurement gates.
 
+### P3-DAVREM: full-diagnostic remainder attribution and copy removal
+
+The new `convergence.work.davidson_stages.work` object is emitted only for
+full reference diagnostics (`BAANDI_DAVIDSON_STAGES=on`). It contains `rank0`,
+`per_rank` (rank-index order), and componentwise `max` stage totals. All
+completed solves, including verification/retries, contribute. `rank0.solves`
+is the denominator for per-solve rates; it is not the SCF map count.
+There is no extra solver collective. At CLI reporting, two variable-length
+allgathers collect rank records; their cost belongs to output, outside Davidson.
+Shapes are retained separately on each rank, including zero-row ranks; maxima
+never fabricate a GEMM by combining dimensions from different ranks.
+
+Exclusive stages are setup, apply_h, apply_check, append, border_s, border_h,
+factor, transform, reduced_eigen, coefficients, corrections, precondition,
+normalize, repair, repair_panel, restart, return, decisions and glue. Nested
+stages pause their parent. Thus the restart includes rotations and reset only;
+its refresh is in border/factor/transform. The old eight clocks and QE-matched
+clock boundaries are unchanged. The new reduced_eigen stage isolates the
+backend plus status/eigenpair communication; transform and coefficients have
+their own stages. Do not subtract this new eigen time from the old QE clock
+and call the result the old remainder: the boundaries differ.
+
+Every stage records seconds, invocations, logical GEMM calls and nominal
+`2*m*n*k` FLOPs, scalar nominal FLOPs, sqrt/hypot counts, copy destination
+bytes, zero-fill bytes, logical streamed bytes, and calls/input payload bytes
+for barrier, fixed-tree sum, broadcast, allgatherv and alltoall. Collective
+seconds are a subset of stage seconds, not an additive stage. GEMM shape
+histograms identify stage, site, m, n, k and calls. These count adapter
+invocations, not MKL internal blocks or pure-kernel microtiles.
+
+`nominal_gflop_s = (gemm_flops + scalar_flops)/seconds/1e9` and
+`logical_gb_s = (gemm_operand_bytes + streamed_bytes)/seconds/1e9` are computed
+per rank before taking maxima. Copy bytes count destinations; their read and
+write sides contribute twice that amount to streamed bytes. GEMM operand
+bytes count each logical operand and output once. Neither metric measures
+DRAM bandwidth. Backend packing, finite scans, hidden allocations, FFT work,
+EVD internals and diagnostic storage are not modeled. The H and EVD clocks
+remain useful, but their zero recorded FLOPs do not mean no arithmetic.
+
+The preconditioner model charges 13 nominal scalar FLOPs/entry (upper branch;
+the lower branch has one fewer multiplication), plus one hypot, and separates
+normalization and its sqrt. The factor adapter uses a full-panel scalar/copy
+model with width b and prefix p; rejected panels increment
+`rejected_factor_panels`, so their modeled totals are upper bounds, not exact
+executed scalar work. Successful-panel scalar FLOPs count Cholesky, inverse,
+Schur subtraction, inverse negation and growth guards. Its scalar access
+traffic is not a cache/DRAM model. Explicit repair dots/subtractions/norms
+are counted from executed panel widths. No tolerance or decision reads these
+counters. Off adds cached-flag branches only: no new clocks, TLS counter
+access, work storage allocation, publication, or JSON work object. Existing
+always-collected legacy records remain unchanged.
+
+Non-GEMM inventory and decisions (r rows, n bands, m basis, u active roots):
+
+| Work | Scaling and treatment |
+| --- | --- |
+| Start and workspace zero fill | Four r*capacity buffers, two r*n buffers, small matrices/vectors are allocated once per solve. Explicit workspace zeros are counted; shared adapter scratch is excluded. Cross-solve pooling is deferred because of ownership/lifetime changes. |
+| Selected coefficient packing | m*u doubles once per general correction; already omitted by adopted restart-correction reuse when C=I. Retained, as noncontiguous selected roots need compact coefficients. |
+| Preconditioning and norms | One r*u pass forms residuals, divides by the unchanged denominator and sums squares in row order. There is already no separate norm pass here. Normalization/compaction is a second r*k pass after the reduction and cannot precede the global norm. |
+| Appending E and HE | Two r*k copies remain: operator and basis own separate contiguous matrices. Eliminating these requires an operator-view contract, outside this ticket. |
+| Restart and repair rotation copies | Two r*n (restart) or r*m (repair) copies removed by `REF_DAV_SWAP_BUFFERS=on`: swap V/X and HV/HX, which have equal r*capacity backing storage. Numerical matrices, shape, column order and backend calls are identical. |
+| Restart resets | `REF_DAV_LEAN_RESET=on` initializes only C=I. It removes five n*n stores (40*n*n bytes) overwritten by measured S/H refresh, complete factor/transform, or the next eigen/repair output. Fresh S/H and guarded factor are retained; this is not the rejected diagonal-H/unit-S approximation. |
+| Small replicated work | H packing, S/T factor panels, transformed border, Ritz coefficients, reset C all execute on every rank; EVD placement remains explicit Root/Replicated. Separate clocks now expose this floor. Root-only factorization would require new broadcasts and fail-consensus handling; deferred pending its measured cost. |
+| Repair | Two full projection passes plus in-panel dots/subtractions and a separate norm pass. Required when rank repair occurs; no reduction in pass count or threshold. Large post-whitening copies are covered by SWAP_BUFFERS. |
+| Collectives | Norm reduction, S border, H-error consensus, H border, EVD status/eigenpairs. S/pivot must precede H, so fusing S/H changes failure work. Restart S/H could be packed together, but volume-only packed reduction was neutral in the previous lane; no speculative fusion is repeated. |
+| Allocation/packing in iterations | Solver numerical buffers and diagnostic shape capacity are reserved before the loop. Existing EVD/backend packing may allocate; opaque backend work needs the requested dev08 stack profile. No new numerical per-iteration allocation. |
+
+Both new switches default **off**, use the run registry/input precedence and
+MPI agreement contract, and are resolved once per solve. No GEMM shape,
+reduction order, H column count, active-root decision or threshold changes.
+Mac correctness probes compare both independent arms and their combination,
+full/off diagnostics, Root/Replicated EVD, cyclic partitions with 1/3/8 ranks
+(including zero local rows), scattered/clustered spectra, capacity 2n and 3n,
+and forced rank repair. See the request for commands and recorded counts.
+The ticket's 9.25 s / 18 versus 5.29 s / 16 motivation is relayed one-run
+MPI8 evidence; these Mac counters cannot assign that dev08 time to a cause.
+No speedup or default adoption is claimed before the requested profiles.
+
+
 ## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
 R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.
 

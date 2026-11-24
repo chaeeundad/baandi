@@ -1,4 +1,5 @@
 use super::accounting::{clock, elapsed};
+use super::work::{self, Stage, span};
 use super::{Iteration, Options, ReducedPlacement, error, preconditioner_denominator};
 use crate::{SolverError, distributed_davidson::DistributedRealOperator, real_davidson::lean};
 use dft_mpi::Collective;
@@ -30,6 +31,8 @@ pub(super) struct Workspace {
     gemm: RealGemmWorkspace,
     evd: RealEighWorkspace,
     single_gemm: bool,
+    swap_buffers: bool,
+    lean_reset: bool,
 }
 impl Workspace {
     pub fn new<O: DistributedRealOperator>(
@@ -49,6 +52,10 @@ impl Workspace {
             n,
             cap,
             single_gemm,
+            lean_reset: dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_LEAN_RESET),
+            swap_buffers: dft_numerics::switches::on(
+                dft_numerics::switches::Id::REF_DAV_SWAP_BUFFERS,
+            ),
             v: RealMatrix::zeros(rows, cap)?,
             hv: RealMatrix::zeros(rows, cap)?,
             x: RealMatrix::zeros(rows, cap)?,
@@ -78,10 +85,11 @@ impl Workspace {
         _initial: bool,
         r: &mut Iteration,
     ) -> Result<(), SolverError> {
+        let _stage = span(r.profile, Stage::ApplyH);
         r.h_calls += 1;
         r.h_columns += x.cols();
         let result = op.apply_block(c, x, &mut self.hv);
-        agree_apply(c, result, &self.hv)
+        agree_apply(c, result, &self.hv, r.profile)
     }
     pub fn apply_corrections<C: Collective, O: DistributedRealOperator>(
         &mut self,
@@ -92,10 +100,13 @@ impl Workspace {
     ) -> Result<(), SolverError> {
         let k = self.e.cols();
         self.he.reshape_within_storage(self.rows, k)?;
+        let _stage = span(r.profile, Stage::ApplyH);
         r.h_calls += 1;
         r.h_columns += k;
         let result = op.apply_block(c, &self.e, &mut self.he);
-        agree_apply(c, result, &self.he)?;
+        agree_apply(c, result, &self.he, r.profile)?;
+        let _append = span(r.profile, Stage::Append);
+        work::copy(r.profile, self.rows * k);
         self.hv.reshape_within_storage(self.rows, m + k)?;
         self.hv.as_mut_slice()[m * self.rows..(m + k) * self.rows]
             .copy_from_slice(self.he.as_slice());
@@ -113,6 +124,7 @@ impl Workspace {
         profile: bool,
     ) -> Result<(), SolverError> {
         let t = clock(profile);
+        let _stage = span(profile, if is_h { Stage::BorderH } else { Stage::BorderS });
         let k = to - from;
         self.border.reshape_within_storage(to, k)?;
         let b = if is_h { &self.hv } else { &self.v };
@@ -145,6 +157,11 @@ impl Workspace {
                 target[(j, i)] = value;
             }
         }
+        work::add(profile, |s| {
+            let entries = (to * k - k * (k - 1) / 2) as u64;
+            s.copied_bytes += 16 * entries;
+            s.streamed_bytes += 24 * entries;
+        });
         r.seconds[1] += elapsed(t);
         Ok(())
     }
@@ -159,6 +176,7 @@ impl Workspace {
         profile: bool,
     ) -> Result<bool, SolverError> {
         let t = clock(profile);
+        let _stage = span(profile, Stage::Factor);
         // Invoke one panel at a time so a rejected pivot never charges GEMMs
         // from later panels. This is the same factor arithmetic/order.
         let mut p = from;
@@ -175,6 +193,22 @@ impl Workspace {
                 r.gemm("factor_u", width, p, p);
                 r.gemm("factor_inverse", width, p, width);
             }
+            work::add(profile, |s| {
+                // Nominal full-panel scalar model of the shared factor adapter.
+                // Early rejected panels are explicitly flagged, not exact work.
+                let b = width as u64;
+                let p = p as u64;
+                s.scalar_flops += (2 * b * b * b + 3 * b * b + b) / 3
+                    + if p > 0 { b * b + p * b } else { 0 }
+                    + 2 * p * b
+                    + b * (b + 1)
+                    + 2 * b;
+                s.sqrt_calls += b + b * (2 * p + b + 1) / 2;
+                s.copied_bytes += 16 * b * b;
+                s.zeroed_bytes += 8 * (p * b + b * (b - 1) / 2);
+                s.streamed_bytes += 32 * b * b + 8 * (p * b + b * (b - 1) / 2);
+                s.rejected_factor_panels += u64::from(!accepted);
+            });
             if !accepted {
                 ok = false;
                 break;
@@ -193,6 +227,8 @@ impl Workspace {
         o: &Options,
     ) -> Result<(), SolverError> {
         let t = clock(o.profile);
+        let _stage = span(o.profile, Stage::Eigen);
+        let transform = span(o.profile, Stage::Transform);
         self.h.reshape_within_storage(m, m)?;
         for j in 0..m {
             for i in 0..m {
@@ -204,6 +240,11 @@ impl Workspace {
         r.gemm("reduced_transform", m, m - from, m);
         r.gemm("reduced_transform", m, m - from, m);
         lean::reduced_border(&mut self.gemm, &self.h, &mut self.lean, from, m)?;
+        work::copy(
+            o.profile,
+            m * m + from * from + m * (m - from) + (m - from) * (m + from - 1) / 2,
+        );
+        drop(transform);
         self.y.reshape_within_storage(m, m)?;
         let root = o.placement == ReducedPlacement::Root;
         let mut success = [1.0];
@@ -234,6 +275,7 @@ impl Workspace {
             c.bcast_f64(&mut self.y.as_mut_slice()[..m * self.n], 0)
                 .map_err(error)?;
         }
+        let _coefficients = span(o.profile, Stage::Coefficients);
         r.gemm("ritz_coefficients", m, self.n, m);
         lean::ritz_coefficients(&mut self.gemm, &mut self.lean, &self.y, m, self.n, None)?;
         r.reduced_order = m;
@@ -251,12 +293,14 @@ impl Workspace {
         profile: bool,
     ) -> Result<(), SolverError> {
         let t = clock(profile);
+        let _stage = span(profile, Stage::Corrections);
         let k = active.len();
         self.coeff.reshape_within_storage(m, k)?;
         for (j, &band) in active.iter().enumerate() {
             self.coeff.as_mut_slice()[j * m..(j + 1) * m]
                 .copy_from_slice(&self.lean.c.as_slice()[band * m..(band + 1) * m]);
         }
+        work::copy(profile, m * k);
         rotate(
             &mut self.gemm,
             &self.v,
@@ -278,6 +322,7 @@ impl Workspace {
             "residual_hx",
         )?;
         self.e.reshape_within_storage(self.rows, k)?;
+        let precondition = span(profile, Stage::Precondition);
         self.norms[..k].fill(0.0);
         for (j, &band) in active.iter().enumerate() {
             for (i, &diagonal) in hamiltonian_diagonal.iter().enumerate() {
@@ -287,6 +332,14 @@ impl Workspace {
                 self.norms[j] += z * z;
             }
         }
+        work::add(profile, |s| {
+            s.scalar_flops += 13 * (self.rows * k) as u64;
+            s.hypot_calls += (self.rows * k) as u64;
+            s.zeroed_bytes += 8 * k as u64;
+            s.streamed_bytes += 32 * (self.rows * k) as u64 + 8 * k as u64;
+        });
+        drop(precondition);
+        let _normalize = span(profile, Stage::Normalize);
         c.tree_sum_f64(&self.norms[..k], &mut self.sums[..k])
             .map_err(error)?;
         let mut kept = 0;
@@ -308,11 +361,18 @@ impl Workspace {
             }
             kept += 1;
         }
+        work::add(profile, |s| {
+            s.sqrt_calls += k as u64;
+            s.scalar_flops += (self.rows * kept) as u64;
+            s.streamed_bytes += 16 * (self.rows * kept) as u64;
+        });
         self.e.reshape_within_storage(self.rows, kept)?;
         r.seconds[4] += elapsed(t);
         Ok(())
     }
-    pub fn append_e(&mut self, m: usize) -> Result<(), SolverError> {
+    pub fn append_e(&mut self, m: usize, profile: bool) -> Result<(), SolverError> {
+        let _stage = span(profile, Stage::Append);
+        work::copy(profile, self.rows * self.e.cols());
         self.v
             .reshape_within_storage(self.rows, m + self.e.cols())?;
         self.v.as_mut_slice()[m * self.rows..].copy_from_slice(self.e.as_slice());
@@ -329,6 +389,7 @@ impl Workspace {
         profile: bool,
     ) -> Result<usize, SolverError> {
         let t = clock(profile);
+        let _stage = span(profile, Stage::Repair);
         r.repairs += 1;
         let input = self.e.cols();
         // Coordinates in Q=V T^T are T S C. Do not assume the old S is I.
@@ -388,8 +449,15 @@ impl Workspace {
         )?;
         self.v.reshape_within_storage(self.rows, m)?;
         self.hv.reshape_within_storage(self.rows, m)?;
-        self.v.as_mut_slice().copy_from_slice(self.x.as_slice());
-        self.hv.as_mut_slice().copy_from_slice(self.hx.as_slice());
+        if self.swap_buffers {
+            std::mem::swap(&mut self.v, &mut self.x);
+            std::mem::swap(&mut self.hv, &mut self.hx);
+        } else {
+            work::copy(profile, 2 * self.v.rows() * self.v.cols());
+            self.v.as_mut_slice().copy_from_slice(self.x.as_slice());
+            self.hv.as_mut_slice().copy_from_slice(self.hx.as_slice());
+        }
+        work::copy(profile, m * m + m * self.n);
         // Preserve the physical Ritz block through the whitening.
         self.lean.c.reshape_within_storage(m, self.n)?;
         self.lean
@@ -427,6 +495,7 @@ impl Workspace {
             )?;
             c.tree_sum_f64(self.coeff.as_slice(), &mut self.reduced[..m * input])
                 .map_err(error)?;
+            work::copy(profile, m * input);
             self.coeff
                 .as_mut_slice()
                 .copy_from_slice(&self.reduced[..m * input]);
@@ -440,12 +509,23 @@ impl Workspace {
                 r,
                 "repair_subtract",
             )?;
+            work::add(profile, |s| {
+                s.scalar_flops += (self.rows * input) as u64;
+                s.streamed_bytes += 24 * (self.rows * input) as u64;
+            });
             for (e, x) in self.e.as_mut_slice().iter_mut().zip(self.x.as_slice()) {
                 *e -= x;
             }
         }
+        let panel = span(profile, Stage::RepairPanel);
         let mut kept = 0;
         for j in 0..input {
+            work::add(profile, |s| {
+                s.scalar_flops += (8 * self.rows * kept + 2 * self.rows) as u64;
+                s.sqrt_calls += 1;
+                s.zeroed_bytes += 16 * kept as u64;
+                s.streamed_bytes += (80 * self.rows * kept + 8 * self.rows + 16 * kept) as u64;
+            });
             for _ in 0..2 {
                 self.norms[..kept].fill(0.0);
                 for a in 0..kept {
@@ -477,7 +557,12 @@ impl Workspace {
             kept += 1;
         }
         self.e.reshape_within_storage(self.rows, kept)?;
-        self.append_e(m)?;
+        work::add(profile, |s| {
+            s.scalar_flops += (self.rows * kept) as u64;
+            s.streamed_bytes += 16 * (self.rows * kept) as u64;
+        });
+        drop(panel);
+        self.append_e(m, profile)?;
         r.seconds[5] += elapsed(t);
         if kept > 0 {
             self.border(c, m, m + kept, false, r, profile)?;
@@ -497,6 +582,7 @@ impl Workspace {
         profile: bool,
     ) -> Result<(), SolverError> {
         let t = clock(profile);
+        let _stage = span(profile, Stage::Restart);
         rotate(
             &mut self.gemm,
             &self.v,
@@ -519,23 +605,38 @@ impl Workspace {
         )?;
         self.v.reshape_within_storage(self.rows, self.n)?;
         self.hv.reshape_within_storage(self.rows, self.n)?;
-        self.v.as_mut_slice().copy_from_slice(self.x.as_slice());
-        self.hv.as_mut_slice().copy_from_slice(self.hx.as_slice());
+        if self.swap_buffers {
+            std::mem::swap(&mut self.v, &mut self.x);
+            std::mem::swap(&mut self.hv, &mut self.hx);
+        } else {
+            work::copy(profile, 2 * self.v.rows() * self.v.cols());
+            self.v.as_mut_slice().copy_from_slice(self.x.as_slice());
+            self.hv.as_mut_slice().copy_from_slice(self.hx.as_slice());
+        }
         self.lean.a.reshape_within_storage(self.n, self.n)?;
         self.lean.c.reshape_within_storage(self.n, self.n)?;
         self.y.reshape_within_storage(self.n, self.n)?;
         for j in 0..self.n {
             for i in 0..self.n {
                 let id = f64::from(i == j);
-                let h = if i == j { self.values[i] } else { 0.0 };
-                self.hr[(i, j)] = h;
-                self.lean.a[(i, j)] = h;
-                self.lean.s[(i, j)] = id;
-                self.lean.t[(i, j)] = id;
-                self.lean.c[(i, j)] = id;
-                self.y[(i, j)] = id;
+                if self.lean_reset {
+                    self.lean.c[(i, j)] = id;
+                } else {
+                    let h = if i == j { self.values[i] } else { 0.0 };
+                    self.hr[(i, j)] = h;
+                    self.lean.a[(i, j)] = h;
+                    self.lean.s[(i, j)] = id;
+                    self.lean.t[(i, j)] = id;
+                    self.lean.c[(i, j)] = id;
+                    self.y[(i, j)] = id;
+                }
             }
         }
+        work::add(profile, |s| {
+            let matrices = if self.lean_reset { 1 } else { 6 };
+            s.zeroed_bytes += matrices * 8 * (self.n * (self.n - 1)) as u64;
+            s.streamed_bytes += matrices * 8 * (self.n * self.n) as u64;
+        });
         r.restarts += 1;
         r.seconds[6] += elapsed(t);
         self.refresh(c, self.n, r, profile)?;
@@ -555,6 +656,8 @@ impl Workspace {
                 "reference contracted basis is dependent".into(),
             ));
         }
+        let _transform = span(profile, Stage::Transform);
+        work::copy(profile, 2 * m * m + m * (m - 1) / 2);
         self.h.reshape_within_storage(m, m)?;
         for j in 0..m {
             for i in 0..m {
@@ -576,6 +679,7 @@ impl Workspace {
         profile: bool,
     ) -> Result<(), SolverError> {
         let t = clock(profile);
+        let _stage = span(profile, Stage::Return);
         rotate(
             &mut self.gemm,
             &self.v,
@@ -642,7 +746,12 @@ fn agree_apply<C: Collective>(
     c: &C,
     result: Result<(), SolverError>,
     y: &RealMatrix,
+    profile: bool,
 ) -> Result<(), SolverError> {
+    let _stage = span(profile, Stage::ApplyCheck);
+    work::add(profile, |s| {
+        s.streamed_bytes += 8 * y.as_slice().len() as u64
+    });
     let failed = result.is_err() || !y.as_slice().iter().all(|v| v.is_finite());
     let mut any = [0.0];
     c.tree_sum_f64(&[f64::from(failed)], &mut any)

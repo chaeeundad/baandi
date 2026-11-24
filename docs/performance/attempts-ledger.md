@@ -3697,3 +3697,13 @@ pure-Rust path (slab gather/scatter, kernels), consistent with the AVX-512 clock
 study (MKL_ENABLE_INSTRUCTIONS=AVX2 removed the neighbour slowdown but made MKL kernels 40-55% slower).
 Decision: keep the default build (no target-cpu). Single-run noise on si128 is about +-1 s.
 Evidence: dev08 /data/sig-dft/bflag/si128/, /scr/mino/rustdft/mkllane/runs/si128/.
+
+### Ladder retry with looser coarse stop (2026-11-26, dev08 MPI8, one run per arm at ac6aee9c): rejected
+
+REFSCF_LADDER with REFSCF_LADDER_RATIO 1e4 / 1e5 (coarse stop at 1e-4 / 1e-3 Ry), KEPT_HX on, verify on.
+si64: D 6.18 s, L1e4 7.71, L1e5 7.22; si128: D 31.79, L1e4 38.11, L1e5 37.48. Fine maps do not fall (si64 13 -> 14,
+si128 17 -> 16) and fine full-H columns rise because the kept-HX warm start is lost at the handoff; coarse stage
+costs 0.9-1.1 s (si64) and 4.9-6.7 s (si128). The reference driver's trajectory already matches QE's map count,
+so a coarse pre-solve has little to remove. Ladder stays off.
+Headline snapshot at the same binary (one run each): si64 verify off 4.57 s / verified 6.40 s / QE rmm 4.30 s
+(1.06x / 1.49x); si128 23.59 / 30.15 / 21.57 s (1.09x / 1.40x). Evidence: dev08 /scr/mino/rustdft/lad2/runs/.

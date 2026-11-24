@@ -117,6 +117,9 @@ pub struct Entry {
 
 const ON_OFF: &[&str] = &["on", "off"];
 
+fn ladder_ratio_valid(v: f64) -> bool {
+    v.is_finite() && (1.0..=1e6).contains(&v)
+}
 fn eigen_factor_valid(v: f64) -> bool {
     v.is_finite() && (1e-3..=1.0).contains(&v)
 }
@@ -580,6 +583,8 @@ table! {
         "P3-PERMAP: calibrate rustfft/MKL per actual lane length, batch and direction once per run; pure builds retain rustfft";
     REFSCF_PERMAP: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-PERMAP: cache unchanged Broyden Gram entries and fuse descf with map diagnostic passes/reduction";
+    REFSCF_LADDER_RATIO: Kind::Number { default: Some(100.), valid: ladder_ratio_valid }, "100", "number in [1, 1e6]",
+        "reference cutoff ladder: coarse stopping threshold = fine dr2 threshold times this ratio (material independent)";
     REFSCF_LADDER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-LADDER: reference coarse cutoff 0.5, exact owned prolongation, fresh fine Broyden history";
     // Adopted 2026-11-26 (dev08 one-run KEPTHX2: si128 32.82 -> 31.40 s, si64 6.37 -> 6.30; +271 MB/rank peak RSS on si128).

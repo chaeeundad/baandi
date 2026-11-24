@@ -148,7 +148,9 @@ fn run_inner<K: Collective>(
         coarse.verification = Verification::Off;
         coarse.max_iterations = coarse.max_iterations.min(MAX_COARSE_MAPS);
         let coarse_profile = Profile {
-            threshold_ry: profile.threshold_ry * THRESHOLD_RATIO,
+            threshold_ry: profile.threshold_ry
+                * dft_numerics::switches::number(dft_numerics::switches::Id::REFSCF_LADDER_RATIO)
+                    .unwrap_or(THRESHOLD_RATIO),
             ..profile
         }
         .validate()?;

@@ -11,6 +11,8 @@
 //! unconverged result, so the driver can retry with the returned vectors.
 
 mod accounting;
+mod ideal_reset;
+pub use ideal_reset::ResetStats;
 mod stream;
 pub mod work;
 mod workspace;
@@ -311,6 +313,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     record.communication = c.snapshot();
     record.total_seconds = elapsed(total_clock);
     record.summarize();
+    ideal_reset::publish(record.resets);
     if options.profile {
         accounting::qe_clock_add(5, record.total_seconds, 1);
         for r in std::iter::once(&record.setup)

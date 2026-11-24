@@ -634,7 +634,7 @@ not wire traffic; all ranks replicate small matrices.
 | --- | --- | --- | --- |
 | Corrections | Two GEMMs `(r,m)(m,u)`: 4rmu FLOPs. Pack selected C columns, precondition and normalize u residuals; no converged-band rotations. | GEMM payload `16*(rm+mu+ru)` bytes; C copy 16mu; residual pass reads X/HX/diagonal and writes E (32ru bytes, scalar caches excluded), normalization/compaction 16rk bytes. One sum of 8u bytes. | General C needs both products. Immediately after restart C=I, so stored V/HV columns already are X/HX; neither GEMM nor packing is necessary. Denominator, norm, zero-direction cutoff and accepted-root order must remain unchanged. |
 | New borders | S: `V_q^T E`, H: `V_q^T HE`, each `(q,r)(r,k)`, total 4rqk FLOPs. | GEMM payload `16*(rq+rk+qk)` bytes; two sums of 8qk bytes each; upper triangle mirrored to both halves (48d read/store bytes for both matrices, d=qk-k(k-1)/2, counting the two diagonal stores). Appending E/HE adds 32rk copy bytes (charged to glue/apply, not the border clock). | Already incremental and one rectangle per matrix. k(k-1)/2 unused lower-triangle entries per product are computed, but splitting those products repeats the rejected upper-border experiment; not reopened here. S and its pivot decision precede H application, so their normal-step collectives cannot simply be fused without changing failure work. |
-| Restart | Rotate V and HV by C: 4rmn FLOPs. Then fresh S/H: 4rn^2 FLOPs; factor S; two small refresh-transform GEMMs: 4n^3 FLOPs. No H call or EVD. | Rotation payload `16*(rm+mn+rn)` bytes; copies into V/HV: 32rn bytes. Fresh Gram payload `16*(2rn+n^2)` bytes and two sums totaling 16n^2 bytes, plus 48n^2 reset-store bytes, 16n^2 HR-to-H copy bytes and adapter-owned small-matrix/factor work. | Required physical rotations: two, not three. The note's ideal diagonal-H/unit-S reset eliminates the measured refresh, but that was already falsified by a 1.0154e-11 Ha degenerate-fixture drift. Preserve measured refresh and its factor; do not repeat that rejection. |
+| Restart | Rotate V and HV by C: 4rmn FLOPs. Then fresh S/H: 4rn^2 FLOPs; factor S; two small refresh-transform GEMMs: 4n^3 FLOPs. No H call or EVD. | Rotation payload `16*(rm+mn+rn)` bytes; copies into V/HV: 32rn bytes. Fresh Gram payload `16*(2rn+n^2)` bytes and two sums totaling 16n^2 bytes, plus 48n^2 reset-store bytes, 16n^2 HR-to-H copy bytes and adapter-owned small-matrix/factor work. | Required physical rotations: two, not three. The note's ideal diagonal-H/unit-S reset eliminates the measured refresh. Historically rejected after 1.0154e-11 Ha degenerate-fixture drift under the old tighter regression premise; P3-RESET explicitly reopens guarded contraction under the strict 1e-10 Ha / standard 5e-9 Ha classes (below). Measured refresh remains the default and every repair/whitening still uses it. |
 | Return | X=VC: 2rmn FLOPs; optional HX adds another 2rmn. | Per product `8*(rm+mn+rn)` bytes; no collective or gather. Owned local output buffers are returned. | Already minimal for a general final C. No unconditional final restart or reapplication of H. Optional HX is caller-required work, not removable duplication. |
 
 Elementwise correction work, outside GEMM totals, is 2ru multiply/subtract
@@ -865,6 +865,69 @@ No default is promoted. See the [one-run dev08 request and local attempt
 record](../performance/lanes/RSCF/stream-dev08-request.md) for independent
 arms, fixtures, rounding branches and validation limits. Timings await dev08;
 Mac correctness and work-count evidence is not performance acceptance.
+
+### P3-RESET: guarded ideal contraction (default off)
+
+`BAANDI_REF_DAV_IDEAL_RESET=on` (input `ref_dav_ideal_reset = "on"`)
+replaces only the contraction refresh with S=T=C=Y=I, H_r=A=diag(theta).
+The rotated physical V/HV are retained. It is derived from the own-words
+iteration note cited above; no QE source was read. The new premise is the
+explicit P3-RESET work order and accuracy-class adoption rule, not evidence
+that the historical unguarded error disappeared. Repair/whitening still
+measures both Grams and factors/transforms them; no convergence threshold,
+certificate or default changes.
+
+A candidate reset checks global squared column norms in O(r*n) work with
+one n-double tree sum; nonfinite norms or |norm²-1| > 1e-12 cause the measured
+refresh and disable ideal resets for the rest of this solve. Every fourth
+contraction instead performs the complete measured refresh and tests
+max|S-I|, including off-diagonal entries, against the same bound. A trip
+also disables subsequent ideal resets. The bound follows the existing
+restart orthogonality contract and is dimensionless, not an energy class.
+Four is a conservative experiment refresh interval, not a material-tuned
+choice or a proof of accumulated-error control. Unit-norm correlations can
+escape the norm test until the periodic check; independent verification is
+still required. Guard state resets at each new solve.
+
+`Record.resets` and each iteration's `resets` expose attempts, ideal,
+periodic_refreshes, guard_fallbacks, disabled_refreshes and the maximum
+periodic measured defect. A periodic check can also trip the guard, so these
+counts overlap; actual measured restarts are attempts minus ideal. Existing
+run-manifest path notes publish cumulative successful-solve counts per run
+ID and calling rank/thread after each solve, outside numerical loops. Failed
+solves publish no partial count. Fine-stage accounting charges norm scans and
+their sum to restart. Each successful ideal reset saves the two full Gram
+products (4*r*n² FLOPs), factor, two refresh transforms (4*n³ FLOPs), and two
+n² sums, at the cost of a 2*r*n+n scalar norm check, one n-wide sum and five
+additional n² reset stores versus adopted LEAN_RESET. The small-matrix stores
+cannot be removed with LEAN_RESET on because they are no longer overwritten.
+
+Mac fixtures: 24 A/B pairs (four fixtures, ranks 1/3/8, root/replicated EVD),
+including the original 32-row degenerate DCT spectrum at capacities 16 and
+24 and a seven-row/eight-rank empty-owner case. All converge, all active-band,
+order/restart/repair/drop decisions and H calls/columns match. Maximum root
+change is 2.886579864025407e-15 Ha; maximum doubly occupied band-sum change is
+9.325873406851315e-15 Ha; maximum candidate/full dense-EVD root difference is
+7.838174553853605e-14 Ha. These are fixed-H quantities, not SCF total energies.
+A test-only full Gram measures every restart without changing its numerical
+path; max|S-I| is 1.3880785409980945e-11 in both arms, before the measured
+fallback. The original 2n degenerate case trips the norm guard immediately
+on all tested ranks, so it does not demonstrate unguarded ideal-reset
+accuracy; the same degenerate spectrum at 3n performs five ideal resets and
+one periodic refresh on all ranks. No tolerance was loosened to hide that
+limitation. Injected scaled and unit-norm correlated bases prove diagonal
+and periodic off-diagonal fallback, sticky disablement and nonfinite rejection.
+
+Full per-fixture counts, reproducible restart defect traces, gate results and
+the exactly-one-profiled-run-per-arm MPI8 request are in
+[the P3-RESET attempt record](../performance/lanes/RSCF/reset-dev08-request.md).
+A separate temporary SCF probe also verifies cubic/skew/elongated two-atom
+synthetic cells at ranks 1/3/8: all 18 off/on runs converge and pass independent
+fixed-point verification, maximum total-energy change 2.7533531010703882e-14 Ha,
+with unchanged SCF/Davidson/H counts. Source, reproduction and results are in
+the attempt record. Real MPI/MKL accuracy and dev08 performance remain unmeasured. The conservative guard's fallback rate must
+be reported; passing energy tests alone is not a speed or adoption claim.
+
 
 ## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
 R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.

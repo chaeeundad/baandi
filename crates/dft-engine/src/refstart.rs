@@ -258,8 +258,10 @@ pub(crate) fn start_prolonged<K: Collective>(
     seed: Option<crate::refscf::ladder::Seed>,
 ) -> Result<StartState, ScfError> {
     let clock = Instant::now();
-    let cache = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_FFT_SHARE)
-        .then(PlanCache::default);
+    let share = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_FFT_SHARE);
+    let partitions =
+        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_PARTITION_CACHE);
+    let cache = (share || partitions).then(|| PlanCache::with_partition_cache(share, partitions));
     let _plans = cache.as_ref().map(PlanCache::enter);
     let timed = TimedCollective::new(comm);
     let mut state = start_inner(input, &timed, seed)?;
@@ -1088,6 +1090,130 @@ fn mgs<K: Collective>(comm: &K, raw: &RealMatrix) -> Result<RealMatrix, ScfError
     Ok(q)
 }
 
+/// One owned-row amplitude table per species and one direct phase per atom/G.
+/// Output ordering remains species, radial orbital, atom, m. This changes only
+/// repeated scalar work, not the radial quadrature or complex expression order.
+#[allow(clippy::too_many_arguments)]
+fn fill_species_orbitals(
+    cell: &Cell,
+    basis: &PlaneWaveBasis,
+    half: &HalfSphere,
+    species: &[Species<'_>],
+    o: &ScfOptions,
+    rows: &[usize],
+    raw: &mut RealMatrix,
+) -> Result<(), ScfError> {
+    let l = rows.len();
+    let representatives: Vec<_> = rows
+        .iter()
+        .map(|&row| {
+            if row == 0 {
+                0
+            } else {
+                half.plus()[row.div_ceil(2)] as usize
+            }
+        })
+        .collect();
+    let mut phases = vec![C::default(); l];
+    let mut angles = vec![0.; l];
+    let mut species_offset = 0;
+    for sp in species {
+        if sp.positions_bohr.is_empty() {
+            continue;
+        }
+        let channels = sp.potential.atomic_wavefunctions().unwrap();
+        let width: usize = channels.iter().map(|c| 2 * c.l + 1).sum();
+        let mut amplitudes = RealMatrix::zeros(l, width).map_err(err)?;
+        let mut channel_offset = 0;
+        for c in channels {
+            let mut radial = BTreeMap::new();
+            for m in -(c.l as isize)..=c.l as isize {
+                let column = channel_offset + (m + c.l as isize) as usize;
+                for (i, &g) in representatives.iter().enumerate() {
+                    if i > 0 && representatives[i - 1] == g {
+                        amplitudes[(i, column)] = amplitudes[(i - 1, column)];
+                        continue;
+                    }
+                    let g = &basis.momenta()[g];
+                    let r = if let Some(&v) = radial.get(&g.norm_squared.to_bits()) {
+                        v
+                    } else {
+                        let v = projector_transform_with_rule(
+                            sp.potential.mesh(),
+                            c.l,
+                            &c.radial_times_r,
+                            g.norm_squared.sqrt(),
+                            o.radial_even_rule,
+                        )
+                        .map_err(err)?
+                            / cell.volume_bohr3().sqrt();
+                        radial.insert(g.norm_squared.to_bits(), v);
+                        v
+                    };
+                    let y = if g.norm_squared == 0. {
+                        if c.l == 0 { 1. / (4. * PI).sqrt() } else { 0. }
+                    } else {
+                        real_spherical_harmonic(c.l, m, g.cartesian).map_err(err)?
+                    };
+                    amplitudes[(i, column)] = r * y;
+                }
+            }
+            channel_offset += 2 * c.l + 1;
+        }
+        for (atom, &pos) in sp.positions_bohr.iter().enumerate() {
+            // Contiguous independent angles; the direct structure_factor dot
+            // product and its sum-from-zero convention are preserved exactly.
+            for (angle, &g) in angles.iter_mut().zip(&representatives) {
+                *angle = basis.momenta()[g]
+                    .cartesian
+                    .iter()
+                    .zip(pos)
+                    .map(|(g, r)| g * r)
+                    .sum();
+            }
+            if angles.iter().any(|v| !v.is_finite()) {
+                return Err(err("non-finite atomic structure-factor angle"));
+            }
+            for i in 0..l {
+                phases[i] = if i > 0 && representatives[i - 1] == representatives[i] {
+                    phases[i - 1]
+                } else {
+                    C::default() + C::from_polar(1., -angles[i])
+                };
+            }
+            let mut channel_offset = 0;
+            for c in channels {
+                let count = 2 * c.l + 1;
+                let il = C::new(0., -1.).powu(c.l as u32);
+                for m in 0..count {
+                    let column = species_offset
+                        + channel_offset * sp.positions_bohr.len()
+                        + atom * count
+                        + m;
+                    let amplitude = &amplitudes.as_slice()
+                        [(channel_offset + m) * l..(channel_offset + m + 1) * l];
+                    let out = &mut raw.as_mut_slice()[column * l..(column + 1) * l];
+                    for (((out, &amplitude), &phase), &row) in
+                        out.iter_mut().zip(amplitude).zip(&phases).zip(rows)
+                    {
+                        let z = il * phase * amplitude;
+                        *out = if row == 0 {
+                            z.re
+                        } else if row % 2 == 1 {
+                            SQRT_2 * z.re
+                        } else {
+                            SQRT_2 * z.im
+                        };
+                    }
+                }
+                channel_offset += count;
+            }
+        }
+        species_offset += width * sp.positions_bohr.len();
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn atomic_block<K: Collective>(
     cell: &Cell,
@@ -1119,7 +1245,9 @@ fn atomic_block<K: Collective>(
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
     let reuse_orbitals =
         dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_ORBITAL_REUSE);
-    let mut phases = if reuse {
+    let species_fill =
+        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_SPECIES_FILL);
+    let mut phases = if reuse && !species_fill {
         vec![C::default(); l]
     } else {
         Vec::new()
@@ -1127,6 +1255,9 @@ fn atomic_block<K: Collective>(
     let mut raw = RealMatrix::zeros(l, j).map_err(err)?;
     let mut col = 0;
     let filled = (|| -> Result<(), ScfError> {
+        if species_fill {
+            return fill_species_orbitals(cell, basis, half, species, o, &rows, &mut raw);
+        }
         for sp in species {
             for c in sp.potential.atomic_wavefunctions().unwrap() {
                 let mut radial = BTreeMap::new();
@@ -1230,7 +1361,33 @@ fn atomic_block<K: Collective>(
     let mut ws =
         RealGemmWorkspace::with_pool(if generalized { l.max(j) } else { l }, j.max(bands), pool)
             .map_err(err)?;
-    if generalized && let Some(t) = overlap_transform(comm, &mut ws, &raw, setup)? {
+    let cholesky = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_CHOLESKY);
+    if generalized && cholesky {
+        let clock = Instant::now();
+        let s = gram(comm, &mut ws, &raw, &raw)?;
+        setup.record("atomic_overlap_gram", clock);
+        let clock = Instant::now();
+        // Same unit-column pivot guard as the legacy atomic QR transform.
+        let factor = dft_numerics::linalg::RealGeneralizedFactor::new(&s, 1e-6).map_err(err)?;
+        setup.record("atomic_overlap_factor_solve", clock);
+        if let Some(factor) = factor {
+            let clock = Instant::now();
+            let defect = factor.metric_defect(&s).map_err(err)?;
+            setup.record("atomic_overlap_metric_check", clock);
+            if defect <= dft_numerics::linalg::HERMITIAN_TOLERANCE {
+                let small = projected_h(comm, &mut ws, &raw, bands, op, setup)?;
+                let clock = Instant::now();
+                let (values, coefficients) = factor.solve_lowest(&small, bands).map_err(err)?;
+                let out = rotate(&mut ws, &raw, &coefficients)?;
+                setup.record("atomic_generalized_diagonalize_rotate", clock);
+                return Ok((out, values));
+            }
+        }
+    }
+    if generalized
+        && !cholesky
+        && let Some(t) = overlap_transform(comm, &mut ws, &raw, setup)?
+    {
         let small = projected_h(comm, &mut ws, &raw, bands, op, setup)?;
         let clock = Instant::now();
         let reduced = congruence(&mut ws, &small, &t)?;

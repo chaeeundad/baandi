@@ -66,6 +66,10 @@ pub enum DistFftError {
 #[derive(Clone, Default)]
 pub struct PlanCache(Arc<Mutex<CachedPlans>>);
 struct CachedPlans {
+    share_kernels: bool,
+    cache_partition: bool,
+    partition: Option<CachedPartition>,
+    partition_hits: usize,
     rust: rustfft::FftPlanner<f64>,
     lengths: BTreeSet<usize>,
     vendor: BTreeMap<(usize, usize), Arc<Mutex<BackendLanes>>>,
@@ -73,6 +77,10 @@ struct CachedPlans {
 impl Default for CachedPlans {
     fn default() -> Self {
         Self {
+            share_kernels: true,
+            cache_partition: false,
+            partition: None,
+            partition_hits: 0,
             rust: rustfft::FftPlanner::new(),
             lengths: BTreeSet::new(),
             vendor: BTreeMap::new(),
@@ -93,6 +101,18 @@ impl Drop for PlanScope {
     }
 }
 impl PlanCache {
+    /// Keep at most the most recent exact partition during constructors.
+    /// Kernel sharing and layout reuse are independent experiments.
+    pub fn with_partition_cache(share_kernels: bool, cache_partition: bool) -> Self {
+        Self(Arc::new(Mutex::new(CachedPlans {
+            share_kernels,
+            cache_partition,
+            ..Default::default()
+        })))
+    }
+    pub fn partition_hits(&self) -> usize {
+        self.0.lock().unwrap().partition_hits
+    }
     pub fn enter(&self) -> PlanScope {
         PlanScope {
             previous: PLAN_CACHE.with(|c| c.replace(Some(self.clone()))),
@@ -141,6 +161,9 @@ impl Lanes {
         let Some(cache) = cache else {
             return BackendLanes::plan(n, counts, vendor).map(Self::Private);
         };
+        if !cache.0.lock().unwrap().share_kernels {
+            return BackendLanes::plan(n, counts, vendor).map(Self::Private);
+        }
         // P3-PERMAP: the shared rustfft fast path used to bypass BackendLanes
         // entirely, including its run-scoped selector. Reuse the existing
         // per-(length,batch) shared dispatch entries for calibrated lanes too;
@@ -203,6 +226,7 @@ impl Lanes {
     }
 }
 
+#[derive(Clone)]
 struct Partition {
     first: usize,
     n: [usize; 3],
@@ -212,6 +236,15 @@ struct Partition {
     owner: Vec<usize>,
     local_index: Vec<usize>,
     counts: Vec<usize>,
+}
+
+struct CachedPartition {
+    shape: [usize; 3],
+    indices: Vec<[usize; 3]>,
+    ranks: usize,
+    mirror: bool,
+    balance: bool,
+    value: Partition,
 }
 
 thread_local! {
@@ -231,6 +264,40 @@ pub fn mirror_sticks() -> bool {
 
 /// Stick partition shared by `new` and `position_owners` (inputs already validated).
 fn partition(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partition {
+    let cache = PLAN_CACHE.with(|c| c.borrow().clone());
+    let Some(cache) = cache else {
+        return partition_uncached(shape, indices, ranks);
+    };
+    let mut cached = cache.0.lock().unwrap();
+    if !cached.cache_partition {
+        return partition_uncached(shape, indices, ranks);
+    }
+    let mirror = mirror_sticks();
+    let balance = dft_numerics::switches::on(dft_numerics::switches::Id::FFT_A2A_BALANCE);
+    if let Some(p) = &cached.partition
+        && p.shape == shape
+        && p.ranks == ranks
+        && p.mirror == mirror
+        && p.balance == balance
+        && p.indices == indices
+    {
+        let value = p.value.clone();
+        cached.partition_hits += 1;
+        return value;
+    }
+    let value = partition_uncached(shape, indices, ranks);
+    cached.partition = Some(CachedPartition {
+        shape,
+        indices: indices.to_vec(),
+        ranks,
+        mirror,
+        balance,
+        value: value.clone(),
+    });
+    value
+}
+
+fn partition_uncached(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partition {
     let supports: [_; 2] = std::array::from_fn(|a| {
         indices
             .iter()
@@ -2452,5 +2519,73 @@ mod tests {
             }
             assert_eq!(before, ptrs(&p));
         });
+    }
+}
+
+#[cfg(test)]
+mod partition_cache_tests {
+    use super::*;
+    use dft_numerics::switches::RunConfig;
+
+    #[test]
+    fn exact_partition_key_and_private_workspaces() {
+        let shape = [4, 5, 6];
+        let indices = vec![[0, 0, 0], [1, 2, 3], [3, 3, 3], [2, 1, 4]];
+        let cache = PlanCache::with_partition_cache(true, true);
+        let _scope = cache.enter();
+        for ranks in [1, 3, 8] {
+            for mirror in ["greedy", "mirror"] {
+                for balance in ["off", "on"] {
+                    let config = RunConfig::from_pairs(&[
+                        ("m2_sticks", mirror),
+                        ("fft_a2a_balance", balance),
+                    ])
+                    .unwrap();
+                    let _run = config.enter();
+                    let expected = partition_uncached(shape, &indices, ranks);
+                    let hits = cache.partition_hits();
+                    let owners = position_owners(shape, &indices, ranks).unwrap();
+                    assert_eq!(
+                        cache.partition_hits(),
+                        hits,
+                        "changed policy/ranks must miss"
+                    );
+                    assert_eq!(
+                        owners,
+                        expected
+                            .slots
+                            .iter()
+                            .map(|&s| expected.owner[s])
+                            .collect::<Vec<_>>()
+                    );
+                    let a = DistributedPairFft::new(shape, &indices, 0, ranks).unwrap();
+                    assert_eq!(cache.partition_hits(), hits + 1);
+                    let mut b = a.shared_workspace().unwrap();
+                    b.plane_mut().fill(C::new(1., 2.));
+                    assert!(a.plane().iter().all(|v| *v == C::default()));
+                }
+            }
+        }
+        let mut changed = indices.clone();
+        changed.reverse();
+        let hits = cache.partition_hits();
+        position_owners(shape, &changed, 8).unwrap();
+        assert_eq!(
+            cache.partition_hits(),
+            hits,
+            "ordered indices are part of key"
+        );
+        position_owners([5, 5, 6], &changed, 8).unwrap();
+        assert_eq!(cache.partition_hits(), hits, "shape is part of key");
+        let cache_private = PlanCache::with_partition_cache(false, true);
+        {
+            let _inner = cache_private.enter();
+            let p = DistributedPairFft::new(shape, &indices, 0, 3).unwrap();
+            assert!(p.shared_workspace().is_none());
+            assert_eq!(cache_private.counts(), (0, 0));
+        }
+        // Nested constructor scopes restore the original cache.
+        position_owners([5, 5, 6], &changed, 8).unwrap();
+        assert_eq!(cache.partition_hits(), hits + 1);
     }
 }

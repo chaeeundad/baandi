@@ -593,6 +593,13 @@ table! {
     // Adopted 2026-11-26 (dev08 one-run: verification H columns -25 to -27%, si128 verification 4.03 -> 3.72 s; criterion unchanged).
     REFSCF_VERIFY_WARM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-VERWARM: reuse kept HX for independent verification and preserve candidate products for recovery; requires REFSCF_KEPT_HX; tolerance unchanged";
+    REFSTART_CHOLESKY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P4-START: one scaled library Cholesky and triangular solves for the generalized atomic Ritz start, no explicit inverse; rounding class";
+    REFSTART_SPECIES_FILL: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P4-START: owned atomic orbital amplitudes per species, one direct phase per atom/representative across radial channels; exact arithmetic";
+    REFSTART_PARTITION_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P4-START: constructor-scoped exact FFT partition reuse between owned projector lookup and operator plans; no shared mutable buffers";
+
 }
 
 struct Resolved {

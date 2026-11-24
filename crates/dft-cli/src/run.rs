@@ -2216,7 +2216,10 @@ fn execute_mode_inner(
             "schema": "fft-kernel-choices-1",
             "rank": crate::parallel::rank(),
             "enabled": dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KERNEL_BY_LENGTH),
-            "scope": "process-local distributed pair lanes; other ranks write rankN/results.json",
+            "scope": "shared and private distributed 1D lanes (start, H application, density); other ranks write rankN/results.json",
+        "decision_policy": "per_run_rank_local_median",
+        "rank_decisions_synchronized": false,
+        "cross_run_bit_reproducibility_established": false,
             "choices": dft_numerics::fused_pair_plan::kernel_choices().iter().map(|c| json!({
                 "length": c.length, "batch": c.batch,
                 "direction": if c.inverse { "inverse" } else { "forward" },

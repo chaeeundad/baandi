@@ -3375,3 +3375,189 @@ fn permap_gram_cache_ring_and_metric_invalidation() {
         new.iter().sum::<usize>()
     );
 }
+
+/// P3-PERMAP regression for dev08 0afbe868: the default shared rustfft
+/// constructor must not bypass calibration. Inspect the computation's frozen
+/// manifest BEFORE any JSON serializer could mark a switch as consulted.
+#[test]
+fn reference_scf_records_calibrated_fft_choices() {
+    use dft_numerics::{
+        fused_pair_plan::kernel_choices,
+        switches::{Id, RunConfig},
+    };
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [dft_engine::SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for rows in [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 12.]],
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let options = dft_engine::ScfOptions {
+                    cutoff_hartree: 1.,
+                    bands: Some(3),
+                    max_iterations: 100,
+                    gamma_real: dft_engine::GammaReal::On,
+                    verification: dft_engine::Verification::Off,
+                    ..Default::default()
+                };
+                let run = |adaptive, share| {
+                    let config = RunConfig::from_pairs(&[
+                        ("fft_kernel_by_length", adaptive),
+                        ("refstart_fft_share", share),
+                        ("m2_fft", "rust"),
+                        ("fft_fused_rows", "off"),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    let output = dft_engine::refscf::driver::run_with(
+                        dft_engine::refstart::StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile::default(),
+                        comm,
+                    )
+                    .unwrap();
+                    config.freeze_consulted();
+                    if adaptive == "on" {
+                        assert!(
+                            config.consulted(Id::FFT_KERNEL_BY_LENGTH),
+                            "reference computation bypassed the selector"
+                        );
+                        let choices = kernel_choices();
+                        assert!(
+                            !choices.is_empty(),
+                            "rank {} has no kernel choices",
+                            comm.rank()
+                        );
+                        for inverse in [false, true] {
+                            assert!(choices.iter().any(|c| c.inverse == inverse && c.batch > 0));
+                        }
+                        assert!(choices.iter().all(|c| c.length > 0 && c.batch > 0));
+                        if dft_numerics::MKL_BACKEND {
+                            assert!(
+                                choices
+                                    .iter()
+                                    .all(|c| c.rust_seconds.is_some() && c.mkl_seconds.is_some())
+                            );
+                        } else {
+                            assert!(
+                                choices
+                                    .iter()
+                                    .all(|c| !c.vendor && c.calibration_seconds == 0.)
+                            );
+                        }
+                    }
+                    assert!(output.outcome.converged);
+                    output
+                };
+                let base = run("off", "on");
+                for share in ["on", "off"] {
+                    let candidate = run("on", share);
+                    let a = &base.outcome.result;
+                    let b = &candidate.outcome.result;
+                    assert!((a.energy.total_hartree() - b.energy.total_hartree()).abs() < 5e-9);
+                    if !dft_numerics::MKL_BACKEND {
+                        assert_eq!(
+                            a.energy.total_hartree().to_bits(),
+                            b.energy.total_hartree().to_bits()
+                        );
+                        assert_eq!(
+                            a.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                            b.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                        );
+                        assert_eq!(base.records.len(), candidate.records.len());
+                    }
+                }
+            });
+        }
+    }
+}
+
+/// Start fields and H use the shared constructor; forks used by the density
+/// transform must retain the selected kernels without replanning/calibrating.
+#[test]
+fn calibrated_shared_fft_keeps_choices_and_workspace_reuse() {
+    use dft_numerics::{
+        fused_pair_plan::kernel_choices,
+        switches::{Id, RunConfig},
+    };
+    use dft_solvers::distributed_fft::{DistributedPairFft, PlanCache};
+    for shape in [[4, 4, 4], [5, 7, 11], [3, 5, 24]] {
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let config = RunConfig::from_pairs(&[
+                    ("fft_kernel_by_length", "on"),
+                    ("m2_fft", "rust"),
+                    ("fft_fused_rows", "on"),
+                ])
+                .unwrap();
+                let _config = config.enter();
+                let cache = PlanCache::default();
+                let _plans = cache.enter();
+                let indices = vec![[0, 0, 0], [1, 1, 0], [2, 0, 1]];
+                let mut original =
+                    DistributedPairFft::new(shape, &indices, comm.rank(), ranks).unwrap();
+                assert!(config.consulted(Id::FFT_KERNEL_BY_LENGTH));
+                let choices = kernel_choices();
+                assert!(!choices.is_empty());
+                let counts = cache.counts();
+                let mut fork = original.shared_workspace().expect("shared cache retained");
+                let _repeated =
+                    DistributedPairFft::new(shape, &indices, comm.rank(), ranks).unwrap();
+                assert_eq!(cache.counts(), counts, "no new shared batch plans");
+                let after = kernel_choices();
+                assert_eq!(choices.len(), after.len(), "no repeated calibration");
+                for (a, b) in choices.iter().zip(&after) {
+                    assert_eq!(
+                        (
+                            a.vendor,
+                            a.rust_seconds,
+                            a.mkl_seconds,
+                            a.calibration_seconds
+                        ),
+                        (
+                            b.vendor,
+                            b.rust_seconds,
+                            b.mkl_seconds,
+                            b.calibration_seconds
+                        )
+                    );
+                }
+                let input: Vec<_> = original
+                    .local_positions()
+                    .iter()
+                    .map(|&i| C::new((i as f64 + 0.3).sin(), (i as f64 + 0.2).cos()))
+                    .collect();
+                let mut a = input.clone();
+                let mut b = input.clone();
+                let potential = vec![1.; shape.iter().product()];
+                original
+                    .apply_local_batch(comm, &mut a, &potential, 1)
+                    .unwrap();
+                fork.apply_local_batch(comm, &mut b, &potential, 1).unwrap();
+                let bits = |v: &[C]| {
+                    v.iter()
+                        .map(|z| (z.re.to_bits(), z.im.to_bits()))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    bits(&a),
+                    bits(&b),
+                    "same selected kernels in cloned density workspace"
+                );
+                for (actual, expected) in a.iter().zip(&input) {
+                    assert!((*actual - expected).norm() < 2e-14);
+                }
+            });
+        }
+    }
+}

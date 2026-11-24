@@ -99,7 +99,8 @@ impl PlanCache {
             _thread: std::marker::PhantomData,
         }
     }
-    /// Distinct rustfft (length, direction) requests and MKL batch descriptors.
+    /// Distinct rustfft (length, direction) requests and cached batch dispatchers
+    /// (explicit MKL or calibrated lanes, including the pure-build fallback).
     /// Counts are construction evidence, not hot-loop instrumentation.
     pub fn counts(&self) -> (usize, usize) {
         let c = self.0.lock().unwrap();
@@ -140,7 +141,13 @@ impl Lanes {
         let Some(cache) = cache else {
             return BackendLanes::plan(n, counts, vendor).map(Self::Private);
         };
-        if vendor && dft_numerics::MKL_BACKEND {
+        // P3-PERMAP: the shared rustfft fast path used to bypass BackendLanes
+        // entirely, including its run-scoped selector. Reuse the existing
+        // per-(length,batch) shared dispatch entries for calibrated lanes too;
+        // workspace sharing and every transform call remain unchanged.
+        let calibrated =
+            dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KERNEL_BY_LENGTH);
+        if calibrated || (vendor && dft_numerics::MKL_BACKEND) {
             let mut c = cache.0.lock().unwrap();
             let mut plans = [None, None, None];
             for a in 0..3 {

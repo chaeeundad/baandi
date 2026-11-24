@@ -1,12 +1,126 @@
 # P3-PERMAP: length/batch FFT dispatch and per-map reductions
 
 Status: experimental, both new switches default off. No dev08 result is claimed.
-Base checkout: `796258987d380bdacf57b82c1871b338c11d014f`.
+
+## Follow-up: shared-dispatch integration regression (2026-11-25)
+
+The user-relayed dev08 one-run screen at `0afbe868` found
+FFT_KERNEL_BY_LENGTH `consulted=false` and empty `fft_kernel_choices.choices`
+on every rank. This is a dispatch defect, not evidence that adaptive kernels
+are neutral or slow. Do not use that screen as a calibrated-kernel measurement.
+
+The original task worktree is `bf27c271` (before P3-SETUP4 integration).
+This follow-up is implemented and tested in an isolated source snapshot of
+`0afbe868`, under `target/tmp/permap-integration/`; the reviewable unified
+patch is `target/permap-shared-dispatch.patch`, based on **0afbe868**, not
+bf27c271. Apply it to that integration baseline or a descendant preserving
+the shared `Lanes` implementation. No Git metadata, remote server, or
+unrelated working-tree source was changed. The snapshot contains the existing
+P3-SETUP4 code verbatim except for the kernel-dispatch condition below.
+
+Root cause: `Lanes::plan` takes P3-SETUP4's `SharedLanes::Rust` fast path when
+M2_FFT=rust. That path directly uses cached rustfft plans, never constructing
+`BackendLanes`. The original adaptive selector lives in `BackendLanes`, so
+it was unreachable with the adopted REFSTART_FFT_SHARE=on default.
+
+Fix: when FFT_KERNEL_BY_LENGTH is on, use the existing shared batch-dispatch
+cache (keyed by length and batch) even with M2_FFT=rust. Its BackendLanes
+then measures and selects the kernels; pure builds use its rustfft fallback.
+Keep the shared Arc/Mutex entries, the cache lifetime, partitioning, scratch
+ownership and `shared_workspace` cloning unchanged. With the switch off the
+previous shared rustfft dispatch remains unchanged. This common dispatcher
+covers reference-start full-grid fields, the distributed real-Gamma H and
+band-density transforms, and the density/mixing FFT workspace cloned from
+start fields. `distributed_real_gamma.rs` needs no separate branch: all its
+FFT calls already reach this dispatcher. It has nevertheless been added to
+the ticket's owned files as explicitly authorized.
+
+### Determinism scope
+
+`fft_kernel_choices` now explicitly reports:
+
+- `decision_policy = "per_run_rank_local_median"`;
+- `rank_decisions_synchronized = false`;
+- `cross_run_bit_reproducibility_established = false`.
+
+Decisions are frozen and reused for a given run/rank/length/batch/direction,
+including cloned workspaces; no timing or registry lookup is added to a
+transform. **No rank-0 broadcast is claimed.** The shared/private constructor
+APIs receive rank and size but no communicator, and the forward-plane API
+also has no communicator. A safe root-only calibration/broadcast would need
+collective setup wiring in `refstart.rs` and `refscf/density.rs` (outside this
+follow-up's ownership), with agreement on the union of nonuniform batch
+sizes and errors before any transform. Injecting collectives into individual
+lane calls is invalid: ranks can own different or zero plane counts. Thus
+this fix retains the documented rank-local experiment and default off;
+independent runs can choose differently near timing ties.
+
+### Regression evidence and renewed screen
+
+`reference_scf_records_calibrated_fft_choices` fails on unmodified 0afbe868
+(exit 101, "reference computation bypassed the selector") and passes with
+the dispatch fix. It freezes the consulted set immediately after the actual
+reference calculation, before any output serializer can consult the switch.
+It checks nonempty forward/inverse choices on each rank, with shared plans
+on/off, cubic and skewed/elongated cells, and 1/3/8 simulated ranks. Pure on/off
+energies and densities are bit-identical; MKL uses the 5e-9 Ha class and must
+record both kernel timings. Real MKL execution remains for dev08.
+
+`calibrated_shared_fft_keeps_choices_and_workspace_reuse` checks repeated
+constructor hits and cloned density workspaces: no new cache entries or
+calibration records, identical chosen kernels and output bits, and a unity
+potential round trip within 2e-14 on cubic, odd/prime and elongated grids,
+including empty owners at eight ranks. The existing P3-SETUP4 tests remain
+unchanged and must continue to pass.
+
+Renew the existing ONE-run-per-arm/four-case MPI8 request below after master
+review, leaving REFSTART_FFT_SHARE=on and FFT_KERNEL_BY_LENGTH default off.
+For each on arm require the **frozen computation** manifest to say
+`consulted=true`, a nonempty choices list from every rank, and (on the MKL
+build) non-null rustfft/MKL calibration times. Reject an empty list as an
+inactive experiment. Include the explicit rank-local policy, selected
+length/batch/direction keys, production FFT stage split, setup/calibration
+cost and per-map phase seconds. No default change or new timing claim is
+made by this repair.
+
+
+Original implementation base checkout: `796258987d380bdacf57b82c1871b338c11d014f`.
 Motivation (ticket-relayed, not reproduced here): P3s `e5ec8ae`, si128 MPI8,
 verification off, 15 maps: 1D FFT kernels about 4.9 s; non-solve/non-density
 map work about 0.66 s (energy_correction 0.25, mix 0.10,
 density_transform 0.07, energy 0.20, potential 0.04). Those are aggregate
 phase seconds across the maps, not seconds per individual map.
+
+### Follow-up Mac validation (0afbe868 snapshot plus patch)
+
+All following commands ran from `target/tmp/permap-integration`, with
+`CARGO_TARGET_DIR` set to the original ticket's `target/` (not a new Git
+worktree). Logs are `target/permap-followup-*.log`; the red/green regression
+logs are `target/permap-integration-before.log` and
+`target/permap-integration-regression.log`.
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| New reference SCF regression, before fix | 101 | Reproduced unconsulted selector |
+| Same regression, after fix | 0 | Shared/private, two cells, ranks 1/3/8 |
+| `cargo check --workspace --tests` | 0 | Entire snapshot type-checks |
+| `cargo test -p dft-solvers` | 0 | 186 passed, 25 ignored |
+| `cargo test -p dft-engine --test refscf` | 0 | 40 passed, 5 ignored; both new regressions pass |
+| `cargo test -p dft-numerics` | 0 | 91 passed, 22 ignored |
+| `cargo fmt --check` | 0 | Clean |
+| `cargo clippy -p dft-solvers -p dft-numerics -p dft-engine --all-targets -- -D warnings` | 0 | Clean |
+| `cargo check -p dft-solvers -p dft-numerics -p dft-engine --tests --features dft-numerics/mkl` | 0 | MKL conditional code type-checks only |
+| Same clippy command with `--features dft-numerics/mkl` | 0 | Clean; MKL is not executable on this Mac |
+| `CHECK_SCCACHE=0 BAANDI_TEST_TMP=<ticket>/target/tmp scripts/check.sh dft-solvers` | 0 | build/test/fmt/clippy PASS; optional `ps` load inventory denied by sandbox |
+| Apply patch to a clean five-file extraction of 0afbe868 | 0 | Reproduces the five modified snapshot files byte-for-byte |
+
+No defaults changed. Pure reference SCF energy differences are **0 Ha**, with
+bit-identical delivered density, across 12 on/off comparisons (two cells x
+three rank counts x shared/private on arms). Nine shared-workspace cases
+(three grids x three rank counts) pass their 2e-14 absolute dimensionless
+round-trip bound and bitwise clone comparison. No native MPI/MKL execution,
+new dev08 timing, or QE measurement was performed. Root-only calibration and
+cross-run bit reproducibility remain explicitly unimplemented.
 
 ## Mechanisms and accounting
 
@@ -142,7 +256,7 @@ Check the effective manifest (environment overrides input performance tables). C
   screens cannot establish independent fixed-point verification or promote
   the adaptive selector's cross-run determinism. No new QE ratio is requested.
 
-## Local validation record
+## Original implementation validation (before shared-dispatch repair)
 
 Mac commands and real outcomes are recorded below after execution. No speed
 conclusion, MKL runtime validation, new QE reference or adoption is inferred.

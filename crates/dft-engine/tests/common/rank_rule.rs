@@ -204,10 +204,17 @@ pub fn delivered(run: &Run, strict_energy: f64, electrons: f64) -> bool {
         && last.iteration == run.records.len()
         && last.threshold_ha <= 5e-9
         && last.coulomb_error_ha.is_finite()
-        && last.coulomb_error_ha <= last.threshold_ha
-        && last
-            .residual_bound_ha
-            .is_some_and(|b| b.is_finite() && b <= last.threshold_ha)
+        // ADR 0044: under the energy judgment (default) the passing criterion is the
+        // energy change of the verification map; the Coulomb error is a diagnostic.
+        && match run.records.last().and_then(|r| r.verification_energy.as_ref()) {
+            Some(e) => e.passed(),
+            None => {
+                last.coulomb_error_ha <= last.threshold_ha
+                    && last
+                        .residual_bound_ha
+                        .is_some_and(|b| b.is_finite() && b <= last.threshold_ha)
+            }
+        }
         && (r.total_hartree() - strict_energy).abs() < 5e-9
         && (r.charge - electrons).abs() < 1e-10
         && r.density

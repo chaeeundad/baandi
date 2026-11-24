@@ -1418,6 +1418,97 @@ Derived from the initialization/shell-cache principles in the own-words
 `qe-scf-cycle.md` and `qe-stage-by-stage.md`; no QE source accessed. A52's
 rejected QR substitution is not repeated, and no numerical defaults change.
 
+### P3-SETUP3: generalized atomic Ritz start and compact G lookup
+
+Two independent switches are appended to the registry, both **default off**:
+`REFSTART_GENERALIZED` (rounding class) and `REFSTART_COMPACT_G` (exact
+metadata removal). They affect only `refstart`, not the legacy start or the
+reference Davidson iteration. Derived from the starting-subspace principles
+in the own-words notes `qe-scf-cycle.md` and `qe-stage-by-stage.md`; no QE
+source accessed. Unlike the rejected A52 replacement of iterative QR, this
+experiment changes only the initial Ritz representation and retains QR as a
+conditioning/completion fallback.
+
+Let X be the raw L-by-J atomic block on a rank, B the requested band count,
+and K=max(J,B). All J atomic columns remain in the Ritz space. The low B
+Ritz roots depend on all of them: selecting B atomic columns before applying
+H changes the start and is not an equivalent saving. H remains applied in
+ceil(K/B) chunks, whose widths sum to K; no K-wide FFT workspace is retained.
+
+For J>=B the generalized path forms S=X^t X, uses the existing scaled,
+guarded Cholesky inverse T with T^t S T approximately I, and forms
+A=X^t H X. It solves (T^t A T) U=U e using the existing real symmetric
+library adapter, then returns X (T U_B). This is A C=S C e with C=T U;
+it requires no explicit orthonormal L-by-J block. One generalized EVD means
+one symmetric EVD after reduction, not a newly implemented eigensolver.
+Both small congruences and coefficient transforms use the existing GEMM
+adapters, including REFSTART_MKL dispatch. Replicated small matrices are
+**never** MPI-summed. Eigenvector signs/degenerate rotations are arbitrary;
+compare Ritz energies, orthonormality and retained subspace, not raw signs.
+
+| Step | Legacy dimensions/work | Generalized dimensions/work, J>=B |
+| --- | --- | --- |
+| Raw atomic fill | L x J; radial/harmonic/phase arithmetic | Identical |
+| Overlap / QR | Two (J x L)(L x J) Grams and two (L x J)(J x J) rotations: 8 L J^2 FLOPs | One S Gram: 2 L J^2 FLOPs, one 8 J^2-byte reduction |
+| Factor/inverse | Two J-square scaled/guarded factors | One existing J-square factor/inverse; same first-pass pivot guard |
+| Metric check | Second wide QR pass | Small T^t S T, 4 J^3 FLOPs, no collective |
+| H application | K columns, widths min(B,K-first) | J columns, same widths and operator capacity B |
+| H Gram | (K x L)(L x width), 2 L K^2 FLOPs | (J x L)(L x width), 2 L J^2 FLOPs; ceil(J/B) reductions totaling 8 J^2 bytes |
+| Reduced problem | One K-square symmetric EVD | T^t A T costs 4 J^3 FLOPs, then one J-square symmetric EVD |
+| Selected coefficients | Copy first B eigenvectors | (J x J)(J x B), 2 J^2 B FLOPs |
+| Final wide rotation | (L x K)(K x B), 2 L K B FLOPs | (L x J)(J x B), 2 L J B FLOPs |
+
+Ignoring common H/fill/EVD and scalar factor work, the candidate saves
+**6 L J^2 - 8 J^3 - 2 J^2 B** real GEMM FLOPs per rank for J>=B, one
+J-square Gram reduction and one factor/inverse. This can be negative on a
+small/empty owner; it is a measured experiment, not a guaranteed speedup.
+At J=512/B=260 (Si128 if its manifest confirms those counts), wide QR work
+8 L*262144 becomes overlap 2 L*262144, but the small checks/reduction add
+1,073,741,824 FLOPs and coefficient rotation 136,314,880 FLOPs **on each
+rank**. At J=256/B=132 the corresponding costs are 134,217,728 and
+17,301,504 FLOPs. Record actual L_r from each run, not G/8 rounded up.
+The legacy complex scalar factor helper is reused once; replacing it with a
+library triangular adapter needs separately owned numerics work.
+
+The first-pass pivot/scale rejection, or max-entry defect of T^t S T above
+1e-12 (the adapter's existing unit-scale accuracy tolerance), sends the raw
+block to unchanged CholQR2/MGS. No atomic rank is silently dropped. J<B
+uses unchanged QR and kinetic-ordered completion without trying the new
+path. Rank-deficient input still errors. A fallback adds the attempted S and
+small-factor work; it is visible through overlap clocks followed by QR clocks.
+Workspace row capacity is max(L,J) only for an eligible generalized start,
+so empty/small owners can evaluate the replicated small problem too.
+
+New setup children: `atomic_overlap_gram`, `atomic_overlap_factor_inverse`,
+`atomic_overlap_metric_check`, `atomic_generalized_diagonalize_rotate`.
+Successful candidates omit `atomic_qr_*`, `atomic_completion` and
+`atomic_orthonormalize_complete`. The existing `atomic_h_apply_gram`,
+`atomic_h_apply`, `atomic_h_gram` retain their scope. All overlap
+`atomic_block_total`; do not sum nested clocks. The existing conservative
+principal-array memory envelope remains; opaque GEMM workspace is excluded.
+
+`REFSTART_COMPACT_G` omits the second FftGridSpec for the density sphere,
+including its unused F-entry reverse map and D-entry forward map. It uses
+the already validated grid dimensions, public canonical Miller mapping and
+binary search of the FFT's sorted owned positions. This removes the S_r-entry
+BTreeMap too, retaining the original density-basis order and exactly the
+same owned G subset. Radials and structure factors were already evaluated
+only at used owned G; no claim of removing all-rank numerical tables is made.
+No interpolation, radial quadrature, FFT order or coefficient arithmetic changes.
+
+Remaining ownership boundary: the driver constructs DensityPlan's full-grid
+FFT and density basis again after start(). Both it and StartFields have
+private mutable FFT buffers, with no public plan transfer/cache constructor.
+DistributedPairFft also creates its own lanes/layouts; a dimensions-only cache
+would omit rank, stick policy, backend and active-index identity. Sharing
+immutable lane plans or a run-owned full-grid plan, and passing the existing
+density metadata into DensityPlan, require changes outside OWNED_FILES
+(`refscf/density.rs`, driver wiring, `distributed_fft.rs`, FFT adapters).
+They are **not implemented here**. Wave/density basis enumeration and sorting
+also remain in the basis crate; only redundant grid metadata is removed.
+The exact follow-up boundary and one-run diagnostic request are in
+[setup3-dev08-request.md](../performance/lanes/RSCF/setup3-dev08-request.md).
+
 ## H-apply FFT cost accounting
 
 P3-FFT (2026-11-24), audited against local base

@@ -2002,3 +2002,507 @@ fn setup2_larger_start_profile() {
         }
     }
 }
+
+/// P3-SETUP3: compare invariant Ritz projectors (signs and degenerate
+/// eigenvectors are arbitrary), full spectra and all non-orbital start bits.
+#[test]
+fn setup3_generalized_start_and_compact_g() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::{Id, RunConfig};
+    for id in [Id::REFSTART_GENERALIZED, Id::REFSTART_COMPACT_G] {
+        assert!(!RunConfig::from_pairs(&[]).unwrap().on(id));
+    }
+    for (shape, rows) in [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        [[8., 0., 0.], [0., 8., 0.], [0., 0., 4.]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let pp = common::potential_with_atomic_start(2., 1.8, shape != 3, 161, "SLA PZ");
+        let pp2 = common::potential_with_atomic_start(2., 2., false, 161, "SLA PZ");
+        let mut atoms = vec![
+            dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+            dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+        ];
+        let mut potentials = vec![dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        if shape == 1 {
+            atoms.push(dft_geometry::Atom::new("Yy", [0.1, 0.7, 0.8]));
+            potentials.push(dft_engine::SpeciesPotential {
+                label: "Yy",
+                potential: &pp2,
+            });
+        }
+        for bands in [5, 4 * atoms.len(), 4 * atoms.len() + 1] {
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let build = |generalized, compact, threads| {
+                        let config = RunConfig::from_pairs(&[
+                            ("refstart_generalized", generalized),
+                            ("refstart_compact_g", compact),
+                        ])
+                        .unwrap();
+                        let _scope = config.enter();
+                        let options = dft_engine::ScfOptions {
+                            cutoff_hartree: 2.,
+                            bands: Some(bands),
+                            threads,
+                            gamma_real: dft_engine::GammaReal::On,
+                            ..Default::default()
+                        };
+                        start(
+                            StartInput {
+                                cell: &cell,
+                                atoms: &atoms,
+                                potentials: &potentials,
+                                options: &options,
+                            },
+                            comm,
+                        )
+                        .unwrap()
+                    };
+                    let base = build("off", "off", 1);
+                    let bits = |s: &dft_engine::refstart::StartState| -> Vec<u64> {
+                        s.density
+                            .iter()
+                            .chain(&s.ionic)
+                            .chain(&s.potential)
+                            .chain(&s.diagonal_static)
+                            .map(|x| x.to_bits())
+                            .chain(
+                                s.density_g
+                                    .iter()
+                                    .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                            )
+                            .collect()
+                    };
+                    for (generalized, compact) in [("off", "on"), ("on", "off"), ("on", "on")] {
+                        let mut worker_bits = None;
+                        for threads in [1, 2] {
+                            let candidate = build(generalized, compact, threads);
+                            assert_eq!(bits(&base), bits(&candidate));
+                            assert_eq!(base.grid.g_to_fft(), candidate.grid.g_to_fft());
+                            assert_eq!(base.basis.vectors(), candidate.basis.vectors());
+                            let active = generalized == "on" && bands <= base.memory.atomic_columns;
+                            assert_eq!(
+                                candidate
+                                    .setup
+                                    .phases
+                                    .contains_key("atomic_generalized_diagonalize_rotate"),
+                                active
+                            );
+                            assert_eq!(
+                                candidate.setup.phases.contains_key("atomic_qr_gram"),
+                                !active
+                            );
+                            let ev_error = base
+                                .ritz_values_hartree
+                                .iter()
+                                .zip(&candidate.ritz_values_hartree)
+                                .map(|(a, b)| (a - b).abs())
+                                .fold(0., f64::max);
+                            assert!(
+                                ev_error < 1e-12,
+                                "shape={shape} B={bands} ranks={ranks} eigenvalues {ev_error:e} Ha"
+                            );
+                            let mut local = vec![0.; 2 * bands * bands];
+                            for j in 0..bands {
+                                for i in 0..bands {
+                                    for row in 0..base.orbitals.rows() {
+                                        local[i + j * bands] +=
+                                            base.orbitals[(row, i)] * candidate.orbitals[(row, j)];
+                                        local[bands * bands + i + j * bands] += candidate.orbitals
+                                            [(row, i)]
+                                            * candidate.orbitals[(row, j)];
+                                    }
+                                }
+                            }
+                            let mut overlaps = vec![0.; local.len()];
+                            comm.tree_sum_f64(&local, &mut overlaps).unwrap();
+                            let mut orth_error: f64 = 0.;
+                            for j in 0..bands {
+                                for i in 0..bands {
+                                    orth_error = orth_error.max(
+                                        (overlaps[bands * bands + i + j * bands]
+                                            - f64::from(i == j))
+                                        .abs(),
+                                    );
+                                }
+                            }
+                            let span_error = setup3_projection_residual(
+                                comm,
+                                &base.orbitals,
+                                &candidate.orbitals,
+                                &overlaps[..bands * bands],
+                            );
+                            assert!(orth_error < 1e-12, "orthogonality {orth_error:e}");
+                            assert!(
+                                span_error < 1e-12,
+                                "shape={shape} B={bands} ranks={ranks} subspace {span_error:e}"
+                            );
+                            let orbital_bits: Vec<_> = candidate
+                                .orbitals
+                                .as_slice()
+                                .iter()
+                                .chain(&candidate.ritz_values_hartree)
+                                .map(|v| v.to_bits())
+                                .collect();
+                            if !active {
+                                assert_eq!(base.orbitals.as_slice(), candidate.orbitals.as_slice());
+                                assert_eq!(base.ritz_values_hartree, candidate.ritz_values_hartree);
+                            }
+                            if let Some(previous) = &worker_bits {
+                                assert_eq!(&orbital_bits, previous);
+                            }
+                            worker_bits = Some(orbital_bits);
+                            if active && threads == 1 && compact == "on" && comm.rank() == 0 {
+                                eprintln!(
+                                    "P3-SETUP3 start shape={shape} P={ranks} G={} L={} J={} B={bands} eigen_error={ev_error:.9e} Ha orth_error={orth_error:.9e} span_error={span_error:.9e}",
+                                    base.memory.wave_rows,
+                                    base.memory.owned_rows,
+                                    base.memory.atomic_columns
+                                );
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// Default convergence thresholds and independent verification remain enabled.
+/// Count comparisons cover every solve, redo, restart, repair and verification.
+#[test]
+fn setup3_generalized_verified_trajectories() {
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    for (label, rows) in [
+        ("cubic", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]),
+        ("skew", [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]),
+        ("elongated", [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]]),
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let atoms = [
+            dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+            dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+        ];
+        let potentials = [dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = dft_engine::ScfOptions {
+            cutoff_hartree: 2.,
+            bands: Some(5),
+            max_iterations: 100,
+            gamma_real: dft_engine::GammaReal::On,
+            ..Default::default()
+        };
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let run = |generalized, compact| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refstart_generalized", generalized),
+                        ("refstart_compact_g", compact),
+                        ("refscf_verify_energy", "off"),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    dft_engine::refscf::driver::run_with(
+                        dft_engine::refstart::StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile::default(),
+                        comm,
+                    )
+                    .unwrap()
+                };
+                let base = run("off", "off");
+                for (generalized, compact) in [("off", "on"), ("on", "off"), ("on", "on")] {
+                    let candidate = run(generalized, compact);
+                    assert!(
+                        candidate.outcome.converged
+                            && candidate
+                                .outcome
+                                .result
+                                .verification
+                                .as_ref()
+                                .unwrap()
+                                .passed()
+                    );
+                    let counts = |r: &dft_engine::refscf::driver::Run| {
+                        let maps: Vec<_> = r
+                            .records
+                            .iter()
+                            .map(|s| (s.first_iteration_redo, s.verification_calls.clone()))
+                            .collect();
+                        let solves: Vec<_> = r
+                            .records
+                            .iter()
+                            .flat_map(|s| &s.calls)
+                            .chain(&r.verification_calls)
+                            .map(|s| {
+                                (
+                                    s.iterations,
+                                    s.h_columns,
+                                    s.restarts,
+                                    s.repairs,
+                                    s.dropped_corrections,
+                                    s.reduced_orders.clone(),
+                                    s.active_bands.clone(),
+                                )
+                            })
+                            .collect();
+                        (maps, solves)
+                    };
+                    let delta = candidate.outcome.result.energy.total_hartree()
+                        - base.outcome.result.energy.total_hartree();
+                    let dr2 = candidate.records[0].dr2_ry - base.records[0].dr2_ry;
+                    let calls: Vec<_> = candidate
+                        .records
+                        .iter()
+                        .flat_map(|s| &s.calls)
+                        .chain(&candidate.verification_calls)
+                        .collect();
+                    if comm.rank() == 0 {
+                        eprintln!(
+                            "P3-SETUP3 verified {label} P={ranks} G={generalized} C={compact}: E={:.17e} Ha delta={delta:.9e} Ha first_dr2={:.17e} Ry delta_dr2={dr2:.9e} Ry maps={} Dav={} H={}",
+                            candidate.outcome.result.energy.total_hartree(),
+                            candidate.records[0].dr2_ry,
+                            candidate.records.len(),
+                            calls.iter().map(|s| s.iterations).sum::<usize>(),
+                            calls.iter().map(|s| s.h_columns).sum::<usize>()
+                        );
+                    }
+                    assert!(delta.abs() < 1e-12);
+                    // First-map dr2 is a diagnostic, not a converged energy:
+                    // the ticket requires its signed delta, not a 1e-12 Ry
+                    // equality gate on the loose first Davidson solve.
+                    assert!(dr2.is_finite());
+                    assert_eq!(
+                        counts(&base),
+                        counts(&candidate),
+                        "{label} G={generalized} C={compact}"
+                    );
+                    if generalized == "off" {
+                        assert_eq!(
+                            stop_to_verified_science(&base),
+                            stop_to_verified_science(&candidate)
+                        );
+                    }
+                }
+            });
+        }
+    }
+}
+
+#[test]
+fn setup3_guarded_fallback_rank_failure_and_empty_owners() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::RunConfig;
+    let cell = dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]])
+        .unwrap();
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let potentials = [dft_engine::SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    // A seven-row wave sphere on eight ranks exercises empty owners. Small
+    // replicated algebra must still have J-row capacity on every rank.
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let empty = dft_mpi::simulate(8, |comm| {
+        let config =
+            RunConfig::from_pairs(&[("refstart_generalized", "on"), ("refstart_compact_g", "on")])
+                .unwrap();
+        let _scope = config.enter();
+        let options = dft_engine::ScfOptions {
+            cutoff_hartree: 0.5,
+            bands: Some(2),
+            ..Default::default()
+        };
+        let s = start(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            comm,
+        )
+        .unwrap();
+        assert!(
+            s.setup
+                .phases
+                .contains_key("atomic_generalized_diagonalize_rotate")
+        );
+        s.orbitals.rows() == 0
+    });
+    assert!(empty.iter().any(|&e| e));
+    // Near-coincident atomic centers stress the overlap metric; coincident
+    // centers are rank deficient and must not be silently truncated or repaired.
+    for displacement in [1e-5, 0.] {
+        let atoms = [
+            dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+            dft_geometry::Atom::new("Xx", [0.13 + displacement, 0.21, 0.32]),
+        ];
+        dft_mpi::simulate(3, |comm| {
+            let build = |value| {
+                let config = RunConfig::from_pairs(&[("refstart_generalized", value)]).unwrap();
+                let _scope = config.enter();
+                let options = dft_engine::ScfOptions {
+                    cutoff_hartree: 2.,
+                    bands: Some(5),
+                    ..Default::default()
+                };
+                start(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    comm,
+                )
+            };
+            let base = build("off");
+            let candidate = build("on");
+            if displacement == 0. {
+                assert!(base.is_err() && candidate.is_err());
+            } else {
+                let base = base.unwrap();
+                let candidate = candidate.unwrap();
+                assert!(candidate.setup.phases.contains_key("atomic_overlap_gram"));
+                assert!(candidate.setup.phases.contains_key("atomic_qr_gram"));
+                assert!(
+                    !candidate
+                        .setup
+                        .phases
+                        .contains_key("atomic_generalized_diagonalize_rotate")
+                );
+                assert_eq!(base.orbitals.as_slice(), candidate.orbitals.as_slice());
+                assert_eq!(base.ritz_values_hartree, candidate.ritz_values_hartree);
+            }
+        });
+    }
+}
+
+/// More than one GEMM row panel and 64 raw atomic columns; no timing gate.
+#[test]
+fn setup3_generalized_large_start() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
+    let atoms: Vec<_> = (0..16)
+        .map(|n| {
+            dft_geometry::Atom::new(
+                "Xx",
+                [
+                    (n / 4) as f64 / 4. + 0.001 * (n % 3) as f64,
+                    (n / 2 % 2) as f64 / 2. + 0.002 * (n % 5) as f64,
+                    (n % 2) as f64 / 2. + 0.003 * (n % 7) as f64,
+                ],
+            )
+        })
+        .collect();
+    let potentials = [dft_engine::SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for (label, rows) in [
+        ("cubic", [[14., 0., 0.], [0., 14., 0.], [0., 0., 14.]]),
+        ("skew", [[14., 0., 0.], [0.7, 14., 0.], [0.2, 0.3, 14.]]),
+        ("elongated", [[10., 0., 0.], [0., 10., 0.], [0., 0., 24.]]),
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let build = |generalized, threads| {
+            let config = RunConfig::from_pairs(&[
+                ("refstart_generalized", generalized),
+                ("refstart_compact_g", "on"),
+            ])
+            .unwrap();
+            let _scope = config.enter();
+            let options = dft_engine::ScfOptions {
+                cutoff_hartree: 4.,
+                bands: Some(34),
+                threads,
+                ..Default::default()
+            };
+            start(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                &Serial,
+            )
+            .unwrap()
+        };
+        let base = build("off", 1);
+        let candidate = build("on", 1);
+        let threaded = build("on", 2);
+        assert_eq!(candidate.orbitals.as_slice(), threaded.orbitals.as_slice());
+        assert_eq!(candidate.ritz_values_hartree, threaded.ritz_values_hartree);
+        assert!(
+            candidate
+                .setup
+                .phases
+                .contains_key("atomic_generalized_diagonalize_rotate")
+        );
+        let eigen_error = base
+            .ritz_values_hartree
+            .iter()
+            .zip(&candidate.ritz_values_hartree)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0., f64::max);
+        let q = &candidate.orbitals;
+        let mut orth_error: f64 = 0.;
+        let mut projection = vec![0.; q.cols() * q.cols()];
+        for j in 0..q.cols() {
+            for i in 0..q.cols() {
+                let norm: f64 = (0..q.rows()).map(|r| q[(r, i)] * q[(r, j)]).sum();
+                orth_error = orth_error.max((norm - f64::from(i == j)).abs());
+                projection[i + j * q.cols()] = (0..q.rows())
+                    .map(|r| base.orbitals[(r, i)] * q[(r, j)])
+                    .sum();
+            }
+        }
+        let span_error = setup3_projection_residual(&Serial, &base.orbitals, q, &projection);
+        eprintln!(
+            "P3-SETUP3 large {label} G={} J=64 B=34 eigen_error={eigen_error:.9e} Ha orth_error={orth_error:.9e} span_error={span_error:.9e}",
+            q.rows()
+        );
+        assert!(eigen_error < 1e-12 && orth_error < 1e-12 && span_error < 1e-12);
+    }
+}
+
+// Linear (not squared-angle) subspace error: largest column norm of B-A(A^t B).
+// Using only I-(A^t B)^t(A^t B) would hide first-order errors below sqrt(eps).
+fn setup3_projection_residual<K: Collective>(
+    comm: &K,
+    a: &dft_numerics::RealMatrix,
+    b: &dft_numerics::RealMatrix,
+    overlap: &[f64],
+) -> f64 {
+    let mut local = vec![0.; b.cols()];
+    for j in 0..b.cols() {
+        for r in 0..b.rows() {
+            let projected: f64 = (0..a.cols())
+                .map(|k| a[(r, k)] * overlap[k + j * a.cols()])
+                .sum();
+            local[j] += (b[(r, j)] - projected).powi(2);
+        }
+    }
+    let mut global = vec![0.; b.cols()];
+    comm.tree_sum_f64(&local, &mut global).unwrap();
+    global.into_iter().map(f64::sqrt).fold(0., f64::max)
+}

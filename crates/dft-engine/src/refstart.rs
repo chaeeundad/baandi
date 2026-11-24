@@ -338,7 +338,12 @@ fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartSt
     let basis = o.basis(cell, [0.; 3], 1.)?;
     let db = o.basis(cell, [0.; 3], 4.)?;
     let grid = FftGridSpec::new(&basis, &db, o.grid_override)?;
-    let dg = FftGridSpec::new(&db, &db, Some(grid.dims()))?;
+    let compact_g = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_COMPACT_G);
+    let dg = if compact_g {
+        None
+    } else {
+        Some(FftGridSpec::new(&db, &db, Some(grid.dims()))?)
+    };
     let half = HalfSphere::new(&basis, &grid).map_err(err)?;
     let j: usize = species
         .iter()
@@ -465,7 +470,7 @@ fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartSt
     drop(nl);
     setup.record("nonlocal_diagonal", clock);
     let clock = Instant::now();
-    let coeff = atomic_fields(&fields, &db, &dg, volume, &species, o);
+    let coeff = atomic_fields(&fields, &db, dg.as_ref(), volume, &species, o);
     agree(
         comm,
         f64::from(coeff.is_err()),
@@ -660,31 +665,42 @@ fn local_xc(functional: Functional, n: &[f64]) -> Result<Vec<f64>, ScfError> {
 fn atomic_fields(
     fields: &StartFields,
     db: &PlaneWaveBasis,
-    dg: &FftGridSpec,
+    dg: Option<&FftGridSpec>,
     volume: f64,
     species: &[Species<'_>],
     o: &ScfOptions,
 ) -> Result<(Vec<C>, Vec<C>), ScfError> {
-    let dims = dg.dims();
-    // Only owned lookup entries: scan the already-built density metadata once.
-    // Do not allocate another full-density-sphere map on every rank.
-    let owned: BTreeMap<_, _> = fields
-        .reciprocal_indices()
-        .iter()
-        .enumerate()
-        .map(|(slot, &flat)| (flat, slot))
-        .collect();
-    let represented: Vec<_> = dg
-        .g_to_fft()
-        .iter()
-        .zip(db.vectors())
-        .filter_map(|(&[i, j, k], g)| {
-            owned
-                .get(&((i * dims[1] + j) * dims[2] + k))
-                .map(|&slot| (slot, g))
-        })
-        .collect();
-    drop(owned);
+    let dims = fields.dims;
+    let represented: Vec<_> = if let Some(dg) = dg {
+        let owned: BTreeMap<_, _> = fields
+            .reciprocal_indices()
+            .iter()
+            .enumerate()
+            .map(|(slot, &flat)| (flat, slot))
+            .collect();
+        dg.g_to_fft()
+            .iter()
+            .zip(db.vectors())
+            .filter_map(|(&[i, j, k], g)| {
+                owned
+                    .get(&((i * dims[1] + j) * dims[2] + k))
+                    .map(|&slot| (slot, g))
+            })
+            .collect()
+    } else {
+        // The wave grid already validated the complete density sphere. Reuse
+        // its dimensions and the FFT's sorted local positions; no F-sized
+        // reverse map or S_r-entry tree is needed to find the used G values.
+        let mut represented = Vec::new();
+        for g in db.vectors() {
+            let [i, j, k] = FftGridSpec::map_miller(g.miller, dims)?;
+            let flat = (i * dims[1] + j) * dims[2] + k;
+            if let Ok(slot) = fields.reciprocal_indices().binary_search(&flat) {
+                represented.push((slot, g));
+            }
+        }
+        represented
+    };
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
     let mut phases = if reuse {
         Vec::with_capacity(
@@ -818,6 +834,71 @@ fn rotate(
         }
     }
     Ok(q)
+}
+
+/// Replicated small-matrix congruence T^t A T. Do not call gram(): these
+/// matrices are identical on every rank and must not be reduced again.
+fn congruence(
+    ws: &mut RealGemmWorkspace,
+    a: &RealMatrix,
+    t: &RealMatrix,
+) -> Result<RealMatrix, ScfError> {
+    let at = rotate(ws, a, t)?;
+    let mut out = RealMatrix::zeros(t.cols(), t.cols()).map_err(err)?;
+    if mkl_start() {
+        ws.multiply_slices_into(
+            GemmSite::Other,
+            t.as_slice(),
+            t.rows(),
+            t.cols(),
+            t.rows(),
+            RealOp::Transpose,
+            at.as_slice(),
+            at.cols(),
+            at.rows(),
+            out.as_mut(),
+        )
+        .map_err(err)?;
+    } else {
+        ws.multiply_into(t.as_ref(), RealOp::Transpose, at.as_ref(), out.as_mut())
+            .map_err(err)?;
+    }
+    for j in 0..out.cols() {
+        for i in 0..j {
+            let v = 0.5 * (out[(i, j)] + out[(j, i)]);
+            out[(i, j)] = v;
+            out[(j, i)] = v;
+        }
+    }
+    Ok(out)
+}
+
+/// One distributed S and the existing scaled Cholesky inverse. Check its
+/// metric on the small matrices before applying H. Ill-conditioned spans use
+/// the unchanged two-pass QR/MGS path, not a truncated generalized problem.
+fn overlap_transform<K: Collective>(
+    comm: &K,
+    ws: &mut RealGemmWorkspace,
+    raw: &RealMatrix,
+    setup: &mut crate::refscf::record::SetupTimings,
+) -> Result<Option<RealMatrix>, ScfError> {
+    let clock = Instant::now();
+    let s = gram(comm, ws, raw, raw)?;
+    setup.record("atomic_overlap_gram", clock);
+    let clock = Instant::now();
+    let t = crate::AtomicStartReport::owned_qr_transform(&s, true)?;
+    setup.record("atomic_overlap_factor_inverse", clock);
+    let Some(t) = t else { return Ok(None) };
+    let clock = Instant::now();
+    let metric = congruence(ws, &s, &t)?;
+    let good = (0..metric.cols()).all(|j| {
+        (0..metric.rows()).all(|i| {
+            let defect = (metric[(i, j)] - f64::from(i == j)).abs();
+            defect.is_finite() && defect <= dft_numerics::linalg::HERMITIAN_TOLERANCE
+        })
+    });
+    setup.record("atomic_overlap_metric_check", clock);
+    Ok(good.then_some(t))
 }
 
 /// Owned form of the legacy guarded CholQR2: two small Gram reductions and
@@ -1025,7 +1106,26 @@ fn atomic_block<K: Collective>(
     )?;
     setup.record("atomic_orbital_fill", clock);
     let clock = Instant::now();
-    let mut ws = RealGemmWorkspace::with_pool(l, j.max(bands), pool).map_err(err)?;
+    let generalized =
+        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_GENERALIZED) && j >= bands;
+    let mut ws =
+        RealGemmWorkspace::with_pool(if generalized { l.max(j) } else { l }, j.max(bands), pool)
+            .map_err(err)?;
+    if generalized && let Some(t) = overlap_transform(comm, &mut ws, &raw, setup)? {
+        let small = projected_h(comm, &mut ws, &raw, bands, op, setup)?;
+        let clock = Instant::now();
+        let reduced = congruence(&mut ws, &small, &t)?;
+        let (mut values, rot) = dft_numerics::real::symmetric_eigh(&reduced).map_err(err)?;
+        let selected =
+            RealMatrix::new(j, bands, rot.as_slice()[..j * bands].to_vec()).map_err(err)?;
+        let coefficients = rotate(&mut ws, &t, &selected)?;
+        let out = rotate(&mut ws, &raw, &coefficients)?;
+        values.truncate(bands);
+        setup.record("atomic_generalized_diagonalize_rotate", clock);
+        return Ok((out, values));
+    }
+    // All ranks see the same reduced S and make the same fallback decision.
+    // No rank deletion, looser pivot, or alternate completion is introduced.
     let mut q = orthogonalize(comm, &mut ws, &raw, setup)?;
     drop(raw);
     let completion_clock = Instant::now();
@@ -1099,6 +1199,27 @@ fn atomic_block<K: Collective>(
     }
     setup.record("atomic_completion", completion_clock);
     setup.record("atomic_orthonormalize_complete", clock);
+    let small = projected_h(comm, &mut ws, &q, bands, op, setup)?;
+    let clock = Instant::now();
+    let k = q.cols();
+    let (mut values, rot) = dft_numerics::real::symmetric_eigh(&small).map_err(err)?;
+    let selected = RealMatrix::new(k, bands, rot.as_slice()[..k * bands].to_vec()).map_err(err)?;
+    let out = rotate(&mut ws, &q, &selected)?;
+    values.truncate(bands);
+    setup.record("atomic_diagonalize_rotate", clock);
+    Ok((out, values))
+}
+
+/// H is still applied to every column in the same Ritz space, in B-wide chunks.
+fn projected_h<K: Collective>(
+    comm: &K,
+    ws: &mut RealGemmWorkspace,
+    q: &RealMatrix,
+    bands: usize,
+    op: &mut DistributedRealHamiltonian,
+    setup: &mut crate::refscf::record::SetupTimings,
+) -> Result<RealMatrix, ScfError> {
+    let l = q.rows();
     let clock = Instant::now();
     let k = q.cols();
     let mut small = RealMatrix::zeros(k, k).map_err(err)?;
@@ -1115,7 +1236,7 @@ fn atomic_block<K: Collective>(
         op.apply_block(comm, &x, &mut hx).map_err(err)?;
         setup.record("atomic_h_apply", h_clock);
         let gram_clock = Instant::now();
-        let part = gram(comm, &mut ws, &q, &hx)?;
+        let part = gram(comm, ws, q, &hx)?;
         setup.record("atomic_h_gram", gram_clock);
         small.as_mut_slice()[first * k..(first + width) * k].copy_from_slice(part.as_slice());
     }
@@ -1127,13 +1248,7 @@ fn atomic_block<K: Collective>(
         }
     }
     setup.record("atomic_h_apply_gram", clock);
-    let clock = Instant::now();
-    let (mut values, rot) = dft_numerics::real::symmetric_eigh(&small).map_err(err)?;
-    let selected = RealMatrix::new(k, bands, rot.as_slice()[..k * bands].to_vec()).map_err(err)?;
-    let out = rotate(&mut ws, &q, &selected)?;
-    values.truncate(bands);
-    setup.record("atomic_diagonalize_rotate", clock);
-    Ok((out, values))
+    Ok(small)
 }
 
 // Same candidate partition and chained summation as the adopted legacy Ewald

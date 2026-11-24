@@ -132,12 +132,21 @@ fn broyden_reference_inputs_and_verified_records() {
             assert!(row["h_columns"].as_u64().unwrap() > 0);
             assert!(row["active_bands_sum"].as_u64().unwrap() > 0);
             assert!(!row["reduced_problem_orders"].as_array().unwrap().is_empty());
-            assert!(row["energies_ha"]["total"].as_f64().unwrap().is_finite());
+            // REFSCF_LEAN_ENERGY (default on since 2026-11-26): intermediate maps may
+            // carry a null audit; the delivered (last) map always has the full audit.
+            let total = &row["energies_ha"]["total"];
+            assert!(total.is_null() || total.as_f64().unwrap().is_finite());
             // Preserve both historical trace-reader paths, including full Ritz
             // matrices. No reader must infer missing work from an empty trace.
             let i = row["iteration"].as_u64().unwrap() as usize - 1;
             assert_eq!(*row, v["convergence"]["history"][i]["reference_scf"]);
         }
+        assert!(
+            rows.last().unwrap()["energies_ha"]["total"]
+                .as_f64()
+                .unwrap()
+                .is_finite()
+        );
         for call in rows
             .iter()
             .flat_map(|r| r["calls"].as_array().unwrap())

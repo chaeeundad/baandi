@@ -3634,3 +3634,12 @@ counts identical, |E - E_D| <= 2.3e-13 Ha, E - E_strict <= 1.2e-10. Wall D/R/N/R
 si128 35.57/33.47/33.70/34.33 (RN single-run noise; stage savings additive), elongated 1.44/1.31/1.28/1.26.
 si128 R: border S+H 3.75 -> 2.80 s (26 fewer GEMM pairs), factor/transform -0.16 s; N: add_vuspsi per call
 0.0250 -> 0.0203 s (back_and_add 2.37 -> 1.97 s). Default on. Evidence: dev08 /data/sig-dft/p3m/REPORT.md.
+
+### P3q (2026-11-26, development protocol): REFSCF_LEAN_ENERGY ADOPTED
+
+Per-map energy only where consumed, fields of the mixed density reused as the next map's input fields,
+full audit at delivery and verification. dev08 MPI8 one profiled run per arm at b7e6cfe8: delivered
+density.bin and energies bit-identical on all cases (intermediate audit fields null), counts identical.
+si128 per-map energy 1.168 -> 0.275 s (verified) and 1.025 -> 0.173 s (verify off); si64 0.235 -> 0.059;
+elongated wall 1.48 -> 1.21 s. energy_correction (~0.25 s) untouched. Default on.
+Evidence: dev08 /data/sig-dft/p3q/REPORT.md.

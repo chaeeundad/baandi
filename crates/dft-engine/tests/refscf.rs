@@ -4381,9 +4381,9 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
     use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::driver, refstart};
     use dft_numerics::switches::{Id, RunConfig};
     assert!(
-        !RunConfig::from_pairs(&[])
+        RunConfig::from_pairs(&[])
             .unwrap()
-            .on(Id::REFSCF_VERIFY_WARM)
+            .on(Id::REFSCF_VERIFY_WARM) // default on since 2026-11-26
     );
     let pp = common::potential_with_atomic_start(
         if recovery { 4. } else { 2. },

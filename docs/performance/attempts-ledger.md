@@ -3707,3 +3707,11 @@ costs 0.9-1.1 s (si64) and 4.9-6.7 s (si128). The reference driver's trajectory 
 so a coarse pre-solve has little to remove. Ladder stays off.
 Headline snapshot at the same binary (one run each): si64 verify off 4.57 s / verified 6.40 s / QE rmm 4.30 s
 (1.06x / 1.49x); si128 23.59 / 30.15 / 21.57 s (1.09x / 1.40x). Evidence: dev08 /scr/mino/rustdft/lad2/runs/.
+
+### P3-VERWARM (2026-11-26, development protocol): REFSCF_VERIFY_WARM ADOPTED
+
+Verification and recovery maps start from the kept HX updated by dV; independent density, tolerances and the
+Coulomb criterion unchanged. dev08 MPI8 one run per arm at 185489c: verification H columns si64 1050 -> 786,
+si128 1942 -> 1422 (one band block per attempt), Coulomb errors identical, maps/attempts identical.
+si128 verification 4.03 -> 3.72 s, wall 32.21 -> 30.36 s (most of it single-run spread); si64 6.14 -> 6.35 (noise).
+Default on. Evidence: dev08 /scr/mino/rustdft/vw/runs/.

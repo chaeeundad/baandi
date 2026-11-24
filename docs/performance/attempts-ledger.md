@@ -3720,3 +3720,11 @@ Default on. Evidence: dev08 /scr/mino/rustdft/vw/runs/.
 
 Full table: docs/performance/precise-2026-11-26.md. Verify-off / QE best 1.014-1.189 (MPI8 si216 1.014,
 si128 1.098; 1 core si128 1.189); verified / QE best 1.074-1.648. 180 samples, no failures, accuracy classes held.
+
+### P4 screen (2026-11-26, dev08 MPI8 verify off, one run per arm at db29dd7)
+
+S = REFSTART_CHOLESKY + REFSTART_SPECIES_FILL + REFSTART_PARTITION_CACHE: setup si64 0.681 -> 0.682, si128 2.247 ->
+2.126, si216 6.075 -> 5.374 s (atomic block 3.59 -> 2.84); wall si128 23.76 -> 23.50, si216 82.91 -> 81.55; rounding
+class (|E - E_D| <= 1.1e-13). ADOPTED. K = REFSCF_KEPT_RECOMPUTE (bit-identical): peak RSS -45/-191/-505 MB per
+rank, but solve +0.18/+1.57/+1.36 s; wall si64 +0.07, si128 +1.13, si216 -1.09 (density drop, unconfirmed). Kept
+off as a memory-saving option. Evidence: dev08 /data/sig-dft/p4start/RESULT.md.

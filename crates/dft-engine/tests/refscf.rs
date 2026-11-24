@@ -4615,11 +4615,11 @@ fn verify_warm_failed_recovery() {
 fn p4_start_switches_preserve_fields_and_ritz() {
     use dft_engine::refstart::{StartInput, start};
     use dft_numerics::switches::{Id, RunConfig};
-    // New P4 experiments must remain opt-in.
+    // Default on since 2026-11-26 (dev08 P4 screen).
     for (id, default_on) in [
-        (Id::REFSTART_PARTITION_CACHE, false),
-        (Id::REFSTART_CHOLESKY, false),
-        (Id::REFSTART_SPECIES_FILL, false),
+        (Id::REFSTART_PARTITION_CACHE, true),
+        (Id::REFSTART_CHOLESKY, true),
+        (Id::REFSTART_SPECIES_FILL, true),
     ] {
         assert_eq!(RunConfig::from_pairs(&[]).unwrap().on(id), default_on);
     }

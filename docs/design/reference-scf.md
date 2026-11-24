@@ -789,6 +789,83 @@ MPI8 evidence; these Mac counters cannot assign that dev08 time to a cause.
 No speedup or default adoption is claimed before the requested profiles.
 
 
+### P3-STREAM: contiguous kernels and fused stores
+
+Four independent `BAANDI_REF_DAV_*` switches default off: `SQRT`,
+`FUSED_APPEND`, `CHECK_APPEND`, `REUSE_ROWS`. They affect only the reference
+Davidson and use the run-owned switch registry. Derived from the own-words
+preconditioner addendum in `research/qe-study/davidson-iteration-structure-gamma.md`;
+no QE source was read. The off path retains the baseline arithmetic.
+
+`SQRT` uses contiguous column slices and fixed 32-row stack chunks. Residual,
+denominator division and squares are formed in one independent-row loop;
+squares are then added in ascending row order from that small stack block.
+This exposes vector sqrt/divide without reassociating the norm sum, changing
+MPI reductions, or allocating in an iteration. The tail and zero-row ranks
+use the same order. The pre-existing residual/division/norm fusion is retained;
+there was no separate full residual or norm pass to remove.
+
+For x=2(h-e), z=|x-1|, the Ha denominator remains
+`0.25 * (2*max(x,1) + 1/(sqrt(1+z*z)+z))`. This is the baseline's positive,
+cancellation-free rationalization, not the literal subtracting expression
+for negative x. The changed operation is `hypot(z,1)` to `sqrt(1+z*z)`.
+For finite computed x/z and z <= 2^500, round-to-nearest binary64 with unit
+roundoff u=2^-53 gives sqrt relative error <=2u+O(u^2); the positive add,
+reciprocal and final add give denominator error <=5u+O(u^2), relative to the
+same computed x/z with exact remaining arithmetic. Scaling by 2 and 1/4 is
+exact in this range. If the platform hypot has relative error <=2u (one
+ulp), the two computed denominators differ by <=10u+O(u^2); the local
+comparison gate is the conservative 8*EPSILON=16u relative bound. This is
+an explicit floating-point model, not a portable libm accuracy guarantee.
+Underflow of z*z is harmless: its contribution to 1 rounds away. The
+common h-e/x/z rounding is unchanged and excluded from this bound.
+
+A once-per-solve diagonal min/max and per-column eigenvalue check select the
+sqrt kernel only when **every** row satisfies the bound. Extreme/nonfinite
+columns use the original hypot kernel for the entire column; the ordinary
+row loop has no data-dependent branch. Fallback is visible in precondition
+hypot counts; sqrt and hypot counts include only rows actually executed.
+Neither path changes band thresholds or silently accepts nonfinite norms.
+The nominal sqrt model charges 15 scalar FLOPs/row, versus baseline 13 plus
+hypot, with sqrt counted separately. The 32-row scratch stores are register/
+stack temporaries, excluded from the logical matrix-traffic model. The sqrt
+path removes the norm-vector zero fill; it writes each completed norm once.
+
+`FUSED_APPEND` writes each normalized value to E and to the future V column
+in the same pass, after the unchanged global norm reduction. It eliminates
+the later E reread, saving 8*r*k logical bytes for k retained columns.
+The second store is still counted as copy-destination bytes, attributed to
+normalize. The append call consumes the staged-column marker. Capacity
+exhaustion leaves the original basis intact and goes through repair; repair
+invalidates any staged append and recomputes its own normalized columns.
+It retains the existing exceptional normalization/copy passes. Exact-zero
+corrections, compaction and failure decisions use unchanged tests.
+
+`CHECK_APPEND` classifies finite HE entries while copying them to HV,
+saving 8*r*k logical bytes per correction block. It retains the same
+collective agreement, including operator errors and failures on another
+rank. The copy is attributed to apply_check; no separate append scan runs.
+Initial H validation stays separate because its producer belongs to the
+operator layer. No finite check is removed or delegated without a contract.
+
+`REUSE_ROWS` retains initialized V/HV/E/HE storage on the calling thread
+between successful solves with identical (local rows, bands, capacity).
+One cache entry is bounded to the most recent shape; a mismatch replaces it.
+All active data are overwritten by start copy, H application, correction or
+append before use. Factors, reduced matrices, operator state and returned
+X/HX are never cached. No unsafe/uninitialized memory is introduced. Failed
+solves drop their acquired buffers and publish no cache entry. On a warm
+same-shape solve, setup avoids 16*r*(capacity+bands) zero-fill bytes; the
+cold solve retains all fills. The two returned row matrices and shared
+adapter scratch still allocate/initialize. Memory retention is a deliberate
+tradeoff (four buffers per calling thread, released on thread exit or shape
+replacement), recorded with the request rather than hidden as free storage.
+
+No default is promoted. See the [one-run dev08 request and local attempt
+record](../performance/lanes/RSCF/stream-dev08-request.md) for independent
+arms, fixtures, rounding branches and validation limits. Timings await dev08;
+Mac correctness and work-count evidence is not performance acceptance.
+
 ## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
 R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.
 

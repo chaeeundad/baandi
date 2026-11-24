@@ -1,11 +1,24 @@
 use super::accounting::{clock, elapsed};
 use super::work::{self, Stage, span};
-use super::{Iteration, Options, ReducedPlacement, error, preconditioner_denominator};
+use super::{Iteration, Options, ReducedPlacement, error, preconditioner_denominator, stream};
 use crate::{SolverError, distributed_davidson::DistributedRealOperator, real_davidson::lean};
 use dft_mpi::Collective;
 use dft_numerics::{
     GemmSite, RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool, real::RealEighWorkspace,
 };
+
+// One bounded cache per calling rank/thread. Only initialized, non-returned
+// row matrices are retained; numerical factors and operator state never are.
+struct Rows {
+    key: (usize, usize, usize),
+    v: RealMatrix,
+    hv: RealMatrix,
+    e: RealMatrix,
+    he: RealMatrix,
+}
+thread_local! {
+    static ROWS: std::cell::RefCell<Option<Rows>> = const { std::cell::RefCell::new(None) };
+}
 
 pub(super) struct Workspace {
     rows: usize,
@@ -33,6 +46,13 @@ pub(super) struct Workspace {
     single_gemm: bool,
     swap_buffers: bool,
     lean_reset: bool,
+    pub sqrt_precondition: bool,
+    pub diagonal_bounds: (f64, f64),
+    fused_append: bool,
+    check_append: bool,
+    reuse_rows: bool,
+    staged_append: Option<usize>,
+    pub reused_elements: usize,
 }
 impl Workspace {
     pub fn new<O: DistributedRealOperator>(
@@ -47,7 +67,47 @@ impl Workspace {
             .map(Ok)
             .unwrap_or_else(|| WorkerPool::new(op.inner_threads()))
             .map_err(|e| SolverError::Application(e.to_string()))?;
+        use dft_numerics::switches::{Id, on};
+        let reuse_rows = on(Id::REF_DAV_REUSE_ROWS);
+        let cached = if reuse_rows {
+            ROWS.with(|slot| slot.borrow_mut().take())
+                .filter(|r| r.key == (rows, n, cap))
+        } else {
+            None
+        };
+        let reused_elements = if cached.is_some() {
+            2 * rows * cap + 2 * rows * n
+        } else {
+            0
+        };
+        let Rows {
+            mut v,
+            mut hv,
+            mut e,
+            mut he,
+            ..
+        } = match cached {
+            Some(buffers) => buffers,
+            None => Rows {
+                key: (rows, n, cap),
+                v: RealMatrix::zeros(rows, cap)?,
+                hv: RealMatrix::zeros(rows, cap)?,
+                e: RealMatrix::zeros(rows, n)?,
+                he: RealMatrix::zeros(rows, n)?,
+            },
+        };
+        v.reshape_within_storage(rows, cap)?;
+        hv.reshape_within_storage(rows, cap)?;
+        e.reshape_within_storage(rows, n)?;
+        he.reshape_within_storage(rows, n)?;
         Ok(Self {
+            sqrt_precondition: on(Id::REF_DAV_SQRT),
+            diagonal_bounds: (f64::INFINITY, f64::NEG_INFINITY),
+            fused_append: on(Id::REF_DAV_FUSED_APPEND),
+            check_append: on(Id::REF_DAV_CHECK_APPEND),
+            reuse_rows,
+            reused_elements,
+            staged_append: None,
             rows,
             n,
             cap,
@@ -56,12 +116,12 @@ impl Workspace {
             swap_buffers: dft_numerics::switches::on(
                 dft_numerics::switches::Id::REF_DAV_SWAP_BUFFERS,
             ),
-            v: RealMatrix::zeros(rows, cap)?,
-            hv: RealMatrix::zeros(rows, cap)?,
+            v,
+            hv,
             x: RealMatrix::zeros(rows, cap)?,
             hx: RealMatrix::zeros(rows, cap)?,
-            e: RealMatrix::zeros(rows, n)?,
-            he: RealMatrix::zeros(rows, n)?,
+            e,
+            he,
             values: vec![0.0; cap],
             old_values: vec![0.0; n],
             lean: lean::LeanScratch::new(cap, n)?,
@@ -76,6 +136,43 @@ impl Workspace {
             gemm: RealGemmWorkspace::with_pool(rows.max(cap), cap, pool)?,
             evd: RealEighWorkspace::new(cap)?,
         })
+    }
+    pub fn recycle_rows(&mut self) {
+        if self.reuse_rows {
+            let take = |matrix: &mut RealMatrix| {
+                std::mem::replace(matrix, RealMatrix::zeros(0, 0).expect("empty matrix"))
+            };
+            let rows = Rows {
+                key: (self.rows, self.n, self.cap),
+                v: take(&mut self.v),
+                hv: take(&mut self.hv),
+                e: take(&mut self.e),
+                he: take(&mut self.he),
+            };
+            ROWS.with(|slot| *slot.borrow_mut() = Some(rows));
+        }
+    }
+    pub fn normalize_restart<C: Collective>(
+        &mut self,
+        c: &C,
+        norms: &[f64],
+        sums: &mut [f64],
+        r: &mut Iteration,
+        profile: bool,
+    ) -> Result<(), SolverError> {
+        self.staged_append = stream::normalize(
+            c,
+            &mut self.e,
+            &mut self.v,
+            norms,
+            sums,
+            self.n,
+            self.cap,
+            self.fused_append,
+            r,
+            profile,
+        )?;
+        Ok(())
     }
     pub fn apply<C: Collective, O: DistributedRealOperator>(
         &mut self,
@@ -104,12 +201,27 @@ impl Workspace {
         r.h_calls += 1;
         r.h_columns += k;
         let result = op.apply_block(c, &self.e, &mut self.he);
-        agree_apply(c, result, &self.he, r.profile)?;
-        let _append = span(r.profile, Stage::Append);
-        work::copy(r.profile, self.rows * k);
-        self.hv.reshape_within_storage(self.rows, m + k)?;
-        self.hv.as_mut_slice()[m * self.rows..(m + k) * self.rows]
-            .copy_from_slice(self.he.as_slice());
+        if self.check_append {
+            let _check = span(r.profile, Stage::ApplyCheck);
+            self.hv.reshape_within_storage(self.rows, m + k)?;
+            let dst = &mut self.hv.as_mut_slice()[m * self.rows..(m + k) * self.rows];
+            // Copy and finite classification share a load. Bitwise OR forces
+            // all rows to be visited, allowing vectorization without short circuit.
+            let mut failed = result.is_err();
+            for (dst, &value) in dst.iter_mut().zip(self.he.as_slice()) {
+                *dst = value;
+                failed |= !value.is_finite();
+            }
+            work::copy(r.profile, self.rows * k);
+            agree_failure(c, failed)?;
+        } else {
+            agree_apply(c, result, &self.he, r.profile)?;
+            let _append = span(r.profile, Stage::Append);
+            work::copy(r.profile, self.rows * k);
+            self.hv.reshape_within_storage(self.rows, m + k)?;
+            self.hv.as_mut_slice()[m * self.rows..(m + k) * self.rows]
+                .copy_from_slice(self.he.as_slice());
+        }
         Ok(())
     }
     /// Only the new columns; mirror their upper triangles. The leading square
@@ -323,54 +435,59 @@ impl Workspace {
         )?;
         self.e.reshape_within_storage(self.rows, k)?;
         let precondition = span(profile, Stage::Precondition);
-        self.norms[..k].fill(0.0);
-        for (j, &band) in active.iter().enumerate() {
-            for (i, &diagonal) in hamiltonian_diagonal.iter().enumerate() {
-                let z = (self.hx[(i, j)] - self.values[band] * self.x[(i, j)])
-                    / preconditioner_denominator(diagonal, self.values[band]);
-                self.e[(i, j)] = z;
-                self.norms[j] += z * z;
+        if self.sqrt_precondition {
+            let mut sqrt_columns = 0;
+            for (j, &band) in active.iter().enumerate() {
+                let rows = j * self.rows..(j + 1) * self.rows;
+                let x = &self.x.as_slice()[rows.clone()];
+                let hx = &self.hx.as_slice()[rows.clone()];
+                let out = &mut self.e.as_mut_slice()[rows];
+                let safe = stream::sqrt_safe(self.diagonal_bounds, self.values[band]);
+                self.norms[j] = if safe {
+                    stream::column::<true>(hamiltonian_diagonal, x, hx, out, self.values[band])
+                } else {
+                    stream::column::<false>(hamiltonian_diagonal, x, hx, out, self.values[band])
+                };
+                sqrt_columns += usize::from(safe);
             }
+            stream::count(profile, self.rows, sqrt_columns, k - sqrt_columns);
+        } else {
+            self.norms[..k].fill(0.0);
+            for (j, &band) in active.iter().enumerate() {
+                for (i, &diagonal) in hamiltonian_diagonal.iter().enumerate() {
+                    let z = (self.hx[(i, j)] - self.values[band] * self.x[(i, j)])
+                        / preconditioner_denominator(diagonal, self.values[band]);
+                    self.e[(i, j)] = z;
+                    self.norms[j] += z * z;
+                }
+            }
+            work::add(profile, |s| {
+                s.scalar_flops += 13 * (self.rows * k) as u64;
+                s.hypot_calls += (self.rows * k) as u64;
+                s.zeroed_bytes += 8 * k as u64;
+                s.streamed_bytes += 32 * (self.rows * k) as u64 + 8 * k as u64;
+            });
         }
-        work::add(profile, |s| {
-            s.scalar_flops += 13 * (self.rows * k) as u64;
-            s.hypot_calls += (self.rows * k) as u64;
-            s.zeroed_bytes += 8 * k as u64;
-            s.streamed_bytes += 32 * (self.rows * k) as u64 + 8 * k as u64;
-        });
         drop(precondition);
-        let _normalize = span(profile, Stage::Normalize);
-        c.tree_sum_f64(&self.norms[..k], &mut self.sums[..k])
-            .map_err(error)?;
-        let mut kept = 0;
-        for j in 0..k {
-            let norm = self.sums[j].sqrt();
-            if !norm.is_finite() {
-                return Err(SolverError::Application(
-                    "nonfinite reference correction".into(),
-                ));
-            }
-            // Only exact/roundoff-zero directions are omitted. Scale is the
-            // dimensionless preconditioned residual, not the requested ethr.
-            if norm <= 32.0 * f64::EPSILON {
-                r.dropped_corrections += 1;
-                continue;
-            }
-            for i in 0..self.rows {
-                self.e[(i, kept)] = self.e[(i, j)] / norm;
-            }
-            kept += 1;
-        }
-        work::add(profile, |s| {
-            s.sqrt_calls += k as u64;
-            s.scalar_flops += (self.rows * kept) as u64;
-            s.streamed_bytes += 16 * (self.rows * kept) as u64;
-        });
-        self.e.reshape_within_storage(self.rows, kept)?;
+        self.staged_append = stream::normalize(
+            c,
+            &mut self.e,
+            &mut self.v,
+            &self.norms,
+            &mut self.sums,
+            m,
+            self.cap,
+            self.fused_append,
+            r,
+            profile,
+        )?;
         r.seconds[4] += elapsed(t);
         Ok(())
     }
     pub fn append_e(&mut self, m: usize, profile: bool) -> Result<(), SolverError> {
+        if self.staged_append.take() == Some(m) {
+            return Ok(());
+        }
         let _stage = span(profile, Stage::Append);
         work::copy(profile, self.rows * self.e.cols());
         self.v
@@ -390,6 +507,7 @@ impl Workspace {
     ) -> Result<usize, SolverError> {
         let t = clock(profile);
         let _stage = span(profile, Stage::Repair);
+        self.staged_append = None;
         r.repairs += 1;
         let input = self.e.cols();
         // Coordinates in Q=V T^T are T S C. Do not assume the old S is I.
@@ -753,6 +871,9 @@ fn agree_apply<C: Collective>(
         s.streamed_bytes += 8 * y.as_slice().len() as u64
     });
     let failed = result.is_err() || !y.as_slice().iter().all(|v| v.is_finite());
+    agree_failure(c, failed)
+}
+fn agree_failure<C: Collective>(c: &C, failed: bool) -> Result<(), SolverError> {
     let mut any = [0.0];
     c.tree_sum_f64(&[f64::from(failed)], &mut any)
         .map_err(error)?;

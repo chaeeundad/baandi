@@ -1655,6 +1655,7 @@ fn execute_mode_inner(
     let mut reference_status = None;
     let mut reference_summary = None;
     let mut reference_diagnostics = false;
+    let mut reference_qe_clock = Vec::new();
     let mut reference_stages = None;
     if reference {
         // Isolate the apply_h JSON from earlier in-process reference runs.
@@ -1694,6 +1695,7 @@ fn execute_mode_inner(
             }, reference_profile(&config)?).map(|run| {
                 reference_return = Some(Instant::now());
                 reference_diagnostics = run.full_diagnostics;
+                reference_qe_clock = run.qe_clock;
                 reference_setup = json!({
                     "schema":"reference-setup-1", "rank":crate::parallel::rank(),
                     "scope":"rank-local inclusive phases; atomic_block_total contains atomic_* children; collectives_nested overlaps phases; no barriers added",
@@ -2609,6 +2611,33 @@ fn execute_mode_inner(
             "output_scope":"materialization and output preparation/writes before final results serialization; external wall includes the final write too",
             "elapsed_to_results_serialize":start.elapsed().as_secs_f64()
         });
+    }
+    if reference_diagnostics && crate::parallel::rank() == 0 {
+        // Rank zero's raw values: deliberately never passed through over_ranks.
+        // Output ends before the self-describing JSON write/console delivery.
+        if let Some(row) = reference_qe_clock.iter_mut().find(|r| r.name == "output") {
+            row.wall_s = result["reference_scf"]["wall_s"]["output"].as_f64();
+        }
+        writeln!(
+            console,
+            "\nQE-matched clocks (rank 0, wall seconds; CPU not collected)"
+        )
+        .unwrap();
+        for row in &reference_qe_clock {
+            if let (Some(wall), Some(calls)) = (row.wall_s, row.calls) {
+                writeln!(
+                    console,
+                    " {:28}: {:12.6}s WALL ({:8} calls) [{}]",
+                    row.name, wall, calls, row.boundary
+                )
+                .unwrap();
+            } else {
+                writeln!(console, " {:28}: unavailable (no exact boundary)", row.name).unwrap();
+            }
+        }
+        result["reference_scf"]["qe_clock"] = json!(reference_qe_clock.iter().map(|r| json!({
+            "name":r.name, "wall_s":r.wall_s, "calls":r.calls, "rank":r.rank, "boundary":r.boundary
+        })).collect::<Vec<_>>());
     }
     let result_path = out.join("results.json");
     let serialize_clock = launch::clock();

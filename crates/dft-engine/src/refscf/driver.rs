@@ -68,6 +68,7 @@ pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
 }
 
 pub struct Run {
+    pub qe_clock: Vec<super::record::QeClock>,
     pub full_diagnostics: bool,
     pub outcome: ScfOutcome,
     pub records: Vec<Record>,
@@ -100,6 +101,9 @@ pub fn run_with<K: Collective>(
     use dft_numerics::switches::{Id, RunConfig};
     let config = RunConfig::current();
     let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
+    let qe_scope = full_diagnostics.then(dft_solvers::ref_davidson::QeClockScope::begin);
+    let mut qe_verification = dft_solvers::ref_davidson::QeCounters::default();
+    let mut qe_mixing_calls = 0;
     let reuse = config.on(Id::REFSCF_VERIFY_REUSE);
     let gate = config.on(Id::REFSCF_VERIFY_GATE);
     let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
@@ -309,6 +313,7 @@ pub fn run_with<K: Collective>(
             && !skipped
             && let Some(report) = &mut verification
         {
+            let qe_before = qe_scope.as_ref().map(|s| s.snapshot());
             verification_start_s = Some(start.elapsed().as_secs_f64());
             let clock = Instant::now();
             state.orbitals = step.solve.eigenvectors.clone();
@@ -388,6 +393,9 @@ pub fn run_with<K: Collective>(
             certificate = Some(record);
             verification_s = clock.elapsed().as_secs_f64();
             verification_end_s = Some(start.elapsed().as_secs_f64());
+            if let (Some(scope), Some(before)) = (&qe_scope, qe_before) {
+                qe_verification.add(scope.snapshot().without(before));
+            }
         }
         let finish = stopped && verification.as_ref().is_none_or(VerificationReport::passed);
         let mut diagnostics = Diagnostics {
@@ -400,6 +408,9 @@ pub fn run_with<K: Collective>(
         let (mut vh, mut vx) = (step.energy.hartree, step.energy.xc);
         let mut failure = None;
         if !finish {
+            if full_diagnostics {
+                qe_mixing_calls += 1;
+            }
             let clock = Instant::now();
             match mixer.update(comm, &mut metric, &x, &f, &mut next) {
                 Ok(d) => diagnostics = d,
@@ -624,7 +635,18 @@ pub fn run_with<K: Collective>(
             };
             output.record("result_assembly", phase);
             output.total_s = clock.elapsed().as_secs_f64();
+            let qe_clock = qe_scope.as_ref().map_or_else(Vec::new, |scope| {
+                qe_clock_table(
+                    comm.rank(),
+                    &setup,
+                    &output,
+                    &records,
+                    qe_mixing_calls,
+                    scope.snapshot().without(qe_verification),
+                )
+            });
             return Ok(Run {
+                qe_clock,
                 setup,
                 output,
                 full_diagnostics,
@@ -774,4 +796,92 @@ fn gather_orbitals<K: Collective>(
             .map_err(numerical)?;
     }
     Ok(out)
+}
+
+/// Assemble outside numerical loops. Existing max/min reports remain independent.
+fn qe_clock_table(
+    rank: usize,
+    setup: &super::record::SetupTimings,
+    output: &super::record::SetupTimings,
+    records: &[Record],
+    mixing_calls: usize,
+    counters: dft_solvers::ref_davidson::QeCounters,
+) -> Vec<super::record::QeClock> {
+    use super::record::QeClock;
+    let mut rows = Vec::with_capacity(20);
+    // These boundaries cannot be recovered from the owned files without
+    // confusing unlike work. Keep explicit holes instead of proxies.
+    for name in [
+        "init_run",
+        "electrons",
+        "c_bands",
+        "fftw",
+        "rdiaghg",
+        "davidson_remainder",
+        "sum_band",
+        "v_of_rho",
+        "mix_rho",
+    ] {
+        rows.push(QeClock::unavailable(name, rank));
+    }
+    for (name, slot) in [
+        ("h_psi", 0),
+        ("calbec", 3),
+        ("add_vuspsi", 4),
+        ("regterg", 5),
+    ] {
+        rows.push(QeClock::measured(
+            name,
+            counters.seconds[slot],
+            counters.calls[slot],
+            rank,
+            "exact",
+        ));
+    }
+    rows.push(QeClock::measured(
+        "vloc_psi",
+        counters.seconds[1] - counters.seconds[2],
+        counters.calls[1],
+        rank,
+        "exact",
+    ));
+    let sum = |get: fn(&Record) -> f64| records.iter().map(get).sum::<f64>();
+    let maps = records.iter().map(|r| r.calls.len()).sum();
+    let verify = sum(|r| r.verification_s);
+    for (name, seconds, calls) in [
+        ("baandi_setup", setup.total_s, 1),
+        (
+            "baandi_scf",
+            records.last().map_or(0., |r| r.map_end_s)
+                - records.first().map_or(0., |r| r.map_start_s)
+                - verify,
+            1,
+        ),
+        ("baandi_solve", sum(|r| r.solve_s), maps),
+        ("baandi_density", sum(|r| r.density_s), maps),
+        ("baandi_input_potential", sum(|r| r.potential_s), maps),
+        ("baandi_mix", sum(|r| r.mixing_s), mixing_calls),
+        (
+            "baandi_reduced_standard",
+            counters.seconds[7],
+            counters.calls[7],
+        ),
+        (
+            "baandi_davidson_remainder",
+            counters.seconds[5] - counters.seconds[6] - counters.seconds[7],
+            counters.calls[5],
+        ),
+        (
+            "verification",
+            verify,
+            records
+                .iter()
+                .filter(|r| r.verification_start_s.is_some())
+                .count(),
+        ),
+        ("output", output.total_s, 1),
+    ] {
+        rows.push(QeClock::measured(name, seconds, calls, rank, "baandi_only"));
+    }
+    rows
 }

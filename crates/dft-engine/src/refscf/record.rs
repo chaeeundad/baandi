@@ -105,3 +105,40 @@ impl SetupTimings {
         *self.phases.entry(name).or_default() += clock.elapsed().as_secs_f64();
     }
 }
+
+/// A QE label is populated only for a matching semantic boundary. Unavailable
+/// rows carry null seconds/calls at the adapter boundary, never invented zeros.
+#[derive(Clone, Debug)]
+pub struct QeClock {
+    pub name: &'static str,
+    pub wall_s: Option<f64>,
+    pub calls: Option<usize>,
+    pub rank: usize,
+    pub boundary: &'static str,
+}
+impl QeClock {
+    pub fn measured(
+        name: &'static str,
+        wall_s: f64,
+        calls: usize,
+        rank: usize,
+        boundary: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            wall_s: Some(wall_s),
+            calls: Some(calls),
+            rank,
+            boundary,
+        }
+    }
+    pub fn unavailable(name: &'static str, rank: usize) -> Self {
+        Self {
+            name,
+            wall_s: None,
+            calls: None,
+            rank,
+            boundary: "unavailable",
+        }
+    }
+}

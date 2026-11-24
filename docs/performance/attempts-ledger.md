@@ -3582,3 +3582,15 @@ defaults. Evidence: P3c screen border 5.07 -> 3.59 s (si128), P3c GF vs D si128 
 partial P3d G-only si128 (9e99bd3, 7 A/A + 20 crossed pairs): medians 39.126 -> 38.518 s, mean log ratio
 -0.0120 +- 0.0045. All samples verified, counts identical, E - E_strict unchanged. Default on (rounding
 class); to be re-measured in the consolidated precise campaign. Evidence: dev08 /data/sig-dft/p3d/si128/TABLE.md.
+
+### P3f/P3g screens (2026-11-25, development protocol, one run each, dev08 MPI8)
+
+- REFSCF_VERIFY_ENERGY (ADR 0044): energy change ~0.85x the Coulomb error at every attempt; si64 7.62 ->
+  7.28 s, si128 38.39 -> 40.64 s (gate inactive -> 3 attempts), elongated 1.51 -> 1.69 s. Default off
+  (user decision C); QE comparisons now carry verify-off and verified BAANDI walls.
+- FFT_FUSED_ROWS (P3-FFT2, bit-identical): si128 42.30 -> 41.53 s, si64 7.52 -> 7.92, elongated
+  1.56 -> 1.67, rskew 0.170 -> 0.250; slab_gather and multiply slower. Not adopted, stays off.
+- QE-matched clock (P3-QECLOCK, si128 one run each): h_psi 0.154 vs 0.137 s/call (93 vs 82 calls),
+  Davidson remainder 9.25 vs 5.29 s, reduced eigensolve 2.25 vs QE serial rdiaghg 4.17 s, setup 3.38 vs
+  init_run 0.83 s, density 2.12 vs sum_band 1.84 s. QE ran -ndiag 1 (serial), not its earlier best 2x2.
+Evidence: dev08 /data/sig-dft/{p3f,p3g}/SCREEN.md, /data/sig-dft/qeclock/out/.

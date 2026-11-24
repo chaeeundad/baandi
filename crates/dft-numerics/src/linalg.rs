@@ -11,6 +11,147 @@ pub const HERMITIAN_TOLERANCE: f64 = 1e-12;
 /// A column is dropped if its remaining norm is <= this times its original norm.
 pub const DEPENDENCE_TOLERANCE: f64 = 1e-12;
 
+/// Scaled real generalized eigensolve, without forming a triangular inverse.
+/// S = D L L^t D; all library factor/solve calls are sequential. The caller
+/// supplies its conditioning guard; rejected metrics leave its fallback intact.
+pub struct RealGeneralizedFactor {
+    lower: crate::RealMatrix,
+    scale: Vec<f64>,
+}
+
+impl RealGeneralizedFactor {
+    fn check(a: &crate::RealMatrix) -> Result<(), LinalgError> {
+        if a.rows() != a.cols() {
+            return Err(LinalgError::NotSquare);
+        }
+        if a.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(LinalgError::NonFinite);
+        }
+        let scale = a.as_slice().iter().fold(1_f64, |s, v| s.max(v.abs()));
+        let mut defect: f64 = 0.;
+        for j in 0..a.cols() {
+            for i in 0..j {
+                defect = defect.max((a[(i, j)] - a[(j, i)]).abs());
+            }
+        }
+        let allowed = HERMITIAN_TOLERANCE * scale;
+        if defect > allowed {
+            return Err(LinalgError::NotHermitian { defect, allowed });
+        }
+        Ok(())
+    }
+
+    pub fn new(s: &crate::RealMatrix, pivot_guard: f64) -> Result<Option<Self>, LinalgError> {
+        use faer::linalg::cholesky::llt::factor;
+        Self::check(s)?;
+        if !pivot_guard.is_finite() || pivot_guard <= 0. {
+            return Err(LinalgError::Dimension);
+        }
+        let n = s.rows();
+        let scale: Vec<_> = (0..n).map(|i| s[(i, i)].sqrt()).collect();
+        if scale.iter().any(|v| !v.is_finite() || *v == 0.) {
+            return Ok(None);
+        }
+        let mut lower = s.clone();
+        for j in 0..n {
+            for i in 0..n {
+                lower[(i, j)] /= scale[i] * scale[j];
+            }
+        }
+        let mut buffer = faer::dyn_stack::MemBuffer::new(factor::cholesky_in_place_scratch::<f64>(
+            n,
+            Par::Seq,
+            Default::default(),
+        ));
+        if factor::cholesky_in_place(
+            lower.as_mut(),
+            Default::default(),
+            Par::Seq,
+            faer::dyn_stack::MemStack::new(&mut buffer),
+            Default::default(),
+        )
+        .is_err()
+            || (0..n).any(|i| !lower[(i, i)].is_finite() || lower[(i, i)] <= pivot_guard)
+        {
+            return Ok(None);
+        }
+        Ok(Some(Self { lower, scale }))
+    }
+
+    /// L^-1 D^-1 A D^-1 L^-t using two library triangular solves.
+    fn whiten(&self, a: &crate::RealMatrix) -> Result<crate::RealMatrix, LinalgError> {
+        use faer::linalg::triangular_solve::solve_lower_triangular_in_place;
+        let n = self.scale.len();
+        if a.rows() != n || a.cols() != n {
+            return Err(LinalgError::Dimension);
+        }
+        let mut reduced = a.clone();
+        for j in 0..n {
+            for i in 0..n {
+                reduced[(i, j)] /= self.scale[i] * self.scale[j];
+            }
+        }
+        solve_lower_triangular_in_place(self.lower.as_ref(), reduced.as_mut(), Par::Seq);
+        solve_lower_triangular_in_place(
+            self.lower.as_ref(),
+            reduced.as_mut().transpose_mut(),
+            Par::Seq,
+        );
+        if reduced.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(LinalgError::NonFinite);
+        }
+        Ok(reduced)
+    }
+
+    /// Preserve the start's unit-metric accuracy guard without an inverse.
+    pub fn metric_defect(&self, s: &crate::RealMatrix) -> Result<f64, LinalgError> {
+        let metric = self.whiten(s)?;
+        let mut defect: f64 = 0.;
+        for j in 0..metric.cols() {
+            for i in 0..metric.rows() {
+                defect = defect.max((metric[(i, j)] - f64::from(i == j)).abs());
+            }
+        }
+        Ok(defect)
+    }
+
+    /// One existing symmetric EVD (MKL dsyevd when enabled), followed by
+    /// L^t Y = U_B and C = D^-1 Y for the requested lowest roots only.
+    pub fn solve_lowest(
+        &self,
+        a: &crate::RealMatrix,
+        bands: usize,
+    ) -> Result<(Vec<f64>, crate::RealMatrix), LinalgError> {
+        use faer::linalg::triangular_solve::solve_upper_triangular_in_place;
+        Self::check(a)?;
+        let n = self.scale.len();
+        if bands > n {
+            return Err(LinalgError::Dimension);
+        }
+        let mut reduced = self.whiten(a)?;
+        for j in 0..n {
+            for i in 0..j {
+                let v = 0.5 * (reduced[(i, j)] + reduced[(j, i)]);
+                reduced[(i, j)] = v;
+                reduced[(j, i)] = v;
+            }
+        }
+        let (mut values, vectors) = crate::symmetric_eigh(&reduced)?;
+        let mut c = crate::RealMatrix::new(n, bands, vectors.as_slice()[..n * bands].to_vec())?;
+        solve_upper_triangular_in_place(self.lower.as_ref().transpose(), c.as_mut(), Par::Seq);
+        for j in 0..bands {
+            for i in 0..n {
+                c[(i, j)] /= self.scale[i];
+            }
+        }
+        if c.as_slice().iter().any(|v| !v.is_finite()) {
+            return Err(LinalgError::NonFinite);
+        }
+        values.truncate(bands);
+        Ok((values, c))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum LinalgError {
     #[error("incompatible matrix dimensions or storage length")]
@@ -829,5 +970,96 @@ mod column_storage_tests {
         a.replace_columns(&b).unwrap();
         assert_eq!(a, b);
         assert_eq!(a.as_slice().as_ptr(), address);
+    }
+}
+
+#[cfg(test)]
+mod generalized_tests {
+    use super::*;
+    use crate::RealMatrix;
+
+    #[test]
+    fn known_generalized_spectrum_and_metric() {
+        for n in [1, 4, 13, 65] {
+            // Independent analytic pencil: S = L L^t, A = L diag(e) L^t.
+            let l = |i: usize, j: usize| {
+                if i < j {
+                    0.
+                } else if i == j {
+                    1. + i as f64 / n as f64
+                } else {
+                    ((i + 3 * j) as f64).sin() / (4. * n as f64)
+                }
+            };
+            let mut s = RealMatrix::zeros(n, n).unwrap();
+            let mut a = s.clone();
+            for j in 0..n {
+                for i in 0..n {
+                    s[(i, j)] = (0..n).map(|k| l(i, k) * l(j, k)).sum();
+                    a[(i, j)] = (0..n).map(|k| l(i, k) * l(j, k) * (k as f64 - 2.)).sum();
+                }
+            }
+            let factor = RealGeneralizedFactor::new(&s, 1e-6).unwrap().unwrap();
+            let defect = factor.metric_defect(&s).unwrap();
+            assert!(defect < 1e-12);
+            let bands = n.div_ceil(2);
+            let (values, c) = factor.solve_lowest(&a, bands).unwrap();
+            let mut residual: f64 = 0.;
+            let mut metric: f64 = 0.;
+            for j in 0..bands {
+                assert!((values[j] - (j as f64 - 2.)).abs() < 1e-12);
+                for i in 0..n {
+                    let r: f64 = (0..n)
+                        .map(|k| (a[(i, k)] - values[j] * s[(i, k)]) * c[(k, j)])
+                        .sum();
+                    residual = residual.max(r.abs());
+                }
+                for i in 0..bands {
+                    let mut dot = 0.;
+                    for r in 0..n {
+                        for k in 0..n {
+                            dot += c[(r, i)] * s[(r, k)] * c[(k, j)];
+                        }
+                    }
+                    metric = metric.max((dot - f64::from(i == j)).abs());
+                }
+            }
+            assert!(residual < 1e-12, "{residual:e}");
+            assert!(metric < 1e-12, "{metric:e}");
+            println!(
+                "P4 n={n} generalized residual={residual:e}, metric={metric:e}, factor metric={defect:e} (dimensionless)"
+            );
+        }
+    }
+
+    #[test]
+    fn generalized_rejects_bad_metric_and_shapes() {
+        let s = RealMatrix::new(2, 2, vec![1., 1. - 1e-14, 1. - 1e-14, 1.]).unwrap();
+        assert!(RealGeneralizedFactor::new(&s, 1e-6).unwrap().is_none());
+        let indefinite = RealMatrix::new(2, 2, vec![1., 2., 2., 1.]).unwrap();
+        assert!(
+            RealGeneralizedFactor::new(&indefinite, 1e-6)
+                .unwrap()
+                .is_none()
+        );
+        let bad = RealMatrix::new(1, 1, vec![f64::NAN]).unwrap();
+        assert!(matches!(
+            RealGeneralizedFactor::new(&bad, 1e-6),
+            Err(LinalgError::NonFinite)
+        ));
+        assert!(matches!(
+            RealGeneralizedFactor::new(&RealMatrix::zeros(1, 2).unwrap(), 1e-6),
+            Err(LinalgError::NotSquare)
+        ));
+        let identity = RealMatrix::new(1, 1, vec![1.]).unwrap();
+        let factor = RealGeneralizedFactor::new(&identity, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert!(factor.solve_lowest(&identity, 2).is_err());
+        assert!(
+            factor
+                .solve_lowest(&RealMatrix::zeros(2, 2).unwrap(), 1)
+                .is_err()
+        );
     }
 }

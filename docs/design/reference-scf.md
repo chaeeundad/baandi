@@ -1610,6 +1610,47 @@ the exact original rank, backend, support, axis and distribution metadata.
 See [setup4-dev08-request.md](../performance/lanes/RSCF/setup4-dev08-request.md)
 for the audit, correctness checks, limits and one-run/four-case dev08 screen.
 
+### P4-START: triangular generalized start and construction reuse
+
+Three independent **default-off** switches; existing defaults remain unchanged.
+`REFSTART_CHOLESKY` factors the scaled overlap once with sequential faer LLT,
+uses triangular solves for the metric check and H congruence, calls the existing
+symmetric EVD once (MKL dsyevd when enabled), and back-solves only the retained
+B eigenvectors before the wide rotation. No explicit inverse is formed. The
+unit-column pivot guard 1e-6 and metric defect 1e-12 are preserved; rejected
+metrics use unchanged QR/MGS, and J<B uses unchanged completion. Dense work
+is replicated once per rank and never summed across ranks. The new factor
+clock is `atomic_overlap_factor_solve`; all existing nested boundaries remain.
+Faer handles the triangular operations on both builds; no new MKL FFI is added.
+
+`REFSTART_SPECIES_FILL` forms owned radial/angular amplitudes once per species,
+and direct atom/G phases once across its radial/magnetic channels. Adjacent
+ORC partners reuse those values. Output ordering and expression order remain
+unchanged. Temporary payload is 8 L M_s + 32 L bytes, with M_s the species'
+magnetic-channel count, excluding radial maps. Local fields were already owned,
+per-species and shell-cached; the P3t LOCAL_SHELLS no-gain experiment stays off.
+Nonlocal diagonal and operator already share the sparse complex projector source.
+
+`REFSTART_PARTITION_CACHE` extends the constructor-scoped PlanCache with one
+exact geometry entry: shape, ordered indices, ranks, mirror and balance policies.
+This removes two repeated wave partitions between owned-projector lookup and
+operator construction. Private work buffers and rank selection remain separate;
+geometry is backend-independent and kernels retain their existing backend keys.
+Metadata copying/allocation and the first full-field plan remain. Existing
+REFSTART_FFT_SHARE already covers field/operator kernels and the density fork;
+full-field and sparse operator layouts cannot be exchanged. The extra O(G +
+sticks + ranks) metadata is released at start return and excluded from the
+principal numerical-array payload envelope.
+
+Atomic H already uses SCF's batched pair FFT and nonlocal GEMM/back-accumulation
+paths on the same retained operator. All J columns remain necessary; cold H
+cannot use kept-HX without an earlier density/HX. The reported per-column gap
+needs matched-width full-H counters, first-use allocation and wait attribution,
+not a second kernel. CLI preflight and basis enumeration remain outside scope.
+See [P4-START audit and one-run request](../performance/lanes/RSCF/p4-start-dev08-request.md)
+for the five-arm si64/si128/si216 MPI8 diagnostic, provenance and validation.
+No setup-at-QE or default-adoption claim is made from Mac checks.
+
 ## H-apply FFT cost accounting
 
 P3-FFT (2026-11-24), audited against local base

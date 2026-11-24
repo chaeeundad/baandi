@@ -140,6 +140,7 @@ pub struct DistributedRealHamiltonian {
     max_items: usize,
     /// One transpose per direction for all pairs of a block (default true).
     batched: bool,
+    direct_pack: bool,
     hbuf: Vec<C>,
     gather_scratch: Vec<f64>,
     xsend: Vec<f64>,
@@ -414,6 +415,7 @@ impl DistributedRealHamiltonian {
             in_items,
             max_items,
             batched: true,
+            direct_pack: dft_numerics::switches::on(dft_numerics::switches::Id::FFT_DIRECT_PACK),
             hbuf: vec![C::default(); pairs * local_len],
             gather_scratch: Vec::new(),
             xsend: vec![0.; ranks * max_items * 2 * capacity],
@@ -634,6 +636,14 @@ impl DistributedRealHamiltonian {
         t: usize,
         out: &mut [C],
     ) {
+        for (phi, &s) in out.iter_mut().zip(src) {
+            *phi = Self::packed_value(s, xrecv, xs, n_loc, m, t);
+        }
+    }
+
+    /// Same ORC arithmetic for both the buffered and direct-stick paths.
+    #[inline]
+    fn packed_value(s: Src, xrecv: &[f64], xs: &[f64], n_loc: usize, m: usize, t: usize) -> C {
         let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
         let get =
             |col: usize, slot: usize| C::new(xs[col * n_loc + slot], xs[col * n_loc + slot + 1]);
@@ -641,27 +651,25 @@ impl DistributedRealHamiltonian {
             let off = (id * m + col) * 2;
             C::new(xrecv[off], xrecv[off + 1])
         };
-        for (phi, &s) in out.iter_mut().zip(src) {
-            *phi = match s {
-                Src::Zero(slot) => C::new(
-                    xs[ca * n_loc + slot],
-                    cb.map_or(0., |cb| xs[cb * n_loc + slot]),
-                ),
-                Src::Plus(slot) | Src::MinusLocal(slot) => {
-                    let a = get(ca, slot) / SQRT_2;
-                    let b = cb.map_or(C::default(), |cb| get(cb, slot)) / SQRT_2;
-                    if matches!(s, Src::Plus(_)) {
-                        a + C::new(-b.im, b.re)
-                    } else {
-                        a.conj() + C::new(b.im, b.re)
-                    }
-                }
-                Src::MinusRemote(id) => {
-                    let a = recv(ca, id) / SQRT_2;
-                    let b = cb.map_or(C::default(), |cb| recv(cb, id)) / SQRT_2;
+        match s {
+            Src::Zero(slot) => C::new(
+                xs[ca * n_loc + slot],
+                cb.map_or(0., |cb| xs[cb * n_loc + slot]),
+            ),
+            Src::Plus(slot) | Src::MinusLocal(slot) => {
+                let a = get(ca, slot) / SQRT_2;
+                let b = cb.map_or(C::default(), |cb| get(cb, slot)) / SQRT_2;
+                if matches!(s, Src::Plus(_)) {
+                    a + C::new(-b.im, b.re)
+                } else {
                     a.conj() + C::new(b.im, b.re)
                 }
-            };
+            }
+            Src::MinusRemote(id) => {
+                let a = recv(ca, id) / SQRT_2;
+                let b = cb.map_or(C::default(), |cb| recv(cb, id)) / SQRT_2;
+                a.conj() + C::new(b.im, b.re)
+            }
         }
     }
 
@@ -1058,25 +1066,49 @@ impl DistributedRealHamiltonian {
         self.apply_elapsed(1, apply_clock);
         stage_add(Stage::Mirror, t0);
 
-        // (2) pack every pair, distributed local-potential apply (one transpose per
-        // direction for the whole block when batched), stage mirror h.
+        // (2) Optionally produce each ORC packed coefficient directly at the
+        // stick scatter. The returned hbuf and mirror/unpack path are unchanged.
         let t0 = dft_numerics::stage_clock::start();
         let apply_clock = self.apply_clock();
-        for t in 0..pairs {
-            Self::pack_pair(
-                &self.src,
-                &self.xrecv,
-                xs,
-                n_loc,
-                m,
-                t,
-                &mut self.hbuf[t * local_len..(t + 1) * local_len],
-            );
+        if !self.direct_pack {
+            for t in 0..pairs {
+                Self::pack_pair(
+                    &self.src,
+                    &self.xrecv,
+                    xs,
+                    n_loc,
+                    m,
+                    t,
+                    &mut self.hbuf[t * local_len..(t + 1) * local_len],
+                );
+            }
         }
         self.apply_elapsed(2, apply_clock);
         stage_add(Stage::PackUnpack, t0);
         let t0 = dft_numerics::stage_clock::start();
-        if self.batched {
+        if self.direct_pack {
+            let src = &self.src;
+            let xrecv = &self.xrecv;
+            if self.batched {
+                self.fft.apply_local_batch_from(
+                    comm,
+                    |t, g| Self::packed_value(src[g], xrecv, xs, n_loc, m, t),
+                    &mut self.hbuf[..pairs * local_len],
+                    &self.potential,
+                    pairs,
+                )?;
+            } else {
+                for t in 0..pairs {
+                    self.fft.apply_local_batch_from(
+                        comm,
+                        |_, g| Self::packed_value(src[g], xrecv, xs, n_loc, m, t),
+                        &mut self.hbuf[t * local_len..(t + 1) * local_len],
+                        &self.potential,
+                        1,
+                    )?;
+                }
+            }
+        } else if self.batched {
             self.fft.apply_local_batch(
                 comm,
                 &mut self.hbuf[..pairs * local_len],
@@ -1743,6 +1775,92 @@ mod lane_identity_tests {
     use dft_geometry::Cell;
     use dft_numerics::switches::RunConfig;
     use dft_units::Hartree;
+
+    #[test]
+    fn fft_pack_switches_preserve_distributed_h_bits() {
+        let mut comparisons = 0;
+        for lattice in [
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+            [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+            [[4., 0., 0.], [0., 5., 0.], [0., 0., 12.]],
+        ] {
+            for ranks in [1, 2, 3, 8] {
+                for mirror in ["greedy", "mirror"] {
+                    dft_mpi::simulate(ranks, |comm| {
+                        let cell = Cell::from_user_rows_bohr(lattice).unwrap();
+                        let basis = PlaneWaveBasis::new(&cell, Hartree(1.2)).unwrap();
+                        let grid = dft_basis::FftGridSpec::new(
+                            &basis,
+                            &basis.density_basis(&cell).unwrap(),
+                            None,
+                        )
+                        .unwrap();
+                        let potential = ndarray::Array3::from_shape_fn(grid.dims(), |(i, j, k)| {
+                            0.1 * ((i + 2 * j + 3 * k) as f64).sin()
+                        });
+                        let nl =
+                            NonlocalOperator::from_columns(basis.momenta().to_vec(), vec![], 0);
+                        let source = Hamiltonian::new(&cell, &basis, potential, nl).unwrap();
+                        let pool = WorkerPool::new(1).unwrap();
+                        let mut reference = Vec::new();
+                        for (direct, sparse) in
+                            [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")]
+                        {
+                            let config = RunConfig::from_pairs(&[
+                                ("fft_direct_pack", direct),
+                                ("fft_sparse_clear", sparse),
+                                ("m2_sticks", mirror),
+                            ])
+                            .unwrap();
+                            let _guard = config.enter();
+                            let mut op = DistributedRealHamiltonian::new(
+                                &source,
+                                &basis,
+                                5,
+                                comm.rank(),
+                                ranks,
+                                pool.clone(),
+                            )
+                            .unwrap();
+                            let mut bits = Vec::new();
+                            for batched in [true, false] {
+                                op.set_batched(batched);
+                                for m in [5, 1, 2, 3, 0] {
+                                    let n = op.local_len();
+                                    let x = RealMatrix::new(
+                                        n,
+                                        m,
+                                        (0..n * m)
+                                            .map(|i| {
+                                                if i % 7 == 0 {
+                                                    -0.0
+                                                } else {
+                                                    ((i * 17 % 113) as f64 - 56.) / 113.
+                                                }
+                                            })
+                                            .collect(),
+                                    )
+                                    .unwrap();
+                                    let mut y = RealMatrix::zeros(n, m).unwrap();
+                                    op.apply_block(comm, &x, &mut y).unwrap();
+                                    bits.extend(y.as_slice().iter().map(|v| v.to_bits()));
+                                }
+                            }
+                            if direct == "off" && sparse == "off" {
+                                reference = bits;
+                            } else {
+                                assert_eq!(bits, reference, "ranks {ranks} mirror {mirror}");
+                            }
+                        }
+                    });
+                    comparisons += ranks * 3 * 2 * 5;
+                }
+            }
+        }
+        eprintln!(
+            "P3-FFT: {comparisons} rank-local H on/off comparisons, max difference 0 Ha (bitwise)"
+        );
+    }
 
     /// Both MPI-using tests share one Universe: its Drop finalizes MPI, and MPI
     /// cannot be initialized twice in one process (--features mpi).

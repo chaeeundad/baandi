@@ -499,6 +499,10 @@ table! {
         "P3-SETUP: reference start reuses identical direct structure factors across atomic charge/local potential and magnetic orbital channels; same arithmetic, default off pending dev08 A/B";
     REF_DAV_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference Davidson only: transposed borders and repair projections use one sequential MKL GEMM over all local rows; rounding class, pure builds retain panel arithmetic";
+    FFT_SPARSE_CLEAR: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-FFT: clear only holes before coefficient/middle/slab scatter using cached contiguous ranges; same FFT order, default off pending dev08";
+    FFT_DIRECT_PACK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-FFT: pack distributed real H input ORC rows directly into FFT sticks, avoiding the intermediate coefficient write/read; default off pending dev08";
 }
 
 struct Resolved {

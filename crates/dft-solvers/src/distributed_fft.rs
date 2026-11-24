@@ -1313,6 +1313,78 @@ mod tests {
         eprintln!("P3-A2A: {reductions} layouts reduced; FFT max difference 0 (bitwise)");
     }
 
+    /// P3-PERMAP: actual kernel dispatch, including empty owners, odd/prime
+    /// lengths and a sheared reciprocal support. MKL: relative 2e-14;
+    /// pure: bit-identical on/off. No material-dependent choice is asserted.
+    #[test]
+    fn kernel_by_length_preserves_transforms() {
+        use dft_numerics::switches::{Id, RunConfig};
+        let bits = |v: &[C]| {
+            v.iter()
+                .map(|z| (z.re.to_bits(), z.im.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            !RunConfig::from_pairs(&[])
+                .unwrap()
+                .on(Id::FFT_KERNEL_BY_LENGTH)
+        );
+        for (shape, shear) in [
+            ([6, 6, 6], [0.; 3]),
+            ([5, 7, 11], [0.5, 0.3, 0.]),
+            ([3, 5, 24], [0.; 3]),
+            ([9, 9, 15], [0.; 3]),
+            ([5, 7, 13], [0.; 3]),
+        ] {
+            let idx = sphere(shape, 3., shear);
+            for ranks in [1, 3, 8] {
+                simulate(ranks, |comm| {
+                    let mut reference = Vec::new();
+                    for arm in ["off", "on"] {
+                        let cfg = RunConfig::from_pairs(&[
+                            ("fft_kernel_by_length", arm),
+                            ("fft_fused_rows", "off"),
+                        ])
+                        .unwrap();
+                        let _scope = cfg.enter();
+                        let mut p =
+                            DistributedPairFft::with_lanes(shape, &idx, comm.rank(), ranks, false)
+                                .unwrap();
+                        let input = random_c(p.local_len() * 2, 137 + comm.rank() as u64);
+                        let mut actual = input.clone();
+                        let size = shape.iter().product();
+                        p.apply_local_batch(comm, &mut actual, &vec![1.; size], 2)
+                            .unwrap();
+                        assert!(
+                            input.is_empty() || rel(&actual, &input) < 2e-14,
+                            "round trip {shape:?}"
+                        );
+                        let potential: Vec<_> =
+                            (0..size).map(|i| (i as f64 * 0.13).cos()).collect();
+                        actual.copy_from_slice(&input);
+                        p.apply_local_batch(comm, &mut actual, &potential, 2)
+                            .unwrap();
+                        if arm == "off" {
+                            reference = actual;
+                        } else {
+                            assert!(
+                                reference.is_empty() || rel(&actual, &reference) < 2e-14,
+                                "apply {shape:?}"
+                            );
+                            if !p.vendor_lanes() {
+                                assert_eq!(bits(&actual), bits(&reference));
+                            }
+                            let mut again = input.clone();
+                            p.apply_local_batch(comm, &mut again, &potential, 2)
+                                .unwrap();
+                            assert_eq!(bits(&again), bits(&actual));
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     #[test]
     fn fused_rows_respects_backend_selection() {
         use dft_numerics::switches::{Id, RunConfig};

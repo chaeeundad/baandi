@@ -61,6 +61,9 @@ pub struct Broyden {
     factor: RealEighWorkspace,
     forms: [f64; MAX_FORMS],
     gamma: [f64; 25],
+    incremental: bool,
+    gram: [[f64; 25]; 25],
+    gram_metric: Option<u64>,
 }
 impl Broyden {
     pub fn new(
@@ -110,6 +113,9 @@ impl Broyden {
             factor: RealEighWorkspace::new(profile.history).map_err(numerical)?,
             forms: [0.; MAX_FORMS],
             gamma: [0.; 25],
+            incremental: dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_PERMAP),
+            gram: [[0.; 25]; 25],
+            gram_metric: None,
         })
     }
     pub fn occupancy(&self) -> usize {
@@ -217,10 +223,13 @@ impl Broyden {
         if p > 0 {
             let mut pairs: [(&[C], &[C]); MAX_FORMS] = [(&[], &[]); MAX_FORMS];
             let mut n = 0;
+            let reuse = self.incremental && self.gram_metric == Some(metric.identity());
             for i in 0..p {
                 for j in 0..=i {
-                    pairs[n] = (&self.df[i], &self.df[j]);
-                    n += 1;
+                    if !reuse || slot == Some(i) || slot == Some(j) {
+                        pairs[n] = (&self.df[i], &self.df[j]);
+                        n += 1;
+                    }
                 }
             }
             for i in 0..p {
@@ -232,11 +241,15 @@ impl Broyden {
             let mut index = 0;
             for i in 0..p {
                 for j in 0..=i {
-                    solve.a[(i, j)] = self.forms[index];
-                    solve.a[(j, i)] = self.forms[index];
-                    index += 1;
+                    if !reuse || slot == Some(i) || slot == Some(j) {
+                        self.gram[i][j] = self.forms[index];
+                        index += 1;
+                    }
+                    solve.a[(i, j)] = self.gram[i][j];
+                    solve.a[(j, i)] = self.gram[i][j];
                 }
             }
+            self.gram_metric = Some(metric.identity());
             self.factor
                 .solve_into(&solve.a, &mut solve.lambda, &mut solve.q)
                 .map_err(numerical)?;

@@ -90,10 +90,167 @@ pub enum BackendLanes {
     Rust(RustLanes),
     #[cfg(feature = "mkl")]
     Mkl(MklLanes),
+    #[cfg(feature = "mkl")]
+    Calibrated {
+        rust: RustLanes,
+        mkl: MklLanes,
+        vendor: [[bool; 2]; 3],
+    },
 }
+
+/// Construction-time observations only; seconds are per batch transform.
+/// Choices are local to this process and run, not portable tuning constants.
+#[derive(Clone, Debug)]
+pub struct KernelChoice {
+    pub length: usize,
+    pub batch: usize,
+    pub inverse: bool,
+    pub vendor: bool,
+    pub rust_seconds: Option<f64>,
+    pub mkl_seconds: Option<f64>,
+    pub calibration_seconds: f64,
+}
+type ChoiceRegistry = Vec<(u64, KernelChoice)>;
+static KERNEL_CHOICES: std::sync::Mutex<ChoiceRegistry> = std::sync::Mutex::new(Vec::new());
+
+/// Snapshot for the I/O adapter, filtered by the current run. No hot-loop I/O.
+pub fn kernel_choices() -> Vec<KernelChoice> {
+    let run = crate::switches::RunConfig::current().run_id();
+    KERNEL_CHOICES
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(id, _)| *id == run)
+        .map(|(_, c)| c.clone())
+        .collect()
+}
+
+#[cfg(feature = "mkl")]
+fn calibrate(
+    rust: &mut RustLanes,
+    mkl: &mut MklLanes,
+    axis: usize,
+    length: usize,
+    batch: usize,
+    inverse: bool,
+) -> Result<KernelChoice, FftError> {
+    use std::time::Instant;
+    let start = Instant::now();
+    let input: Vec<_> = (0..length * batch)
+        .map(|i| C::new((i as f64 * 0.37).sin(), (i as f64 * 0.19).cos()))
+        .collect();
+    let mut data = input.clone();
+    // Warm both kernels. Restoring identical, bounded input is outside each
+    // timed call: repeated unscaled FFTs otherwise overflow during calibration.
+    rust.run(axis, inverse, &mut data)?;
+    data.copy_from_slice(&input);
+    mkl.run(axis, inverse, &mut data)?;
+    let mut samples = [[0.; 2]; 7];
+    for (sample, times) in samples.iter_mut().enumerate() {
+        // Cross the order to avoid always giving one backend the warmer cache.
+        for which in [sample % 2, 1 - sample % 2] {
+            let mut elapsed = 0.;
+            let mut calls = 0;
+            while calls < 64 && (calls == 0 || elapsed < 0.0002) {
+                data.copy_from_slice(&input);
+                let clock = Instant::now();
+                if which == 0 {
+                    rust.run(axis, inverse, &mut data)?;
+                } else {
+                    mkl.run(axis, inverse, &mut data)?;
+                }
+                elapsed += clock.elapsed().as_secs_f64();
+                std::hint::black_box(&data);
+                calls += 1;
+            }
+            times[which] = elapsed / calls as f64;
+        }
+    }
+    let mut rust_samples = samples.map(|s| s[0]);
+    let mut mkl_samples = samples.map(|s| s[1]);
+    rust_samples.sort_by(f64::total_cmp);
+    mkl_samples.sort_by(f64::total_cmp);
+    Ok(KernelChoice {
+        length,
+        batch,
+        inverse,
+        vendor: mkl_samples[3] < rust_samples[3],
+        rust_seconds: Some(rust_samples[3]),
+        mkl_seconds: Some(mkl_samples[3]),
+        calibration_seconds: start.elapsed().as_secs_f64(),
+    })
+}
+
 impl BackendLanes {
     /// Plan lanes of lengths `n` with `counts[a]` lanes per buffer of axis `a`.
     pub fn plan(n: [usize; 3], counts: [usize; 3], vendor: bool) -> Result<Self, FftError> {
+        let config = crate::switches::RunConfig::current();
+        let adaptive = config.on(crate::switches::Id::FFT_KERNEL_BY_LENGTH);
+        #[cfg(feature = "mkl")]
+        if adaptive {
+            let mut rust = RustLanes::plan(n, counts)?;
+            let mut mkl = MklLanes::plan(n, counts)?;
+            let mut vendor = [[false; 2]; 3];
+            // Serialize construction-time calibration across workers. Reuse the
+            // first measured choice for each (run,length,batch,direction).
+            let mut registry = KERNEL_CHOICES.lock().unwrap();
+            for axis in 0..3 {
+                if counts[axis] == 0 {
+                    continue;
+                }
+                for inverse in [false, true] {
+                    let cached = registry.iter().find(|(id, c)| {
+                        *id == config.run_id()
+                            && c.length == n[axis]
+                            && c.batch == counts[axis]
+                            && c.inverse == inverse
+                            && c.rust_seconds.is_some()
+                    });
+                    let choice = if let Some((_, choice)) = cached {
+                        choice.clone()
+                    } else {
+                        let choice =
+                            calibrate(&mut rust, &mut mkl, axis, n[axis], counts[axis], inverse)?;
+                        registry.push((config.run_id(), choice.clone()));
+                        choice
+                    };
+                    vendor[axis][usize::from(inverse)] = choice.vendor;
+                }
+            }
+            return Ok(Self::Calibrated { rust, mkl, vendor });
+        }
+        let _ = adaptive;
+        // Also record explicit/fallback choices, so off arms remain auditable.
+        let effective_vendor = vendor && cfg!(feature = "mkl");
+        let mut registry = KERNEL_CHOICES.lock().unwrap();
+        for axis in 0..3 {
+            if counts[axis] == 0 {
+                continue;
+            }
+            for inverse in [false, true] {
+                if !registry.iter().any(|(id, c)| {
+                    *id == config.run_id()
+                        && c.length == n[axis]
+                        && c.batch == counts[axis]
+                        && c.inverse == inverse
+                        && c.vendor == effective_vendor
+                }) {
+                    registry.push((
+                        config.run_id(),
+                        KernelChoice {
+                            length: n[axis],
+                            batch: counts[axis],
+                            inverse,
+                            vendor: effective_vendor,
+                            rust_seconds: None,
+                            mkl_seconds: None,
+                            calibration_seconds: 0.,
+                        },
+                    ));
+                }
+            }
+        }
+        drop(registry);
         #[cfg(feature = "mkl")]
         if vendor {
             return Ok(Self::Mkl(MklLanes::plan(n, counts)?));
@@ -101,9 +258,17 @@ impl BackendLanes {
         let _ = vendor;
         Ok(Self::Rust(RustLanes::plan(n, counts)?))
     }
-    /// True when the MKL lanes are active.
+    /// True for vendor-capable dispatch. Calibrated lanes conservatively return
+    /// true even if every measured choice is rustfft, preventing callers from
+    /// bypassing the dispatcher with a separate rustfft-only kernel.
     pub fn is_vendor(&self) -> bool {
-        !matches!(self, Self::Rust(_))
+        match self {
+            Self::Rust(_) => false,
+            #[cfg(feature = "mkl")]
+            Self::Mkl(_) => true,
+            #[cfg(feature = "mkl")]
+            Self::Calibrated { .. } => true, // Keep row-fused kernels from bypassing dispatch.
+        }
     }
     /// Unscaled in-place transforms of all lanes of the axis buffer `data`.
     pub fn run(&mut self, axis: usize, inverse: bool, data: &mut [C]) -> Result<(), FftError> {
@@ -111,6 +276,14 @@ impl BackendLanes {
             Self::Rust(l) => l.run(axis, inverse, data),
             #[cfg(feature = "mkl")]
             Self::Mkl(l) => l.run(axis, inverse, data),
+            #[cfg(feature = "mkl")]
+            Self::Calibrated { rust, mkl, vendor } => {
+                if vendor[axis][usize::from(inverse)] {
+                    mkl.run(axis, inverse, data)
+                } else {
+                    rust.run(axis, inverse, data)
+                }
+            }
         }
     }
 }
@@ -568,6 +741,40 @@ impl<L: PairLanes> PairDensityOperator for PairFusedPlan<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kernel_by_length_records_and_reuses_choices() {
+        let cfg =
+            crate::switches::RunConfig::from_pairs(&[("fft_kernel_by_length", "on")]).unwrap();
+        let _scope = cfg.enter();
+        let mut plan = BackendLanes::plan([7, 5, 11], [3, 0, 2], false).unwrap();
+        let first = kernel_choices();
+        assert_eq!(first.len(), 4); // Empty batches are never calibrated.
+        let _second = BackendLanes::plan([7, 5, 11], [3, 0, 2], true).unwrap();
+        let second = kernel_choices();
+        assert_eq!(second.len(), first.len());
+        for (a, b) in first.iter().zip(&second) {
+            assert_eq!(a.vendor, b.vendor);
+            assert_eq!(a.calibration_seconds, b.calibration_seconds);
+            #[cfg(feature = "mkl")]
+            assert_eq!(a.vendor, a.mkl_seconds.unwrap() < a.rust_seconds.unwrap());
+            #[cfg(not(feature = "mkl"))]
+            {
+                assert!(!a.vendor);
+                assert!(a.mkl_seconds.is_none());
+            }
+        }
+        let input: Vec<_> = (0..21).map(|i| C::new(i as f64 / 21., -0.3)).collect();
+        let mut data = input.clone();
+        plan.run(0, true, &mut data).unwrap();
+        plan.run(0, false, &mut data).unwrap();
+        for (a, b) in data.iter().zip(&input) {
+            assert!((*a / 7. - b).norm() < 2e-14);
+        }
+        let isolated = crate::switches::RunConfig::from_pairs(&[]).unwrap();
+        let _scope = isolated.enter();
+        assert!(kernel_choices().is_empty(), "records are isolated per run");
+    }
 
     #[test]
     fn lane_fft_serial_bits_and_density_exclusion() {

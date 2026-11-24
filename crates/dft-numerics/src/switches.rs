@@ -567,6 +567,10 @@ table! {
         "P3-RMM: maximum DIIS steps per sweep; default four, experimental overrides require multi-system evidence";
     REFSCF_RMM_BLOCK: Kind::Number { default: Some(16.), valid: |v| (1. ..=64.).contains(&v) && v.fract() == 0. }, "16", "integer 1..64",
         "P3-RMM: band-order Gram-Schmidt panel width; default sixteen";
+    FFT_KERNEL_BY_LENGTH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-PERMAP: calibrate rustfft/MKL per actual lane length, batch and direction once per run; pure builds retain rustfft";
+    REFSCF_PERMAP: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-PERMAP: cache unchanged Broyden Gram entries and fuse descf with map diagnostic passes/reduction";
 }
 
 struct Resolved {

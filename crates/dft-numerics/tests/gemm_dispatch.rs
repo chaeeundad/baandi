@@ -157,4 +157,224 @@ fn dispatch_counters_follow_the_route() {
         .map(|r| r.calls)
         .sum::<u64>();
     assert_eq!(rot, 2);
+    single_products();
+}
+
+fn single_products() {
+    use dft_numerics::linalg::LinalgError;
+    use dft_numerics::switches::{Id, RunConfig};
+    let default = RunConfig::from_pairs(&[]).unwrap();
+    assert!(!default.on(Id::REF_DAV_SINGLE_GEMM));
+    let on = RunConfig::from_pairs(&[("ref_dav_single_gemm", "on")]).unwrap();
+    let _scope = on.enter();
+    let mut calls = 0;
+    let mut flops = 0;
+    let mut max_error = 0.0_f64;
+    // Includes empty owners, panel boundaries, padded inputs, a strided output,
+    // and enough work for the original panel entry to use the worker pool.
+    for (k, m, n) in [
+        (0, 3, 2),
+        (1, 3, 2),
+        (255, 7, 5),
+        (256, 7, 5),
+        (257, 7, 5),
+        (1025, 40, 27),
+    ] {
+        let lda = k + 3;
+        let ldb = k + 5;
+        let a = fixture(lda, m, 7);
+        let b = fixture(ldb, n, 13);
+        let mut bits = None;
+        for threads in [1, 2, 4, 8] {
+            let mut ws =
+                RealGemmWorkspace::with_pool(k, 64, WorkerPool::new(threads).unwrap()).unwrap();
+            let mut legacy = RealMatrix::zeros(m, n).unwrap();
+            ws.multiply_slices_into(
+                GemmSite::Other,
+                a.as_slice(),
+                k,
+                m,
+                lda,
+                RealOp::Transpose,
+                b.as_slice(),
+                n,
+                ldb,
+                legacy.as_mut(),
+            )
+            .unwrap();
+            // The new switch alone cannot reroute any old entry.
+            let old = legacy.clone();
+            {
+                let _scope = default.enter();
+                ws.multiply_slices_into(
+                    GemmSite::Other,
+                    a.as_slice(),
+                    k,
+                    m,
+                    lda,
+                    RealOp::Transpose,
+                    b.as_slice(),
+                    n,
+                    ldb,
+                    legacy.as_mut(),
+                )
+                .unwrap();
+            }
+            assert_eq!(
+                old.as_slice()
+                    .iter()
+                    .map(|x| x.to_bits())
+                    .collect::<Vec<_>>(),
+                legacy
+                    .as_slice()
+                    .iter()
+                    .map(|x| x.to_bits())
+                    .collect::<Vec<_>>()
+            );
+            for _ in 0..2 {
+                let mut out = RealMatrix::new(m + 2, n + 2, vec![91.0; (m + 2) * (n + 2)]).unwrap();
+                ws.multiply_slices_single_into(
+                    GemmSite::ProjectionOverlap,
+                    a.as_slice(),
+                    k,
+                    m,
+                    lda,
+                    RealOp::Transpose,
+                    b.as_slice(),
+                    n,
+                    ldb,
+                    out.as_mut().submatrix_mut(1, 1, m, n),
+                )
+                .unwrap();
+                if k > 0 {
+                    calls += 1;
+                    flops += 2 * m * n * k;
+                }
+                let mut actual = Vec::new();
+                for j in 0..n + 2 {
+                    for i in 0..m + 2 {
+                        if i == 0 || i == m + 1 || j == 0 || j == n + 1 {
+                            assert_eq!(out[(i, j)], 91.0);
+                        } else {
+                            let expected: f64 = (0..k).map(|p| a[(p, i - 1)] * b[(p, j - 1)]).sum();
+                            max_error = max_error.max((out[(i, j)] - expected).abs());
+                            assert!((out[(i, j)] - expected).abs() < 1e-11);
+                            assert!((out[(i, j)] - legacy[(i - 1, j - 1)]).abs() < 1e-11);
+                            actual.push(out[(i, j)].to_bits());
+                        }
+                    }
+                }
+                if let Some(ref prior) = bits {
+                    assert_eq!(&actual, prior);
+                }
+                bits = Some(actual);
+            }
+        }
+    }
+    let table = if dft_numerics::MKL_BACKEND {
+        rows()
+    } else {
+        rows_as_if_mkl()
+    };
+    let single = table
+        .iter()
+        .find(|r| r.site == "projection_overlap" && r.route == "mkl_single")
+        .unwrap();
+    assert!(single.is_mkl());
+    assert_eq!(single.calls, calls);
+    assert_eq!(single.flops, flops as u64);
+    assert_eq!((single.max_m, single.max_n, single.max_k), (40, 27, 1025));
+    let empty = table
+        .iter()
+        .find(|r| r.site == "projection_overlap" && r.route == "pure_layout")
+        .unwrap();
+    assert_eq!((empty.calls, empty.flops), (8, 0));
+    println!(
+        "single GEMM: {calls} products, {flops} FLOPs, max scalar error {max_error:e} (dimensionless); T=1/2/4/8 repeats bit-identical; MKL executed={}",
+        dft_numerics::MKL_BACKEND
+    );
+
+    let mut ws = RealGemmWorkspace::with_pool(257, 8, WorkerPool::new(1).unwrap()).unwrap();
+    let a = fixture(257, 3, 1);
+    let b = fixture(257, 2, 2);
+    let mut out = RealMatrix::zeros(3, 2).unwrap();
+    assert_eq!(
+        ws.multiply_slices_single_into(
+            GemmSite::Other,
+            &a.as_slice()[..10],
+            257,
+            3,
+            257,
+            RealOp::Transpose,
+            b.as_slice(),
+            2,
+            257,
+            out.as_mut()
+        ),
+        Err(LinalgError::Dimension)
+    );
+    assert_eq!(
+        ws.multiply_slices_single_into(
+            GemmSite::Other,
+            a.as_slice(),
+            257,
+            3,
+            256,
+            RealOp::Transpose,
+            b.as_slice(),
+            2,
+            257,
+            out.as_mut()
+        ),
+        Err(LinalgError::Dimension)
+    );
+    let mut bad = a.clone();
+    bad[(0, 0)] = f64::NAN;
+    assert_eq!(
+        ws.multiply_slices_single_into(
+            GemmSite::Other,
+            bad.as_slice(),
+            257,
+            3,
+            257,
+            RealOp::Transpose,
+            b.as_slice(),
+            2,
+            257,
+            out.as_mut()
+        ),
+        Err(LinalgError::NonFinite)
+    );
+    // Explicit vendor opt-out remains the same pure result even on MKL builds.
+    let pure = RunConfig::from_pairs(&[("mkl_dgemm", "off")]).unwrap();
+    let _scope = pure.enter();
+    let mut ws = RealGemmWorkspace::with_pool(257, 8, WorkerPool::new(1).unwrap()).unwrap();
+    ws.multiply_slices_single_into(
+        GemmSite::Other,
+        a.as_slice(),
+        257,
+        3,
+        257,
+        RealOp::Transpose,
+        b.as_slice(),
+        2,
+        257,
+        out.as_mut(),
+    )
+    .unwrap();
+    let first = out.clone();
+    ws.multiply_slices_into(
+        GemmSite::Other,
+        a.as_slice(),
+        257,
+        3,
+        257,
+        RealOp::Transpose,
+        b.as_slice(),
+        2,
+        257,
+        out.as_mut(),
+    )
+    .unwrap();
+    assert_eq!(first, out);
 }

@@ -29,12 +29,14 @@ pub(super) struct Workspace {
     sums: Vec<f64>,
     gemm: RealGemmWorkspace,
     evd: RealEighWorkspace,
+    single_gemm: bool,
 }
 impl Workspace {
     pub fn new<O: DistributedRealOperator>(
         op: &O,
         n: usize,
         cap: usize,
+        single_gemm: bool,
     ) -> Result<Self, SolverError> {
         let rows = op.local_rows().len();
         let pool = op
@@ -46,6 +48,7 @@ impl Workspace {
             rows,
             n,
             cap,
+            single_gemm,
             v: RealMatrix::zeros(rows, cap)?,
             hv: RealMatrix::zeros(rows, cap)?,
             x: RealMatrix::zeros(rows, cap)?,
@@ -114,7 +117,13 @@ impl Workspace {
         self.border.reshape_within_storage(to, k)?;
         let b = if is_h { &self.hv } else { &self.v };
         r.gemm(if is_h { "border_h" } else { "border_s" }, to, k, self.rows);
-        self.gemm.multiply_slices_into(
+        let entry = if self.single_gemm {
+            RealGemmWorkspace::multiply_slices_single_into
+        } else {
+            RealGemmWorkspace::multiply_slices_into
+        };
+        entry(
+            &mut self.gemm,
             GemmSite::Other,
             self.v.as_slice(),
             self.rows,
@@ -398,7 +407,13 @@ impl Workspace {
         self.x.reshape_within_storage(self.rows, input)?;
         for _ in 0..2 {
             r.gemm("repair_projection", m, input, self.rows);
-            self.gemm.multiply_slices_into(
+            let entry = if self.single_gemm {
+                RealGemmWorkspace::multiply_slices_single_into
+            } else {
+                RealGemmWorkspace::multiply_slices_into
+            };
+            entry(
+                &mut self.gemm,
                 GemmSite::Other,
                 self.v.as_slice(),
                 self.rows,
@@ -638,4 +653,227 @@ fn agree_apply<C: Collective>(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod single_gemm_tests {
+    use super::*;
+    use crate::ref_davidson::{Solution, solve};
+    use dft_numerics::switches::RunConfig;
+
+    // Same diagonal-plus-rank-one, clustered and cyclic-row fixtures as the
+    // reference restart-correction diagnostics; add a multi-panel local shape.
+    struct Operator {
+        dim: usize,
+        rows: Vec<usize>,
+        clustered: bool,
+        threads: usize,
+    }
+    impl Operator {
+        fn diagonal(&self, row: usize) -> f64 {
+            if self.clustered && row < 2 {
+                1.0
+            } else {
+                1.0 + row as f64 * 0.4
+            }
+        }
+    }
+    impl DistributedRealOperator for Operator {
+        fn global_len(&self) -> usize {
+            self.dim
+        }
+        fn local_rows(&self) -> &[usize] {
+            &self.rows
+        }
+        fn inner_threads(&self) -> usize {
+            self.threads
+        }
+        fn apply_block<C: Collective>(
+            &mut self,
+            c: &C,
+            x: &RealMatrix,
+            y: &mut RealMatrix,
+        ) -> Result<(), SolverError> {
+            for j in 0..x.cols() {
+                let dot: f64 = self
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &row)| ((row + 1) as f64).sin() * x[(i, j)])
+                    .sum();
+                let mut sum = [0.0];
+                c.tree_sum_f64(&[dot], &mut sum).map_err(error)?;
+                for (i, &row) in self.rows.iter().enumerate() {
+                    y[(i, j)] =
+                        self.diagonal(row) * x[(i, j)] + 0.03 * ((row + 1) as f64).sin() * sum[0];
+                }
+            }
+            Ok(())
+        }
+    }
+    fn bits(x: &[f64]) -> Vec<u64> {
+        x.iter().map(|v| v.to_bits()).collect()
+    }
+    fn decisions(s: &Solution) -> String {
+        let r = &s.record;
+        let stages: Vec<_> = std::iter::once(&r.setup)
+            .chain(&r.iterations)
+            .chain(std::iter::once(&r.finish))
+            .map(|r| {
+                let mut r = r.clone();
+                r.seconds.fill(0.0);
+                r
+            })
+            .collect();
+        format!(
+            "{:?} {:?} {stages:?}",
+            s.converged,
+            (
+                r.communication,
+                r.h_calls,
+                r.h_columns,
+                r.reduced_solves,
+                r.backend_solves,
+                r.restarts,
+                r.gemm_flops,
+                r.placement
+            )
+        )
+    }
+    fn repeat(a: &Solution, b: &Solution) {
+        assert_eq!(decisions(a), decisions(b));
+        assert_eq!(bits(&a.eigenvalues), bits(&b.eigenvalues));
+        assert_eq!(
+            bits(a.eigenvectors.as_slice()),
+            bits(b.eigenvectors.as_slice())
+        );
+        assert_eq!(
+            bits(a.hx.as_ref().unwrap().as_slice()),
+            bits(b.hx.as_ref().unwrap().as_slice())
+        );
+        assert_eq!(a.ritz_changes_ha.len(), b.ritz_changes_ha.len());
+        for (a, b) in a.ritz_changes_ha.iter().zip(&b.ritz_changes_ha) {
+            assert_eq!(bits(a), bits(b));
+        }
+        let ritz_bits = |s: &Solution| {
+            s.ritz_values_ha
+                .iter()
+                .map(|step| {
+                    step.iter()
+                        .map(|pair| pair.map(f64::to_bits))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ritz_bits(a), ritz_bits(b));
+        assert_eq!(bits(&a.band_thresholds_ha), bits(&b.band_thresholds_ha));
+    }
+
+    #[test]
+    fn single_gemm_decisions_columns_repeats_and_threads() {
+        let off = RunConfig::from_pairs(&[("ref_dav_single_gemm", "off")]).unwrap();
+        let on = RunConfig::from_pairs(&[("ref_dav_single_gemm", "on")]).unwrap();
+        for (dim, n, clustered) in [
+            (12, 3, false),
+            (17, 5, true),
+            (7, 4, true),
+            (1025, 3, false),
+        ] {
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |c| {
+                    let mut op = Operator {
+                        dim,
+                        rows: (c.rank()..dim).step_by(ranks).collect(),
+                        clustered,
+                        threads: 1,
+                    };
+                    let mut x = RealMatrix::zeros(op.rows.len(), n).unwrap();
+                    for j in 0..n {
+                        for (i, &row) in op.rows.iter().enumerate() {
+                            x[(i, j)] = if row == j {
+                                1.0
+                            } else {
+                                0.03 * ((row * 7 + j * 13 + 1) as f64).sin()
+                            };
+                        }
+                    }
+                    let diag: Vec<_> = op
+                        .rows
+                        .iter()
+                        .map(|&row| op.diagonal(row) + 0.03 * ((row + 1) as f64).sin().powi(2))
+                        .collect();
+                    for placement in [ReducedPlacement::Root, ReducedPlacement::Replicated] {
+                        let mut o = Options::new(n, 1e-10, n - 1);
+                        o.max_iterations = if dim > 1000 { 2 } else { 40 };
+                        o.profile = true;
+                        o.return_hx = true;
+                        o.placement = placement;
+                        let a = {
+                            let _scope = off.enter();
+                            solve(c, &mut op, &x, &diag, o).unwrap()
+                        };
+                        let _scope = on.enter();
+                        let b = solve(c, &mut op, &x, &diag, o).unwrap();
+                        assert_eq!(decisions(&a), decisions(&b), "dim={dim}, ranks={ranks}");
+                        for (a, b) in a.eigenvalues.iter().zip(&b.eigenvalues) {
+                            assert!((a - b).abs() < 1e-10, "eigenvalue difference in Ha");
+                        }
+                        if !dft_numerics::MKL_BACKEND {
+                            repeat(&a, &b);
+                        }
+                        repeat(&b, &solve(c, &mut op, &x, &diag, o).unwrap());
+                        op.threads = 4;
+                        repeat(&b, &solve(c, &mut op, &x, &diag, o).unwrap());
+                        op.threads = 1;
+                    }
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn single_gemm_repair_projection_preserves_filter_and_h_work() {
+        dft_mpi::simulate(1, |c| {
+            let op = Operator {
+                dim: 257,
+                rows: (0..257).collect(),
+                clustered: false,
+                threads: 1,
+            };
+            let mut prior = None;
+            for single in [false, true, true] {
+                let mut w = Workspace::new(&op, 2, 6, single).unwrap();
+                w.v.reshape_within_storage(257, 2).unwrap();
+                w.hv.reshape_within_storage(257, 2).unwrap();
+                w.lean.c.reshape_within_storage(2, 2).unwrap();
+                for j in 0..2 {
+                    w.v[(j, j)] = 1.0;
+                    w.hv[(j, j)] = (j + 1) as f64;
+                    w.lean.s[(j, j)] = 1.0;
+                    w.lean.t[(j, j)] = 1.0;
+                    w.lean.c[(j, j)] = 1.0;
+                    w.e[(0, j)] = 0.5;
+                    w.e[(2, j)] = 0.5;
+                }
+                let mut r = super::super::Record::new(1, 6, false, ReducedPlacement::Replicated);
+                assert_eq!(w.repair(c, 2, &mut r.setup, false).unwrap(), 1);
+                assert_eq!(r.setup.h_columns, 0);
+                assert_eq!(r.setup.h_calls, 0);
+                assert_eq!(r.setup.dropped_corrections, 1);
+                assert_eq!(
+                    r.setup
+                        .gemms
+                        .iter()
+                        .filter(|g| g.stage == "repair_projection")
+                        .count(),
+                    2
+                );
+                let state = (bits(w.e.as_slice()), format!("{:?}", r.setup));
+                if let Some(ref prior) = prior {
+                    assert_eq!(&state, prior);
+                }
+                prior = Some(state);
+            }
+        });
+    }
 }

@@ -416,6 +416,93 @@ impl RealGemmWorkspace {
     ) -> Result<(), LinalgError> {
         self.multiply_slices_impl(site, true, a, a_rows, a_cols, lda, op, b, b_cols, ldb, out)
     }
+    /// Single sequential MKL product for reference Davidson Gram/projection
+    /// rectangles. Unlike the panel entry, the reduction spans all local rows.
+    /// This is a rounding change, but neither grouping nor backend threading
+    /// depends on the worker budget (MKL links the sequential threading layer).
+    /// The whole output must fit one existing scratch tile; arbitrary output
+    /// strides are supported by scattering that tile. No new scratch is allocated.
+    /// Pure builds and MKL_DGEMM=off retain the original pure panel arithmetic.
+    #[allow(clippy::too_many_arguments)]
+    pub fn multiply_slices_single_into(
+        &mut self,
+        site: GemmSite,
+        a: &[f64],
+        a_rows: usize,
+        a_cols: usize,
+        lda: usize,
+        op: RealOp,
+        b: &[f64],
+        b_cols: usize,
+        ldb: usize,
+        mut out: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        let (m, k) = if op == RealOp::Transpose {
+            (a_cols, a_rows)
+        } else {
+            (a_rows, a_cols)
+        };
+        let n = b_cols;
+        let fits = |len: usize, rows: usize, cols: usize, ld: usize| {
+            ld >= rows
+                && (rows == 0
+                    || cols == 0
+                    || (cols - 1)
+                        .checked_mul(ld)
+                        .and_then(|x| x.checked_add(rows))
+                        .is_some_and(|need| need <= len))
+        };
+        if a_rows > self.long
+            || a_cols > self.short
+            || n > self.short
+            || out.nrows() != m
+            || out.ncols() != n
+            || m.checked_mul(n)
+                .is_none_or(|size| size > self.short * self.short)
+            || !fits(a.len(), a_rows, a_cols, lda)
+            || !fits(b.len(), k, n, ldb)
+        {
+            return Err(LinalgError::Dimension);
+        }
+        if m == 0 || n == 0 || k == 0 {
+            let route = self.count_route(site.index(), Route::PureLayout, [m, n, k], 1);
+            let _span = dispatch::span(site.index(), route, m, n, k);
+            out.fill(0.0);
+            return Ok(());
+        }
+        let route = self.count_route(site.index(), Route::MklSingle, [m, n, k], 1);
+        let _span = dispatch::span(site.index(), route, m, n, k);
+        #[cfg(feature = "mkl")]
+        if route == Route::MklSingle {
+            let tile = &mut self.tiles[0];
+            tile.reshape_within_storage(m, n)?;
+            dft_mkl::dgemm_at(
+                site.into(),
+                op == RealOp::Transpose,
+                m,
+                n,
+                k,
+                a,
+                lda,
+                b,
+                ldb,
+                tile.as_mut_slice(),
+            )
+            .map_err(|_| LinalgError::Dimension)?;
+            for j in 0..n {
+                for i in 0..m {
+                    out[(i, j)] = tile[(i, j)];
+                }
+            }
+            return finite(out.as_ref());
+        }
+        self.multiply_into_impl(
+            MatRef::from_column_major_slice_with_stride(a, a_rows, a_cols, lda),
+            op,
+            MatRef::from_column_major_slice_with_stride(b, k, n, ldb),
+            out,
+        )
+    }
     #[allow(clippy::too_many_arguments)]
     fn multiply_slices_impl(
         &mut self,

@@ -497,6 +497,8 @@ table! {
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
     REFSCF_SETUP_PHASE_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-SETUP: reference start reuses identical direct structure factors across atomic charge/local potential and magnetic orbital channels; same arithmetic, default off pending dev08 A/B";
+    REF_DAV_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "reference Davidson only: transposed borders and repair projections use one sequential MKL GEMM over all local rows; rounding class, pure builds retain panel arithmetic";
 }
 
 struct Resolved {

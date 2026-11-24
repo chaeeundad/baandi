@@ -138,7 +138,9 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
             "reference Davidson dimensions/threshold/start",
         ));
     }
-    let mut w = Workspace::new(operator, n, cap)?;
+    let single_gemm = dft_numerics::switches::RunConfig::current()
+        .on(dft_numerics::switches::Id::REF_DAV_SINGLE_GEMM);
+    let mut w = Workspace::new(operator, n, cap, single_gemm)?;
     // Resolve once per solve. The reference workspace resets C to identity
     // on contraction, even though it remeasures S/H and their factor afterward.
     // Only the immediately following correction can use these stored Ritz rows.

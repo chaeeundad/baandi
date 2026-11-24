@@ -3580,7 +3580,15 @@ fn reference_apply_h_json() -> Value {
                 .map(|&i| s.fft.0[i][0] as f64 * 1e-9)
                 .sum::<f64>()
         };
-        json!({
+        // The original solver counter records two dispatching entries per H.
+        // P3-NL replaces only the projection entry; keep route labels honest.
+        let single = if dft_numerics::switches::on(dft_numerics::switches::Id::NONLOCAL_SINGLE_GEMM)
+        {
+            s.wide_calls / 2
+        } else {
+            0
+        };
+        let mut row = json!({
             "stage_s": APPLY_H_STAGES.iter().zip(s.seconds).map(|(k,v)| (k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
             "fft": {
                 "measured": s.fft.0.iter().any(|v| v[0] > 0),
@@ -3596,8 +3604,12 @@ fn reference_apply_h_json() -> Value {
             "calls":s.columns_per_call.len(), "columns":s.columns_per_call.iter().sum::<usize>(),
             "columns_per_call":s.columns_per_call, "complex_pairs_per_direction":s.pairs,
             "two_band_pairs":s.pairs-s.odd_tails, "single_band_tails":s.odd_tails,
-            "nonlocal_wide_entry_calls":s.wide_calls, "nonlocal_direct_pure_calls":s.direct_calls
-        })
+            "nonlocal_wide_entry_calls":s.wide_calls - single, "nonlocal_direct_pure_calls":s.direct_calls
+        });
+        if single > 0 {
+            row["nonlocal_single_entry_calls"] = json!(single);
+        }
+        row
     };
     let mut total = ApplyH::default();
     for s in &solves {
@@ -3675,6 +3687,122 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reference_lazy_output_preserves_json_science_and_density_bytes() {
+        use dft_mpi::Collective;
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("p3-nl-cli-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut pp = crate::test_fixtures::gaussian_with(2., 1.8, true, 161)
+            .replace("element=\"Xx\"", "element=\"He\"");
+        let parsed = dft_upf::parse_upf(&pp).unwrap();
+        let array = |f: &dyn Fn(f64) -> f64| {
+            parsed
+                .mesh()
+                .r()
+                .iter()
+                .map(|&r| format!("{:.17e}", f(r)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let start = pp.find("<PP_RHOATOM>").unwrap() + "<PP_RHOATOM>".len();
+        let end = pp.find("</PP_RHOATOM>").unwrap();
+        pp.replace_range(
+            start..end,
+            &array(&|r| {
+                8. / (std::f64::consts::PI.sqrt() * 1.8_f64.powi(3))
+                    * r
+                    * r
+                    * (-(r / 1.8).powi(2)).exp()
+            }),
+        );
+        pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>",
+            &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>", array(&|r| r * (-0.6 * r * r).exp())));
+        fs::write(dir.join("syn.xml"), pp).unwrap();
+        let base = "[system]\nname='lazy output test'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=2.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=2\ndriver='reference'\nverify='off'\n[performance]\nm2_lazy_result=true\n";
+        for arm in ["off", "on"] {
+            fs::write(
+                dir.join(format!("{arm}.toml")),
+                format!("{base}refscf_lazy_output='{arm}'\n"),
+            )
+            .unwrap();
+        }
+        dft_mpi::simulate(2, |comm| {
+            dft_engine::parallel::set_communicator(Some(Arc::new(comm.clone())));
+            let mut baseline = None;
+            for arm in ["off", "on"] {
+                let out = dir.join(format!("{arm}-{}", comm.rank()));
+                execute(&dir.join(format!("{arm}.toml")), Some(&out)).unwrap();
+                let result: Value =
+                    serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+                // Full files contain clocks, paths, hashes and switch/counter
+                // provenance. Compare every scalar scientific output and the
+                // complete per-iteration scientific history, excluding clocks.
+                fn without_clocks(value: &mut Value) {
+                    match value {
+                        Value::Object(object) => {
+                            object.retain(|key, _| {
+                                !key.ends_with("_s") && key != "timings" && key != "inner_clocks"
+                            });
+                            for value in object.values_mut() {
+                                without_clocks(value);
+                            }
+                        }
+                        Value::Array(values) => {
+                            for value in values {
+                                without_clocks(value);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let mut history = result["convergence"]["history"].clone();
+                without_clocks(&mut history);
+                let mut science = serde_json::Map::new();
+                science.insert("history".into(), history);
+                for key in [
+                    "cell",
+                    "atoms",
+                    "cutoff",
+                    "basis",
+                    "electrons",
+                    "bands",
+                    "occupations",
+                    "xc",
+                    "energies",
+                    "total_energy",
+                    "eigenvalues",
+                    "verification",
+                ] {
+                    science.insert(key.to_string(), result[key].clone());
+                }
+                // Check solver work explicitly as well as the history above.
+                science.insert(
+                    "iterations".into(),
+                    result["convergence"]["iterations"].clone(),
+                );
+                science.insert(
+                    "converged".into(),
+                    result["convergence"]["converged"].clone(),
+                );
+                for key in ["davidson_iterations_recorded", "h_vectors_recorded"] {
+                    science.insert(key.into(), result["convergence"]["work"][key].clone());
+                }
+                let density = fs::read(out.join("density.bin")).unwrap();
+                let meta = fs::read(out.join("density.json")).unwrap();
+                if let Some((old_science, old_density, old_meta)) = &baseline {
+                    assert_eq!(&science, old_science);
+                    assert_eq!(&density, old_density);
+                    assert_eq!(&meta, old_meta);
+                } else {
+                    baseline = Some((science, density, meta));
+                }
+            }
+            dft_engine::parallel::set_communicator(None);
+        });
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn reference_output_writer_records_body_cost_without_duplicate_json() {
         let path = std::env::temp_dir().join(format!("p3-setup-json-{}.json", std::process::id()));

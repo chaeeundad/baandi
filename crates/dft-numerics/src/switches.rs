@@ -540,6 +540,10 @@ table! {
         "P3-SETUP3: reference atomic start uses raw-overlap generalized Rayleigh-Ritz without wide QR passes when J >= bands and the guarded metric reduction passes; otherwise legacy CholQR2/completion; rounding class, default off pending dev08";
     REFSTART_COMPACT_G: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-SETUP3: reference atomic fields map density Miller indices directly into sorted owned FFT positions, omitting the duplicate density-grid reverse map and tree lookup table; bit-identical, default off pending dev08";
+    NONLOCAL_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-NL: one MKL projection over all local rows instead of 256-row reduction panels; requires M2_DGEMM, rounding class, default off pending dev08";
+    REFSCF_LAZY_OUTPUT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-NL: reference driver retains owned orbitals when the caller requests lazy delivery; requires M2_LAZY_RESULT and a registered MPI communicator; default off pending dev08";
 }
 
 struct Resolved {

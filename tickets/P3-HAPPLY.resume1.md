@@ -1,0 +1,1 @@
+Approved: add crates/dft-numerics/src/real.rs to OWNED_FILES for the FFT probe activation condition only (the two-line change in your request): enable the FFT split when BAANDI_DAVIDSON_STAGES is on. Keep zero cost and bit-identical results when off. Rerun the ticket Mac commands and report. Leave changes uncommitted.

@@ -12,3 +12,6 @@ The performance campaign (BAANDI <= 0.90 x fastest QE, one-core and MPI lanes) c
    NLCC/PseudoDojo files, collinear spin and Fermi-Dirac occupations, symmetry, forces/stress/relaxation. Then a
    refactor that makes it the single SCF path and retires duplicated legacy code, with the README feature table
    kept true at every step.
+   When forces/stress move to the reference path, build the nonlocal force/stress contraction band-first
+   (one GEMM per k over all projectors, not one projection per derivative direction): the user's earlier
+   QE acceleration (fastqe) measured 1.5% of wall from that change alone.

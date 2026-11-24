@@ -2209,20 +2209,24 @@ fn execute_mode_inner(
                 .collect::<Vec<_>>(),
         });
     }
-    result["fft_kernel_choices"] = json!({
-        "schema": "fft-kernel-choices-1",
-        "rank": crate::parallel::rank(),
-        "enabled": dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KERNEL_BY_LENGTH),
-        "scope": "process-local distributed pair lanes; other ranks write rankN/results.json",
-        "choices": dft_numerics::fused_pair_plan::kernel_choices().iter().map(|c| json!({
-            "length": c.length, "batch": c.batch,
-            "direction": if c.inverse { "inverse" } else { "forward" },
-            "kernel": if c.vendor { "mkl" } else { "rustfft" },
-            "rust_seconds_per_batch": c.rust_seconds,
-            "mkl_seconds_per_batch": c.mkl_seconds,
-            "calibration_seconds": c.calibration_seconds,
-        })).collect::<Vec<_>>(),
-    });
+    // Only written when the calibration switch is on, so the default results.json
+    // key set is unchanged.
+    if dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KERNEL_BY_LENGTH) {
+        result["fft_kernel_choices"] = json!({
+            "schema": "fft-kernel-choices-1",
+            "rank": crate::parallel::rank(),
+            "enabled": dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KERNEL_BY_LENGTH),
+            "scope": "process-local distributed pair lanes; other ranks write rankN/results.json",
+            "choices": dft_numerics::fused_pair_plan::kernel_choices().iter().map(|c| json!({
+                "length": c.length, "batch": c.batch,
+                "direction": if c.inverse { "inverse" } else { "forward" },
+                "kernel": if c.vendor { "mkl" } else { "rustfft" },
+                "rust_seconds_per_batch": c.rust_seconds,
+                "mkl_seconds_per_batch": c.mkl_seconds,
+                "calibration_seconds": c.calibration_seconds,
+            })).collect::<Vec<_>>(),
+        });
+    }
     result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
     if let Some(report) = &r.spectral_completeness {
         result["spectral_completeness"] = spectral_json(report);

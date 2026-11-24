@@ -1192,3 +1192,164 @@ interpolation. Scratch is bounded by `16 * max(owned_rows, atom_count)` bytes
 and included conservatively in the named-array peak envelope. The atomic
 coefficient builder still works on owned G rows only. Real MPI/MKL timing and
 identity remain dev08 gates even though the pure-Rust local tests are exact.
+
+## H-apply FFT cost accounting
+
+P3-FFT (2026-11-24), audited against local base
+`d7ec4e9565a24d2f88c5b241e4fdd597f50d2e73`. The ticket supplies a dev08
+`66d45e69` Si128 MPI8 rank-max profile: inverse 5.80 s, forward 4.95 s,
+local 2D transforms 2.12 + 2.14 s, alltoall 1.16 + 0.88 s, transpose
+pack/unpack 1.37 + 1.10 s, ORC/grid/mirror work 1.49 s, multiply 0.43 s;
+reported FFT excluding multiply 11.16 s versus QE FFTW 6.70 s (vloc_psi
+7.98 s). BAANDI 14204 H columns are paired; QE reports 13592 FFTW calls.
+These are supplied motivation, not newly reproduced reference results or
+additive exclusive wall components: different rank maxima cannot be summed.
+Raw provenance and transform-count definitions must accompany a comparison.
+
+### Exact logical traffic, one complex pair
+
+A pair carries two real bands (one on an odd tail). After deterministic axis
+selection let `(n0,n1,n2)` be the FFT lengths, `R` ranks, `S` total occupied
+sticks, `s_r` owned sticks, `Z` occupied reciprocal z planes, `L_r` local
+complex coefficients, `p_r` owned first-axis real planes. Define
+`A_r=s_r*n0`, `M=Z*n1`, `F=n1*n2`, `b=max(s_r)*max(p_r)`.
+Complex f64 values occupy 16 bytes. The table counts value reads plus writes;
+indices, write allocation, cache-line waste and FFT/MPI internal scratch are
+excluded. FFT rows give **minimum interface traffic**, not measured DRAM
+traffic or the butterfly traffic inside rustfft/MKL. Multiply by pair batch
+width for a block; real-space rows already include all `p_r` planes.
+
+| Current stage (fft_profile index) | Bytes per pair on rank r | Required work / avoidable part |
+| --- | --- | --- |
+| Coefficients to sticks (0) | `16*A_r + 32*L_r` | clear sticks, read coefficients, scatter; `16*L_r` clear writes are overwritten |
+| Inverse first axis (1) | `32*A_r` | `s_r` contiguous length-n0 transforms, already pruned |
+| Inverse transpose pack (2) | `32*A_r` | sticks -> destination-major send buffer |
+| Inverse alltoall (3) | `16*R*b` outgoing payload | useful outgoing `16*A_r`; useful incoming `16*p_r*S` |
+| Inverse middle unpack (4) | `p_r*(16*M + 32*S)` | clear dense active-z lanes and scatter received sticks; `16*p_r*S` redundant clears |
+| Inverse second axis (5) | `32*p_r*M` | `p_r*Z` length-n1 transforms, already pruned |
+| Middle -> slab (6) | `p_r*(16*F + 32*M)` | transpose active z lanes into contiguous z rows; `16*p_r*M` redundant clears |
+| Inverse last axis (7) | `32*p_r*F` | `p_r*n1` length-n2 transforms; dense output required |
+| Potential multiply (8) | `40*p_r*F` | complex read/write and real potential read |
+| Forward last axis (9) | `32*p_r*F` | dense real input; same count as inverse |
+| Slab -> middle (10) | `32*p_r*M` | gather only active reciprocal z planes |
+| Forward second axis (11) | `32*p_r*M` | only active z planes needed |
+| Forward middle pack (12) | `32*p_r*S` | gather only occupied sticks into send buffer |
+| Forward alltoall (13) | `16*R*b` outgoing payload | useful outgoing `16*p_r*S`; useful incoming `16*A_r` |
+| Forward transpose unpack (14) | `32*A_r` | received segments -> contiguous sticks |
+| Forward first axis (15) | `32*A_r` | only owned occupied sticks |
+| Gather and 1/N scale (16) | `32*L_r` | read selected G, write local coefficients |
+
+Summing the table **excluding multiply and MPI payload** gives
+`B_fft,r = 64*L_r + 144*A_r + 144*p_r*M + 80*p_r*F + 64*p_r*S`
+bytes per pair. Hole-only initialization reduces this by
+`16*(L_r+p_r*(S+M))` for unique G indices, the store minimum for these
+same in-place buffers. Outer input fusion saves another `32*L_r` from the
+combined ORC+FFT total, not from this FFT-only table alone. This is a
+minimum for the retained layout/axis order, not a lower bound on every
+possible out-of-place or strided FFT algorithm.
+
+The table excludes the outer ORC packing and mirror exchanges. For a full
+(two-band) pair, ORC packing reads 32 bytes per nonzero-G position and 16
+bytes at G=0, then writes one complex coefficient: `48*L_r - 16*z_r`, where
+`z_r` is 1 if this rank owns G=0. Let `H_r` be the number of owned nonzero
+Gamma representatives (two ORC rows each). Unpacking reads plus/minus
+complex values and writes four real entries: `64*H_r + 32*z_r` bytes.
+The subsequent kinetic addition is separate: `32*Rorc_r` bytes per band
+(read x, kinetic and y; write y), where Rorc_r is the owned ORC row count.
+
+For split Gamma representatives let `O_r` be outgoing representative items,
+`I_r` incoming items, and `u` the maximum items in a rank-to-rank block.
+Per full pair the mirror-input staging clears `32*R*u` bytes and copies
+`64*O_r` bytes; outgoing payload is `32*R*u`. Return staging copies
+`32*I_r` bytes; outgoing payload is `16*R*u`. The returned plus/minus reads
+are already in the unpack formula. These exchanges vanish when `u=0`, as
+with mirror-paired ownership on symmetric supports. They are unchanged by
+P3-FFT. For an odd tail, packing reads 16 bytes per nonzero G (8 at G=0)
+and writes 16; unpacking reads 32 and writes 16 per nonzero representative
+(16 read + 8 write at G=0). Mirror input copy/clear/payload per tail halve;
+return complex payload is unchanged. Do not divide an odd block's total by
+its pair count and call every pair a two-band pair.
+
+Alltoall payload includes self blocks, **not** both send and receive traffic.
+Both directions together send `32*R*b` bytes per rank. Across all ranks,
+useful payload/direction is `16*S*n0`, padded payload is `16*R^2*b`;
+utilization is `S*n0/(R^2*b)` when nonempty. Off-rank useful payload subtracts
+`16*sum_r(s_r*p_r)`. Rank timings or Npw alone do not determine padding.
+
+### Minimum and implemented experiments
+
+The current code already scatters only into occupied sticks, transforms only
+occupied sticks and active middle planes, uses one transpose per direction
+for the **whole band-pair block**, and keeps backend plans/scratch. It never
+zeros or copies a full 3D box per pair. Further generic pruning, alltoall
+batching or plan reuse is therefore not a new mechanism. Transform work per
+direction across ranks is `S*n0 + n0*Z*n1 + n0*n1*n2` point-transforms,
+with conventional work estimate `5*sum(points_axis*log2(n_axis))` FLOPs.
+The last dense pass is necessary for arbitrary local potentials; zero G
+coefficients do not imply zero real-space values.
+
+For the present in-place contiguous backend and padded collective layout,
+a single scatter must initialize each input location either with its value
+or with zero. Clearing **holes only** achieves that store minimum. Likewise
+one transpose each way is already achieved at the collective level; packing
+is still needed to reconcile destination-major MPI blocks and dense backend
+lanes. Zero-copy transpose/strided out-of-place FFT would require another
+backend contract, outside this ticket (especially `real.rs`). Removing
+padding needs a variable-count collective, also outside owned files.
+
+Two independent construction-cached switches, both default off:
+
+- `BAANDI_FFT_SPARSE_CLEAR=on`: complement ranges for sticks, middle and slab
+  are built once, coalescing adjacent holes into contiguous fills. It saves
+  `16*(L_r + p_r*(S+M))` bytes per pair for unique coefficient indices.
+  More generally replace L_r with the number of unique scatter destinations.
+  The three existing profile byte counts reflect this reduction exactly.
+  Every hole is re-cleared after reuse; buffers mutated by an in-place FFT
+  must not be assumed to retain zeros. No per-point lookup table or new
+  FFT arithmetic is introduced; range metadata/cache effects need dev08.
+- `BAANDI_FFT_DIRECT_PACK=on`: the distributed H apply supplies ORC packed
+  values to the first-axis stick scatter through an inlined callback. This
+  removes the input `hbuf` write/read, **32*L_r bytes per pair**, including an
+  odd tail. Output hbuf, mirror exchange/unpack and normalization remain.
+  Old and direct paths use exactly the same scalar ORC expression. Both
+  batched and diagnostic unbatched H application are supported; density and
+  kept-change entry points retain their existing coefficient input path.
+  This switch affects the distributed operator, including other drivers
+  that explicitly opt in; it is not confined to reference SCF.
+
+Savings add without double counting. All transforms, collectives, payloads,
+axis selection and kernel choices stay unchanged. With switches off there
+are no hole-range allocations; with on, metadata is allocated at plan
+construction only. Transpose storage retains its existing grow-to-largest
+batch behavior. H input hbuf capacity remains because forward output needs
+it; this is a traffic optimization, not a peak-memory claim.
+
+`FFT_DIRECT_PACK` moves ORC arithmetic from outer `pair_pack` into FFT stage
+0; stage 0's profile still counts a logical 16-byte coefficient read rather
+than callback source loads. Its abstract byte count does **not** independently
+prove the 32*L_r removed traffic. Compare combined pack+scatter and full
+apply totals, and derive saved traffic from L_r and the actual pair sequence.
+No speedup may be claimed from a smaller renamed stage alone.
+
+### Prior attempts, tests and limits
+
+Derived from the principles in the own-words notes
+`fft-call-structure.md`, `qe-hpsi-and-fft.md`, `qe-gamma-real-path.md` and the
+engine's current code; no QE source accessed. A01/A02/A26 and M2d already
+supply reuse/pruning/batching. A11/A28/A34, neutral M2_FFT, rejected async
+alltoall, FFT-KEPT-FUSE-NEUTRAL and FFT-ARRIVAL-OWNERSHIP-CLOSED are not
+repeated. PFFT-4's indexed transpose was worse on the old Mac path: this
+candidate retains the transpose and uses contiguous complement **spans**,
+not an all-element indexed transpose. The changed premise is the user's
+new reference-driver Si128/Si64 dev08 profile and explicit P3-FFT work order,
+not an inference that removed bytes guarantee wall improvement.
+
+Tests in the two owned source files compare each switch alone and combined,
+cubic/anisotropic/odd grids, asymmetric support, full/empty support, both
+first axes, simulated ranks 1/2/3/8, dirty-buffer reuse and shrinking/growing
+batches. Physics tests add cubic/skewed/elongated cells, odd/even/empty band
+blocks and greedy/mirror ownership. Existing serial full-grid and pair-plan
+oracles remain. These are correctness tests, not Mac performance evidence.
+The [dev08 request](../performance/lanes/RSCF/fft-dev08-request.md) owns the
+screen and A/A + crossed A/B protocol. Default promotion, real MPI/MKL,
+full convergence and external-reference accuracy remain remote gates.

@@ -168,6 +168,42 @@ pub fn position_owners(
     Ok(part.slots.iter().map(|&s| part.owner[s]).collect())
 }
 
+/// Complement of scatter destinations, coalesced once at construction. Clearing
+/// spans avoids both redundant zero stores and a per-point hole-index stream.
+struct HoleClear {
+    spans: Vec<std::ops::Range<usize>>,
+    points: usize,
+}
+impl HoleClear {
+    fn new(len: usize, occupied: impl Iterator<Item = usize>) -> Self {
+        let mut mask = vec![false; len];
+        for i in occupied {
+            mask[i] = true;
+        }
+        let mut spans = Vec::new();
+        let mut start = 0;
+        while start < len {
+            if mask[start] {
+                start += 1;
+                continue;
+            }
+            let mut end = start + 1;
+            while end < len && !mask[end] {
+                end += 1;
+            }
+            spans.push(start..end);
+            start = end;
+        }
+        let points = spans.iter().map(|s| s.len()).sum();
+        Self { spans, points }
+    }
+    fn clear(&self, data: &mut [C]) {
+        for span in &self.spans {
+            data[span.clone()].fill(C::default());
+        }
+    }
+}
+
 pub struct DistributedPairFft {
     shape: [usize; 3],
     first: usize,
@@ -196,6 +232,7 @@ pub struct DistributedPairFft {
     lanes: BackendLanes,
     profile: dft_numerics::real::fft_profile::Probe,
     kept_fuse: bool,
+    holes: Option<[HoleClear; 3]>,
 }
 
 impl DistributedPairFft {
@@ -271,7 +308,19 @@ impl DistributedPairFft {
             .collect::<Vec<_>>();
         let local_sticks = counts[rank];
         let lanes = BackendLanes::plan(n, [local_sticks, planes.len(), n[1]], vendor)?;
+        let holes =
+            dft_numerics::switches::on(dft_numerics::switches::Id::FFT_SPARSE_CLEAR).then(|| {
+                [
+                    HoleClear::new(local_sticks * n[0], scatter.iter().copied()),
+                    HoleClear::new(planes.len() * n[1], occupied.iter().map(|p| p.0)),
+                    HoleClear::new(
+                        n[1] * n[2],
+                        (0..n[1]).flat_map(|y| planes.iter().map(move |&z| y * n[2] + z)),
+                    ),
+                ]
+            });
         Ok(Self {
+            holes,
             shape,
             first,
             n,
@@ -391,19 +440,38 @@ impl DistributedPairFft {
         if c.len() != ll * np {
             return Err(FftError::IncompatibleArray.into());
         }
+        self.begin_to_real_batch_from(comm, np, |t, g| c[t * ll + g])
+    }
+
+    /// Scatter coefficients supplied in local-position order directly into the
+    /// sticks. `coefficient(t, g)` is called once per local position per vector,
+    /// in the same order as the slice path. No intermediate coefficient array.
+    /// All ranks must supply the same batch width; the callback must not perform collectives.
+    fn begin_to_real_batch_from<K: Collective>(
+        &mut self,
+        comm: &K,
+        np: usize,
+        mut coefficient: impl FnMut(usize, usize) -> C,
+    ) -> Result<(), DistFftError> {
         self.reserve_batch(np);
         let (nx, mp) = (self.n[0], self.max_planes);
         for t in 0..np {
             let mark = self.profile.start();
-            self.sticks.fill(C::default());
-            for (&i, &v) in self.scatter.iter().zip(&c[t * ll..(t + 1) * ll]) {
-                self.sticks[i] = v;
+            let clear_points = if let Some(holes) = &self.holes {
+                holes[0].clear(&mut self.sticks);
+                holes[0].points
+            } else {
+                self.sticks.fill(C::default());
+                self.sticks.len()
+            };
+            for (g, &i) in self.scatter.iter().enumerate() {
+                self.sticks[i] = coefficient(t, g);
             }
             self.profile.finish(
                 mark,
                 0,
                 self.scatter.len(),
-                16 * self.sticks.len() + 32 * self.scatter.len(),
+                16 * clear_points + 32 * self.scatter.len(),
                 None,
             );
             if !self.sticks.is_empty() {
@@ -454,7 +522,13 @@ impl DistributedPairFft {
     pub fn to_real_plane_in(&mut self, t: usize, np: usize, i: usize) -> Result<(), DistFftError> {
         let [_, ny, nz] = self.n;
         let mark = self.profile.start();
-        self.middle.fill(C::default());
+        let clear_points = if let Some(holes) = &self.holes {
+            holes[1].clear(&mut self.middle);
+            holes[1].points
+        } else {
+            self.middle.fill(C::default());
+            self.middle.len()
+        };
         for &(m, owner, off) in &self.occupied {
             let k = 2 * ((owner * np + t) * self.block + off + i);
             self.middle[m] = C::new(self.recv[k], self.recv[k + 1]);
@@ -463,7 +537,7 @@ impl DistributedPairFft {
             mark,
             4,
             self.occupied.len(),
-            16 * self.middle.len() + 32 * self.occupied.len(),
+            16 * clear_points + 32 * self.occupied.len(),
             None,
         );
         if !self.middle.is_empty() {
@@ -473,7 +547,13 @@ impl DistributedPairFft {
                 .finish(mark, 5, self.middle.len(), 32 * self.middle.len(), Some(1));
         }
         let mark = self.profile.start();
-        self.slab.fill(C::default());
+        let clear_points = if let Some(holes) = &self.holes {
+            holes[2].clear(&mut self.slab);
+            holes[2].points
+        } else {
+            self.slab.fill(C::default());
+            self.slab.len()
+        };
         for (k, &z) in self.planes.iter().enumerate() {
             for y in 0..ny {
                 self.slab[y * nz + z] = self.middle[k * ny + y];
@@ -483,7 +563,7 @@ impl DistributedPairFft {
             mark,
             6,
             self.middle.len(),
-            16 * self.slab.len() + 32 * self.middle.len(),
+            16 * clear_points + 32 * self.middle.len(),
             None,
         );
         let mark = self.profile.start();
@@ -644,6 +724,28 @@ impl DistributedPairFft {
         self.finish_to_reciprocal_batch(comm, data, np)
     }
 
+    /// Local-potential application with input packing fused into the stick
+    /// scatter. The callback supplies vector t, local position g; output retains
+    /// the ordinary local coefficient layout and final 1/N scaling. Callback
+    /// source traffic is caller-owned; FFT profiling counts a logical complex
+    /// coefficient read, as on the slice path. No allocation after batch warmup.
+    pub fn apply_local_batch_from<K: Collective>(
+        &mut self,
+        comm: &K,
+        coefficient: impl FnMut(usize, usize) -> C,
+        out: &mut [C],
+        potential: &[f64],
+        np: usize,
+    ) -> Result<(), DistFftError> {
+        let _profile_scope = self.profile.apply_scope();
+        if potential.len() != self.total || out.len() != self.local_len() * np {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        self.begin_to_real_batch_from(comm, np, coefficient)?;
+        self.multiply_planes(potential, np)?;
+        self.finish_to_reciprocal_batch(comm, out, np)
+    }
+
     fn multiply_planes(&mut self, potential: &[f64], np: usize) -> Result<(), DistFftError> {
         for t in 0..np {
             for i in 0..self.plane_count() {
@@ -802,6 +904,113 @@ mod tests {
     use dft_numerics::fused::FusedOperator;
     use dft_numerics::{Fft3d, FftPlan3d, PairFusedPlan};
     use ndarray::Array3;
+
+    #[test]
+    fn sparse_clear_and_direct_input_preserve_transform_bits() {
+        use dft_numerics::{real::fft_profile, switches::RunConfig};
+        let mut fixtures = vec![
+            ([6, 6, 6], sphere([6, 6, 6], 4., [0.; 3])),
+            ([5, 7, 15], sphere([5, 7, 15], 4., [0.; 3])),
+            ([5, 7, 9], sphere([5, 7, 9], 5., [0.5, 0.3, 0.])),
+            // Force the other first axis and include ranks owning no planes.
+            ([3, 5, 7], vec![[0, 0, 0], [0, 1, 0], [0, 3, 0]]),
+            ([1, 2, 3], vec![]),
+        ];
+        fixtures.push((
+            [3, 3, 3],
+            (0..3)
+                .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| [x, y, z])))
+                .collect(),
+        ));
+        let mut comparisons = 0;
+        for (shape, idx) in fixtures {
+            let potential: Vec<_> = (0..shape.iter().product())
+                .map(|i| if i % 5 == 0 { -0.0 } else { (i as f64).cos() })
+                .collect();
+            for vendor in [false, true] {
+                for ranks in [1, 2, 3, 8] {
+                    simulate(ranks, |comm| {
+                        let mut plans: Vec<_> = ["off", "on"]
+                            .into_iter()
+                            .map(|sparse| {
+                                let config = RunConfig::from_pairs(&[
+                                    ("fft_sparse_clear", sparse),
+                                    ("fft_profile", "on"),
+                                    ("phase_profile", "on"),
+                                    ("stage_timers", "off"),
+                                ])
+                                .unwrap();
+                                let _guard = config.enter();
+                                DistributedPairFft::with_lanes(
+                                    shape,
+                                    &idx,
+                                    comm.rank(),
+                                    ranks,
+                                    vendor,
+                                )
+                                .unwrap()
+                            })
+                            .collect();
+                        // Reuse dirty buffers, shrink/grow batches, and zero-width batches.
+                        for np in [3, 1, 5, 0, 2] {
+                            let ll = plans[0].local_len();
+                            let input = random_c(ll * np, 321 + np as u64);
+                            let mut reference = Vec::new();
+                            let mut base_bytes = 0;
+                            for (sparse, plan) in plans.iter_mut().enumerate() {
+                                for direct in [false, true] {
+                                    let before = fft_profile::snapshot();
+                                    let mut data = input.clone();
+                                    if direct {
+                                        plan.apply_local_batch_from(
+                                            comm,
+                                            |t, g| input[t * ll + g],
+                                            &mut data,
+                                            &potential,
+                                            np,
+                                        )
+                                        .unwrap();
+                                    } else {
+                                        plan.apply_local_batch(comm, &mut data, &potential, np)
+                                            .unwrap();
+                                    }
+                                    let delta = fft_profile::snapshot().since(before);
+                                    let bits: Vec<_> = data
+                                        .iter()
+                                        .map(|v| (v.re.to_bits(), v.im.to_bits()))
+                                        .collect();
+                                    let bytes =
+                                        [0, 4, 6].iter().map(|&i| delta.0[i][3]).sum::<u64>();
+                                    if sparse == 0 && !direct {
+                                        reference = bits;
+                                        base_bytes = bytes;
+                                    } else {
+                                        assert_eq!(
+                                            bits, reference,
+                                            "{shape:?} ranks {ranks} np {np}"
+                                        );
+                                        let saved = if sparse == 0 {
+                                            0
+                                        } else {
+                                            16 * np
+                                                * (ll
+                                                    + plan.plane_count()
+                                                        * (plan.occupied.len() + plan.middle.len()))
+                                        };
+                                        assert_eq!(base_bytes - bytes, saved as u64);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    comparisons += 5 * 3 * ranks;
+                }
+            }
+        }
+        eprintln!(
+            "P3-FFT: {comparisons} rank-local on/off transform comparisons, max difference 0 (bitwise); exact sparse-clear byte savings verified"
+        );
+    }
 
     #[test]
     fn kept_fusion_bits_counters_and_rank_independence() {

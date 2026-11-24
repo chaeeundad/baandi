@@ -3715,3 +3715,8 @@ Coulomb criterion unchanged. dev08 MPI8 one run per arm at 185489c: verification
 si128 1942 -> 1422 (one band block per attempt), Coulomb errors identical, maps/attempts identical.
 si128 verification 4.03 -> 3.72 s, wall 32.21 -> 30.36 s (most of it single-run spread); si64 6.14 -> 6.35 (noise).
 Default on. Evidence: dev08 /scr/mino/rustdft/vw/runs/.
+
+### PRECISE-2026-11-26: consolidated campaign at fa4cfadc
+
+Full table: docs/performance/precise-2026-11-26.md. Verify-off / QE best 1.014-1.189 (MPI8 si216 1.014,
+si128 1.098; 1 core si128 1.189); verified / QE best 1.074-1.648. 180 samples, no failures, accuracy classes held.

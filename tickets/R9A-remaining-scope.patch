@@ -1,0 +1,206 @@
+--- a/crates/dft-engine/src/atomic_start.rs
++++ b/crates/dft-engine/src/atomic_start.rs
+@@ -7,34 +7,9 @@
+ use dft_solvers::LinearOperator;
+ use dft_upf::radial::{projector_transform_with_rule, real_spherical_harmonic};
+ 
+-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+-pub enum StartWavefunctions {
+-    FreeElectron,
+-    /// Default (ADR 0042): atomic-orbital subspace with Rayleigh-Ritz; falls back to
+-    /// the free-electron start with a recorded reason when it does not apply.
+-    #[default]
+-    Atomic,
+-}
+-impl StartWavefunctions {
+-    pub fn name(self) -> &'static str {
+-        match self {
+-            Self::FreeElectron => "free_electron",
+-            Self::Atomic => "atomic",
+-        }
+-    }
+-}
+-
+-/// Initialization work is separate from Davidson work; MACs are complex MACs.
+-#[derive(Debug, Clone, Default)]
+-pub struct AtomicStartReport {
+-    pub atomic_orbitals: usize,
+-    pub initial_h_applications: usize,
+-    pub gram_rotation_macs: usize,
+-    pub mgs_projection_macs: usize,
+-    pub radial_samples: usize,
+-    pub evd_orders: Vec<usize>,
+-    pub fallback_reason: Option<String>,
+-}
++pub use crate::model::StartWavefunctions;
++
++pub use crate::model::AtomicStartReport;
+ 
+ fn numerical(e: impl std::fmt::Display) -> ScfError {
+     ScfError::Numerical(e.to_string())
+--- a/crates/dft-engine/src/start_density.rs
++++ b/crates/dft-engine/src/start_density.rs
+@@ -7,23 +7,7 @@
+     ScfError::Numerical(e.to_string())
+ }
+ 
+-/// Starting density of the SCF. Default `Uniform` is bit-identical to before.
+-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+-pub enum StartDensity {
+-    #[default]
+-    Uniform,
+-    /// Sum of the atomic charge densities of the pseudopotentials (UPF
+-    /// `PP_RHOATOM`, 4 pi r^2 rho), negative ringing clipped, charge renormalised.
+-    Atomic,
+-}
+-impl StartDensity {
+-    pub fn name(self) -> &'static str {
+-        match self {
+-            Self::Uniform => "uniform",
+-            Self::Atomic => "atomic",
+-        }
+-    }
+-}
++pub use crate::model::StartDensity;
+ 
+ /// rho(G) = (1/Omega) sum_atoms exp(-i G.tau) int 4 pi r^2 rho_at(r) sinc(G r) dr,
+ /// on the density sphere, transformed to the grid, clipped at zero and rescaled
+--- a/crates/dft-engine/src/model/options.rs
++++ b/crates/dft-engine/src/model/options.rs
+@@ -1,7 +1,6 @@
+ //! Shared SCF options and occupation contracts.
+ use super::{StandardProfile, Verification};
+ use crate::Functional;
+-pub use crate::{StartDensity, StartWavefunctions};
+ use dft_basis::PlaneWaveBasis;
+ use dft_geometry::Cell;
+ use dft_physics::data::Hartree;
+@@ -261,3 +260,38 @@
+         }
+     }
+ }
++
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
++pub enum StartWavefunctions {
++    FreeElectron,
++    /// Default (ADR 0042): atomic-orbital subspace with Rayleigh-Ritz; falls back to
++    /// the free-electron start with a recorded reason when it does not apply.
++    #[default]
++    Atomic,
++}
++impl StartWavefunctions {
++    pub fn name(self) -> &'static str {
++        match self {
++            Self::FreeElectron => "free_electron",
++            Self::Atomic => "atomic",
++        }
++    }
++}
++
++/// Starting density of the SCF. Default `Uniform` is bit-identical to before.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
++pub enum StartDensity {
++    #[default]
++    Uniform,
++    /// Sum of the atomic charge densities of the pseudopotentials (UPF
++    /// `PP_RHOATOM`, 4 pi r^2 rho), negative ringing clipped, charge renormalised.
++    Atomic,
++}
++impl StartDensity {
++    pub fn name(self) -> &'static str {
++        match self {
++            Self::Uniform => "uniform",
++            Self::Atomic => "atomic",
++        }
++    }
++}
+--- a/crates/dft-engine/src/model/result.rs
++++ b/crates/dft-engine/src/model/result.rs
+@@ -1,6 +1,5 @@
+ //! Shared SCF outputs and fixed-point records.
+ use super::{CompatMode, ScfError, StandardProfile, VerificationReport};
+-pub use crate::AtomicStartReport;
+ use crate::energy::{self, EnergyAudit};
+ use dft_geometry::kpoints::KPoint;
+ use dft_physics::{
+@@ -196,3 +195,15 @@
+     pub converged: bool,
+     pub result: ScfResult,
+ }
++
++/// Initialization work is separate from Davidson work; MACs are complex MACs.
++#[derive(Debug, Clone, Default)]
++pub struct AtomicStartReport {
++    pub atomic_orbitals: usize,
++    pub initial_h_applications: usize,
++    pub gram_rotation_macs: usize,
++    pub mgs_projection_macs: usize,
++    pub radial_samples: usize,
++    pub evd_orders: Vec<usize>,
++    pub fallback_reason: Option<String>,
++}
+--- a/crates/dft-engine/src/refscf/driver.rs
++++ b/crates/dft-engine/src/refscf/driver.rs
+@@ -10,7 +10,7 @@
+ use super::{
+     broyden::{Broyden, Diagnostics, PredictionScratch},
+     density::DensityPlan,
+-    map,
++    lazy, map,
+     metric::{Metric, Serial},
+     numerical,
+     profile::{Profile, next_ethr_ry},
+@@ -1054,12 +1054,12 @@
+             let density = state.fields.gather(&delivery_comm, &step.density)?;
+             output.record("density_gather", phase);
+             let phase = Instant::now();
+-            let lazy_comm = owned_comm.clone().filter(|_| {
+-                config.on(Id::REFSCF_LAZY_OUTPUT) && crate::gamma_real::lazy_result_allowed()
+-            });
++            let lazy_comm = owned_comm
++                .clone()
++                .filter(|_| config.on(Id::REFSCF_LAZY_OUTPUT) && lazy::lazy_result_allowed());
+             let (orbitals, lazy) = if let Some(comm) = lazy_comm {
+                 let placeholder = ComplexMatrix::zeros(0, bands).map_err(numerical)?;
+-                let lazy = crate::gamma_real::LazyOrbitals::from_owned_handoff(
++                let lazy = lazy::LazyOrbitals::from_owned_handoff(
+                     std::mem::replace(
+                         &mut step.solve.eigenvectors,
+                         dft_numerics::RealMatrix::zeros(0, bands).map_err(numerical)?,
+@@ -1487,7 +1487,7 @@
+                     ])
+                     .unwrap();
+                     let _guard = config.enter();
+-                    crate::gamma_real::set_delivered_orbitals(needed);
++                    lazy::set_delivered_orbitals(needed);
+                     let run = run(
+                         StartInput {
+                             cell: &cell,
+@@ -1540,7 +1540,7 @@
+                         baseline = Some(r);
+                     }
+                 }
+-                crate::gamma_real::set_delivered_orbitals(true);
++                lazy::set_delivered_orbitals(true);
+                 crate::parallel::set_communicator(None);
+             });
+         }
+--- a/crates/dft-engine/src/refscf/electronic.rs
++++ b/crates/dft-engine/src/refscf/electronic.rs
+@@ -13,6 +13,7 @@
+ use crate::{
+     Functional,
+     energy::EnergyAudit,
++    model::spin::validate_options,
+     model::{
+         ScfError, SpinSector, ThermodynamicLedger, Verification, VerificationAttempt,
+         VerificationReport,
+@@ -372,7 +373,7 @@
+         ),
+     };
+     if let Some((theta, constraint)) = policy.finite() {
+-        crate::scf::finite_temperature::validate_options(&options, theta, bands)?;
++        validate_options(&options, theta, bands)?;
+         if !theta.is_finite()
+             || theta <= 0.
+             || bands == 0

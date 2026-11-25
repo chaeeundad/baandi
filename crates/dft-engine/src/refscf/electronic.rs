@@ -315,7 +315,7 @@ pub(super) async fn run_continuation<K: Collective>(
         ));
     }
     let clock = Instant::now();
-    let profile = profile.validate()?;
+    let mut profile = profile.validate()?;
     let opts = input.options;
     let config = RunConfig::current();
     if opts.standard.is_none()
@@ -511,7 +511,33 @@ pub(super) async fn run_continuation<K: Collective>(
     let mut completed = 0usize;
     macro_rules! checkpoint_state {
         () => {
-            |io: &mut super::checkpoint::Exchange<'_>| -> Result<usize, ScfError> {
+            |request: super::stepper::Visit<'_, '_>| -> Result<usize, ScfError> {
+                let io = match request {
+                    super::stepper::Visit::Checkpoint(io) => io,
+                    super::stepper::Visit::Policy(patch) => {
+                        let next = patch.prepare(profile)?;
+                        if patch.beta.is_some() || patch.history.is_some() {
+                            let mut replacement = if policy.channels() == 2 {
+                                Broyden::spin(next, &plan.g2, &plan.smooth, volume, electrons)?
+                            } else {
+                                Broyden::new(next, &plan.g2, &plan.smooth, volume, electrons)?
+                            };
+                            if spin_fd && config.on(Id::REFSCF_HISTORY_CONDITIONING) {
+                                replacement.condition_history();
+                            }
+                            mixer = replacement;
+                        }
+                        if let Some(enabled) = patch.verification {
+                            if enabled != verification.is_some() {
+                                verification = enabled.then(VerificationReport::default);
+                            }
+                        }
+
+                        profile = next;
+
+                        return Ok(completed);
+                    }
+                };
                 if trace.is_some() {
                     return Err(super::checkpoint::invalid(
                         "electronic checkpoint with external trace is unsupported",

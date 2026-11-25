@@ -295,3 +295,27 @@ pub fn normalized_result(outcome: &mut ScfOutcome) -> String {
     }
     format!("{:?}", outcome.result)
 }
+
+/// Reference counterpart of the historical budget-preflight demo. The old
+/// scenario is explicitly inapplicable: extending max_iterations is not in the
+/// reference policy allow-list. Drive its baseline through the real adapter and
+/// retain the rejection instead of claiming numerical-instability recovery.
+#[allow(dead_code)] // Legacy-only demo harness also includes this adapter module.
+pub fn reference_budget_demo<T: dft_engine::refscf::runtime::Completion>(
+    stepper: dft_engine::refscf::stepper::Stepper<'_, T>,
+) -> Result<(T, Value), dft_engine::ScfError> {
+    use dft_engine::refscf::runtime::{PolicyPatch, Runtime};
+    let mut runtime = Runtime::new(stepper);
+    runtime.initialize()?;
+    let rejected = PolicyPatch::from_legacy(&PolicyChange::MaxIterations(200))
+        .expect_err("reference budget extension must remain unsupported");
+    while !runtime.snapshot().state.terminal() {
+        runtime.step()?;
+    }
+    let snapshot = runtime.snapshot();
+    let evidence = json!({"status":"not_applicable","scenario":"legacy budget_preflight_v1",
+        "reason":rejected.to_string(),"driver":"reference","state":format!("{:?}",snapshot.state),
+        "completed_maps":snapshot.completed_maps,"policy_revision":snapshot.policy_revision,
+        "recovery_claim":false});
+    Ok((runtime.finish()?, evidence))
+}

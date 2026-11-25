@@ -107,14 +107,14 @@
   "l07-agent": {
     "command": "run",
     "mode": "agent",
-    "reference_reason": "RUNTIME",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
   "l07-observe": {
     "command": "run",
     "mode": "observe",
-    "reference_reason": "RUNTIME",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

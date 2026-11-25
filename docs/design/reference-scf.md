@@ -4533,3 +4533,131 @@ Final invocations passed. The sandbox also denies the gate's optional `ps`
 load probe; all four verification gates still ran and passed. Real MPI8 identity
 and wall acceptance remain with the master session's
 [`r8a-dev08-request.md`](../performance/lanes/RSCF/r8a-dev08-request.md).
+
+## Runtime control
+
+R8c routes eligible `run --observe` and `run --agent` calculations through
+`api::stepper` and `refscf::runtime::Runtime`. L7 is removed; explicit
+`scf.driver = "legacy"` retains the historical runtime. Other eligibility
+predicates still apply. The reference facade handles Gamma, complex-k and
+eligible electronic/spin/FD calculations with the same numerical continuations
+as a plain run. Observation never changes a numerical option.
+
+The lifecycle adapter retains a scalar snapshot: state/version, completed map
+count, last report, safe-point flag and policy revision. Pause/resume retains
+the pinned continuation and never repeats a map. Pause/cancel requested at an
+unsafe candidate/verification or first-map/retry boundary waits for a safe
+return. Terminal numerical delivery wins over pending controls. Cancellation
+drops the continuation at a safe point, keeps the last completed-map record,
+and does not fabricate a delivered density or successful result. Numerical
+failure retains the last successful report and marks the runtime failed.
+
+Policy transactions use R8b's state visitor, via a separate typed mailbox;
+the checkpoint byte format is not used for live mutation. Polling a policy
+request applies it and yields again without running a map. Ordinary maps add
+no policy allocation, cloning of numerical arrays, or I/O. Transactions may
+allocate a replacement mixer only when a host explicitly changes beta/history.
+The closed allow-list is:
+
+- `mixing_beta`: finite `(0, 1]`, replacing the Broyden mixer with empty history.
+- `mixing_history`: `1..=25`, the reference mixer's bound; also resets history.
+- `threshold_ry`: positive finite total residual energy in Ry; tightening only.
+- `verification`: boolean; disabling rejects when CLI derivatives require it.
+
+Combined engine patches validate before mutation and commit once per completed
+map boundary. Density/orbitals and the ethr ratchet are retained. Cached failed
+verification maps and predictor state are invalidated on a transaction.
+The record includes revision, completed-map index, iteration, state version,
+patch and history-reset flag. Legacy solver selection, residual/eigen tolerances,
+budget extension, schedule and divergence knobs explicitly reject.
+Cutoff-ladder policy mutation rejects: a coarse-only mutation must not silently
+revert at fine initialization. Observation and lifecycle controls still work.
+Checkpoint capture after policy mutation rejects because v2's immutable identity
+does not include a runtime audit; ordinary R8b checkpoint behavior is unchanged.
+
+The CLI uses the existing version `1.0` event envelope and emits one
+`iteration_finished` event per map, with kind (`ordinary`, `retry`, or
+`verification`), stage, estimator in Ha, dr2 and ethr in Ry, optional energy
+in Ha, H columns, reuse and safe-point flags. Missing legacy real-space density
+residual and charge diagnostics are null; dr2 is not relabelled as a density
+norm. Initialization, terminal states, failures and control dispositions are
+separate events with monotonic sequence numbers. JSON formatting and the bounded
+256-record sink remain outside numerical steps. Sink failures stop the adapter;
+queued output is drained before returning. `runtime.json` retains the final or
+partial scalar record and policy audit, including an adapter error if present.
+`results.json` includes the runtime ledger and preserves the launch policy
+separately; effective mixing, threshold and verification fields reflect applied
+changes.
+
+The Unix proposal endpoint preserves supervised authority: only the separate
+launch-terminal `approve ID` / `deny ID` input grants approval. Socket payloads
+cannot grant authority. Each proposal carries `id`, `calc_id`, observed state
+and policy versions, `max_iteration`, `action` and its one typed argument.
+Unknown fields/actions, wrong identity, stale/future versions and expired
+iterations reject. The lifetime ledger is capped at 1024 request IDs, intake
+and approvals at 16 per safe point, and approval age at 60 seconds. Identical
+ID retries return their prior disposition; conflicting reuse rejects. No
+approval or absent agents means continue under the current policy. Approval
+intent is durably journaled before mutation; disposition follows it. Journal
+failure stops before the next numerical map; it does not claim to roll back an
+already applied mutation. Pending requests receive terminal dispositions.
+
+Only rank zero binds the socket and accepts operator input. Approved commands
+and root transport errors are broadcast, and sink/application failures are
+checked collectively. All ranks execute the same safe-point controls; there
+is no asynchronous rank cancellation. Observed runs also agree on sink errors
+before advancing. Pauses count inside existing wall clocks. Native MPI transport
+and timings still require the master session's environment; simulator evidence
+is labelled as such.
+
+The historical self-healing scenario extends `MaxIterations` from an exhausted
+budget. That operation is deliberately outside R8c's allow-list.
+`heal::reference_budget_demo` runs the reference baseline through the adapter
+and records the explicit unsupported-policy rejection and exhausted state.
+It makes no recovery claim. Historical
+`tests/reference/runtime/generated/results.json` and its README citation remain
+unchanged; new evidence is in `reference-results.json` beside it.
+
+Validation and evidence reproduction:
+
+```sh
+R8C_WRITE_EVIDENCE=1 cargo test -p dft-cli --test reference_runtime -- --nocapture
+cargo test -p dft-cli --lib reference_channel_tests
+cargo test -p dft-engine --lib refscf::runtime::tests
+```
+
+The Gamma matrix checks full density bits and energy bits, verification off/on,
+pause/resume, recorded events, deterministic beta/history/threshold changes and
+partial cancellation. It uses simulated ranks 1/3. Complex-k and fixed-spin
+policy trajectories are checked against plain runs with the same final policy;
+matching numerical guard failures are recorded as failures of the fixture,
+not converged evidence or a relaxed numerical gate. CLI subprocess checks
+compare plain/observe density bytes and energy bits and assert reference routing.
+The agent subprocess check runs when filesystem Unix sockets are available;
+restricted runners explicitly record its unavailability. A real socket-pair
+unit test independently checks supervised admission, approval, stale rejection,
+ID replay, policy mutation and derivative-verification protection. A three-rank
+transport test checks root command broadcast and collective error propagation.
+
+Final local validation (2026-11-25, Rust 1.99.1, macOS/aarch64): workspace
+check, the six runtime integration tests, all CLI tests (198 passed, 55 ignored),
+formatting and CLI/engine Clippy exit 0. The three engine lifecycle unit tests,
+R8a debug stepper tests (3 passed, 2 ignored) and R8b checkpoint-v2 tests
+(4 passed, 3 ignored) also pass. Full `scripts/check.sh` with
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/r8c-runtime-tests` exits 0:
+113 binaries, 1,049 passed, 0 failed, 237 ignored; build/fmt/clippy pass.
+The sandbox denies only the optional `ps` load probe. All nine README freshness
+checks pass; the historical README evidence was not changed.
+
+The release `bench_scf.py --require-identical` run against
+`baseline-reference.json`, one thread and three repetitions per case, reports
+seven iterations, zero energy difference in Ha and identical density files for
+Gamma, shifted 2x2x2 and unshifted 2x2x2. It uses the external Si UPF with SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+These are BAANDI identity checks, not QE comparisons or performance acceptance.
+The initial benchmark used a relative UPF path that became invalid in its
+temporary input directory (exit 3); the final absolute-path invocation exits 0.
+The metadata regression also verifies that turning verification off and
+tightening a threshold updates effective output fields while retaining the
+launch policy. A Clippy item-order warning introduced with that reporting
+helper was fixed before the final full gate. New changes remain uncommitted.

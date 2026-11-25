@@ -156,7 +156,7 @@ pub(super) async fn run_continuation<K: Collective>(
         }
     }
     let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
-    let profile = profile.validate()?;
+    let mut profile = profile.validate()?;
     let o = input.options;
     // Prepared symmetry must not supply an implicit grid for a frozen segment.
     refstart::validate_strain_grid(o)?;
@@ -304,7 +304,36 @@ pub(super) async fn run_continuation<K: Collective>(
     // on an explicit checkpoint poll; ordinary maps allocate nothing here.
     macro_rules! checkpoint_state {
         () => {
-            |io: &mut super::checkpoint::Exchange<'_>| -> Result<usize, ScfError> {
+            |request: super::stepper::Visit<'_, '_>| -> Result<usize, ScfError> {
+                let io = match request {
+                    super::stepper::Visit::Checkpoint(io) => io,
+                    super::stepper::Visit::Policy(patch) => {
+                        let next = patch.prepare(profile)?;
+                        if patch.beta.is_some() || patch.history.is_some() {
+                            let replacement = Broyden::new(
+                                next,
+                                &plan.g2,
+                                &plan.smooth,
+                                volume,
+                                state.electrons,
+                            )?;
+
+                            mixer = replacement;
+                        }
+                        if let Some(enabled) = patch.verification {
+                            if enabled != verification.is_some() {
+                                verification = enabled.then(VerificationReport::default);
+                            }
+                        }
+                        options.standard = Some(StandardProfile {
+                            threshold_ha: next.threshold_ry / 2.,
+                        });
+                        profile = next;
+                        pending = None;
+                        predictor = VerificationPredictor::default();
+                        return Ok(completed);
+                    }
+                };
                 super::checkpoint::header(io, &input, profile, comm, "complex-k", dims)?;
                 super::checkpoint::symmetry(io, &mut symmetry)?;
                 io.same(&plan.g2)?;

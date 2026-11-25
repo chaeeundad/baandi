@@ -402,7 +402,7 @@ No expression evaluation or provenance recording occurs inside numerical loops.
 ### PBE selection and explicit pseudopotential override (P7B)
 
 The required `[xc] functional` accepts exactly `"lda-pz"` or `"pbe"`.
-PBE accepts UPF labels `PBE` and `SLA PW PBX PBC` (case/whitespace normalized).
+PBE accepts UPF labels `PBE`, `SLA PW PBX PBC` and the older `SLA PW PBE PBE` (case/whitespace normalized).
 A mismatching label is rejected unless `[xc] allow_functional_override = true`.
 The default override is false. The original UPF label remains in species
 provenance; PBE and override-enabled results.json records `xc`, `allow_functional_override`, and

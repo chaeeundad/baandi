@@ -3728,3 +3728,12 @@ S = REFSTART_CHOLESKY + REFSTART_SPECIES_FILL + REFSTART_PARTITION_CACHE: setup 
 class (|E - E_D| <= 1.1e-13). ADOPTED. K = REFSCF_KEPT_RECOMPUTE (bit-identical): peak RSS -45/-191/-505 MB per
 rank, but solve +0.18/+1.57/+1.36 s; wall si64 +0.07, si128 +1.13, si216 -1.09 (density drop, unconfirmed). Kept
 off as a memory-saving option. Evidence: dev08 /data/sig-dft/p4start/RESULT.md.
+
+### GEN-2432530 (2026-11-25, dev08 one run per arm, MPI8 verify off; last timing screen before generalization)
+REF_DAV_TRIANGLE alone (T) vs D: si128 wall 23.92 -> 23.66 s, si216 82.93 -> 81.11 s; si216 profiled pair: border_s
+5.31 -> 4.50, border_h 4.64 -> 3.85 s (254 -> 180 GFLOP each), other stages within noise; maps/iterations/H vectors
+identical; |E_T - E_D| <= 4.6e-13 Ha. ADOPTED (default on). STACK_ROTATE and SETUP_FUSED stay off. Memory breakdown
+(D): si128 VmHWM 726 MB/rank, measured 506 MB (kept slabs 185, Davidson cached rows 71 + returned backing 48);
+si216 1.91 GB/rank, measured 1.38 GB (kept slabs ~500, cached rows 202, returned 134). Generalization agreement:
+G2 si32 PBE E_ref - E_legacy = -1.2e-10 Ha, G1 Mg NLCC +3.6e-10 Ha, both verified, both within the standard class
+of the strict oracle. Evidence: dev08 /data/sig-dft/gen/RESULT.md.

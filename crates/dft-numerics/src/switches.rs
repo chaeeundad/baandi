@@ -605,7 +605,8 @@ table! {
 
     REFSCF_KEPT_RECOMPUTE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; requires REFSCF_KEPT_HX";
-    REF_DAV_TRIANGLE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-25 (dev08 2432530 MPI8 verify off: si216 -1.82 s, si128 -0.26 s, counts identical, rounding class)
+    REF_DAV_TRIANGLE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P4-DAVREM: MKL rectangular top plus GEMMT upper square borders; rounding class";
     REF_DAV_STACK_ROTATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-DAVREM: pack V/HV rows and rotate restart/return in one GEMM; rounding class";

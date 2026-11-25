@@ -35,7 +35,7 @@ impl Functional {
                     .collect::<Vec<_>>()
                     .join(" ")
                     .as_str(),
-                "PBE" | "SLA PW PBX PBC"
+                "PBE" | "SLA PW PBX PBC" | "SLA PW PBE PBE"
             ),
         }
     }

@@ -225,7 +225,7 @@ this ticket's owned files and are left to the orchestrator.
 ### P7B functional compatibility
 
 The engine selects LDA-PZ or PBE explicitly. PBE recognizes `PBE` and the
-four-token `SLA PW PBX PBC` label, normalized for whitespace and case.
+four-token `SLA PW PBX PBC` label and its older spelling `SLA PW PBE PBE` (for example Si.pbe-rrkj.UPF), normalized for whitespace and case.
 Other PBE-family labels (PBE0, PBEsol) are not PBE. LDA matching is unchanged.
 `xc.allow_functional_override = true` permits a mismatch and records both the
 requested functional and unchanged UPF header, plus the permission/applied

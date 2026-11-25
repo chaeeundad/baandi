@@ -931,8 +931,10 @@ be reported; passing energy tests alone is not a speed or adoption claim.
 
 ### P4-DAVREM: triangular borders, stacked rotations and setup fusion
 
-Three independent registry switches default **off**: `REF_DAV_TRIANGLE`,
-`REF_DAV_STACK_ROTATE`, `REF_DAV_SETUP_FUSED` (environment prefix `BAANDI_`,
+Three independent registry switches: `REF_DAV_TRIANGLE` (default **on** since
+2026-11-25, dev08 one-run screen at 2432530: si216 MPI8 border stages 9.95 to
+8.35 s, wall -1.8 s; si128 -0.26 s; map, iteration and H counts identical;
+energies within 5e-13 Ha), `REF_DAV_STACK_ROTATE` and `REF_DAV_SETUP_FUSED` (default **off**) (environment prefix `BAANDI_`,
 input keys lower case). No threshold, capacity, rank rule, collective ordering
 or H-column policy changes. Derived from the own-words
 [davidson-gemm-accounting.md](../research/qe-study/davidson-gemm-accounting.md)

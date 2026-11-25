@@ -207,5 +207,6 @@
  "R6A-G4B-DEFAULT": "리팩토링 R6a: 자기 모멘트 스핀 금속 계산을 기본으로 새 경로에서",
  "R9B-DENEST": "리팩토링 R9b: 새 경로 모듈을 기존 SCF 모듈에서 독립",
  "R10A-ORACLE-FIX": "R10a 후속: 엄격 기준 감마 결과가 1e-13 바뀐 원인 찾아 복원",
- "G4F-STIFFNESS-ROBUST": "G4F: 스핀 강성 판정이 진공 밀도에서 실패하는 문제 수정"
+ "G4F-STIFFNESS-ROBUST": "G4F: 스핀 강성 판정이 진공 밀도에서 실패하는 문제 수정",
+ "R9C-ORACLE-FEATURE": "리팩토링 R9c: 엄격 기준 도구(기존 경로)를 기능 플래그 뒤로 분리"
 }

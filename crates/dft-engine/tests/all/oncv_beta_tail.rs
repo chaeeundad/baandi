@@ -24,7 +24,7 @@ fn si2_oncv_standard_against_strict_oracle() {
     let cell =
         Cell::from_user_rows_bohr([[0., 5.13, 5.13], [5.13, 0., 5.13], [5.13, 5.13, 0.]]).unwrap();
     let atoms = [Atom::new("Si", [0.; 3]), Atom::new("Si", [0.25; 3])];
-    // Both drivers receive exactly the same immutable parsed projector prefixes.
+    // Both drivers receive exactly the same immutable full-support projectors.
     let species = [SpeciesPotential {
         label: "Si",
         potential: &pp,

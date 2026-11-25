@@ -33,6 +33,8 @@ pub struct Projector {
     pub(crate) l: usize,
     pub(crate) radial_times_r: Vec<f64>,
     pub(crate) cutoff: usize,
+    declared_cutoff: usize,
+    largest_tail: f64,
 }
 impl Projector {
     pub fn l(&self) -> usize {
@@ -41,9 +43,23 @@ impl Projector {
     pub fn radial_times_r(&self) -> &[f64] {
         &self.radial_times_r
     }
-    /// Number of valid points, equal to the one-based final UPF index.
+    /// Effective support length, equal to the one-based final included index.
     pub fn cutoff_index(&self) -> usize {
         self.cutoff
+    }
+    /// Declared one-based cutoff index, or the index inferred from cutoff_radius.
+    /// This is metadata, not a limit on stored nonzero support.
+    pub fn declared_cutoff_index(&self) -> usize {
+        self.declared_cutoff
+    }
+    /// max(declared cutoff index, last nonzero sample index), one-based.
+    pub fn effective_support_index(&self) -> usize {
+        self.cutoff
+    }
+    /// Largest absolute stored sample beyond the declared cutoff, in Bohr^-1/2.
+    /// Zero when that tail is absent or exactly zero.
+    pub fn largest_tail_magnitude(&self) -> f64 {
+        self.largest_tail
     }
 }
 /// Atomic pseudo-wavefunction, chi(r) = r R(r), on the full radial mesh.
@@ -287,54 +303,6 @@ fn attr<'a>(tag: &'a Tag, key: &str) -> Result<&'a str, UpfError> {
         .ok_or_else(|| UpfError::Missing(format!("{}/{key}", tag.name)))
 }
 
-/// One last printed significant digit, relative to the projector maximum.
-/// Use the most precise nonzero supported sample: short zeros or a coarsely
-/// printed sample must not widen the budget. Plain integers give no budget.
-fn beta_tail_precision(text: &str, tag: &Tag, prefix: &[f64]) -> Result<f64, UpfError> {
-    let end = text[tag.end..]
-        .find(&format!("</{}>", tag.name))
-        .ok_or_else(|| invalid(&tag.name, "missing closing tag"))?;
-    let mut body = text[tag.end..tag.end + end].to_string();
-    while let Some(start) = body.find("<!--") {
-        let end = body[start..]
-            .find("-->")
-            .ok_or_else(|| invalid(&tag.name, "unterminated comment"))?
-            + start
-            + 3;
-        body.replace_range(start..end, " ");
-    }
-    let mut precision = 0;
-    let mut tokens = body.split_ascii_whitespace();
-    for &value in prefix {
-        let token = tokens
-            .next()
-            .ok_or_else(|| invalid(&tag.name, "missing numeric token"))?;
-        if token.parse::<f64>().ok() != Some(value) {
-            return Err(invalid(
-                &tag.name,
-                "cannot determine printed beta precision",
-            ));
-        }
-        if value == 0.0 || !token.contains(['.', 'e', 'E']) {
-            continue;
-        }
-        let mantissa = token.split(['e', 'E']).next().unwrap();
-        let digits = mantissa
-            .bytes()
-            .filter(u8::is_ascii_digit)
-            .skip_while(|&b| b == b'0')
-            .count();
-        precision = precision.max(digits);
-    }
-    if precision == 0 {
-        return Ok(0.0);
-    }
-    // A coarse print format is not permission to discard macroscopic support.
-    // The half-binary-precision ceiling is independent of element/generator.
-    Ok(10.0_f64
-        .powf(1.0 - precision as f64)
-        .min(f64::EPSILON.sqrt()))
-}
 fn flag(s: &str) -> Option<bool> {
     match s.trim().to_ascii_lowercase().as_str() {
         "t" | ".t." | "true" | ".true." | "1" => Some(true),
@@ -709,8 +677,8 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
                 .parse()
                 .map_err(|_| invalid("cutoff_radius_index", "not an integer"))?
         } else {
-            // The index is authoritative when both attributes are present.
-            // Radius-only files retain the last sampled radius <= the cutoff;
+            // The index takes precedence when both metadata attributes are present.
+            // Radius-only files infer the declared index from the last r <= cutoff;
             // no off-mesh endpoint or interpolated sample is introduced.
             attr(t, "cutoff_radius")?;
             mesh.r().partition_point(|&r| r <= b.cutoff_radius)
@@ -733,40 +701,27 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
                 ),
             ));
         }
-        let maximum = b.values[..cutoff]
+        let largest_tail = b.values[cutoff..]
             .iter()
             .map(|x| x.abs())
             .fold(0.0, f64::max);
-        let (tail_index, tail) = b.values.iter().enumerate().skip(cutoff).fold(
-            (cutoff, 0.0_f64),
-            |largest, (index, value)| {
-                if value.abs() > largest.1 {
-                    (index, value.abs())
-                } else {
-                    largest
-                }
-            },
+        // Exact zeros alone may be omitted. Never infer support from a tolerance
+        // or printed precision: all supplied nonzero samples contribute.
+        let support = cutoff.max(
+            b.values
+                .iter()
+                .rposition(|&x| x != 0.0)
+                .map_or(0, |i| i + 1),
         );
-        if tail > 0.0 {
-            let relative = beta_tail_precision(text, t, &b.values[..cutoff])?;
-            // Division avoids underflow/overflow in a scaled absolute bound.
-            if maximum == 0.0 || relative == 0.0 || tail / maximum > relative {
-                return Err(invalid(
-                    &t.name,
-                    &format!(
-                        "cutoff index {cutoff}: largest tail magnitude {tail:.17e} Bohr^-1/2 at index {}; relative tolerance {relative:.17e}, projector maximum {maximum:.17e} Bohr^-1/2",
-                        tail_index + 1
-                    ),
-                ));
-            }
-        }
         // A finite endpoint sample at r=0 has exactly zero weight in r*u*j_l.
         // Preserve the supplied value (ONCV interpolation can leave a residual);
         // do not introduce a tolerance or alter any nonzero-radius sample.
         projectors.push(Projector {
             l: b.angular_momentum,
-            radial_times_r: b.values[..cutoff].to_vec(),
-            cutoff,
+            radial_times_r: b.values[..support].to_vec(),
+            cutoff: support,
+            declared_cutoff: cutoff,
+            largest_tail,
         });
     }
     if projectors.len() != np {

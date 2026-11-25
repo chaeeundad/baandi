@@ -112,11 +112,14 @@ Abbreviations:
 | L8 | Python `Session.step/status/iteration`, MCP tools | yes (APIs) | `run()` ported in R5; step and MCP in R8d | R5, R8d |
 | L9 | Legacy-only SCF input keys: `mixing = linear / kerker-pulay`, `mixing_q0_inverse_bohr`, `hartree_mixing`, `spectral_guard`, `locking`, `preconditioner`, `davidson_capacity_per_band`, `start_density = uniform`, `start_wavefunctions` (random), `energy_tolerance_ha`, `density_residual_tolerance`, `eigen_tolerance` (strict only), `standard_stall_guard`, `standard_density_forcing`, legacy `cutoff_ladder`, `xc.density_floor` | yes | During the transition: route to legacy with a reason (R1). In R10c: input error with a migration message such as "applies only to the strict oracle (BAANDI_REFERENCE_STRICT=on)" (D4) | R1, R10c |
 | L10 | `compat.mode = "reference"` (ADR 0038: PW92 original prefactor, QE local mesh) | yes | refstart rejects `pw92 != Modified`. Port: pass the prefactor, local mesh and radial rule through refstart. These are physics constants, so the cost is small | R6b |
-| L11 | UPFs without `PP_RHOATOM` / `PP_PSWFC`, or with l>3 orbitals | yes (synthetic fixtures) | Fallback with a reason. Add a cold start from lowest-kinetic plane waves plus a superposition-free start in refstart only if a real material needs it; otherwise the error message says what is missing | R1, R10c |
 | L12 | Legacy cutoff ladder, direct minimisation, SCF_ADVANCE, fixed map, spectral SCF, first block, replay capture | experiment | Delete. The reference path has its own `refscf/ladder.rs` and RMM, both opt-in | R10a |
 | L13 | Legacy standard-path stop machinery (stall guard, density forcing, stop predictor, verify schedule, cert screen, stop metric) | default on the legacy standard path | Delete once the fallback list is empty; the oracle keeps only the strict path | R10b |
 | L14 | Legacy MPI M2 distributed Gamma, `gamma_real` complex↔real bridge, lean/distributed Davidsons | oracle at MPI | Decision D2 | R10d |
 | L15 | `refscf-map --solver legacy` | diagnostic | Under the oracle feature | R9c |
+
+L11 (optional atomic charge/orbitals): **done in R6c**. The reference start uses
+neutral uniform density and deterministic kinetic completion when needed; it no
+longer routes these UPFs to legacy.
 
 Reference-only features need nothing: RMM, the reference ladder, kept HX, and the verify gate are already reference.
 

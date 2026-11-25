@@ -44,6 +44,23 @@ fn phase<T>(
     *seconds.entry(name).or_default() += clock.elapsed().as_secs_f64();
     out
 }
+fn start_report_json(report: dft_engine::refstart::StartReport) -> Value {
+    use dft_engine::refstart::{DensityStartKind, OrbitalStartKind};
+    json!({
+        "density": match report.density {
+            DensityStartKind::Atomic => "atomic",
+            DensityStartKind::Uniform => "uniform",
+            DensityStartKind::Supplied => "supplied",
+        },
+        "orbitals": match report.orbitals {
+            OrbitalStartKind::Atomic => "atomic",
+            OrbitalStartKind::AtomicWithKineticCompletion => "atomic_with_kinetic_completion",
+            OrbitalStartKind::Kinetic => "kinetic",
+            OrbitalStartKind::Supplied => "supplied",
+        }
+    })
+}
+
 fn boundary_json(t: &dft_engine::refscf::record::SetupTimings) -> Value {
     json!({"phases":t.phases,"collectives_nested":t.collective_s,"total":t.total_s})
 }
@@ -1842,6 +1859,7 @@ fn execute_mode_inner(
     let mut reference_derivatives = None;
     let mut reference_symmetry_record = Value::Null;
     let mut reference_return = None;
+    let mut reference_start_report = Value::Null;
     let mut reference_setup = Value::Null;
     let mut reference_output = Value::Null;
     let mut reference_records = Vec::new();
@@ -1914,6 +1932,7 @@ fn execute_mode_inner(
                 reference_return = Some(Instant::now());
                 reference_diagnostics = run.full_diagnostics;
                 reference_qe_clock = run.qe_clock;
+                reference_start_report = start_report_json(run.start_report);
                 reference_setup = json!({
                     "schema":"reference-setup-1", "rank":crate::parallel::rank(),
                     "scope":"rank-local inclusive phases; atomic_block_total contains atomic_* children; collectives_nested overlaps phases; no barriers added",
@@ -2191,7 +2210,7 @@ fn execute_mode_inner(
             .as_mut()
             .and_then(Value::as_object_mut)
             .and_then(|summary| summary.remove("memory_breakdown"));
-        result["reference_scf"] = json!({"memory_breakdown":memory_breakdown,"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
+        result["reference_scf"] = json!({"start":reference_start_report,"memory_breakdown":memory_breakdown,"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
             "stop_to_verified_clock":"reference-scf-wall-1",
             "cutoff_ladder":reference_ladder,
             "kept_hx":reference_kept_hx,
@@ -3184,7 +3203,7 @@ fn reference_electronic_run(
         "execution":execution_json(config,&path,opts,Solver { gamma_real_used:false,gamma_real_fallback_reason:Some("spin/FD"),parallel_model:model }),
         "parallel":{"model":model,"ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"k_concurrency":1,"g_vectors":"distributed"},
         "timings":{"setup_s":r.setup_s,"engine_total_s":r.total_s},
-        "reference_scf":{"schema":"reference-spin-fd-1","iterations":rows,"verification_calls":calls(&r.verification_calls),
+        "reference_scf":{"start":start_report_json(r.start_report),"schema":"reference-spin-fd-1","iterations":rows,"verification_calls":calls(&r.verification_calls),
             "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>()},
         "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ unavailable; free-moment collinear FD with PBE routes to legacy pending G4D"]});
     if let Some(report) = &r.symmetry {

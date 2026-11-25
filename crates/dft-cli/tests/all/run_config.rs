@@ -1,3 +1,4 @@
+//! R6C: pin legacy-specific contracts explicitly; optional atomic data no longer route there.
 //! RUN-CONFIG (2026-11-18): `[performance]` and `[profile]` tables of the input
 //! file, precedence environment > input > default, strict input errors, the
 //! extended switch manifest (requested, source, consulted, path, fallback) and
@@ -10,7 +11,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path, process::Command};
 
-const BASE: &str = "[system]\nname='synthetic run config'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\n";
+const BASE: &str = "[system]\nname='synthetic run config'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nnbands=4\n";
 
 struct Run {
     code: Option<i32>,

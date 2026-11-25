@@ -236,7 +236,7 @@ fn valid_preflight_preserves_engine_energy_and_density() {
     use dft_cli::{config::Config, run::options};
     use dft_engine::{ScfProblem, SpeciesPotential, input::Atom};
     let c = Case::new();
-    let text = c.text("Si", "'synthetic.xml'", "max_iterations=1");
+    let text = c.text("Si", "'synthetic.xml'", "driver='legacy'\nmax_iterations=1");
     let config = Config::parse(&text).unwrap();
     let potential = dft_upf::from_file(c.dir.join("synthetic.xml")).unwrap();
     let direct = ScfProblem::new(

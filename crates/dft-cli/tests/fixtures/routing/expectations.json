@@ -247,29 +247,28 @@
   "l11-high-l": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "ATOMIC_DATA",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
   "l11-missing-pswfc": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "ATOMIC_DATA",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
   "l11-missing-rhoatom": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "ATOMIC_DATA",
+    "reference_reason": null,
     "parse_error": null,
-    "options_error": null,
-    "upf_error": "missing field `PP_RHOATOM`"
+    "options_error": null
   },
   "l11-zero-rhoatom": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "ATOMIC_DATA",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

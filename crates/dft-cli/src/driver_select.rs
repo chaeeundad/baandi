@@ -78,9 +78,6 @@ impl Selection {
             if config.xc.pw92_prefactor.as_deref() == Some("original") {
                 keys.push("xc.pw92_prefactor");
             }
-            if reason == ATOMIC_DATA {
-                keys.extend(["PP_RHOATOM", "PP_PSWFC"]);
-            }
             return Err(crate::config::ConfigError::Invalid(format!(
                 "explicit reference driver request cannot be honored: {reason}; legacy-only keys/features: {}; remove the conflicting controls or explicitly select scf.driver = \"legacy\"",
                 if keys.is_empty() {
@@ -121,8 +118,6 @@ pub const EXTRAPOLATION: &str = "L5: relaxation density extrapolation requires t
 pub const CHECKPOINT: &str = "L6: checkpoint/restart v1 requires the legacy session";
 pub const LEGACY_INPUT: &str = "L9: explicit legacy-only SCF controls";
 pub const COMPAT: &str = "L10: original PW92 prefactor requires the legacy driver";
-pub const ATOMIC_DATA: &str =
-    "L11: reference start requires nonzero PP_RHOATOM and PP_PSWFC with l<=3";
 
 fn source(id: Id) -> Source {
     match RunConfig::current().source(id) {
@@ -242,21 +237,8 @@ fn legacy_keys(c: &Config) -> Vec<&'static str> {
 fn l10(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
     c.compat.reference() || c.xc.pw92_prefactor.as_deref() == Some("original")
 }
-fn l11(_: &Config, _: Mode, _: Command, upfs: &[&Pseudopotential]) -> bool {
-    upfs.iter().any(|p| {
-        p.atomic_wavefunctions()
-            .is_none_or(|w| w.is_empty() || w.iter().any(|c| c.l > 3))
-            || p.raw().rhoatom.values.len() != p.mesh().r().len()
-            || p.raw().rhoatom.values.iter().all(|&v| v == 0.)
-    })
-}
 type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
-const LEGACY_ONLY: &[(Predicate, &str)] = &[
-    (l1, G4D_FALLBACK),
-    (l9, LEGACY_INPUT),
-    (l10, COMPAT),
-    (l11, ATOMIC_DATA),
-];
+const LEGACY_ONLY: &[(Predicate, &str)] = &[(l1, G4D_FALLBACK), (l9, LEGACY_INPUT), (l10, COMPAT)];
 /// An empty UPF slice is a preliminary input-only decision. Commands must pass
 /// every parsed potential for the final decision before engine construction.
 pub fn select(

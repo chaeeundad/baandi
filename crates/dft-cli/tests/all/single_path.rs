@@ -1,3 +1,4 @@
+//! R6C: pin legacy-specific contracts explicitly; optional atomic data no longer route there.
 //! ADR 0043 single SCF path, the default since the user decision of
 //! 2026-11-16 (`scf.convergence_profile` removed). The strict path stays as a
 //! reference tool behind `BAANDI_REFERENCE_STRICT=on`.
@@ -19,7 +20,9 @@ struct Run {
 
 /// `reference`: value of `BAANDI_REFERENCE_STRICT` (None = unset).
 fn run(dir: &PathBuf, name: &str, reference: Option<&str>, scf: &str, output: &str) -> Run {
-    let text = format!("{BASE}[scf]\nnbands=4\n{scf}[output]\ndirectory='{name}'\n{output}");
+    let text = format!(
+        "{BASE}[scf]\ndriver='legacy'\nnbands=4\n{scf}[output]\ndirectory='{name}'\n{output}"
+    );
     let input = format!("{name}.toml");
     fs::write(dir.join(&input), text).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));

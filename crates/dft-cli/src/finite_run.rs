@@ -373,6 +373,8 @@ ecutwfc_ry=5.0
 kpoints=[[0.0,0.0,0.0]]
 [xc]
 functional="lda-pz"
+[scf]
+driver="legacy"
 [occupations]
 mode="fermi_dirac"
 smearing_ha=0.01

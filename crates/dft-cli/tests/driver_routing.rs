@@ -45,7 +45,6 @@ fn reason(key: &str) -> &'static str {
         "CHECKPOINT" => route::CHECKPOINT,
         "LEGACY_INPUT" => route::LEGACY_INPUT,
         "COMPAT" => route::COMPAT,
-        "ATOMIC_DATA" => route::ATOMIC_DATA,
         _ => panic!("unknown reason {key}"),
     }
 }
@@ -614,6 +613,128 @@ fn explain_prints_selection_before_validation_errors() {
             "{text}"
         );
         assert!(!text.contains("unknown mixer"), "{text}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn optional_atomic_data_runs_on_reference() {
+    let dir = std::env::temp_dir().join(format!("r6c-start-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    for variant in ["no-rhoatom", "no-atomic", "zero-rhoatom", "no-pswfc", "l4"] {
+        let upf = dir.join("syn.xml");
+        let generated = std::process::Command::new("python3")
+            .arg("-I")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../scripts/gen_synthetic_upf.py"
+            ))
+            .arg(&upf)
+            .args([
+                "--valence",
+                "2",
+                "--radius",
+                "1.8",
+                "--points",
+                "161",
+                "--start-variant",
+                variant,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            generated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        // Only identity metadata changes; this remains a non-physical fixture.
+        let text = fs::read_to_string(&upf)
+            .unwrap()
+            .replace("element=\"Xx\"", "element=\"He\"");
+        let mut cases = vec![(false, "gamma"), (true, "gamma")];
+        if variant == "no-atomic" {
+            cases.extend([(true, "k"), (true, "fd"), (true, "spin")]);
+        }
+        if variant == "no-pswfc" {
+            cases.push((true, "spin"));
+        }
+        for (explicit, mode) in cases {
+            fs::write(
+                &upf,
+                if mode == "spin" {
+                    text.replace("SLA PZ", "SLA PW")
+                } else {
+                    text.clone()
+                },
+            )
+            .unwrap();
+            let input = dir.join("input.toml");
+            let mut input_text = format!(
+                "[system]\nname='R6C synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='Xx'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nXx={{path='syn.xml',element='He'}}\n[basis]\necutwfc_ry=2.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=160\n{}",
+                if explicit { "driver='reference'\n" } else { "" }
+            );
+            if mode != "gamma" {
+                input_text = input_text.replace("nbands=3", "nbands=5");
+            }
+            match mode {
+                "k" => {
+                    input_text = input_text
+                        .replace("kpoints=[[0.0,0.0,0.0]]", "kpoints=[[0.13,-0.21,0.07,1.0]]")
+                }
+                "fd" => input_text
+                    .push_str("[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=5\n"),
+                "spin" => {
+                    input_text = input_text.replace("lda-pz", "lda-pw");
+                    input_text.push_str("[spin]\nmode='collinear'\nn_up=1\nn_down=1\n");
+                }
+                _ => (),
+            }
+            fs::write(&input, input_text).unwrap();
+            let out = dir.join(format!("{variant}-{explicit}-{mode}"));
+            let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+            for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("BAANDI_")) {
+                cmd.env_remove(key);
+            }
+            let output = cmd
+                .arg("run")
+                .arg(&input)
+                .arg("--output-dir")
+                .arg(&out)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{variant}/{explicit}/{mode}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result: Value =
+                serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+            assert_eq!(result["scf"]["driver"], "reference");
+            assert_eq!(
+                result["reference_scf"]["start"]["density"],
+                if mode == "spin" || matches!(variant, "no-rhoatom" | "no-atomic" | "zero-rhoatom")
+                {
+                    "uniform"
+                } else {
+                    "atomic"
+                }
+            );
+            assert_eq!(
+                result["reference_scf"]["start"]["orbitals"],
+                if matches!(variant, "no-rhoatom" | "zero-rhoatom") {
+                    "atomic"
+                } else {
+                    "kinetic"
+                }
+            );
+
+            assert_eq!(result["scf"]["driver_reason"], Value::Null);
+            assert_eq!(
+                result["scf"]["driver_source"],
+                if explicit { "input" } else { "default" }
+            );
+        }
     }
     fs::remove_dir_all(dir).unwrap();
 }

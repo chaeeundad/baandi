@@ -1,3 +1,4 @@
+// R6C: pin legacy-specific contracts explicitly; optional atomic data no longer route there.
 #[allow(dead_code)]
 #[path = "../common/mod.rs"]
 mod common;
@@ -15,7 +16,7 @@ fn config_fallback_results_and_explain() {
             .replace("element=\"Xx\"", "element=\"He\""),
     )
     .unwrap();
-    let base = "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=5\n";
+    let base = "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\ndriver='legacy'\nnbands=5\n";
     for (name, suffix, reason) in [
         ("missing", "", "PP_PSWFC"),
         // ONEPATH-3B: a collinear fixed sector no longer excludes the atomic
@@ -118,7 +119,7 @@ fn spin_fixed_sector_records_the_atomic_start() {
     let input = dir.join("input.toml");
     fs::write(
         &input,
-        "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=5\n[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
+        "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\ndriver='legacy'\nnbands=5\n[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
     )
     .unwrap();
     let out = dir.join("spin-atomic");

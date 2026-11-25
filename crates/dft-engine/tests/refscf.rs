@@ -8379,3 +8379,229 @@ fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
     }
     stop_to_verified_clocks(run);
 }
+
+// Generated, non-physical local/nonlocal NC fixtures; never QE evidence.
+fn r6c_start_potential(variant: &str) -> dft_upf::Pseudopotential {
+    let output = std::process::Command::new("python3")
+        .args(["-I", "-c", "import runpy, sys; print(runpy.run_path(sys.argv[1])['start_variant'](sys.argv[2], valence=2, radius=1.8, points=161))"])
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/gen_synthetic_upf.py"))
+        .arg(variant)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    dft_upf::parse_upf(std::str::from_utf8(&output.stdout).unwrap()).unwrap()
+}
+
+#[test]
+fn r6c_optional_atomic_start_is_neutral_and_orthonormal() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refstart::{self, StartInput},
+    };
+    use dft_geometry::{Atom, Cell};
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    // Missing and all-zero atomic charge have the same neutral fallback.
+    for variant in [
+        "no-rhoatom",
+        "no-atomic",
+        "zero-rhoatom",
+        "no-pswfc",
+        "l4",
+        "s-l4",
+    ] {
+        let pp = r6c_start_potential(variant);
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            cutoff_hartree: 1.,
+            bands: Some(3),
+            ..Default::default()
+        };
+        for ranks in [1, 3] {
+            dft_mpi::simulate(ranks, |comm| {
+                let start = refstart::start(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    comm,
+                )
+                .unwrap();
+                use refstart::{DensityStartKind, OrbitalStartKind};
+                assert_eq!(
+                    start.report.density,
+                    if matches!(variant, "zero-rhoatom" | "no-rhoatom" | "no-atomic") {
+                        DensityStartKind::Uniform
+                    } else {
+                        DensityStartKind::Atomic
+                    }
+                );
+                assert_eq!(
+                    start.report.orbitals,
+                    match variant {
+                        "zero-rhoatom" | "no-rhoatom" => OrbitalStartKind::Atomic,
+                        "s-l4" => OrbitalStartKind::AtomicWithKineticCompletion,
+                        _ => OrbitalStartKind::Kinetic,
+                    }
+                );
+                assert_eq!(
+                    start.memory.atomic_columns,
+                    match variant {
+                        "zero-rhoatom" | "no-rhoatom" => 4,
+                        "s-l4" => 1,
+                        _ => 0,
+                    }
+                );
+                if matches!(variant, "zero-rhoatom" | "no-rhoatom" | "no-atomic") {
+                    assert!(start.density.iter().all(|&n| n == 2. / cell.volume_bohr3()));
+                    for (&g, &n) in start
+                        .fields
+                        .reciprocal_indices()
+                        .iter()
+                        .zip(&start.density_g)
+                    {
+                        assert_eq!(n, c(if g == 0 { 2. / cell.volume_bohr3() } else { 0. }));
+                    }
+                }
+                let q = &start.orbitals;
+                for a in 0..3 {
+                    for b in 0..3 {
+                        let local = [(0..q.rows()).map(|i| q[(i, a)] * q[(i, b)]).sum()];
+                        let mut total = [0.];
+                        comm.tree_sum_f64(&local, &mut total).unwrap();
+                        assert!((total[0] - f64::from(a == b)).abs() < 1e-12);
+                    }
+                }
+            });
+        }
+    }
+}
+
+/// cargo test --release -p dft-engine --test refscf r6c_optional_atomic_oracle -- --ignored --nocapture
+#[test]
+#[ignore = "multi-start SCF accuracy matrix; run in release"]
+fn r6c_optional_atomic_oracle() {
+    use dft_engine::{ScfOptions, ScfProblem, SpeciesPotential, refstart::StartInput};
+    use dft_geometry::{Atom, Cell};
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    for variant in [
+        "no-rhoatom",
+        "no-atomic",
+        "zero-rhoatom",
+        "no-pswfc",
+        "l4",
+        "s-l4",
+    ] {
+        let pp = r6c_start_potential(variant);
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            cutoff_hartree: 1.,
+            gamma_real: dft_engine::GammaReal::On,
+            bands: Some(3),
+            max_iterations: 160,
+            ..Default::default()
+        };
+        let oracle = ScfProblem::new(
+            &cell,
+            &atoms,
+            &potentials,
+            ScfOptions {
+                cutoff_hartree: options.cutoff_hartree,
+                gamma_real: options.gamma_real,
+                bands: options.bands,
+                max_iterations: options.max_iterations,
+                ..ScfOptions::strict_reference()
+            },
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        assert!(oracle.certified);
+        for threshold_ry in [1e-8, 1e-12] {
+            let run = dft_engine::refscf::driver::run(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile {
+                    threshold_ry,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(run.outcome.converged, "{variant}: {}", run.exit_reason);
+            assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+            let energy = run.outcome.result.total_hartree();
+            let delta = (energy - oracle.total_hartree()).abs();
+            let tolerance = if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 };
+            println!(
+                "R6C {variant} threshold={threshold_ry:e} Ry E={energy:.17e} Ha oracle={:.17e} Ha delta={delta:.9e} Ha",
+                oracle.total_hartree()
+            );
+            assert!(
+                delta < tolerance,
+                "{variant}: {delta:e} Ha >= {tolerance:e} Ha"
+            );
+        }
+    }
+}
+
+#[test]
+fn r6c_kinetic_start_supports_kpoints_and_fixed_density() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refstart::{self, DensityStartKind, OrbitalStartKind, StartInput},
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let pp = r6c_start_potential("legacy"); // Zero atomic charge, no atomic orbitals.
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(5),
+        ..Default::default()
+    };
+    let points = [KPoint {
+        fractional: [0.13, -0.21, 0.07],
+        weight: 1.,
+    }];
+    dft_mpi::simulate(3, |comm| {
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        };
+        let start = refstart::start_kpoints(input(), &points, comm).unwrap();
+        assert_eq!(start.report.density, DensityStartKind::Uniform);
+        assert_eq!(start.report.orbitals, OrbitalStartKind::Kinetic);
+        let density = [Array3::from_elem(
+            start.grid.dims(),
+            2. / cell.volume_bohr3(),
+        )];
+        let (fixed, _) =
+            refstart::start_kpoints_from_density(input(), &density, &points, comm).unwrap();
+        assert_eq!(fixed.report.density, DensityStartKind::Supplied);
+        assert_eq!(fixed.report.orbitals, OrbitalStartKind::Kinetic);
+        assert_eq!(fixed.initial_h_columns, 5);
+    });
+}

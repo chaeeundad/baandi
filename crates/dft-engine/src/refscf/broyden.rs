@@ -4,8 +4,9 @@
 //! renormalization. The symmetric spectral factorization is the existing faer
 //! adapter (MKL dsyevd on that backend), not a hand-written elimination.
 //! A=Q Lambda Q^T, gamma=Q Lambda^-1 Q^T c. A numerical rank deficiency
-//! (lambda_min <= p*eps*lambda_max) is a reported error, never a ridge or
-//! pseudoinverse. cond_2=lambda_max/lambda_min is reported on every solve.
+//! (lambda_min <= p*eps*lambda_max) is a reported error by default, never a ridge or
+//! pseudoinverse. Explicit conditioning opt-in follows proposed ADR 0045.
+//! cond_2=lambda_max/lambda_min is reported on every solve.
 use super::memory::{Component as Mem, bytes, observe};
 use super::{
     Error, invalid,
@@ -51,6 +52,13 @@ pub struct Diagnostics {
     pub gamma_max: f64,
     pub condition: Option<f64>,
 }
+/// Candidate-only metadata, kept separate from the legacy scientific record.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConditioningDiagnostics {
+    /// Oldest-first removals, with the pre-removal condition of each solve.
+    pub dropped_pairs: usize,
+    pub dropped_conditions: [f64; 25],
+}
 pub struct Broyden {
     profile: Profile,
     iteration: usize,
@@ -67,6 +75,9 @@ pub struct Broyden {
     incremental: bool,
     gram: [[f64; 25]; 25],
     gram_metric: Option<u64>,
+    conditioning: bool,
+    conditioning_diagnostics: ConditioningDiagnostics,
+    retained: usize,
 }
 impl Broyden {
     /// ONEPATH-3 charge/magnetization history. TF must not freeze a free
@@ -137,6 +148,9 @@ impl Broyden {
             incremental: dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_PERMAP),
             gram: [[0.; 25]; 25],
             gram_metric: None,
+            conditioning: false,
+            conditioning_diagnostics: ConditioningDiagnostics::default(),
+            retained: 0,
         };
         observe(
             Mem::History,
@@ -160,8 +174,38 @@ impl Broyden {
         );
         Ok(mixer)
     }
+    /// Opt-in before the first update. Ordinary drivers retain rejection.
+    pub fn condition_history(&mut self) {
+        assert_eq!(self.iteration, 0, "configure history before mixing");
+        self.conditioning = true;
+    }
+    pub fn conditioning_diagnostics(&self) -> ConditioningDiagnostics {
+        self.conditioning_diagnostics
+    }
     pub fn occupancy(&self) -> usize {
-        self.iteration.saturating_sub(1).min(self.profile.history)
+        if self.conditioning {
+            self.retained
+        } else {
+            self.iteration.saturating_sub(1).min(self.profile.history)
+        }
+    }
+    /// Read-only geometry of the most recently assembled history Gram matrix.
+    /// Pair squared norms (Ry) and largest absolute pair cosine diagnose scale
+    /// collapse and duplicate secants without changing the solve.
+    pub fn history_geometry(&self) -> ([f64; 25], f64) {
+        let p = self.occupancy();
+        let mut norms = [0.; 25];
+        let mut cosine = 0_f64;
+        for (i, norm) in norms.iter_mut().enumerate().take(p) {
+            *norm = self.gram[i][i];
+            for j in 0..i {
+                let denominator = (self.gram[i][i] * self.gram[j][j]).sqrt();
+                if denominator > 0. {
+                    cosine = cosine.max(self.gram[i][j].abs() / denominator);
+                }
+            }
+        }
+        (norms, cosine)
     }
     pub fn gamma(&self) -> &[f64] {
         &self.gamma[..self.occupancy()]
@@ -182,7 +226,7 @@ impl Broyden {
         if x.len() != self.previous_x.len() || f.len() != x.len() || scratch.dx.len() != x.len() {
             return Err(invalid("prediction vector shape"));
         }
-        if self.iteration == 0 {
+        if self.iteration == 0 || self.conditioning {
             return Ok(None);
         }
         let p = self.iteration.min(self.profile.history);
@@ -249,9 +293,21 @@ impl Broyden {
         if x.len() != self.previous_x.len() || f.len() != x.len() || next.len() != x.len() {
             return Err(invalid("Broyden vector shape"));
         }
+        self.conditioning_diagnostics = ConditioningDiagnostics::default();
         self.iteration += 1;
-        let p = self.occupancy();
-        let slot = (self.iteration > 1).then(|| (self.iteration - 2) % self.profile.history);
+        let slot = if self.conditioning && self.iteration > 1 {
+            if self.retained == self.profile.history {
+                self.df.rotate_left(1);
+                self.dx.rotate_left(1);
+                self.retained -= 1;
+            }
+            let slot = self.retained;
+            self.retained += 1;
+            Some(slot)
+        } else {
+            (self.iteration > 1).then(|| (self.iteration - 2) % self.profile.history)
+        };
+        let mut p = self.occupancy();
         if let Some(slot) = slot {
             for j in 0..x.len() {
                 self.df[slot][j] = self.previous_f[j] - f[j];
@@ -262,10 +318,14 @@ impl Broyden {
         self.previous_f.copy_from_slice(f);
         self.gamma.fill(0.0);
         let mut condition = None;
-        if p > 0 {
+        let mut dropped_pairs = 0;
+        let mut dropped_conditions = [0.; 25];
+        while p > 0 {
             let mut pairs: [(&[C], &[C]); MAX_FORMS] = [(&[], &[]); MAX_FORMS];
             let mut n = 0;
-            let reuse = self.incremental && self.gram_metric == Some(metric.identity());
+            let reuse = !self.conditioning
+                && self.incremental
+                && self.gram_metric == Some(metric.identity());
             for i in 0..p {
                 for j in 0..=i {
                     if !reuse || slot == Some(i) || slot == Some(j) {
@@ -297,6 +357,26 @@ impl Broyden {
                 .map_err(numerical)?;
             let (min, max) = (solve.lambda[0], solve.lambda[p - 1]);
             let cond = if min > 0.0 { max / min } else { f64::INFINITY };
+            if self.conditioning
+                && (max == 0. || min <= (p as f64 * f64::EPSILON).sqrt() * max || !cond.is_finite())
+            {
+                if !min.is_finite() || !max.is_finite() {
+                    return Err(numerical("nonfinite history spectrum"));
+                }
+                dropped_conditions[dropped_pairs] = cond;
+                dropped_pairs += 1;
+                // Preserve every event even if a later rebuild/backend fails.
+                self.conditioning_diagnostics = ConditioningDiagnostics {
+                    dropped_pairs,
+                    dropped_conditions,
+                };
+                self.df.rotate_left(1);
+                self.dx.rotate_left(1);
+                self.retained -= 1;
+                p = self.retained;
+                self.gram_metric = None;
+                continue;
+            }
             if min <= p as f64 * f64::EPSILON * max || !cond.is_finite() {
                 return Err(Error::Singular {
                     iteration: self.iteration,
@@ -314,6 +394,7 @@ impl Broyden {
                     self.gamma[i] += solve.q[(i, j)] * (projection / solve.lambda[j]);
                 }
             }
+            break;
         }
         for j in 0..x.len() {
             let (mut xx, mut ff) = (x[j], f[j]);
@@ -329,6 +410,10 @@ impl Broyden {
         if next.iter().any(|v| !v.re.is_finite() || !v.im.is_finite()) {
             return Err(numerical("nonfinite Broyden update"));
         }
+        self.conditioning_diagnostics = ConditioningDiagnostics {
+            dropped_pairs,
+            dropped_conditions,
+        };
         Ok(Diagnostics {
             iteration: self.iteration,
             occupancy: p,

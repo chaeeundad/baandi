@@ -21,6 +21,8 @@ struct SpinFields {
     response: SpinXcResponse,
     channels: [Array3<f64>; 2],
     core: Option<Array3<f64>>,
+    kernel_difference: Vec<f64>,
+    kernel_span: Vec<f64>,
 }
 impl Workspace {
     pub fn new<K: Collective>(
@@ -38,6 +40,8 @@ impl Workspace {
             Ok(Some(SpinFields {
                 xc: SpinXc::new(SpinFunctional::LdaPw, cell, dims)?,
                 response: SpinXcResponse::new(dims),
+                kernel_difference: vec![0.; len],
+                kernel_span: vec![0.; len],
                 channels: std::array::from_fn(|_| Array3::zeros(dims)),
                 core: state
                     .core_density
@@ -52,6 +56,70 @@ impl Workspace {
             ));
         }
         Ok(Self { spin: local? })
+    }
+    /// Positive residual measure 1/2 integral |d²e_xc/dm²| d_m², Ha.
+    /// Finite differences of the existing polarized LDA-PW potentials hold n
+    /// fixed. h/n=cbrt(epsilon) balances second-order truncation and roundoff.
+    /// At full polarization use the feasible one-sided span, never negative rho.
+    pub fn spin_stiffness<K: Collective>(
+        &mut self,
+        comm: &K,
+        input: &[Vec<f64>],
+        output: &[Vec<f64>],
+        dv: f64,
+    ) -> Result<f64, ScfError> {
+        let local = (|| -> Result<f64, ScfError> {
+            let Some(spin) = self.spin.as_mut() else {
+                return Ok(0.);
+            };
+            for sign in [-1., 1.] {
+                for (i, (&up, &down)) in input[0].iter().zip(&input[1]).enumerate() {
+                    let core = spin.core.as_ref().map_or(0., |c| c.as_slice().unwrap()[i]);
+                    let u = up + 0.5 * core;
+                    let d = down + 0.5 * core;
+                    let n = u + d;
+                    let h = n * f64::EPSILON.cbrt();
+                    let shift = (sign * h).max(-2. * u).min(2. * d);
+                    spin.channels[0].as_slice_mut().unwrap()[i] = u + 0.5 * shift;
+                    spin.channels[1].as_slice_mut().unwrap()[i] = d - 0.5 * shift;
+                    if sign < 0. {
+                        spin.kernel_span[i] = -shift;
+                    } else {
+                        spin.kernel_span[i] += shift;
+                    }
+                }
+                // The scratch channels already include the immutable core.
+                spin.xc.evaluate(&spin.channels, &mut spin.response)?;
+                for i in 0..input[0].len() {
+                    let vm = 0.5
+                        * (spin.response.potentials[0].as_slice().unwrap()[i]
+                            - spin.response.potentials[1].as_slice().unwrap()[i]);
+                    if sign < 0. {
+                        spin.kernel_difference[i] = -vm;
+                    } else {
+                        spin.kernel_difference[i] += vm;
+                    }
+                }
+            }
+            let mut energy = 0.;
+            for i in 0..input[0].len() {
+                let span = spin.kernel_span[i];
+                if span > 0. {
+                    let kernel = spin.kernel_difference[i] / span;
+                    let dm = (output[0][i] - output[1][i]) - (input[0][i] - input[1][i]);
+                    energy += 0.5 * kernel.abs() * dm * dm;
+                }
+            }
+            Ok(dv * energy)
+        })();
+        if sum(comm, &[f64::from(local.is_err())])?[0] != 0. {
+            return Err(numerical("spin stiffness evaluator failed on a rank").into());
+        }
+        let energy = sum(comm, &[local?])?[0];
+        if !energy.is_finite() {
+            return Err(ScfError::NonFinite);
+        }
+        Ok(energy)
     }
 }
 
@@ -500,4 +568,65 @@ fn fields_output<K: Collective>(
     density: &[Vec<f64>],
 ) -> Result<Fields, ScfError> {
     fields(workspace, state, comm, cell, functional, density)
+}
+
+#[cfg(test)]
+mod g4b_kernel_tests {
+    use super::*;
+    use crate::refscf::metric::Serial;
+
+    #[test]
+    fn spin_curvature_matches_energy_second_difference_with_core() {
+        let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 4., 0.], [0., 0.1, 3.]]).unwrap();
+        let dims = [2; 3];
+        for core in [0., 0.02] {
+            let mut work = Workspace {
+                spin: Some(SpinFields {
+                    xc: SpinXc::new(SpinFunctional::LdaPw, &cell, dims).unwrap(),
+                    response: SpinXcResponse::new(dims),
+                    channels: std::array::from_fn(|_| Array3::zeros(dims)),
+                    core: Some(Array3::from_elem(dims, core)),
+                    kernel_difference: vec![0.; 8],
+                    kernel_span: vec![0.; 8],
+                }),
+            };
+            let input = vec![vec![0.04; 8], vec![0.02; 8]];
+            let dm = 1e-5;
+            let output = vec![vec![0.04 + dm / 2.; 8], vec![0.02 - dm / 2.; 8]];
+            let measured = work
+                .spin_stiffness(&Serial, &input, &output, cell.volume_bohr3() / 8.)
+                .unwrap();
+            let h = (0.06 + core) * 1e-4;
+            let spin = work.spin.as_mut().unwrap();
+            let mut energy = |delta: f64| {
+                spin.channels[0].fill(0.04 + delta / 2.);
+                spin.channels[1].fill(0.02 - delta / 2.);
+                spin.xc
+                    .evaluate_with_core(&spin.channels, spin.core.as_ref(), &mut spin.response)
+                    .unwrap();
+                spin.response.energy_ha
+            };
+            let curvature = (energy(h) + energy(-h) - 2. * energy(0.)) / (h * h);
+            let expected = 0.5 * curvature.abs() * dm * dm;
+            assert!(
+                (measured / expected - 1.).abs() < 1e-5,
+                "{measured:e} Ha vs {expected:e} Ha"
+            );
+            assert_eq!(
+                work.spin_stiffness(&Serial, &input, &input, cell.volume_bohr3() / 8.)
+                    .unwrap(),
+                0.
+            );
+            // Empty and exactly polarized points use a feasible span, never a
+            // negative channel; no arbitrary density floor is introduced.
+            for u in [0., 0.06] {
+                let edge = vec![vec![u; 8], vec![0.; 8]];
+                assert_eq!(
+                    work.spin_stiffness(&Serial, &edge, &edge, cell.volume_bohr3() / 8.)
+                        .unwrap(),
+                    0.
+                );
+            }
+        }
+    }
 }

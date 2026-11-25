@@ -1,7 +1,7 @@
 //! Reference SCF for scalar FD and collinear fixed/FD occupations.
 //! The fixed unpolarized entry points never call this module.
 use super::{
-    broyden::{Broyden, Diagnostics},
+    broyden::{Broyden, ConditioningDiagnostics, Diagnostics},
     density::DensityPlan,
     electronic_map::{self as map, Map},
     k_kept::KeptHx,
@@ -104,6 +104,7 @@ pub struct Iteration {
     pub moment_mu_b: f64,
     pub residual_guard_ha: f64,
     pub mixing: Diagnostics,
+    pub history_conditioning: ConditioningDiagnostics,
     pub mixing_fraction: f64,
     /// Channel/k/call order; includes first-step redo and bounded retries.
     pub calls: Vec<(usize, usize, SolveRecord)>,
@@ -125,6 +126,84 @@ pub struct Run {
     pub setup_s: f64,
     pub total_s: f64,
 }
+/// Opt-in diagnostic records retained even when the run rejects a history.
+/// Storage is reserved at setup; adapters inspect/serialize only after return.
+#[derive(Clone, Debug, Default)]
+pub struct MapTrace {
+    pub iteration: usize,
+    pub verification: bool,
+    pub redo: bool,
+    pub estimator_terms_ry: [f64; 3],
+    pub free_energy_ha: f64,
+    pub moment_mu_b: f64,
+    pub chemical_potentials_ha: [Option<f64>; 2],
+    pub electron_residual: f64,
+    pub moment_residual: Option<f64>,
+    pub occupations: Vec<f64>,
+    pub condition: Option<f64>,
+    pub history_pair_norm2_ry: [f64; 25],
+    pub history_max_cosine: f64,
+    pub stiffness_ha: f64,
+    pub dropped_pairs: usize,
+    pub dropped_conditions: [f64; 25],
+}
+#[derive(Default)]
+pub struct Trace {
+    records: Vec<MapTrace>,
+    used: usize,
+}
+impl Trace {
+    pub fn records(&self) -> &[MapTrace] {
+        &self.records[..self.used]
+    }
+    fn prepare(&mut self, maps: usize, occupations: usize) {
+        self.used = 0;
+        self.records = (0..maps)
+            .map(|_| MapTrace {
+                occupations: vec![0.; occupations],
+                ..Default::default()
+            })
+            .collect();
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn record<K: Collective>(
+        &mut self,
+        comm: &K,
+        metric: &mut Metric,
+        g2: &[f64],
+        f: &[C],
+        step: &Map,
+        iteration: usize,
+        verification: bool,
+        redo: bool,
+    ) -> Result<(), ScfError> {
+        let record = &mut self.records[self.used];
+        self.used += 1;
+        record.iteration = iteration;
+        record.verification = verification;
+        record.redo = redo;
+        record.estimator_terms_ry = if step.density.len() == 2 {
+            metric.spin_terms(comm, f, g2)?
+        } else {
+            [0.; 3]
+        };
+        record.free_energy_ha = step.free_energy();
+        record.moment_mu_b = step.moment;
+        if let Some(e) = step.evaluation {
+            record.chemical_potentials_ha = e.roots.map(|r| r.map(|r| r.mu_ha));
+            record.electron_residual = e.electron_residual;
+            record.moment_residual = e.moment_residual;
+        }
+        for (a, b) in record
+            .occupations
+            .iter_mut()
+            .zip(step.blocks.iter().flatten().flat_map(|b| &b.occupations))
+        {
+            *a = *b;
+        }
+        Ok(())
+    }
+}
 /// Gamma uses the complex solver as required by ONEPATH-3.
 pub fn run(
     input: StartInput<'_>,
@@ -144,6 +223,17 @@ pub fn run_with<K: Collective>(
     points: &[KPoint],
     policy: Policy,
     comm: &K,
+) -> Result<Run, ScfError> {
+    run_with_trace(input, profile, points, policy, comm, None)
+}
+/// Diagnostic entry; `None` retains the ordinary driver arithmetic and storage.
+pub fn run_with_trace<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    points: &[KPoint],
+    policy: Policy,
+    comm: &K,
+    mut trace: Option<&mut Trace>,
 ) -> Result<Run, ScfError> {
     let clock = Instant::now();
     let profile = profile.validate()?;
@@ -285,11 +375,22 @@ pub fn run_with<K: Collective>(
     } else {
         Broyden::new(profile, &plan.g2, &plan.smooth, volume, electrons)?
     };
+    let spin_fd = matches!(policy, Policy::SpinFermiDirac { .. });
+    let stiffness = spin_fd && config.on(Id::REFSCF_SPIN_STIFFNESS);
+    if spin_fd && config.on(Id::REFSCF_HISTORY_CONDITIONING) {
+        mixer.condition_history();
+    }
     let mut kept: Vec<_> = (0..policy.channels())
         .map(|_| KeptHx::new(config.on(Id::REFSCF_KEPT_HX)))
         .collect();
     let mut x = transform(&mut plan, comm, &n, &policy, electrons, volume)?;
     let mut workspace = map::Workspace::new(&states[0], comm, input.cell, policy.channels() == 2)?;
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.prepare(
+            2 * opts.max_iterations + 1,
+            policy.channels() * points.len() * bands,
+        );
+    }
     let setup_s = clock.elapsed().as_secs_f64();
     let mut history = Vec::new();
     let mut verification =
@@ -326,7 +427,30 @@ pub fn run_with<K: Collective>(
             collect_calls(&step, &mut calls);
             let y = transform(&mut plan, comm, &step.density, &policy, electrons, volume)?;
             let f: Vec<_> = y.iter().zip(&x).map(|(a, b)| a - b).collect();
-            let dr2 = metric.norm(comm, &f)?;
+            let base_dr2 = metric.norm(comm, &f)?;
+            let stiffness_ha = if stiffness {
+                workspace.spin_stiffness(comm, &n, &step.density, dv)?
+            } else {
+                0.
+            };
+            let dr2 = if stiffness {
+                base_dr2 + 2. * stiffness_ha
+            } else {
+                base_dr2
+            };
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.record(
+                    comm,
+                    &mut metric,
+                    &plan.g2,
+                    &f,
+                    &step,
+                    iteration,
+                    false,
+                    redo,
+                )?;
+                trace.records[trace.used - 1].stiffness_ha = stiffness_ha;
+            }
             if iteration == 1 && !redo && dr2 < ethr * electrons.max(1.) {
                 ethr = next_ethr_ry(ethr, dr2, electrons);
                 redo = true;
@@ -338,6 +462,7 @@ pub fn run_with<K: Collective>(
             }
             break (step, y, f, dr2);
         };
+        let ordinary_trace = trace.as_ref().map(|t| t.used - 1);
         previous = dr2;
         let valid = valid(&step, &policy, electrons);
         let stopped = dr2 < profile.threshold_ry
@@ -378,7 +503,32 @@ pub fn run_with<K: Collective>(
             check_gaps(&fresh, &policy, opts.eigen_tolerance)?;
             let z = transform(&mut plan, comm, &fresh.density, &policy, electrons, volume)?;
             let residual: Vec<_> = z.iter().zip(&y).map(|(a, b)| a - b).collect();
-            let error = metric.norm(comm, &residual)? / 2.;
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.record(
+                    comm,
+                    &mut metric,
+                    &plan.g2,
+                    &residual,
+                    &fresh,
+                    iteration,
+                    true,
+                    false,
+                )?;
+            }
+            let base_error = metric.norm(comm, &residual)? / 2.;
+            let stiffness_ha = if stiffness {
+                workspace.spin_stiffness(comm, &step.density, &fresh.density, dv)?
+            } else {
+                0.
+            };
+            let error = if stiffness {
+                base_error + stiffness_ha
+            } else {
+                base_error
+            };
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.records[trace.used - 1].stiffness_ha = stiffness_ha;
+            }
             let distance = distances(comm, &step, &fresh, dv, electrons)?;
             let mut eig_change = 0_f64;
             let mut occ_change = 0.;
@@ -437,10 +587,27 @@ pub fn run_with<K: Collective>(
             });
         }
         let mut mixing = Diagnostics::default();
+        let mut history_conditioning = ConditioningDiagnostics::default();
         let mut mixing_fraction = 1.;
         if !passed && iteration < opts.max_iterations {
             let mut next = x.clone();
-            mixing = mixer.update(comm, &mut metric, &x, &f, &mut next)?;
+            let update = mixer.update(comm, &mut metric, &x, &f, &mut next);
+            if let Some(trace) = trace.as_deref_mut() {
+                let condition = match &update {
+                    Ok(d) => d.condition,
+                    Err(super::Error::Singular { condition, .. }) => Some(*condition),
+                    _ => None,
+                };
+                let record = &mut trace.records[ordinary_trace.unwrap()];
+                record.condition = condition;
+                let d = mixer.conditioning_diagnostics();
+                record.dropped_pairs = d.dropped_pairs;
+                record.dropped_conditions = d.dropped_conditions;
+                (record.history_pair_norm2_ry, record.history_max_cosine) =
+                    mixer.history_geometry();
+            }
+            mixing = update?;
+            history_conditioning = mixer.conditioning_diagnostics();
             let mut proposal = inverse(&mut plan, comm, &next, policy.channels())?;
             if policy.channels() == 2 {
                 for (s, channel) in proposal.iter_mut().enumerate() {
@@ -492,6 +659,7 @@ pub fn run_with<K: Collective>(
             moment_mu_b: step.moment,
             residual_guard_ha: step.guard,
             mixing,
+            history_conditioning,
             mixing_fraction,
             calls,
         });

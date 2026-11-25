@@ -21,7 +21,7 @@ pub(super) struct Fields {
     pub vh: Vec<f64>,
 }
 pub(super) struct Map {
-    pub solve: ref_davidson::Solution,
+    pub solve: Solution,
     pub warm_start: bool,
     pub density: Vec<f64>,
     pub residuals: Vec<f64>,
@@ -284,6 +284,7 @@ pub(super) fn evaluate<K: Collective>(
             initial_hx.as_ref(),
         )?
     };
+    let solve = Solution::from(solve);
     let warm_start = initial_hx.is_some();
     if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_MEMORY_TRIM) {
         drop(initial_hx);
@@ -401,7 +402,7 @@ fn audit<K: Collective>(
     functional: Functional,
     input: &[f64],
     occupations: &[f64],
-    solve: &ref_davidson::Solution,
+    solve: &Solution,
     density: &[f64],
     residuals: &[f64],
     input_fields: &Fields,
@@ -705,5 +706,118 @@ mod tests {
                 }
             });
         }
+    }
+}
+
+// Solver accounting is consumed by solve_map before a Map can be pending.
+// Retained maps need numerical output only; no solver is replayed on restore.
+pub(super) struct Solution {
+    pub eigenvalues: Vec<f64>,
+    pub eigenvectors: dft_numerics::RealMatrix,
+    pub hx: Option<dft_numerics::RealMatrix>,
+    pub converged: Vec<bool>,
+    pub ritz_changes_ha: Vec<Vec<f64>>,
+    pub ritz_values_ha: Vec<Vec<[f64; 2]>>,
+    pub band_thresholds_ha: Vec<f64>,
+    pub record: Option<ref_davidson::Record>,
+}
+impl From<ref_davidson::Solution> for Solution {
+    fn from(s: ref_davidson::Solution) -> Self {
+        Self {
+            eigenvalues: s.eigenvalues,
+            eigenvectors: s.eigenvectors,
+            hx: s.hx,
+            converged: s.converged,
+            ritz_changes_ha: s.ritz_changes_ha,
+            ritz_values_ha: s.ritz_values_ha,
+            band_thresholds_ha: s.band_thresholds_ha,
+            record: Some(s.record),
+        }
+    }
+}
+impl super::checkpoint::Codec for Solution {
+    fn put(&self, o: &mut Vec<u8>) -> Result<(), ScfError> {
+        super::checkpoint::Codec::put(&self.eigenvalues, o)?;
+        super::checkpoint::Codec::put(&self.eigenvectors, o)?;
+        super::checkpoint::Codec::put(&self.hx, o)?;
+        super::checkpoint::Codec::put(&self.converged, o)?;
+        super::checkpoint::Codec::put(&self.ritz_changes_ha, o)?;
+        super::checkpoint::Codec::put(&self.ritz_values_ha, o)?;
+        super::checkpoint::Codec::put(&self.band_thresholds_ha, o)?;
+        Ok(())
+    }
+    fn get(r: &mut super::checkpoint::Reader<'_>) -> Result<Self, ScfError> {
+        Ok(Self {
+            eigenvalues: super::checkpoint::Codec::get(r)?,
+            eigenvectors: super::checkpoint::Codec::get(r)?,
+            hx: super::checkpoint::Codec::get(r)?,
+            converged: super::checkpoint::Codec::get(r)?,
+            ritz_changes_ha: super::checkpoint::Codec::get(r)?,
+            ritz_values_ha: super::checkpoint::Codec::get(r)?,
+            band_thresholds_ha: super::checkpoint::Codec::get(r)?,
+            record: None,
+        })
+    }
+}
+super::checkpoint::record!(Fields {
+    hartree,
+    xc,
+    xc_integral,
+    nlcc,
+    hxc,
+    vh
+});
+super::checkpoint::record!(Map {
+    solve,
+    warm_start,
+    density,
+    residuals,
+    energy,
+    timings,
+    input_fields
+});
+
+impl Fields {
+    pub(super) fn validate_checkpoint(&self, planes: usize) -> Result<(), ScfError> {
+        if self.hxc.len() != planes
+            || self.vh.len() != planes
+            || self.hxc.iter().chain(&self.vh).any(|v| !v.is_finite())
+            || !self.hartree.is_finite()
+            || !self.xc.is_finite()
+            || !self.xc_integral.is_finite()
+        {
+            return Err(super::checkpoint::invalid("cached field shape/values"));
+        }
+        Ok(())
+    }
+}
+impl Map {
+    pub(super) fn validate_checkpoint(
+        &self,
+        rows: usize,
+        bands: usize,
+        planes: usize,
+    ) -> Result<(), ScfError> {
+        self.input_fields.validate_checkpoint(planes)?;
+        let x = &self.solve.eigenvectors;
+        if self.density.len() != planes
+            || self.residuals.len() != bands
+            || self.solve.eigenvalues.len() != bands
+            || self.solve.converged.len() != bands
+            || x.rows() != rows
+            || x.cols() != bands
+            || x.as_slice()
+                .iter()
+                .chain(&self.density)
+                .chain(&self.residuals)
+                .chain(&self.solve.eigenvalues)
+                .any(|v| !v.is_finite())
+            || self.solve.hx.as_ref().is_some_and(|h| {
+                h.rows() != rows || h.cols() != bands || h.as_slice().iter().any(|v| !v.is_finite())
+            })
+        {
+            return Err(super::checkpoint::invalid("pending Gamma map shape/values"));
+        }
+        Ok(())
     }
 }

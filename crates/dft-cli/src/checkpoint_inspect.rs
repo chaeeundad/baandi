@@ -19,6 +19,18 @@ pub(crate) fn recognizes(path: &Path) -> Result<bool, checkpoint_io::Error> {
 }
 
 pub(crate) fn evidence(path: &Path) -> Result<Value, checkpoint_io::Error> {
+    if checkpoint_io::version(path)? == 2 {
+        let file = checkpoint_io::read_reference(path)?;
+        return Ok(json!({"source":path,"format":"BAANDICP","schema_version":2,
+            "kind":if file.result.is_some(){"ResultExport"}else{"ExactContinuation"},
+            "capability":if file.result.is_some(){"inspection_only"}else{"exact_continuation"},
+            "iteration":file.iteration,"ranks":file.identity.ranks,
+            "input_sha256":file.identity.input_sha256,"upf_sha256":file.identity.upf_sha256,
+            "execution":{"build_sha256":file.identity.binary_sha256,"platform":file.identity.platform,"threads":file.identity.threads},
+            "result":file.result.as_ref().map(|r|json!({"energy_hartree":f64::from_bits(r.energy_ha_bits),"converged":r.converged,
+                "density_sha256":r.density_sha256,"orbitals_sha256":r.orbitals_sha256,"verification_attempts":r.verification_attempts})),
+            "validation":"Checksum, version and bounded container checked; restart compatibility requires the original input, UPFs and binary. No SCF executed."}));
+    }
     let cp = checkpoint_io::read(path)?;
     let (state, capability, history) =
         match cp.kind {

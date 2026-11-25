@@ -345,3 +345,85 @@ pub(super) fn complete_audit<K: Collective>(
     }
     Ok(())
 }
+
+super::checkpoint::record!(PerK {
+    eigenvalues,
+    residuals,
+    converged,
+    calls
+});
+super::checkpoint::record!(Solution {
+    eigenvectors,
+    hx,
+    per_k
+});
+super::checkpoint::record!(Map {
+    solve,
+    warm_start,
+    density,
+    residuals,
+    energy,
+    timings,
+    input_fields
+});
+
+impl Map {
+    pub(super) fn validate_checkpoint(
+        &self,
+        state: &KStartState,
+        planes: usize,
+    ) -> Result<(), ScfError> {
+        self.input_fields.validate_checkpoint(planes)?;
+        if self.density.len() != planes
+            || self
+                .density
+                .iter()
+                .chain(&self.residuals)
+                .any(|v| !v.is_finite())
+            || self.solve.eigenvectors.0.len() != state.blocks.len()
+            || self.solve.per_k.len() != state.blocks.len()
+        {
+            return Err(super::checkpoint::invalid("pending k map shape/values"));
+        }
+        for (k, (x, b)) in self
+            .solve
+            .eigenvectors
+            .0
+            .iter()
+            .zip(&state.blocks)
+            .enumerate()
+        {
+            let bands = state.orbitals.0[k].cols();
+            let info = &self.solve.per_k[k];
+            if x.rows() != b.operator.local_rows().len()
+                || x.cols() != bands
+                || info.eigenvalues.len() != bands
+                || info.residuals.len() != bands
+                || info.converged.len() != bands
+                || x.as_slice()
+                    .iter()
+                    .any(|v| !v.re.is_finite() || !v.im.is_finite())
+                || info
+                    .eigenvalues
+                    .iter()
+                    .chain(&info.residuals)
+                    .any(|v| !v.is_finite())
+            {
+                return Err(super::checkpoint::invalid("pending k orbital shape/values"));
+            }
+        }
+        if let Some(hx) = &self.solve.hx
+            && (hx.0.len() != state.blocks.len()
+                || hx.0.iter().zip(&self.solve.eigenvectors.0).any(|(h, x)| {
+                    h.rows() != x.rows()
+                        || h.cols() != x.cols()
+                        || h.as_slice()
+                            .iter()
+                            .any(|v| !v.re.is_finite() || !v.im.is_finite())
+                }))
+        {
+            return Err(super::checkpoint::invalid("pending k HX shape/values"));
+        }
+        Ok(())
+    }
+}

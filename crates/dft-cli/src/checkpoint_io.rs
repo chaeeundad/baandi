@@ -265,6 +265,9 @@ pub fn read(path: &Path) -> Result<Checkpoint, Error> {
 /// A same-directory hard link is the atomic no-clobber publication operation.
 pub fn write(path: &Path, cp: &Checkpoint) -> Result<(), Error> {
     let bytes = encode(cp)?;
+    publish_bytes(path, &bytes)
+}
+fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -279,7 +282,7 @@ pub fn write(path: &Path, cp: &Checkpoint) -> Result<(), Error> {
         .create_new(true)
         .open(&temp)?;
     let result = (|| -> Result<(), Error> {
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         fs::hard_link(&temp, path)?;
         fs::File::open(parent)?.sync_all()?;
@@ -1901,8 +1904,13 @@ fn context(
         .map(|(label, potential)| SpeciesPotential { label, potential })
         .collect();
     let upfs: Vec<_> = potentials.iter().map(|(_, p)| p).collect();
-    let selection =
+    let mut selection =
         crate::driver_select::select(&config, crate::driver_select::Mode::Classic, command, &upfs);
+    // Existing v1 artifacts always resume through their legacy arithmetic.
+    if selection.reference() {
+        selection.driver = crate::driver_select::Driver::LegacyStandard;
+        selection.reason = Some(crate::driver_select::CHECKPOINT);
+    }
     selection.announce();
     let opts = crate::run::options_for(&config, selection)?;
     let points = config.basis.resolve_kpoints()?;
@@ -2012,6 +2020,10 @@ fn selection_results(
     Ok(())
 }
 pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Result<(), Error> {
+    if let Some(context) = ReferenceContext::load(input, crate::driver_select::Command::Checkpoint)?
+    {
+        return reference_dispatch(context, None, output, iteration, kind);
+    }
     let (mut problem, model, execution, selection) =
         context(input, crate::driver_select::Command::Checkpoint)?;
     if !matches!(kind, Kind::Result) {
@@ -2050,6 +2062,14 @@ pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Resu
     Ok(())
 }
 pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result<(), Error> {
+    if version(source)? == 2 {
+        if warm {
+            return Err(invalid("v2 exact continuation cannot be imported as warm"));
+        }
+        let context = ReferenceContext::load(input, crate::driver_select::Command::Restart)?
+            .ok_or_else(|| invalid("v2 restart requires the reference driver"))?;
+        return reference_dispatch(context, Some(source), output, 0, Kind::Exact);
+    }
     let cp = read(source)?;
     if cp.runtime.is_some() {
         return Err(invalid(
@@ -2281,3 +2301,631 @@ mod pseudo_wire_tests {
 #[cfg(test)]
 #[path = "../tests/preconditioner/wire.rs"]
 mod preconditioner_tests;
+
+// Reference v2 keeps the BAANDICP envelope and strict, separate v1 decoder.
+use dft_engine::refscf::checkpoint::{
+    Checkpoint as ReferenceCheckpoint, Identity as ReferenceIdentity,
+};
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2Identity {
+    input_sha256: String,
+    upf_sha256: Vec<String>,
+    binary_sha256: String,
+    platform: String,
+    threads: usize,
+    ranks: usize,
+}
+impl From<&ReferenceIdentity> for V2Identity {
+    fn from(v: &ReferenceIdentity) -> Self {
+        Self {
+            input_sha256: v.input_sha256.clone(),
+            upf_sha256: v.upf_sha256.clone(),
+            binary_sha256: v.binary_sha256.clone(),
+            platform: v.platform.clone(),
+            threads: v.threads,
+            ranks: v.ranks,
+        }
+    }
+}
+impl From<V2Identity> for ReferenceIdentity {
+    fn from(v: V2Identity) -> Self {
+        Self {
+            input_sha256: v.input_sha256,
+            upf_sha256: v.upf_sha256,
+            binary_sha256: v.binary_sha256,
+            platform: v.platform,
+            threads: v.threads,
+            ranks: v.ranks,
+        }
+    }
+}
+/// Delivered-result inspection record. Hashes cover little-endian IEEE bits in
+/// canonical grid and spin/k/column-major orbital order, never decimal JSON.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReferenceResult {
+    pub energy_ha_bits: u64,
+    pub density_sha256: String,
+    pub orbitals_sha256: String,
+    pub converged: bool,
+    pub iterations: usize,
+    pub verification_attempts: usize,
+}
+pub struct ReferenceFile {
+    pub identity: ReferenceIdentity,
+    pub iteration: usize,
+    pub states: Vec<Vec<u8>>,
+    pub result: Option<ReferenceResult>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2Header {
+    schema_version: u32,
+    kind: String,
+    identity: V2Identity,
+    iteration: usize,
+    /// Rank index is the position in this array; offsets/counts are bytes.
+    states: Vec<ArrayRef>,
+    result: Option<ReferenceResult>,
+}
+impl ReferenceFile {
+    pub fn checkpoint(&self, rank: usize) -> Result<ReferenceCheckpoint, Error> {
+        if self.result.is_some() {
+            return Err(invalid("v2 ResultExport cannot restart"));
+        }
+        Ok(ReferenceCheckpoint {
+            schema_version: 2,
+            identity: self.identity.clone(),
+            rank,
+            iteration: self.iteration,
+            state: self
+                .states
+                .get(rank)
+                .ok_or_else(|| invalid("v2 rank missing"))?
+                .clone(),
+        })
+    }
+}
+fn envelope(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
+    if bytes.len() < 56 || bytes.len() > MAX_FILE || &bytes[..8] != MAGIC {
+        return Err(invalid("checkpoint magic/size"));
+    }
+    let h = usize::try_from(u64::from_le_bytes(bytes[8..16].try_into()?))?;
+    let b = usize::try_from(u64::from_le_bytes(bytes[16..24].try_into()?))?;
+    if h > MAX_HEADER || h.checked_add(b).and_then(|n| n.checked_add(56)) != Some(bytes.len()) {
+        return Err(invalid("checkpoint lengths"));
+    }
+    if Sha256::digest(&bytes[..bytes.len() - 32])[..] != bytes[bytes.len() - 32..] {
+        return Err(invalid("checkpoint checksum"));
+    }
+    Ok((&bytes[24..24 + h], &bytes[24 + h..24 + h + b]))
+}
+fn file_bytes(path: &Path) -> Result<Vec<u8>, Error> {
+    let f = fs::File::open(path)?;
+    if !f.metadata()?.is_file() || f.metadata()?.len() > MAX_FILE as u64 {
+        return Err(invalid("checkpoint file quota/type"));
+    }
+    let mut bytes = Vec::new();
+    f.take(MAX_FILE as u64 + 1).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+pub fn version(path: &Path) -> Result<u32, Error> {
+    let bytes = file_bytes(path)?;
+    let (h, _) = envelope(&bytes)?;
+    let v: serde_json::Value = serde_json::from_slice(h)?;
+    match v["schema_version"].as_u64() {
+        Some(1) => Ok(1),
+        Some(2) => Ok(2),
+        _ => Err(invalid("unsupported checkpoint version")),
+    }
+}
+pub fn encode_reference(file: &ReferenceFile) -> Result<Vec<u8>, Error> {
+    file.identity.validate()?;
+    if file.result.is_none() && file.states.len() != file.identity.ranks
+        || file.result.is_some() && !file.states.is_empty()
+    {
+        return Err(invalid("v2 kind/rank count"));
+    }
+    let mut payload = Vec::new();
+    let mut states = Vec::new();
+    for (rank, state) in file.states.iter().enumerate() {
+        file.checkpoint(rank)?.validate(&file.identity, rank)?;
+        if payload
+            .len()
+            .checked_add(state.len())
+            .is_none_or(|n| n > MAX_FILE)
+        {
+            return Err(invalid("v2 state quota"));
+        }
+        states.push(ArrayRef {
+            offset: payload.len(),
+            count: state.len(),
+        });
+        payload.extend_from_slice(state);
+    }
+    let header = serde_json::to_vec(&V2Header {
+        schema_version: 2,
+        kind: if file.result.is_some() {
+            "ResultExport"
+        } else {
+            "ExactContinuation"
+        }
+        .into(),
+        identity: (&file.identity).into(),
+        iteration: file.iteration,
+        states,
+        result: file.result.clone(),
+    })?;
+    if header.len() > MAX_HEADER
+        || header
+            .len()
+            .checked_add(payload.len())
+            .and_then(|n| n.checked_add(56))
+            .is_none_or(|n| n > MAX_FILE)
+    {
+        return Err(invalid("v2 container quota"));
+    }
+    let mut out = MAGIC.to_vec();
+    out.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    out.extend(header);
+    out.extend(payload);
+    let digest = Sha256::digest(&out);
+    out.extend_from_slice(&digest);
+    Ok(out)
+}
+pub fn decode_reference(bytes: &[u8]) -> Result<ReferenceFile, Error> {
+    let (header, payload) = envelope(bytes)?;
+    let h: V2Header = serde_json::from_slice(header)?;
+    if h.schema_version != 2 {
+        return Err(invalid("v2 schema version"));
+    }
+    let identity: ReferenceIdentity = h.identity.into();
+    identity.validate()?;
+    let exact =
+        h.kind == "ExactContinuation" && h.result.is_none() && h.states.len() == identity.ranks;
+    let result = h.kind == "ResultExport" && h.result.is_some() && h.states.is_empty();
+    if !exact && !result {
+        return Err(invalid("v2 kind/rank count"));
+    }
+    if let Some(r) = &h.result
+        && (!f64::from_bits(r.energy_ha_bits).is_finite()
+            || r.iterations != h.iteration
+            || [&r.density_sha256, &r.orbitals_sha256]
+                .iter()
+                .any(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit())))
+    {
+        return Err(invalid("v2 result energy/hash/iteration"));
+    }
+    let mut cursor = 0usize;
+    let mut states = Vec::new();
+    for a in h.states {
+        let end = a
+            .offset
+            .checked_add(a.count)
+            .filter(|&n| n <= payload.len())
+            .ok_or_else(|| invalid("v2 state range"))?;
+        if a.offset != cursor || a.count == 0 {
+            return Err(invalid("v2 state offset/count"));
+        }
+        states.push(payload[cursor..end].to_vec());
+        cursor = end;
+    }
+    if cursor != payload.len() {
+        return Err(invalid("v2 unreferenced bytes"));
+    }
+    Ok(ReferenceFile {
+        identity,
+        iteration: h.iteration,
+        states,
+        result: h.result,
+    })
+}
+pub fn read_reference(path: &Path) -> Result<ReferenceFile, Error> {
+    decode_reference(&file_bytes(path)?)
+}
+pub fn write_reference(path: &Path, file: &ReferenceFile) -> Result<(), Error> {
+    publish_bytes(path, &encode_reference(file)?)
+}
+
+/// Gather only at a requested checkpoint. Six bytes per f64 are exact integers;
+/// the collective API performs no floating arithmetic on these packed payloads.
+pub fn gather_reference<K: dft_mpi::Collective>(
+    cp: ReferenceCheckpoint,
+    comm: &K,
+) -> Result<ReferenceFile, Error> {
+    agreed(
+        cp.validate(&cp.identity, comm.rank())
+            .map_err(Into::into)
+            .and_then(|()| {
+                if cp.identity.ranks != comm.size() || cp.iteration as u128 >= (1u128 << 53) {
+                    Err(invalid("v2 communicator/boundary mismatch"))
+                } else {
+                    Ok(())
+                }
+            }),
+        comm,
+    )?;
+    let stamp = serde_json::to_vec(&V2Identity::from(&cp.identity))?;
+    let digest = Sha256::digest(stamp);
+    let local_meta: Vec<_> = std::iter::once(cp.iteration as f64)
+        .chain(std::iter::once(cp.state.len() as f64))
+        .chain(digest.iter().map(|&b| f64::from(b)))
+        .collect();
+    let mut meta = vec![0.; local_meta.len() * comm.size()];
+    comm.allgatherv_f64(&local_meta, &vec![local_meta.len(); comm.size()], &mut meta)?;
+    let rows: Vec<_> = meta.chunks_exact(local_meta.len()).collect();
+    if rows
+        .iter()
+        .any(|r| r[0] != local_meta[0] || r[2..] != local_meta[2..])
+    {
+        return Err(invalid("v2 ranks disagree on input/binary/boundary"));
+    }
+    let lengths: Vec<_> = rows.iter().map(|r| r[1] as usize).collect();
+    let total = lengths
+        .iter()
+        .try_fold(0usize, |n, &len| n.checked_add(len))
+        .ok_or_else(|| invalid("v2 gather overflow"))?;
+    if total > MAX_FILE {
+        return Err(invalid("v2 gathered state quota"));
+    }
+    let counts: Vec<_> = lengths.iter().map(|n| n.div_ceil(6)).collect();
+    let packed: Vec<_> = cp
+        .state
+        .chunks(6)
+        .map(|chunk| {
+            let mut bytes = [0u8; 8];
+            bytes[..chunk.len()].copy_from_slice(chunk);
+            u64::from_le_bytes(bytes) as f64
+        })
+        .collect();
+    let mut all = vec![0.; counts.iter().sum()];
+    comm.allgatherv_f64(&packed, &counts, &mut all)?;
+    let mut offset = 0;
+    let mut states = Vec::new();
+    for (&length, &count) in lengths.iter().zip(&counts) {
+        let mut state = Vec::with_capacity(length);
+        for &v in &all[offset..offset + count] {
+            state.extend_from_slice(&(v as u64).to_le_bytes()[..6]);
+        }
+        state.truncate(length);
+        states.push(state);
+        offset += count;
+    }
+    Ok(ReferenceFile {
+        identity: cp.identity,
+        iteration: cp.iteration,
+        states,
+        result: None,
+    })
+}
+
+struct ReferenceContext {
+    config: crate::config::Config,
+    cell: dft_geometry::Cell,
+    atoms: Vec<dft_geometry::Atom>,
+    potentials: Vec<(String, dft_upf::Pseudopotential)>,
+    options: ScfOptions,
+    selection: crate::driver_select::Selection,
+    identity: ReferenceIdentity,
+}
+impl ReferenceContext {
+    fn load(input: &Path, command: crate::driver_select::Command) -> Result<Option<Self>, Error> {
+        let bytes = fs::read(input)?;
+        let config = crate::config::Config::parse(std::str::from_utf8(&bytes)?)?;
+        config.validate()?;
+        let mut potentials = Vec::new();
+        let mut upf_sha256 = Vec::new();
+        for (label, path) in &config.pseudopotentials {
+            let data = fs::read(input.parent().unwrap_or(Path::new(".")).join(path))?;
+            upf_sha256.push(crate::run::sha256(&data));
+            potentials.push((
+                label.clone(),
+                dft_upf::parse_upf(std::str::from_utf8(&data)?)?,
+            ));
+        }
+        let upfs: Vec<_> = potentials.iter().map(|(_, p)| p).collect();
+        let selection = crate::driver_select::select(
+            &config,
+            crate::driver_select::Mode::Classic,
+            command,
+            &upfs,
+        );
+        selection.validate(&config)?;
+        if !selection.reference() {
+            return Ok(None);
+        }
+        let options = crate::run::options_for(&config, selection)?;
+        let cell = config.cell()?;
+        let atoms = config
+            .system
+            .atoms
+            .iter()
+            .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
+            .collect();
+        let executable = fs::read(std::env::current_exe()?)?;
+        let host = std::process::Command::new("uname").arg("-a").output()?;
+        if !host.status.success() {
+            return Err(invalid("v2 execution platform unavailable"));
+        }
+        let identity = ReferenceIdentity {
+            input_sha256: crate::run::sha256(&bytes),
+            upf_sha256,
+            binary_sha256: crate::run::sha256(&executable),
+            platform: format!(
+                "{}:{}:{}",
+                std::env::consts::ARCH,
+                std::env::consts::OS,
+                String::from_utf8(host.stdout)?.trim()
+            ),
+            threads: options.threads.max(1),
+            ranks: crate::parallel::size(),
+        };
+        identity.validate()?;
+        Ok(Some(Self {
+            config,
+            cell,
+            atoms,
+            potentials,
+            options,
+            selection,
+            identity,
+        }))
+    }
+    fn request(&self) -> Result<dft_engine::refscf::api::Request, Error> {
+        use dft_engine::refscf::{api::Request, electronic::Policy};
+        let mut request = Request::new(
+            crate::run::reference_profile(&self.config)?,
+            self.config.basis.resolve_kpoints()?,
+        );
+        let electrons = self
+            .atoms
+            .iter()
+            .map(|a| {
+                self.potentials
+                    .iter()
+                    .find(|(name, _)| name == &a.species)
+                    .map(|(_, p)| p.z_valence())
+                    .ok_or_else(|| invalid("v2 atom species"))
+            })
+            .sum::<Result<f64, _>>()?;
+        let theta = self.config.finite_temperature()?;
+        let sector = self.config.spin_sector(electrons)?;
+        let band_cap = self
+            .config
+            .occupations
+            .as_ref()
+            .and_then(|o| o.band_cap)
+            .unwrap_or(32);
+        request.policy = match (sector, theta) {
+            (None, None) => None,
+            (None, Some(theta_ha)) => Some(Policy::FermiDirac { theta_ha, band_cap }),
+            (Some(s), None) => Some(Policy::FixedSpin(s)),
+            (Some(sector), Some(theta_ha)) => Some(Policy::SpinFermiDirac {
+                sector,
+                theta_ha,
+                band_cap,
+                constraint: self.config.finite_constraint(),
+            }),
+        };
+        request.symmetry = self
+            .config
+            .prepared_symmetry()?
+            .map(|p| {
+                dft_engine::refscf::symmetry::Prepared::from_prepared(
+                    &self.cell,
+                    &self.atoms,
+                    &self.config.symmetry_full_mesh()?,
+                    self.config.symmetry.tolerance_bohr,
+                    self.config.basis.time_reversal(),
+                    &p,
+                )
+                .map_err(|e| -> Error { e.into() })
+            })
+            .transpose()?;
+        Ok(request)
+    }
+}
+fn agreed<T, K: dft_mpi::Collective>(value: Result<T, Error>, comm: &K) -> Result<T, Error> {
+    let mut failures = [0.];
+    comm.tree_sum_f64(&[f64::from(value.is_err())], &mut failures)?;
+    if failures[0] > 0. {
+        return Err(value
+            .err()
+            .unwrap_or_else(|| invalid("reference checkpoint operation failed on another rank")));
+    }
+    value
+}
+fn reference_result(
+    delivered: dft_engine::refscf::api::Delivered,
+) -> Result<ReferenceResult, Error> {
+    use dft_engine::refscf::api::Run;
+    let mut density = Sha256::new();
+    let mut orbitals = Sha256::new();
+    let (energy, converged, iterations, verification_attempts) = match delivered.run {
+        Run::Scalar(mut run) => {
+            let r = &mut run.outcome.result;
+            r.materialize_orbitals()?;
+            for &v in &r.density {
+                density.update(v.to_le_bytes());
+            }
+            for k in &r.k_points {
+                for v in k.solution.eigenvectors.as_slice() {
+                    orbitals.update(v.re.to_le_bytes());
+                    orbitals.update(v.im.to_le_bytes());
+                }
+            }
+            (
+                r.energy.total_hartree(),
+                run.outcome.converged,
+                r.history.len(),
+                r.verification.as_ref().map_or(0, |v| v.attempts.len()),
+            )
+        }
+        Run::Electronic(run) => {
+            for channel in &run.density {
+                for &v in channel {
+                    density.update(v.to_le_bytes());
+                }
+            }
+            for channel in &run.blocks {
+                for b in channel {
+                    for v in b.orbitals.as_slice() {
+                        orbitals.update(v.re.to_le_bytes());
+                        orbitals.update(v.im.to_le_bytes());
+                    }
+                }
+            }
+            (
+                run.energy.total_hartree(),
+                run.converged,
+                run.history.len(),
+                run.verification.as_ref().map_or(0, |v| v.attempts.len()),
+            )
+        }
+    };
+    if !energy.is_finite() {
+        return Err(invalid("v2 nonfinite delivered energy"));
+    }
+    Ok(ReferenceResult {
+        energy_ha_bits: energy.to_bits(),
+        density_sha256: format!("{:x}", density.finalize()),
+        orbitals_sha256: format!("{:x}", orbitals.finalize()),
+        converged,
+        iterations,
+        verification_attempts,
+    })
+}
+fn reference_command<K: dft_mpi::Collective>(
+    context: ReferenceContext,
+    source: Option<&Path>,
+    output: &Path,
+    iteration: usize,
+    kind: Kind,
+    comm: &K,
+) -> Result<(), Error> {
+    if matches!(kind, Kind::Warm) {
+        return Err(invalid(
+            "reference checkpoint v2 supports exact continuation and result export; warm import is not an exact restart",
+        ));
+    }
+    let file = agreed(source.map(read_reference).transpose(), comm)?;
+    let cp = agreed(
+        file.as_ref().map(|f| f.checkpoint(comm.rank())).transpose(),
+        comm,
+    )?;
+    if let Some(cp) = &cp {
+        agreed(
+            cp.validate(&context.identity, comm.rank())
+                .map_err(Into::into),
+            comm,
+        )?;
+    }
+    let request = agreed(context.request(), comm)?;
+    let potentials: Vec<_> = context
+        .potentials
+        .iter()
+        .map(|(label, potential)| dft_engine::SpeciesPotential { label, potential })
+        .collect();
+    let input = dft_engine::refstart::StartInput {
+        cell: &context.cell,
+        atoms: &context.atoms,
+        potentials: &potentials,
+        options: &context.options,
+    };
+    // api::stepper uses the process communicator installed by main. The same
+    // communicator is used below only for cold-path checkpoint publication.
+    let mut stepper = dft_engine::refscf::api::stepper(input, request);
+    if let Some(cp) = &cp {
+        agreed(
+            stepper
+                .restore(cp, &context.identity, comm.rank())
+                .map_err(Into::into),
+            comm,
+        )?;
+    } else {
+        agreed(stepper.initialize().map_err(Into::into), comm)?;
+    }
+    let export = source.is_some() || matches!(kind, Kind::Result);
+    let file = if export {
+        let delivered = stepper.run_to_end()?;
+        let result = reference_result(delivered)?;
+        ReferenceFile {
+            identity: context.identity,
+            iteration: result.iterations,
+            states: Vec::new(),
+            result: Some(result),
+        }
+    } else {
+        if iteration > 0 {
+            loop {
+                let r = stepper.step()?;
+                if stepper.is_done() {
+                    return Err(invalid(
+                        "v2 requested checkpoint is terminal; use --kind result",
+                    ));
+                }
+                if r.iteration >= iteration && r.safe_point {
+                    break;
+                }
+            }
+        }
+        let cp = agreed(
+            stepper
+                .checkpoint(context.identity, comm.rank())
+                .map_err(Into::into),
+            comm,
+        )?;
+        gather_reference(cp, comm)?
+    };
+    let written = if comm.rank() == 0 {
+        write_reference(output, &file).and_then(|_| selection_results(output, context.selection))
+    } else {
+        Ok(())
+    };
+    agreed(written, comm)?;
+    if comm.rank() == 0 {
+        context.selection.announce();
+        if let Some(r) = &file.result {
+            println!(
+                "Energy {:.17} Ha, converged={}, iterations={}",
+                f64::from_bits(r.energy_ha_bits),
+                r.converged,
+                r.iterations
+            );
+        } else {
+            println!(
+                "Wrote reference checkpoint v2, iteration {}: {}",
+                file.iteration,
+                output.display()
+            );
+        }
+    }
+    if file.result.as_ref().is_some_and(|r| !r.converged) {
+        return Err(invalid(
+            "NOT CONVERGED: reference result exported without convergence",
+        ));
+    }
+    Ok(())
+}
+fn reference_dispatch(
+    context: ReferenceContext,
+    source: Option<&Path>,
+    output: &Path,
+    iteration: usize,
+    kind: Kind,
+) -> Result<(), Error> {
+    if let Some(comm) = dft_engine::parallel::SharedComm::active() {
+        reference_command(context, source, output, iteration, kind, &comm)
+    } else {
+        reference_command(
+            context,
+            source,
+            output,
+            iteration,
+            kind,
+            &dft_engine::refscf::metric::Serial,
+        )
+    }
+}

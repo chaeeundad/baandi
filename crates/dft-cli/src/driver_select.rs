@@ -202,9 +202,6 @@ fn l5(c: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
                 .is_some_and(|r| r.start_extrapolation != crate::relax::Extrapolation::None),
         }
 }
-fn l6(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
-    matches!(command, Command::Checkpoint | Command::Restart)
-}
 fn l7(_: &Config, mode: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
     mode != Mode::Classic
 }
@@ -294,7 +291,6 @@ const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l2, G4B_FALLBACK),
     (l4, VARIABLE_CELL),
     (l5, EXTRAPOLATION),
-    (l6, CHECKPOINT),
     (l7, RUNTIME),
     (l8, SESSION),
     (l9, LEGACY_INPUT),

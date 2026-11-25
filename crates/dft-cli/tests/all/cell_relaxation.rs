@@ -7,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 fn input() -> String {
-    "[system]\nname='relaxation oracle'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\nenergy_tolerance_ha=1e-12\ndensity_residual_tolerance=1e-10\neigen_tolerance=1e-11\n".into()
+    "[system]\nname='relaxation oracle'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\n".into()
 }
 #[test]
 #[ignore = "multi-step SCF, run cargo test --release -p dft-cli --test all cell_relaxation:: -- --ignored --nocapture"]
@@ -625,11 +625,7 @@ fn reference_atomic_fixture(dir: &std::path::Path) {
     fs::write(dir.join("syn.xml"), xml).unwrap();
 }
 fn reference_input() -> String {
-    input()
-        .replace("energy_tolerance_ha=1e-12\n", "")
-        .replace("density_residual_tolerance=1e-10\n", "")
-        .replace("eigen_tolerance=1e-11\n", "")
-        + "standard_threshold_ha=5e-15\n"
+    input() + "standard_threshold_ha=5e-15\n"
 }
 fn reference_relax_run(
     dir: &std::path::Path,

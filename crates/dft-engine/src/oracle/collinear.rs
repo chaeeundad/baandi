@@ -17,7 +17,6 @@ struct BlockWork {
     saved: Option<EigenSolution>,
 }
 pub struct CollinearProblem {
-    spin_share_enabled: bool,
     spin_share: SpinShareReport,
     finite: Option<OccupationWorkspace>,
     channels: [ScfProblem; 2],
@@ -158,7 +157,6 @@ impl CollinearProblem {
         }
         let mixers = [make_spin_mixer(&up)?, make_spin_mixer(&down)?];
         Ok(Self {
-            spin_share_enabled: dft_numerics::switches::on(dft_numerics::switches::Id::SPIN_SHARE),
             spin_share: SpinShareReport::default(),
             finite: None,
             channels: [up, down],
@@ -201,82 +199,6 @@ impl CollinearProblem {
     pub fn grid_dimensions(&self) -> [usize; 3] {
         self.channels[0].grid.dims()
     }
-    /// Per-problem test override; does not mutate process environment.
-    #[doc(hidden)]
-    pub fn force_spin_share(&mut self, enabled: bool) {
-        self.spin_share_enabled = enabled;
-    }
-
-    fn spin_share_fallback(&self) -> Option<usize> {
-        if !self.spin_share_enabled {
-            return Some(0);
-        }
-        if self.channels[0].options.standard.is_none() {
-            return Some(1);
-        }
-        if crate::parallel::SharedComm::active().is_some() {
-            return Some(2);
-        }
-        if self.finite.is_some() {
-            return Some(3);
-        }
-        if self.sector.initial_moment_seed.is_some_and(|m| m != 0.0) {
-            return Some(4);
-        }
-        if self.sector.n_up != self.sector.n_down {
-            return Some(5);
-        }
-        let [up, down] = &self.channels;
-        if up.occupations.len() != down.occupations.len()
-            || !up
-                .occupations
-                .iter()
-                .zip(&down.occupations)
-                .all(|(a, b)| a.to_bits() == b.to_bits() && (*a == 0.0 || *a == 1.0))
-        {
-            return Some(6);
-        }
-        // Both channels are constructed from the same basis, nonlocal operator,
-        // solver options and spatial symmetry. No spin-dependent external field
-        // or constraint is supported by this API. Compare the FULL local
-        // potentials with exactly the map's evaluation order; threshold is zero
-        // bits, including signed zero. Never infer equality from total moment.
-        let equal = up
-            .ionic_real
-            .iter()
-            .zip(&down.ionic_real)
-            .zip(&self.input_h.potential)
-            .zip(
-                self.input_xc.potentials[0]
-                    .iter()
-                    .zip(&self.input_xc.potentials[1]),
-            )
-            .all(|(((&a, &b), &h), (&x, &y))| {
-                let u = a + h + x;
-                let d = b + h + y;
-                u.is_finite() && d.is_finite() && u.to_bits() == d.to_bits()
-            });
-        if !equal {
-            return Some(7);
-        }
-        // Equal Hamiltonians can have different approximate solutions when warm
-        // starts differ. Decline sharing after such a symmetry-breaking history.
-        for (up, down) in self.blocks[0].iter().zip(&self.blocks[1]) {
-            let same = match (&up.solution, &down.solution) {
-                (Some(a), Some(b)) => same_orbital_bits(&a.eigenvectors, &b.eigenvectors),
-                (None, None) => {
-                    up.saved.is_some() == down.saved.is_some()
-                        && same_orbital_bits(&up.initial, &down.initial)
-                }
-                _ => false,
-            };
-            if !same {
-                return Some(8);
-            }
-        }
-        None
-    }
-
     fn map(
         &mut self,
         density: &[Array3<f64>; 2],
@@ -300,16 +222,7 @@ impl CollinearProblem {
             self.channels[0].core_density.as_ref(),
             &mut self.input_xc,
         )?;
-        let share = match self.spin_share_fallback() {
-            None => {
-                self.spin_share.shared_maps += 1;
-                true
-            }
-            Some(reason) => {
-                self.spin_share.fallback_counts[reason] += 1;
-                false
-            }
-        };
+        self.spin_share.fallback_counts[1] += 1;
         let mut kinetic = 0.0;
         let mut nonlocal = 0.0;
         let mut band_sum = 0.0;
@@ -322,24 +235,6 @@ impl CollinearProblem {
         let mut spans: Vec<Option<atomic_start::AtomicSpan>> =
             (0..self.blocks[0].len()).map(|_| None).collect();
         for (s, channel_output) in output.iter_mut().enumerate() {
-            if share && s == 1 {
-                let [up, down] = &mut self.blocks;
-                channel_output.fill(0.0);
-                for ((source, dest), state) in up.iter().zip(down).zip(&mut self.channels[1].states)
-                {
-                    state.hamiltonian.copy_local_potential(&self.effective)?;
-                    dest.solution.clone_from(&source.solution);
-                    let solution = dest.solution.as_mut().unwrap();
-                    // Preserve logical iterations and all spectral data, but a
-                    // copied channel did not issue any Hamiltonian applications.
-                    solution.operator_applications = 0;
-                    self.spin_share.davidson_iterations += solution.iterations;
-                    for (to, from) in dest.orbitals.iter_mut().zip(&source.orbitals) {
-                        to.copy_from_slice(from);
-                    }
-                }
-                continue;
-            }
             let p = &mut self.channels[s];
             let bands = p.occupations.len();
             let solver = Davidson {
@@ -422,8 +317,6 @@ impl CollinearProblem {
                     (atomic || work.saved.is_some() || p.options.free_electron_initial_guess)
                         .then_some(&work.initial)
                 });
-                // ONEPATH-3: the standard profile uses the Ritz-change stopping
-                // rule of the closed-shell standard path (complex solver).
                 let solution = {
                     p.options
                         .eigensolver
@@ -1157,103 +1050,5 @@ impl CollinearProblem {
         report.passed = report.events[first..].iter().all(|e| e.passed);
         report.elapsed += start.elapsed();
         Ok((report.events[first..].iter().any(|e| e.retries > 0), failed))
-    }
-}
-
-fn same_orbital_bits(a: &ComplexMatrix, b: &ComplexMatrix) -> bool {
-    a.as_slice().len() == b.as_slice().len()
-        && a.as_slice()
-            .iter()
-            .zip(b.as_slice())
-            .all(|(a, b)| a.re.to_bits() == b.re.to_bits() && a.im.to_bits() == b.im.to_bits())
-}
-
-#[cfg(test)]
-mod spin_share_tests {
-    use super::*;
-
-    fn problem() -> CollinearProblem {
-        let cell =
-            Cell::from_user_rows_bohr([[5., 0., 0.], [0.5, 5., 0.], [0.3, 0.2, 5.]]).unwrap();
-        let pp = crate::pool_fixture::potential_with_functional(2., 1., true, 401, "SLA PW");
-        let mut p = CollinearProblem::new(
-            &cell,
-            &[Atom::new("Xx", [0.; 3])],
-            &[SpeciesPotential {
-                label: "Xx",
-                potential: &pp,
-            }],
-            ScfOptions {
-                functional: Functional::LdaPw,
-                cutoff_hartree: 2.5,
-                bands: Some(4),
-                ..ScfOptions::default()
-            },
-            &[KPoint {
-                fractional: [0.; 3],
-                weight: 1.,
-            }],
-            SpinSector {
-                n_up: 1,
-                n_down: 1,
-                axis_cartesian: [0., 0., 1.],
-                initial_moment_seed: Some(0.),
-            },
-        )
-        .unwrap();
-        p.force_spin_share(true);
-        p
-    }
-
-    #[test]
-    fn unequal_potentials_take_two_solves_even_at_zero_total_moment() {
-        let mut p = problem();
-        let dims = p.grid_dimensions();
-        let mut density = [
-            Array3::from_elem(dims, 1. / 125.),
-            Array3::from_elem(dims, 1. / 125.),
-        ];
-        // Each channel still integrates to one electron; local magnetization is
-        // nonzero and cannot be detected from the integrated moment alone.
-        density[0][[0, 0, 0]] += 1e-4;
-        density[0][[0, 0, 1]] -= 1e-4;
-        density[1][[0, 0, 0]] -= 1e-4;
-        density[1][[0, 0, 1]] += 1e-4;
-        let mut output = [Array3::zeros(dims), Array3::zeros(dims)];
-        p.map(&density, &mut output, StandardProfile::CAP_HA)
-            .unwrap();
-        assert_eq!(p.spin_share.shared_maps, 0);
-        assert_eq!(p.spin_share.fallback_counts[7], 1);
-        assert!(
-            p.blocks
-                .iter()
-                .flatten()
-                .all(|w| w.solution.as_ref().unwrap().operator_applications > 0)
-        );
-    }
-
-    #[test]
-    fn eligibility_checks_bits_occupations_bands_and_starts() {
-        let mut p = problem();
-        assert_eq!(p.spin_share_fallback(), None);
-        // The smallest representable change at the computed potential is enough.
-        p.channels[0].ionic_real.fill(0.);
-        p.channels[1].ionic_real.fill(0.);
-        p.input_xc.potentials[1][[0, 0, 0]] = f64::from_bits(1);
-        assert_eq!(p.spin_share_fallback(), Some(7));
-        p.input_xc.potentials[1].fill(0.);
-        p.channels[1].occupations[0] = 0.5;
-        assert_eq!(p.spin_share_fallback(), Some(6));
-        p.channels[0].occupations[0] = 0.5;
-        assert_eq!(p.spin_share_fallback(), Some(6));
-        p.channels[0].occupations[0] = 1.;
-        p.channels[1].occupations[0] = 1.;
-        p.channels[1].occupations.push(0.);
-        assert_eq!(p.spin_share_fallback(), Some(6));
-        p.channels[1].occupations.pop();
-        p.blocks[1][0].initial.as_mut_slice()[0].re += 0.1;
-        assert_eq!(p.spin_share_fallback(), Some(8));
-        p.channels[0].options.standard = None;
-        assert_eq!(p.spin_share_fallback(), Some(1));
     }
 }

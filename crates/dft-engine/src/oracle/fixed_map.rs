@@ -118,7 +118,6 @@ impl ScfProblem {
         };
         let state = &mut self.states[0];
         state.hamiltonian.set_local_potential(effective)?;
-        self.owned.complex_stale = false;
         let bands = self.occupations.len();
         let half = HalfSphere::new(&state.basis, &state.grid).map_err(numerical)?;
         let dim = half.full_len();
@@ -211,14 +210,12 @@ impl ScfProblem {
             .map_err(numerical)?;
         }
         let coefficients: Vec<_> = (0..bands).map(|b| orbitals.column(b).to_vec()).collect();
-        state.band_density.compute_keep_for_map(
+        state.band_density.compute_with(
             &coefficients,
             &self.occupations,
             &state.grid,
             self.cell.volume_bohr3(),
             true,
-            None,
-            false,
         )?;
         let density = state.band_density.density().clone();
         let output_xc = self.options.evaluate_xc(

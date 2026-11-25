@@ -6,7 +6,6 @@ use crate::events::{EventKind, EventQueue, ExecutionConfig, ExecutionMode, Failu
 use crate::policy::{PolicyChange, ToleranceFloors, prepare_policy};
 use crate::runtime::ControlError;
 use crate::state_view::StateSnapshot;
-use dft_solvers::mixing::DensityMixer as _;
 
 /// Prepared under the runtime's exclusive session ownership. All fallible work
 /// precedes journal publication; commit performs only owned replacements.
@@ -41,17 +40,10 @@ pub struct StepReport {
     pub mixing_applied: bool,
 }
 struct Continuation {
-    /// Next input density; an EMPTY array in the owned density loop
-    /// (`owned`), whose input lives in `problem.owned.input`.
+    /// Next input density.
     n: Array3<f64>,
     mixer: Box<dyn MixerHistory>,
-    /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the plane-mode distributed Pulay
-    /// mixer of the owned density loop (then `mixer` is not used).
-    owned: Option<crate::mix_dist::DistributedPulay<crate::parallel::SharedComm>>,
     previous: Option<Vec<ComplexMatrix>>,
-    /// MPI-LAZY-ORBITALS: distributed rows of the blocks of `previous` that are
-    /// 0 x B placeholders (same order; empty when none is lazy).
-    previous_lazy: Vec<Option<crate::gamma_real::LazyOrbitals>>,
     history: Vec<IterationRecord>,
     weight: f64,
     best: f64,
@@ -441,42 +433,11 @@ impl ScfSession {
         )?;
         mixer.reset();
         let weight = self.problem.cell.volume_bohr3() / n.len() as f64;
-        // M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`, default off): the density stays
-        // on the slab planes through the audit, the mixer and the next
-        // potential; static replicated eligibility (no spectral audit here).
-        let owned = if self.problem.owned_density_eligible() {
-            let Mixing::Pulay { beta, history } = self.problem.options.mixing else {
-                unreachable!("eligibility requires plain Pulay");
-            };
-            let input = self.problem.owned_from_full(&n)?;
-            let total = n.len();
-            let (comm, plan) = self.problem.grid_plan()?;
-            let (len, counts) = (plan.plane_len(), plan.plane_counts().to_vec());
-            let mut m = crate::mix_dist::DistributedPulay::new_planes(
-                comm, beta, history, total, len, &counts,
-            )?;
-            if let Some((plan, refit)) = self.guard_plan()? {
-                m.set_coulomb_guard(plan, refit);
-            }
-            self.problem.owned.input = Some(input);
-            self.problem.owned.density_mode = true;
-            Some(m)
-        } else {
-            self.problem.owned.input = None;
-            self.problem.owned.density_mode = false;
-            None
-        };
-        let n = if owned.is_some() {
-            Array3::zeros((0, 0, 0))
-        } else {
-            n
-        };
+        self.problem.record_owned_density_decline();
         self.continuation = Some(Continuation {
             n,
             mixer,
-            owned,
             previous: None,
-            previous_lazy: Vec::new(),
             history: Vec::new(),
             weight,
             best: f64::INFINITY,
@@ -492,9 +453,7 @@ impl ScfSession {
         let Continuation {
             n,
             mixer,
-            owned,
             previous,
-            previous_lazy,
             history,
             weight,
             best,
@@ -503,18 +462,9 @@ impl ScfSession {
             start,
         } = self.continuation.as_mut().unwrap();
         let weight = *weight;
-        if owned.is_some() && !n.is_empty() {
-            // A materialized copy (`materialize_density`) of the owned input:
-            // the owned planes stay authoritative; the copy is dropped so that
-            // it cannot go stale.
-            *n = Array3::zeros((0, 0, 0));
-        }
-        let invalid = if owned.is_some() {
-            self.problem.owned_input_invalid()?
-        } else {
-            n.iter()
-                .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
-        };
+        let invalid = n
+            .iter()
+            .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF);
         if invalid {
             return Err(ScfError::Diverged {
                 reason: "mixed density is nonfinite or negative beyond 1e-14 Bohr^-3".into(),
@@ -557,10 +507,9 @@ impl ScfSession {
         });
         let mut step = self
             .problem
-            .step_session(
+            .step_kpoints_with_certification(
                 n,
                 previous.as_deref(),
-                previous_lazy,
                 tolerance,
                 tolerance <= self.problem.options.eigen_tolerance,
             )
@@ -576,8 +525,7 @@ impl ScfSession {
         // M2-OWNED: owned pairs reduce their per-plane partials (one
         // allgatherv); full pairs keep the row-major arithmetic.
         let (residual, output_sum, input_sum, min_density) =
-            self.problem
-                .step_metrics(n, &step.density, step.owned_density.as_ref())?;
+            self.problem.step_metrics(n, &step.density)?;
         let charge = output_sum * weight;
         let charge_error = (charge - self.problem.electrons).abs() / self.problem.electrons;
         let input_charge_error =
@@ -874,22 +822,6 @@ impl ScfSession {
             crate::phase_clock::add_certificate(certificate_clock);
         }
         if certified || (retain_last && iteration == self.problem.options.max_iterations) {
-            // MPI-LAZY-ORBITALS: the delivered state carries full blocks (one
-            // gather per lazy k block; every rank reaches this point together).
-            // LAZY-RESULT: kept distributed when the caller declared it reads
-            // no delivered orbitals (replicated decision) and the identity
-            // audit below does not need them; `ScfResult::materialize_orbitals`
-            // gathers them later. `orbitals` is then the 0 x B placeholder.
-            if step.k_points.iter().any(|k| k.lazy.is_some()) {
-                if step.nonlocal_from_identity || !crate::gamma_real::lazy_result_allowed() {
-                    materialize_kpoints(&mut step.k_points)?;
-                } else {
-                    crate::m2::count(crate::m2::Count::LazyResults);
-                }
-                if let Some(first) = step.k_points.first() {
-                    step.solution.eigenvectors = first.solution.eigenvectors.clone();
-                }
-            }
             // B2: the final state always carries the explicit nonlocal audit.
             let energy_identity = if step.nonlocal_from_identity {
                 let audit = self.problem.explicit_nonlocal_energy(&step.k_points)?;
@@ -905,9 +837,7 @@ impl ScfSession {
                 None
             };
             // M2-OWNED: the delivered density is gathered once here (output).
-            if let Some(o) = step.owned_density.take() {
-                step.density = self.problem.materialize_owned(&o)?;
-            }
+
             let gap_hartree = if certified {
                 self.problem.check_gap(&step.k_points)?
             } else {
@@ -988,59 +918,7 @@ impl ScfSession {
             reason: e.to_string(),
             history: history.clone(),
         };
-        if let Some(om) = owned.as_mut() {
-            // M2-OWNED: the Pulay update, the feed of a failed verification and
-            // the convex safeguard on this rank's planes; the next input stays
-            // owned (no gather). The same branch structure as below.
-            if history.last().is_some_and(|r| r.mixer_reset) {
-                om.reset();
-            }
-            let input = self
-                .problem
-                .owned
-                .input
-                .take()
-                .ok_or(ScfError::InvalidInput("M2 owned mixing without input"))?;
-            let out = step
-                .owned_density
-                .as_ref()
-                .ok_or(ScfError::InvalidInput("M2 owned mixing without output"))?;
-            let mut mixed = om
-                .mix_block(&input.values, &out.values, mean)
-                .map_err(diverged)?;
-            let base: &[f64] = &input.values;
-            history.last_mut().unwrap().mixing_history_used =
-                Some(om.history_len().saturating_sub(1));
-            history.last_mut().unwrap().mixing_raw_recovery = om.used_raw_recovery();
-            history.last_mut().unwrap().pulay = om.pulay_step();
-            let fraction = self.problem.owned_convex_fraction(base, &mixed)?;
-            if fraction < 1.0 {
-                for (b, a) in mixed.iter_mut().zip(base) {
-                    *b = a + fraction * (*b - a);
-                }
-                om.reset();
-                let record = history.last_mut().unwrap();
-                record.mixing_fraction = fraction;
-                record.mixer_reset = true;
-                *mixing_resets += 1;
-                record.mixing_resets = *mixing_resets;
-            }
-            let epoch = self.problem.owned.next_epoch();
-            self.problem.owned.input = Some(crate::grid_dist::Owned {
-                epoch,
-                values: mixed,
-            });
-            history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-            crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
-            let (warm, lazy) = split_points(step.k_points);
-            *previous = Some(warm);
-            *previous_lazy = lazy;
-            return if iteration == self.problem.options.max_iterations {
-                Ok(StepStatus::NotConverged)
-            } else {
-                Ok(StepStatus::Ready)
-            };
-        }
+
         let mut mixed = mixer
             .mix(
                 n.as_slice().unwrap(),
@@ -1081,10 +959,12 @@ impl ScfSession {
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
         crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
-        // MPI-LAZY-ORBITALS: lazy blocks travel with their distributed rows.
-        let (warm, lazy) = split_points(step.k_points);
-        *previous = Some(warm);
-        *previous_lazy = lazy;
+        *previous = Some(
+            step.k_points
+                .into_iter()
+                .map(|k| k.solution.eigenvectors)
+                .collect(),
+        );
         if iteration == self.problem.options.max_iterations {
             Ok(StepStatus::NotConverged)
         } else {
@@ -1228,56 +1108,18 @@ impl ScfSession {
             .unwrap_or(&[])
     }
     /// Next input density at an active boundary, returned output at a terminal one.
-    /// None at an active boundary of the owned density loop
-    /// (`BAANDI_M2_LOCAL_DENSITY`): the input is held on the ranks' planes;
-    /// `materialize_density` gathers it (collective).
     pub fn density(&self) -> Option<&Array3<f64>> {
         self.outcome
             .as_ref()
             .map(|o| &o.result.density)
-            .or_else(|| {
-                self.continuation
-                    .as_ref()
-                    .filter(|c| c.owned.is_none() || !c.n.is_empty())
-                    .map(|c| &c.n)
-            })
+            .or_else(|| self.continuation.as_ref().map(|c| &c.n))
     }
-    /// M2-OWNED: gather the owned next input density into the continuation so
-    /// that `density()` returns it (one allgatherv, charged as a
-    /// materialization; a no-op otherwise). Collective: every rank calls it at
-    /// the same boundary. The owned loop continues from its owned input.
+    /// Compatibility hook: strict sessions already hold the full density.
     pub fn materialize_density(&mut self) -> Result<(), ScfError> {
-        let Some(c) = self.continuation.as_mut() else {
-            return Ok(());
-        };
-        if c.owned.is_none() || !c.n.is_empty() {
-            return Ok(());
-        }
-        let input = self
-            .problem
-            .owned
-            .input
-            .take()
-            .ok_or(ScfError::InvalidInput("M2 owned boundary without input"))?;
-        let full = self.problem.materialize_owned(&input);
-        self.problem.owned.input = Some(input);
-        c.n = full?;
         Ok(())
     }
-    /// The next input density of an active boundary: kept on the planes in
-    /// the owned loop (the full array is cleared so it cannot go stale).
+    /// Replace the next input density at an active boundary.
     fn set_next_input(&mut self, n: Array3<f64>) -> Result<(), ScfError> {
-        let owned = self
-            .continuation
-            .as_ref()
-            .is_some_and(|c| c.owned.is_some());
-        let n = if owned {
-            let o = self.problem.owned_from_full(&n)?;
-            self.problem.owned.input = Some(o);
-            Array3::zeros((0, 0, 0))
-        } else {
-            n
-        };
         if let Some(c) = self.continuation.as_mut() {
             c.n = n;
         }
@@ -1389,10 +1231,6 @@ impl ScfSession {
             // MPI-LAZY-ORBITALS: lazy blocks are gathered (every rank runs the
             // same capture, so the collective is entered by all of them).
             match self.continuation.as_ref() {
-                Some(c) if c.previous_lazy.iter().any(Option::is_some) => full_previous(c)
-                    .map_err(|_| Rejection::Orbitals)?
-                    .map(|v| v.iter().map(orbitals).collect())
-                    .unwrap_or_default(),
                 Some(c) => c
                     .previous
                     .as_ref()
@@ -1414,7 +1252,6 @@ impl ScfSession {
             if self.status != StepStatus::Ready {
                 return Err(Rejection::Boundary);
             }
-            self.problem.forget_real_reuse();
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
             Some(ContinuationState {
                 verification_attempts: Vec::new(),
@@ -1563,11 +1400,9 @@ impl ScfSession {
         if self.continuation.is_none() {
             return Err(R::Boundary);
         }
-        // M2-OWNED: the imported density becomes the owned input of the loop.
         self.set_next_input(n).map_err(|_| R::Grid)?;
         let c = self.continuation.as_mut().ok_or(R::Boundary)?;
         c.previous = previous;
-        c.previous_lazy = Vec::new();
         Ok(())
     }
     pub fn restore_exact(
@@ -1849,36 +1684,8 @@ pub(crate) fn orthonormal_split(
     Ok(flag[0] == 0.0)
 }
 
-fn split_points(
-    points: Vec<KPointSolution>,
-) -> (
-    Vec<ComplexMatrix>,
-    Vec<Option<crate::gamma_real::LazyOrbitals>>,
-) {
-    let any_lazy = points.iter().any(|k| k.lazy.is_some());
-    let mut warm = Vec::with_capacity(points.len());
-    let mut lazy = Vec::new();
-    for k in points {
-        warm.push(k.solution.eigenvectors);
-        if any_lazy {
-            lazy.push(k.lazy);
-        }
-    }
-    (warm, lazy)
-}
-
 fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
-    let Some(previous) = c.previous.as_ref() else {
-        return Ok(None);
-    };
-    let mut out = Vec::with_capacity(previous.len());
-    for (i, m) in previous.iter().enumerate() {
-        out.push(match c.previous_lazy.get(i).and_then(Option::as_ref) {
-            Some(lazy) if m.rows() == 0 => lazy.materialize()?.clone(),
-            _ => m.clone(),
-        });
-    }
-    Ok(Some(out))
+    Ok(c.previous.clone())
 }
 
 #[cfg(test)]

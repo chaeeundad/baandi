@@ -148,32 +148,7 @@ impl LazyOrbitals {
     pub fn global_len(&self) -> usize {
         self.0.n
     }
-    /// Whether this handle holds the rows of `rows` (the operator's local
-    /// rows) of an N-row block.
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn matches(&self, rows: &[usize], n: usize) -> bool {
-        self.0.n == n && *self.0.rows == *rows
-    }
-    /// The local rows after the elementwise ORC round trip sqrt2 * (x / sqrt2)
-    /// that pack(unpack(x)) applies to every coordinate but the G = 0 row:
-    /// bit-identical to the local rows of the packed gathered warm start.
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn round_trip_start(&self) -> Result<RealMatrix, ScfError> {
-        let x = &self.0.x;
-        let nl = x.rows();
-        let mut out = RealMatrix::zeros(nl, x.cols()).map_err(SolverError::from)?;
-        let s = std::f64::consts::SQRT_2;
-        for (dst, src) in out
-            .as_mut_slice()
-            .chunks_mut(nl.max(1))
-            .zip(x.as_slice().chunks(nl.max(1)))
-        {
-            for ((d, &v), &g) in dst.iter_mut().zip(src).zip(self.0.rows.iter()) {
-                *d = if g == 0 { v } else { s * (v / s) };
-            }
-        }
-        Ok(out)
-    }
+
     /// The full complex N x B block (gathered once, then cached). Collective:
     /// every rank must call it at the same point.
     pub fn materialize(&self) -> Result<&ComplexMatrix, ScfError> {
@@ -225,46 +200,5 @@ impl LazyOrbitals {
             Ok(inner) => Ok(inner.full.into_inner().expect("materialized")),
             Err(shared) => Ok(shared.full.get().expect("materialized").clone()),
         }
-    }
-    /// Occupation-weighted kinetic energy sum_b f_b sum_G |G|^2/2 |c_b(G)|^2 from
-    /// the local rows: sum_r d_r x_rb^2 with the ORC kinetic diagonal d (the
-    /// representative's |G|^2/2 on both of its coordinates, |G|^2/2 at G = 0),
-    /// band values reduced with one tree sum, then summed in band order.
-    /// Rounding class against the complex sum (another summation order).
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn kinetic_energy(
-        &self,
-        diagonal: &[f64],
-        occupations: &[f64],
-    ) -> Result<f64, ScfError> {
-        let x = &self.0.x;
-        let nl = x.rows();
-        let m = occupations
-            .iter()
-            .rposition(|&f| f != 0.0)
-            .map_or(0, |i| i + 1);
-        if diagonal.len() != nl || occupations.len() != x.cols() {
-            return Err(ScfError::InvalidInput("lazy kinetic energy dimensions"));
-        }
-        let mut partial = vec![0.0; m];
-        for (p, column) in partial.iter_mut().zip(x.as_slice().chunks(nl.max(1))) {
-            *p = column
-                .iter()
-                .zip(diagonal)
-                .map(|(&v, &d)| d * v * v)
-                .sum::<f64>();
-        }
-        let mut values = vec![0.0; m];
-        self.0
-            .comm
-            .tree_sum_f64(&partial, &mut values)
-            .map_err(|e| ScfError::Numerical(format!("lazy kinetic energy: {e}")))?;
-        let mut sum = 0.0;
-        for (v, f) in values.iter().zip(occupations) {
-            if *f != 0.0 {
-                sum += f * v;
-            }
-        }
-        Ok(sum)
     }
 }

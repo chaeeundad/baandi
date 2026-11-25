@@ -63,6 +63,7 @@ const C_POTENTIAL: usize = 0;
 #[cfg(feature = "strict-oracle")]
 const C_AUDIT: usize = 1;
 #[cfg(feature = "strict-oracle")]
+#[cfg(test)]
 const C_STOP: usize = 2;
 #[cfg(feature = "strict-oracle")]
 const C_PLANS: usize = 3;
@@ -112,25 +113,17 @@ pub fn local_density_requested() -> bool {
 }
 
 #[cfg(feature = "strict-oracle")]
-pub(crate) const O_FIELDS_OWNED_MAPS: usize = 0;
-#[cfg(feature = "strict-oracle")]
 pub(crate) const O_FIELDS_DECLINED_MAPS: usize = 1;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const O_POTENTIAL_GATHERS: usize = 2;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const O_POTENTIAL_GATHER_VALUES: usize = 3;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_CONSUMER_GATHERS: usize = 4;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_CONSUMER_GATHER_VALUES: usize = 5;
 pub(crate) const O_REDISTRIBUTIONS: usize = 6;
 pub(crate) const O_REDISTRIBUTION_VALUES: usize = 7;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const O_FULL_COPIES: usize = 8;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const O_FULL_COPY_VALUES: usize = 9;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_DENSITY_OWNED_MAPS: usize = 10;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const O_DENSITY_DECLINED: usize = 11;
 #[cfg(feature = "strict-oracle")]
@@ -141,16 +134,6 @@ pub(crate) const O_DENSITY_GATHER_VALUES: usize = 13;
 pub(crate) const O_MIXER_GATHERS: usize = 14;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const O_MIXER_GATHER_VALUES: usize = 15;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_MATERIALIZATIONS: usize = 16;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_MATERIALIZATION_VALUES: usize = 17;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_EPOCH_CHECKS: usize = 18;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_OWNED_REDUCTIONS: usize = 19;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const O_PLANE_VALUES: usize = 20;
 const OWNED_NAMES: [&str; 21] = [
     "fields_owned_maps",
     "fields_declined_maps",
@@ -177,17 +160,11 @@ const OWNED_NAMES: [&str; 21] = [
 static OWNED: [AtomicU64; 21] = [const { AtomicU64::new(0) }; 21];
 #[cfg(feature = "strict-oracle")]
 pub(crate) const T_POTENTIAL_GATHER: usize = 0;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const T_CONSUMER_GATHER: usize = 1;
 pub(crate) const T_REDISTRIBUTE: usize = 2;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const T_DENSITY_GATHER: usize = 3;
 #[cfg(feature = "strict-oracle")]
 pub(crate) const T_MIXER_GATHER: usize = 4;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const T_MATERIALIZE: usize = 5;
-#[cfg(feature = "strict-oracle")]
-pub(crate) const T_OWNED_REDUCE: usize = 6;
 const OWNED_TIME_NAMES: [&str; 7] = [
     "potential_gather",
     "consumer_potential_gather",
@@ -276,10 +253,7 @@ pub(crate) fn count_spin_decline() {
 pub(crate) fn owned_add(i: usize, n: u64) {
     OWNED[i].fetch_add(n, Ordering::Relaxed);
 }
-#[cfg(feature = "strict-oracle")]
-pub(crate) fn owned_max(i: usize, n: u64) {
-    OWNED[i].fetch_max(n, Ordering::Relaxed);
-}
+
 /// Charge the time since `start` (None with `BAANDI_STAGE_TIMERS=off`: no clock).
 pub(crate) fn owned_time(i: usize, start: Option<std::time::Instant>) {
     if start.is_some() {
@@ -328,46 +302,11 @@ pub fn owned_stats() -> crate::parallel::M2Stats {
     (counts, stages)
 }
 
-/// Epoch-tagged plane-local field of the slab layout (M2-OWNED): the values
-/// of this rank's planes and the epoch of the map that produced them. A
-/// consumer compares the epoch it expects with the tag, so a stale field is
-/// rejected instead of used.
-#[derive(Clone, Debug)]
-#[cfg(feature = "strict-oracle")]
-pub(crate) struct Owned {
-    pub(crate) epoch: u64,
-    pub(crate) values: Vec<f64>,
-}
-
-/// Owned-field state of one problem (M2-OWNED). `potential` is the effective
-/// potential of the latest owned map on the distributed operator's planes;
-/// `complex_stale` says that the complex Hamiltonians still hold an older full
-/// potential (a consumer of the full potential gathers it first).
+/// Declared consumer retained for strict-oracle decline diagnostics.
 #[derive(Default)]
 #[cfg(feature = "strict-oracle")]
 pub(crate) struct OwnedFields {
-    epoch: u64,
-    pub(crate) potential: Option<Owned>,
-    pub(crate) complex_stale: bool,
-    pub(crate) map: Option<PlaneMap>,
-    pub(crate) scratch: Vec<f64>,
-    /// `BAANDI_M2_LOCAL_DENSITY` loop active (set by the session): maps keep
-    /// their output density on the slab planes (`output`), and a map given an
-    /// empty input array reads its input from `input`.
-    pub(crate) density_mode: bool,
-    pub(crate) input: Option<Owned>,
-    pub(crate) output: Option<Owned>,
-    /// Declared consumer of active-boundary state (`OwnedDecline`): both
-    /// owned modes decline for this problem.
     pub(crate) declined: Option<OwnedDecline>,
-}
-#[cfg(feature = "strict-oracle")]
-impl OwnedFields {
-    /// A new epoch for a field produced now (monotonic per problem).
-    pub(crate) fn next_epoch(&mut self) -> u64 {
-        self.epoch += 1;
-        self.epoch
-    }
 }
 
 /// Plane start of rank r for n0 planes over `ranks` ranks (the rule of
@@ -420,14 +359,7 @@ impl PlaneMap {
             recv: Vec::new(),
         }
     }
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn identity(&self) -> bool {
-        self.first_a == self.first_b
-    }
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn matches(&self, dims: [usize; 3], first_a: usize, first_b: usize) -> bool {
-        self.dims == dims && self.first_a == first_a && self.first_b == first_b
-    }
+
     /// Layout A -> layout B. Collective unless `identity()`.
     pub(crate) fn a_to_b<K: Collective>(
         &mut self,

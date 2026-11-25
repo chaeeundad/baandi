@@ -385,10 +385,10 @@ pub(crate) fn capture_entry(e: Entry<'_>) -> Option<Capture> {
             } else {
                 "null".to_string()
             },
-            sw_reuse = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_REUSE),
+            sw_reuse = "off",
             sw_lean = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_LEAN_ALGEBRA),
-            sw_lazy = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_LAZY),
-            sw_psi = dft_numerics::switches::choice(dft_numerics::switches::Id::REUSE_PSI),
+            sw_lazy = "off",
+            sw_psi = "off",
             sw_dav = dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),
         );
         // ISSUE-18: the operator fingerprint (separate field, appended).

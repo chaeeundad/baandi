@@ -398,10 +398,6 @@ pub(crate) fn evaluate_with_core_xc(
 /// Common terms for one output density and the input fields that produced it.
 /// Rebuild every iteration; never reuse across density/potential updates.
 pub(crate) struct SharedAudit {
-    /// Fourier coefficients of the checked output density (`to_reciprocal`
-    /// normalization), kept for the stop-rule estimate (ticket MPI-REMAINING).
-    #[cfg_attr(not(feature = "strict-oracle"), allow(dead_code))]
-    density_reciprocal: Array3<Complex64>,
     local: f64,
     local_zero_mode: f64,
     hartree: f64,
@@ -490,7 +486,6 @@ pub(crate) fn prepare_shared(
         rh,
         rx,
         nlcc: core_ledger(core, n, x, volume),
-        density_reciprocal: ng,
     })
 }
 
@@ -511,14 +506,7 @@ impl SharedAudit {
             rh,
             rx,
             nlcc: None,
-            density_reciprocal: Array3::zeros((0, 0, 0)),
         }
-    }
-    /// Fourier coefficients of the checked output density of this audit
-    /// (moved out; the audit's later stages do not read them).
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn take_density_reciprocal(&mut self) -> Array3<Complex64> {
-        std::mem::replace(&mut self.density_reciprocal, Array3::zeros((0, 0, 0)))
     }
 }
 

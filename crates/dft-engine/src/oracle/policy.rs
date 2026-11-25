@@ -223,9 +223,7 @@ pub fn prepare_policy(
     if next.locking == crate::Locking::Auto && !matches!(next.eigensolver, SolverChoice::Davidson) {
         return Err(PolicyError::LockingRequiresDavidson);
     }
-    if next.standard.is_some() && !matches!(next.eigensolver, SolverChoice::Davidson) {
-        return Err(PolicyError::StandardRequiresDavidson);
-    }
+
     validate_mixing(&next.mixing)?;
     let mixing_changed = mixing_key(&next.mixing) != mixing_key(&current.mixing);
     if !reset
@@ -242,21 +240,4 @@ pub fn prepare_policy(
         options: next,
         reset_history: reset || mixing_changed,
     })
-}
-
-#[cfg(test)]
-mod standard_policy_tests {
-    use super::*;
-    /// ONEPATH-4: the runtime modes run the standard path by default; a hybrid
-    /// eigensolver request would be ignored by the Ritz-change solver there, so
-    /// it rejects. The strict reference keeps accepting it.
-    #[test]
-    fn hybrid_request_rejects_on_the_standard_path_only() {
-        let change = [PolicyChange::Eigensolver(RuntimeEigensolver::Hybrid)];
-        assert_eq!(
-            prepare_policy(&ScfOptions::default(), 1, None, &change).err(),
-            Some(PolicyError::StandardRequiresDavidson)
-        );
-        assert!(prepare_policy(&ScfOptions::strict_reference(), 1, None, &change).is_ok());
-    }
 }

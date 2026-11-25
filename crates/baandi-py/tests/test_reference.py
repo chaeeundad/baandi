@@ -56,16 +56,16 @@ class ReferenceBindingTests(unittest.TestCase):
         self.assertEqual((o.mixing_beta, o.mixing_history), (0.7, 8))
         self.assertTrue(o.verify)
         self.assertEqual(o.standard_threshold_ha, 5e-9)
-        o.driver = "legacy"
+        o.reference_strict = True
         o.reference_strict = False
-        self.assertEqual((o.mixing_beta, o.mixing_history), (0.5, 6))
+        self.assertEqual((o.mixing_beta, o.mixing_history), (0.7, 8))
         o.reference_strict = True
         self.assertEqual(o.mixing_beta, 0.3)
         o.mixing_beta, o.mixing_history = 0.4, 5
         o.driver = "reference"
         self.assertEqual((o.mixing_beta, o.mixing_history), (0.4, 5))
 
-    def test_reference_invalid_start_fails_without_fallback(self):
+    def test_reference_missing_atomic_data_uses_uniform_start(self):
         o = Options()
         o.reference_strict = False
         s = small_session(o)
@@ -76,11 +76,10 @@ class ReferenceBindingTests(unittest.TestCase):
                 operation()
         with self.assertRaises(ValueError):
             s.stress()
-        with self.assertRaisesRegex(RuntimeError, "requires compatible NC atomic charge"):
-            s.initialize()
-        self.assertEqual(s.status, "Failed")
-        with self.assertRaises(RuntimeError):
-            s.run()
+        s.initialize()
+        self.assertEqual(s.status, "Initialized")
+        s.run()
+        self.assertTrue(s.result().converged)
 
     def test_reference_stepwise_batch_bit_identity(self):
         # Nonphysical atomic-start data, generated in memory; no UPF committed.
@@ -163,24 +162,23 @@ class ReferenceBindingTests(unittest.TestCase):
         for name, value in (("driver", "typo"), ("mixing_beta", 0.),
                             ("mixing_history", 0), ("max_iterations", 0),
                             ("standard_threshold_ha", float("nan")),
-                            ("reference_strict", True), ("kgrid", [0, 2, 2])):
+                            ("driver", "legacy"), ("kgrid", [0, 2, 2])):
             o = Options()
             o.reference_strict = False
             setattr(o, name, value)
             with self.subTest(option=name), self.assertRaises(ValueError):
                 small_session(o)
 
-    def test_legacy_rejects_non_gamma_mesh(self):
+    def test_strict_oracle_rejects_non_gamma_mesh(self):
         o = Options()
-        o.driver = "legacy"
+        o.reference_strict = True
         o.kgrid = [2, 2, 2]
         with self.assertRaisesRegex(ValueError, "non-Gamma kgrid requires"):
             small_session(o)
 
-    def test_legacy_stepwise_batch_and_owned_result(self):
+    def test_strict_oracle_stepwise_batch_and_owned_result(self):
         o = Options()
-        o.driver = "legacy"
-        o.reference_strict = False
+        o.reference_strict = True
         o.cutoff_hartree, o.bands = 2., 2
         a, b = small_session(o), small_session(o)
         a.initialize()

@@ -217,8 +217,4 @@ pub struct ScfStep {
     /// True when `energy.nonlocal` comes from the band-sum identity (B2,
     /// `BAANDI_ENERGY_IDENTITY=on`, non-final iterations only).
     pub nonlocal_from_identity: bool,
-    /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the output density on this
-    /// rank's slab planes; `density` is then an empty array.
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) owned_density: Option<crate::grid_dist::Owned>,
 }

@@ -708,9 +708,7 @@ impl Scf {
             )),
         }
     }
-    /// Applies on the standard path only (`Config::scf_path` rejects it on an
-    /// input that falls back to strict).
-
+    /// Mixing strategy for the strict oracle; reference mixing is resolved separately.
     pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
         let invalid = |message: &str| ConfigError::Invalid(message.into());
         let beta = self.mixing_beta.unwrap_or(0.3);

@@ -76,6 +76,7 @@ pub(crate) struct DistributedPulay<K: Collective> {
     chunk: usize,
     /// Plane mode (`BAANDI_M2_LOCAL_DENSITY`): the block is this rank's slab
     /// planes, handed to `mix_block` directly; `mix` (full arrays) is refused.
+    #[cfg(test)]
     planes: bool,
     rank: usize,
     /// Chunk counts per rank (allgatherv layout).
@@ -161,6 +162,7 @@ impl<K: Collective> DistributedPulay<K> {
     /// block itself; chunk mode: one allgatherv of the block, then this
     /// rank's planes). Collective in chunk mode.
     fn guard_planes(&mut self, block: &[f64]) -> Result<Vec<f64>, SolverError> {
+        #[cfg(test)]
         if self.planes {
             return Ok(block.to_vec());
         }
@@ -309,6 +311,7 @@ impl<K: Collective> DistributedPulay<K> {
             lo,
             hi,
             chunk: CHUNK,
+            #[cfg(test)]
             planes: false,
             rank,
             chunk_counts,
@@ -330,6 +333,7 @@ impl<K: Collective> DistributedPulay<K> {
     /// `plane_len` points each (`plane_counts` planes per rank, ascending plane
     /// order = rank order); every canonical partial sum is per plane, so the
     /// results do not depend on the rank count.
+    #[cfg(test)]
     pub(crate) fn new_planes(
         comm: K,
         beta: f64,
@@ -498,6 +502,7 @@ impl<K: Collective> DensityMixer for DistributedPulay<K> {
                 "finite equal nonempty densities, positive mean and beta required",
             ));
         }
+        #[cfg(test)]
         if self.planes {
             return Err(SolverError::InvalidParameter(
                 "plane-mode mixer takes owned blocks (mix_block)",
@@ -550,6 +555,7 @@ impl<K: Collective> DistributedPulay<K> {
     /// locally (an early error on one rank would desynchronize the
     /// collectives): a nonfinite value reaches every rank through the charge
     /// sums, and every rank's result is then nonfinite.
+    #[cfg(test)]
     pub(crate) fn mix_block(
         &mut self,
         x: &[f64],
@@ -767,6 +773,7 @@ impl<K: Collective> MixerHistory for DistributedPulay<K> {
         mean: f64,
     ) -> Result<(), SolverError> {
         let size = dx.first().map_or(0, Vec::len);
+        #[cfg(test)]
         if self.planes {
             return Err(SolverError::InvalidParameter(
                 "plane-mode mixer takes owned blocks (seed_block)",

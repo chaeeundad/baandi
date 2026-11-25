@@ -126,6 +126,10 @@ fn synthetic_config(threads: usize) -> config::Config {
 
 #[test]
 fn final_scf_exports_identical_across_thread_counts() {
+    let switches =
+        dft_numerics::switches::RunConfig::from_pairs(&[("reference_strict", "on")]).unwrap();
+    let _scope = switches.enter();
+
     let root = std::env::temp_dir().join(format!("p8b-scf-{}", std::process::id()));
     let pp = dft_engine::input::parse_upf(
         &common::fixture()

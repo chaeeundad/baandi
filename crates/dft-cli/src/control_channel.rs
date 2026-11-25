@@ -212,6 +212,10 @@ mod tests {
 
     #[test]
     fn proposal_requires_separate_approval_and_rejects_stale_version() {
+        let switches =
+            dft_numerics::switches::RunConfig::from_pairs(&[("reference_strict", "on")]).unwrap();
+        let _scope = switches.enter();
+
         let config = crate::config::Config::parse("[system]\nname='test'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='Si'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nSi='synthetic.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n").unwrap();
         let prepared = config.prepare().unwrap();
         let upf = parse_upf(&fixture::fixture()).unwrap();

@@ -250,7 +250,7 @@ fn numeric_field_allowlist_and_errors() {
             "system.atoms[1].fractional[2]",
             "1/0",
         ),
-        ("'2e-8/2 Ha'", "'1/0 Ha'", "scf.energy_tolerance", "1/0 Ha"),
+        ("'1e-8'", "'1/0'", "scf.standard_threshold_ha", "1/0"),
         ("seed='4052/2'", "seed='-1'", "scf.seed", "-1"),
     ] {
         let err = Config::parse(&text.replace(from, to))

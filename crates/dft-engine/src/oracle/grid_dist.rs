@@ -270,18 +270,17 @@ impl GridPlan {
         self.planes * self.rows * self.nz
     }
     /// Grid points of one plane.
+    #[cfg(test)]
     pub(crate) fn plane_len(&self) -> usize {
         self.rows * self.nz
     }
     /// Planes per rank (ascending plane order is rank order).
+    #[cfg(test)]
     pub(crate) fn plane_counts(&self) -> &[usize] {
         &self.plane_counts
     }
-    /// First FFT axis of the slab layout (the axis of the planes).
-    pub(crate) fn first_axis(&self) -> usize {
-        self.fft.first_axis()
-    }
     /// Effective potential of the latest `potential_field` call on this rank's planes.
+    #[cfg(test)]
     pub(crate) fn effective_planes(&self) -> &[f64] {
         &self.effective_planes
     }
@@ -311,6 +310,7 @@ impl GridPlan {
     /// Full row-major grid from every rank's plane-local field `local` (one
     /// allgatherv; a pure permutation, bit-identical for every rank count).
     /// Collective. Counted as one owned-field gather of the given kind.
+    #[cfg(test)]
     pub(crate) fn gather_field<K: Collective>(
         &mut self,
         comm: &K,
@@ -342,53 +342,6 @@ impl GridPlan {
         Ok(())
     }
 
-    /// Canonical global reduction of plane-local partials: `fill(i, out)`
-    /// writes the `k` partial sums of plane i; `maxes` are combined by max
-    /// (order free, exact). One allgatherv; sums added in ascending plane
-    /// order, so the result does not depend on the rank count. Collective.
-    pub(crate) fn plane_reduce<K: Collective>(
-        &mut self,
-        comm: &K,
-        k: usize,
-        mut fill: impl FnMut(usize, &mut [f64]),
-        maxes: &[f64],
-    ) -> Result<(Vec<f64>, Vec<f64>), ScfError> {
-        self.send.clear();
-        self.send.resize(self.planes * k, 0.0);
-        for i in 0..self.planes {
-            fill(i, &mut self.send[i * k..(i + 1) * k]);
-        }
-        self.send.extend_from_slice(maxes);
-        let counts: Vec<usize> = self
-            .plane_counts
-            .iter()
-            .map(|p| p * k + maxes.len())
-            .collect();
-        self.recv.resize(counts.iter().sum(), 0.0);
-        comm.allgatherv_f64(&self.send, &counts, &mut self.recv)
-            .map_err(|e| ScfError::Numerical(format!("M2 owned reduction: {e}")))?;
-        let mut sums = vec![0.0; k];
-        let mut max = vec![f64::NEG_INFINITY; maxes.len()];
-        let mut at = 0;
-        for &planes in &self.plane_counts {
-            for p in 0..planes {
-                for (q, s) in sums.iter_mut().enumerate() {
-                    *s += self.recv[at + p * k + q];
-                }
-            }
-            at += planes * k;
-            for (m, v) in max.iter_mut().zip(&self.recv[at..at + maxes.len()]) {
-                // NaN propagates (a nonfinite value on any rank).
-                *m = if v.is_nan() || m.is_nan() {
-                    f64::NAN
-                } else {
-                    m.max(*v)
-                };
-            }
-            at += maxes.len();
-        }
-        Ok((sums, max))
-    }
     fn weight(&self) -> f64 {
         self.volume / self.dims.iter().product::<usize>() as f64
     }

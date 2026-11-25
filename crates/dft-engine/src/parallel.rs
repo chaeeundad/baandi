@@ -156,11 +156,6 @@ pub(crate) fn count_distributed_solve() {
 pub struct SharedComm(Shared);
 
 impl SharedComm {
-    /// Whether a communicator is registered, including a one-rank MPI world.
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn registered() -> bool {
-        COMM.with(|c| c.borrow().is_some())
-    }
     /// The registered communicator when it has two or more ranks.
     pub fn active() -> Option<Self> {
         COMM.with(|c| {

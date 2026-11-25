@@ -31,10 +31,6 @@ fn standard_scf_in_an_expanded_cell_on_the_frozen_reference_grid() {
         bands: Some(4),
         ..ScfOptions::strict_reference()
     };
-    assert!(
-        standard.standard.is_some(),
-        "engine default is the standard path"
-    );
     let grid = ScfProblem::new(&reference, &atoms, &refs, standard.clone())
         .unwrap()
         .grid_dimensions();
@@ -54,13 +50,11 @@ fn standard_scf_in_an_expanded_cell_on_the_frozen_reference_grid() {
         .expect("standard problem on the frozen grid")
         .run()
         .expect("standard SCF converges with verification");
-    assert!(
-        standard_result
-            .verification
-            .as_ref()
-            .is_some_and(|v| v.passed())
-    );
+    assert!(standard_result.certified);
     let strict = ScfOptions {
+        energy_tolerance: 1e-12,
+        density_tolerance: 1e-10,
+        eigen_tolerance: 1e-10,
         cutoff_hartree: 1.5,
         bands: Some(4),
         ..ScfOptions::strict_reference()
@@ -74,8 +68,5 @@ fn standard_scf_in_an_expanded_cell_on_the_frozen_reference_grid() {
         "ONEPATH-2B frozen expanded cell: grid {grid:?} (own {own:?}), dE standard-strict {de:e} Ha"
     );
     // Standard class: the delivered energy is resolved to the threshold.
-    assert!(
-        de.abs() <= standard.standard.unwrap().threshold_ha,
-        "{de:e}"
-    );
+    assert!(de.abs() <= 1e-10, "{de:e}");
 }

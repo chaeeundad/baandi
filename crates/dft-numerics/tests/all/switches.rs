@@ -144,8 +144,7 @@ fn legacy_defaults_are_unchanged() {
         switches::Table::Profile
     );
     assert_eq!(switches::choice(Id::LEAN_BORDER), "separate");
-    assert!(on(Id::SPIN_SHARE), "SPIN_SHARE defaults on");
-    assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
+    assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::M2_SELECTED_ROOTS));
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_CAPACITY), None).0,
         Value::Choice("auto")
@@ -217,14 +216,12 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
     // MPI-KEPT-START stays opt-in until dev08.
-    assert_eq!(value(Id::M2_REUSE), Value::Choice("on"));
     // MPI-SCALING-GAP switches stay opt-in until dev08.
     assert_eq!(value(Id::M2_STICKS), Value::Choice("mirror"));
     assert_eq!(value(Id::M2_START), Value::Choice("gram"));
     // MPI-OVERLAP-DAVIDSON stays opt-in until dev08.
     assert_eq!(value(Id::M2_LEAN_ALGEBRA), Value::Choice("on"));
     // Adopted 2026-11-17 on dev08 evidence (ledger M2-LAZY-DEV08-STAGE0/-STAGE1, MPI-FS-PANEL-GS).
-    assert_eq!(value(Id::M2_LAZY), Value::Choice("on"));
     assert_eq!(value(Id::M2_PANEL_GS), Value::Choice("fused"));
     // MPI-REMAINING grid switches stay opt-in until dev08.
     assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("on"));
@@ -267,11 +264,9 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::FFT_KEPT_FUSE), Value::Choice("off"));
     assert_eq!(value(Id::DAVIDSON_PACKED_REDUCE), Value::Choice("off"));
     assert_eq!(value(Id::COLLECTIVE_TRACE), Value::Choice("off"));
-    assert_eq!(value(Id::SERIAL_DENSITY_FUSED), Value::Choice("on"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
-    assert_eq!(value(Id::M2_OWNED_INPUT), Value::Choice("off"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 127);
+    assert_eq!(TABLE.len(), 121);
 }
 
 #[test]

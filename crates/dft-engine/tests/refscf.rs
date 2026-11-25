@@ -4611,7 +4611,17 @@ fn nlcc_owned_start_matches_legacy_and_gaussian_fourier() {
             gamma_real: GammaReal::On,
             ..Default::default()
         };
-        let old = ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+        let old = ScfProblem::new(
+            &cell,
+            &atoms,
+            &species,
+            ScfOptions {
+                standard: None,
+                verification: dft_engine::Verification::Off,
+                ..options.clone()
+            },
+        )
+        .unwrap();
         let density = old.starting_density();
         let core = old.core_density().unwrap();
         let mut fft = dft_physics::data::FftPlan3d::new(old.grid_dimensions()).unwrap();
@@ -5602,7 +5612,17 @@ fn pbe_nlcc_total_gradient_and_start_match_serial() {
             grid_override: Some(dims),
             ..Default::default()
         };
-        let old = ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+        let old = ScfProblem::new(
+            &cell,
+            &atoms,
+            &species,
+            ScfOptions {
+                standard: None,
+                verification: dft_engine::Verification::Off,
+                ..options.clone()
+            },
+        )
+        .unwrap();
         let n = old.starting_density();
         let core = old.core_density().unwrap();
         let total = &n + core;
@@ -5882,7 +5902,17 @@ fn pbe_nlcc_negative_total_start_fails_collectively() {
     };
     // This deliberately under-resolved core rings below zero where the atomic
     // valence was clipped to zero. PBE must reject the total, never repair it.
-    let old = ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+    let old = ScfProblem::new(
+        &cell,
+        &atoms,
+        &species,
+        ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            ..options.clone()
+        },
+    )
+    .unwrap();
     let density = old.starting_density();
     let total = &density + old.core_density().unwrap();
     let minimum = total.iter().copied().fold(f64::INFINITY, f64::min);
@@ -7167,7 +7197,11 @@ fn g6_symmetry_geometry_guard_and_small_map() {
         &cell,
         &atoms,
         &narrow_potentials,
-        narrow_options,
+        ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            ..narrow_options
+        },
         prepared.points(),
         dft_engine::OccupationPolicy::Insulator {
             minimum_gap_hartree: 1e-7,
@@ -8221,10 +8255,19 @@ fn g4e_positive_density_driver_bits() {
         for setting in ["off", "on"] {
             let config = RunConfig::from_pairs(&[("xc_screen_negative", setting)]).unwrap();
             let _s = config.enter();
-            let legacy = ScfProblem::new(&cell, &atoms, &potentials, options.clone())
-                .unwrap()
-                .run()
-                .unwrap();
+            let legacy = ScfProblem::new(
+                &cell,
+                &atoms,
+                &potentials,
+                ScfOptions {
+                    standard: None,
+                    verification: dft_engine::Verification::Off,
+                    ..options.clone()
+                },
+            )
+            .unwrap()
+            .run()
+            .unwrap();
             let reference = dft_engine::refscf::driver::run_with(
                 StartInput {
                     cell: &cell,
@@ -8628,7 +8671,17 @@ fn r6b_original_pbe_nlcc_start_matches_serial() {
         grid_override: Some([8, 10, 12]),
         ..Default::default()
     };
-    let old = ScfProblem::new(&cell, &atoms, &potentials, options.clone()).unwrap();
+    let old = ScfProblem::new(
+        &cell,
+        &atoms,
+        &potentials,
+        ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            ..options.clone()
+        },
+    )
+    .unwrap();
     let n = old.starting_density();
     let total = &n + old.core_density().unwrap();
     let mut fft = FftPlan3d::new(old.grid_dimensions()).unwrap();

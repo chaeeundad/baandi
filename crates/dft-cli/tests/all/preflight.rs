@@ -37,6 +37,7 @@ impl Case {
     fn command(&self, text: &str, command: &str, json: bool) -> Output {
         fs::write(self.dir.join("input.toml"), text).unwrap();
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+        cmd.env("BAANDI_REFERENCE_STRICT", "on");
         cmd.current_dir(&self.dir).args([command, "input.toml"]);
         if json {
             cmd.arg("--json");
@@ -120,18 +121,15 @@ fn scf_controls_and_electrons() {
         "max_iterations=0",
         "max_iterations=-1",
         "threads=0",
-        "energy_tolerance_ha=0.0",
-        "density_residual_tolerance=-1.0",
-        "eigen_tolerance=nan",
         "mixing_beta=0.0",
         "mixing_beta=1.1",
         "mixing='unknown'",
         "nbands=1",
     ] {
-        let key = format!("scf.{}", setting.split('=').next().unwrap());
+        let key = setting.split('=').next().unwrap();
         reject(
             c.command(&c.text("Si", "'synthetic.xml'", setting), "validate", false),
-            &[&key],
+            &[key],
         );
     }
     let text = c.text("Si", "'synthetic.xml'", "");
@@ -233,10 +231,14 @@ fn functional_files_and_kpoint_gap() {
 
 #[test]
 fn valid_preflight_preserves_engine_energy_and_density() {
+    let switches =
+        dft_numerics::switches::RunConfig::from_pairs(&[("reference_strict", "on")]).unwrap();
+    let _scope = switches.enter();
+
     use dft_cli::{config::Config, run::options};
     use dft_engine::{ScfProblem, SpeciesPotential, input::Atom};
     let c = Case::new();
-    let text = c.text("Si", "'synthetic.xml'", "driver='legacy'\nmax_iterations=1");
+    let text = c.text("Si", "'synthetic.xml'", "max_iterations=1");
     let config = Config::parse(&text).unwrap();
     let potential = dft_upf::from_file(c.dir.join("synthetic.xml")).unwrap();
     let direct = ScfProblem::new(

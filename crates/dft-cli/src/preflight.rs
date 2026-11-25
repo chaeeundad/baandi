@@ -213,19 +213,14 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         ));
     }
     if let Some(s) = &config.scf {
-        for (key, value) in [("mixing_beta", s.mixing_beta)] {
-            if value.is_some_and(|x| !x.is_finite() || x <= 0. || (key == "mixing_beta" && x > 1.))
-            {
-                return Err(fail(
-                    &format!("scf.{key}"),
-                    "invalid value",
-                    if key == "mixing_beta" {
-                        "set a finite value in (0, 1]"
-                    } else {
-                        "set a positive finite tolerance"
-                    },
-                ));
-            }
+        if s.mixing_beta
+            .is_some_and(|x| !x.is_finite() || x <= 0. || x > 1.)
+        {
+            return Err(fail(
+                "scf.mixing_beta",
+                "invalid value",
+                "set a finite value in (0, 1]",
+            ));
         }
         if s.max_iterations.is_some_and(|n| n <= 0) {
             return Err(fail(

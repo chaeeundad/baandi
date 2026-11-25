@@ -25,7 +25,7 @@
 //! ranks under the same replicated conditions (no data-dependent branch).
 use crate::parallel::SharedComm;
 pub use crate::profile::distributed::stats;
-pub(crate) use crate::profile::distributed::{Count, Stage, add, count, count_max, count_n};
+pub(crate) use crate::profile::distributed::{Count, Stage, add, count, count_n};
 use crate::{Functional, Pw92Prefactor, ScfError, ScfOptions};
 use dft_mpi::{Collective, block_counts, block_displacements};
 use dft_physics::data::{Array3, Hartree};

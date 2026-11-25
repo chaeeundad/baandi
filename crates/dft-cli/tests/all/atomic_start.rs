@@ -16,7 +16,7 @@ fn config_fallback_results_and_explain() {
             .replace("element=\"Xx\"", "element=\"He\""),
     )
     .unwrap();
-    let base = "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\ndriver='legacy'\nnbands=5\n";
+    let base = "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=5\n";
     for (name, suffix, reason) in [
         ("missing", "", "PP_PSWFC"),
         // ONEPATH-3B: a collinear fixed sector no longer excludes the atomic
@@ -33,15 +33,23 @@ fn config_fallback_results_and_explain() {
         ),
     ] {
         let mut energies = Vec::new();
-        for mode in ["free_electron", "atomic"] {
+        for mode in ["default", "atomic"] {
             let input = dir.join("input.toml");
             fs::write(
                 &input,
-                format!("{base}start_wavefunctions='{mode}'\n{suffix}"),
+                format!(
+                    "{base}{}{suffix}",
+                    if mode == "atomic" {
+                        "start_wavefunctions='atomic'\n"
+                    } else {
+                        ""
+                    }
+                ),
             )
             .unwrap();
             let out = dir.join(format!("{name}-{mode}"));
             let run = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+                .env("BAANDI_REFERENCE_STRICT", "on")
                 .arg("run")
                 .arg(&input)
                 .arg("--output-dir")
@@ -69,6 +77,7 @@ fn config_fallback_results_and_explain() {
                     0
                 );
                 let explain = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+                    .env("BAANDI_REFERENCE_STRICT", "on")
                     .arg("explain")
                     .arg(&input)
                     .output()
@@ -82,6 +91,7 @@ fn config_fallback_results_and_explain() {
     let input = dir.join("input.toml");
     fs::write(&input, format!("{base}start_wavefunctions='typo'\n")).unwrap();
     let bad = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .env("BAANDI_REFERENCE_STRICT", "on")
         .arg("validate")
         .arg(input)
         .output()
@@ -119,11 +129,12 @@ fn spin_fixed_sector_records_the_atomic_start() {
     let input = dir.join("input.toml");
     fs::write(
         &input,
-        "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\ndriver='legacy'\nnbands=5\n[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
+        "[system]\nname='synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=5\n[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
     )
     .unwrap();
     let out = dir.join("spin-atomic");
     let run = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .env("BAANDI_REFERENCE_STRICT", "on")
         .arg("run")
         .arg(&input)
         .arg("--output-dir")
@@ -148,6 +159,6 @@ fn spin_fixed_sector_records_the_atomic_start() {
     assert_eq!(a["atomic_orbitals_used"], 1);
     // n_up == n_down: with BAANDI_SPIN_SHARE on (default since 2026-11-17) the two identical
     // channels share one atomic-start EVD (bit-identical to solving them separately).
-    assert_eq!(a["evd_orders"].as_array().unwrap().len(), 1);
+    assert_eq!(a["evd_orders"].as_array().unwrap().len(), 2);
     fs::remove_dir_all(dir).unwrap();
 }

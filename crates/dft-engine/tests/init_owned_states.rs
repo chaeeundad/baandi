@@ -276,7 +276,7 @@ fn compare_scf(ranks: usize, skew: bool, fallback: bool) {
             b.atomic_start.initial_h_applications
         );
         assert!(a.atomic_start.atomic_orbitals > 0);
-        assert!(b.verification.as_ref().is_some_and(|v| v.passed()));
+        assert!(b.certified);
         if ranks > 1 {
             assert_eq!(
                 counts[RunCounter::StatesFullBuilds as usize],

@@ -749,20 +749,6 @@ pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
         rc.note_path(id, path, reason.as_deref().filter(|_| rc.on(id)));
     }
 
-    if rc.consulted(Id::REUSE_PSI) {
-        let r = dft_engine::gamma_real::reuse_psi_counters();
-        let (path, why) = if r.armed > 0 {
-            ("kept_start", None)
-        } else if rc.on(Id::REUSE_PSI) {
-            (
-                "plain_start",
-                Some("no warm lean real Gamma solve took the kept start"),
-            )
-        } else {
-            ("plain_start", None)
-        };
-        rc.note_path(Id::REUSE_PSI, path, why);
-    }
     if rc.consulted(Id::EWALD_CACHE) {
         let hits = rc.counters()[RunCounter::EwaldHits as usize];
         rc.note_path(
@@ -2121,7 +2107,6 @@ fn execute_mode_inner(
                 "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "algebra_stream":algebra_stream_json(),
                 "davidson_lean":davidson_lean_json(),
-                "reuse_psi":reuse_psi_json(),
                 "gemm_dispatch":gemm_dispatch_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
@@ -4011,24 +3996,6 @@ fn gemm_dispatch_json() -> serde_json::Value {
             .map(|(s,c)|json!({"site":s,"calls":c})).collect::<Vec<_>>(),
         "mkl_flop_fraction":if total > 0 {mkl as f64/total as f64} else {0.0},
         "note":"process totals of the real GEMM wrappers (serial and MPI real paths); output m x n, reduction k, gflop = 2 m n k; route mkl_wide = dgemm only because of the wide entry; pure_output_bound / pure_panel_bound / pure_long / pure_short / pure_layout = fallback reason on an MKL build; pure_direct = direct pure-kernel entry; narrow = streaming kernels; rows_as_if_mkl (pure builds only) = the same calls under the route an MKL build with dgemm on would take (same rule and workspace); complex GEMMs (atomic start, k points) are not included"
-    })
-}
-
-/// REUSE-PSI (`BAANDI_REUSE_PSI`, work order C2) counters of this process.
-fn reuse_psi_json() -> serde_json::Value {
-    let c = dft_engine::reuse_psi_counters();
-    let l = dft_engine::lean_counters();
-    json!({
-        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::REUSE_PSI),
-        "armed_starts":c.armed,"kept_starts":l.kept_starts,"declined_starts":l.kept_declined,
-        "kept_returns":l.kept_stored,"not_kept":c.not_kept,
-        "unchanged_potential":c.unchanged_potential,
-        "kept_pairs":c.kept_pairs,"full_pairs":c.full_pairs,
-        "inverse_transforms_saved":c.transforms_saved(),
-        "h_columns_not_applied":l.kept_columns,
-        "nonlocal_columns_saved":c.columns_saved,
-        "bytes_kept_max":c.bytes_kept,"memory_gate_bytes":dft_engine::PSI_KEEP_MAX_BYTES,"gated_states":c.gated,
-        "note":"armed = solves whose kept H X was brought to the new potential; kept_starts = armed starts the lean solver took (its initial equals the kept X), declined = armed but initial differed; kept_pairs: one forward transform of kept psi(r) (inverse saved), full_pairs: pair transformed both ways; nonlocal_columns_saved: columns whose P^T X, back product and kinetic pass were skipped (counted when armed); h_columns_not_applied: columns of the initial H application the solver skipped"
     })
 }
 

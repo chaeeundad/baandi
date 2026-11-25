@@ -1,6 +1,4 @@
 //! Shared convergence profiles and fixed-point assessment.
-#[cfg(feature = "strict-oracle")]
-use super::IterationRecord;
 use super::{FixedPointCertificate, ScfOptions};
 use std::time::Duration;
 
@@ -27,48 +25,8 @@ impl StandardProfile {
             .min(0.1 * error_ha / electrons.max(1.0))
             .clamp(Self::FLOOR_HA, Self::CAP_HA)
     }
-    /// Experimental inexact-solve cap: square the previous normalized density
-    /// residual (in atomic units) to map a norm scale to a Ritz-energy scale.
-    /// This heuristic is not an energy bound or an inexact-Newton guarantee.
-    /// Never loosen the ordinary ratchet; retain its existing numerical floor.
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn density_forcing(tolerance: f64, history: &[IterationRecord]) -> f64 {
-        history.last().map_or(tolerance, |r| {
-            tolerance
-                .min(r.density_residual.powi(2))
-                .max(Self::FLOOR_HA)
-        })
-    }
-
     pub fn empty_threshold(tolerance: f64) -> f64 {
         (5.0 * tolerance).max(5e-6)
-    }
-
-    /// Five completed intervals without a factor-two error reduction.
-    /// Cap against the window-entry tolerance, not the latest tolerance: this
-    /// prevents repeated cuts on every step of the same plateau. History alone
-    /// determines the action, including after an exact checkpoint continuation.
-    #[cfg(feature = "strict-oracle")]
-    pub(crate) fn stall_guard(tolerance: f64, history: &[IterationRecord]) -> f64 {
-        const INTERVALS: usize = 5;
-        const TIGHTEN: f64 = 0.1;
-        if history.len() <= INTERVALS {
-            return tolerance;
-        }
-        let window = &history[history.len() - INTERVALS - 1..];
-        let Some(entry_error) = window[0].standard_error_ha else {
-            return tolerance;
-        };
-        if window[1..]
-            .iter()
-            .all(|r| r.standard_error_ha.is_some_and(|e| e > 0.5 * entry_error))
-        {
-            tolerance
-                .min(TIGHTEN * window[0].requested_eigen_tolerance)
-                .max(Self::FLOOR_HA)
-        } else {
-            tolerance
-        }
     }
 
     /// Residual guard (`BAANDI_STANDARD_RESIDUAL_GUARD`, default on): an

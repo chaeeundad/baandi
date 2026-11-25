@@ -101,6 +101,9 @@ fn force_state_with_operations<'a>(
 }
 
 /// Stress shares the force model, occupations and verification contract.
+/// The retained options include the frozen reference cell: derivative kernels
+/// rebuild that ordered Miller support at input.cell, not a new cutoff sphere.
+/// The separate Pulay assessment keeps its nominal-cutoff scan protocol.
 pub use force_state as stress_state;
 pub use force_state_prepared as stress_state_prepared;
 
@@ -208,6 +211,7 @@ pub enum IonicSeed {
 #[derive(Clone)]
 pub struct KSeed {
     lattice: [[f64; 3]; 3],
+    strain_reference: Option<Box<[[f64; 3]; 3]>>,
     cutoff: f64,
     dims: [usize; 3],
     points: Vec<dft_geometry::kpoints::KPoint>,
@@ -240,6 +244,11 @@ pub fn ionic_seed<K: dft_mpi::Collective>(
     }
     Ok(IonicSeed::K(KSeed {
         lattice: input.cell.lattice_columns_bohr(),
+        strain_reference: input
+            .options
+            .strain_reference
+            .as_ref()
+            .map(|cell| Box::new(cell.lattice_columns_bohr())),
         cutoff: input.options.cutoff_hartree,
         dims: result
             .density
@@ -263,6 +272,12 @@ impl KSeed {
         state: &mut crate::refstart::KStartState,
     ) -> Result<(), ScfError> {
         if self.lattice != input.cell.lattice_columns_bohr()
+            || self.strain_reference.as_deref().copied()
+                != input
+                    .options
+                    .strain_reference
+                    .as_ref()
+                    .map(|cell| cell.lattice_columns_bohr())
             || self.cutoff != input.options.cutoff_hartree
             || self.dims != state.grid.dims()
             || self.points != state.blocks.iter().map(|b| b.point).collect::<Vec<_>>()

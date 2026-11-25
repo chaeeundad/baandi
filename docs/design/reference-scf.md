@@ -4230,3 +4230,113 @@ BAANDI_TEST_TMP=/private/tmp/g6b-tests`; its optional sandbox-denied `ps` probe
 did not prevent verification. README generation made no tracked changes and
 all 9 freshness checks passed. Logs and the before/after automatic-grid
 fingerprints are retained locally under `target/tmp/g6b-validation/`.
+
+## Non-self-consistent bands
+
+R4A-REF-NSCF supports scalar and collinear fixed-density spectra. The user
+approved the visibility-only extension to `electronic_map.rs`: `Fields`,
+`Fields::hxc` and `fields` are visible to sibling reference modules. Their
+arithmetic and the SCF callers are unchanged.
+
+R4A-REF-NSCF adds `refscf::nscf::{nscf, nscf_with}` and
+`refstart::start_kpoints_from_density`. The engine API accepts `StartInput`,
+replicated density arrays, an ordered k list, an explicit total band count and
+a positive residual tolerance in Hartree. One array denotes total unpolarized
+density; two arrays denote up/down collinear densities, not total/magnetization.
+The explicit-communicator variant permits the same deterministic collective
+harness as the reference SCF driver. All inputs must be identical across ranks.
+
+The supplied real-space grid is retained. There is no interpolation, clipping,
+charge normalization, density update, occupation solve or mixing. The checks
+retain the legacy finite-density lower bound of -1e-14 electrons/Bohr^3 and
+charge tolerance of 1e-8 times the valence electron count. Unpolarized inputs
+require positive even integer electron count and at least N/2 + 4 bands. For
+collinear input the minimum is four above the ceiling of the larger integrated
+channel charge (charge-check-sized roundoff is removed before the ceiling).
+PZ has no polarized adapter and rejects collinear input. Too few plane waves or
+an incompatible supplied grid reject, rather than changing the basis or grid.
+
+Initialization builds ionic/core fields and uses the supplied valence density.
+It shares the existing atomic-orbital Ritz construction and kinetic completion
+with the k SCF start; it does not call an atomic-density SCF initializer. Atomic
+orbitals are still required by this reference start contract. The scalar
+Hartree/XC potential uses `electronic_map::fields` (delegating to `map::fields`
+for scalar input), including the existing NLCC and spectral PBE core-gradient
+treatment. Spin input uses the same per-channel LDA-PW/PBE fields as SCF, with
+the Hartree potential from the total valence density and the nonmagnetic core
+split equally between channels. The immutable channel potentials are prepared
+once, then
+redistributed to each k Hamiltonian. Gamma also uses complex orbitals. All ranks
+process each k point in sequence; there are no k-point pools.
+
+Every band is marked strict in `ref_davidson_complex`, bypassing the SCF loose
+empty-band criterion. Ritz-value changes are not the acceptance certificate.
+The inner Ritz-change threshold is the minimum positive normal `f64`, so
+only exactly unchanged Ritz values can end that inner check; a zero threshold
+is invalid in the shared solver. This is not an energy-accuracy threshold.
+After each solver call NSCF freshly applies H to the returned orbitals, reduces
+squared residual norms over owned rows, and accepts only when every finite
+residual is at most the requested tolerance. Otherwise it restarts all bands
+from those vectors, for at most 64 calls. Exhaustion reports channel/k context
+and the maximum residual in Hartree; it never returns unconverged spectra.
+The result retains original k coordinates/weights, eigenvalues and residuals
+in Ha, and distributed eigenvectors with their global row indices. It is not
+an SCF result or a fixed-point certificate. CLI routing is R4b's responsibility.
+
+Validation commands:
+
+```sh
+cargo test -p dft-engine --test refscf_nscf
+cargo test --release -p dft-engine --test refscf_nscf synthetic_rank_matrix -- --nocapture
+DFT_SI_UPF=/absolute/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf_nscf silicon_path -- --ignored --nocapture
+cargo test --release -p dft-engine --test refscf_nscf spin_channels_match_serial_dense_oracle -- --ignored --nocapture
+```
+
+The scalar matrix compares identical nonuniform fixed densities with legacy
+NSCF at 1e-8 Ha residual certification on both sides and a 1e-8 Ha eigenvalue
+bound. The legacy wrapper retains SCF buffer-band stopping and rejects the
+ordinary low-band-count fixture with an unconverged empty-band residual. The
+oracle therefore requests its complete plane-wave basis separately at each k
+and compares the requested leading bands. Each legacy call still passes its
+own all-band 1e-8 Ha guard. Its single-point weight is one; k weights do not
+enter the fixed-density Hamiltonian. It includes Gamma/X/L, skew two-species local/nonlocal projectors, PBE
+NLCC, and external Si2, using simulated communicator sizes 1/3/8. The spin
+oracle uses the serial collinear Hartree/XC adapters and full dense Hermitian
+diagonalization because legacy `nscf` has no collinear entry. Synthetic fixtures
+are not material or QE evidence. Simulated ranks do not establish real MPI
+transport/scaling. No SCF thresholds, defaults or arithmetic are changed.
+
+Local evidence (2026-11-25, simulated ranks, not QE or MPI timing):
+
+| Fixture | Ranks | Maximum eigenvalue difference (Ha) | Maximum NSCF residual (Ha) |
+| --- | --- | ---: | ---: |
+| Cubic synthetic, no atomic charge | 1 | 2.232e-14 | 5.002e-9 |
+| Skew two-species | 1/3/8 | 2.109e-15 | 6.418e-9 |
+| PBE NLCC synthetic | 1/3/8 | 2.498e-15 | 9.897e-9 |
+| Si2 Gamma/X/L, 3 Ha cutoff | 1/3/8 | 2.942e-15 | 3.236e-9 |
+| Spin LDA-PW NLCC, serial spin-field/dense oracle | 1/3/8 | 2.387e-15 | 9.080e-9 |
+| Spin PBE NLCC, serial spin-field/dense oracle | 1/3/8 | 2.998e-15 | 7.503e-9 |
+
+The Si file is external `Si.pz-vbc.UPF`, SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+The spin matrix covers two unequal, nonuniform channel densities integrating
+to 1.25 and 0.75 electrons, a skew cell, nonlocal projectors, NLCC and three
+k points. The serial dense oracle independently certifies its retained bands
+at 1e-8 Ha; the reference solve certifies every requested band at the same
+bound. The input channel arrays remain unchanged. These are correctness
+observations, not a performance or material-accuracy qualification.
+
+Final gate results after the approved spin integration: `cargo check
+--workspace --tests`, the default NSCF suite (3 passed, 2 ignored), the existing
+`refscf` suite (84 passed, 24 ignored), formatting and engine clippy all exited
+0. The complete release NSCF matrix, including external Si2 and both spin
+functionals, passed all 5 tests with no ignored tests. The full gate
+`BAANDI_TEST_TMP=/private/tmp/r4a-check CHECK_SCCACHE=0 CHECK_NICE=0
+scripts/check.sh` exited 0: 107 binaries, 1,017 passed, 0 failed, 221 ignored;
+build/fmt/clippy also passed. External scratch resolves the earlier three
+CLI cache-fixture failures caused by worktree-local scratch. The optional
+sandbox-denied `ps` load probe did not affect the gate. All nine README
+freshness checks passed. Logs are retained under `target/` as
+`nscf-all-approved.log`, `check-full-approved.log`,
+`check-workspace-approved.log`, `nscf-approved.log`, `refscf-approved.log` and
+`clippy-approved.log`.

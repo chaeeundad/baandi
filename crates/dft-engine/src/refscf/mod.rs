@@ -22,6 +22,7 @@ pub mod ladder;
 mod map;
 pub mod memory;
 pub mod metric;
+pub mod nscf;
 pub mod profile;
 pub mod qe_reference;
 pub mod record;

@@ -174,15 +174,15 @@ pub(super) fn sum<K: Collective>(comm: &K, v: &[f64]) -> Result<Vec<f64>, ScfErr
     comm.tree_sum_f64(v, &mut out).map_err(numerical)?;
     Ok(out)
 }
-struct Fields {
-    hxc: Vec<Vec<f64>>,
+pub(super) struct Fields {
+    pub(super) hxc: Vec<Vec<f64>>,
     hartree: f64,
     xc: f64,
     xc_integral: f64,
     vh: Vec<f64>,
     nlcc: Option<crate::energy::CoreXcLedger>,
 }
-fn fields<K: Collective>(
+pub(super) fn fields<K: Collective>(
     workspace: &mut Workspace,
     state: &mut KStartState,
     comm: &K,

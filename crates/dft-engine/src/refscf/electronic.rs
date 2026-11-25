@@ -264,9 +264,9 @@ pub fn run_with_trace<K: Collective>(
             Some("reference spin/FD uses complete map audits and verifies each stop"),
         );
     }
-    if policy.channels() == 2 && opts.functional != Functional::LdaPw {
+    if policy.channels() == 2 && opts.functional == Functional::LdaPz {
         return Err(ScfError::InvalidInput(
-            "reference spin XC requires lda-pw: legacy polarized lda-pz unavailable; distributed PBE has no two-channel evaluator",
+            "reference spin XC requires lda-pw or pbe: legacy polarized lda-pz unavailable",
         ));
     }
     let electrons = input.atoms.iter().try_fold(0., |n, a| {
@@ -384,7 +384,13 @@ pub fn run_with_trace<K: Collective>(
         .map(|_| KeptHx::new(config.on(Id::REFSCF_KEPT_HX)))
         .collect();
     let mut x = transform(&mut plan, comm, &n, &policy, electrons, volume)?;
-    let mut workspace = map::Workspace::new(&states[0], comm, input.cell, policy.channels() == 2)?;
+    let mut workspace = map::Workspace::new(
+        &states[0],
+        comm,
+        input.cell,
+        policy.channels() == 2,
+        opts.functional,
+    )?;
     if let Some(trace) = trace.as_deref_mut() {
         trace.prepare(
             2 * opts.max_iterations + 1,

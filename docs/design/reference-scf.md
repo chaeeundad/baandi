@@ -3278,9 +3278,10 @@ Internal energy E, positive TS and Mermin F=E-TS are separate records.
 Stage 2 uses separate channel/k operators, orbitals and kept HX entries.
 Hartree sees total valence charge; XC sees both channels and half the immutable
 NLCC core in each. Only LDA-PW has an available legacy polarized LDA evaluator.
-Polarized LDA-PZ is absent in legacy and rejects explicitly. Distributed PBE
-currently has no two-channel evaluator and also rejects; scalar FD PBE uses
-the existing distributed GGA. No new XC parameterization is introduced.
+Polarized LDA-PZ is absent in legacy and rejects explicitly. G4C adds
+distributed two-channel PBE, with or without NLCC, for fixed sectors and
+both FD spin policies. Scalar FD PBE retains the existing distributed GGA.
+No new XC parameterization is introduced.
 
 Broyden receives one stacked (n,m) vector and one shared history. Both nonzero
 blocks use the existing half-sphere Coulomb metric; the magnetization zero
@@ -3739,3 +3740,141 @@ across 98 binaries. The sandbox denies the optional `ps` load probe; the
 script continues and runs every gate. No git metadata was written and all
 changes are uncommitted. The routing patch remains a separate, unapplied
 ownership handoff, so these checks do not qualify that CLI change.
+
+
+### G4C distributed spin PBE
+
+`gga::distributed::SpinPbe` owns the polarized xcx functionals, interleaved
+rho/sigma, Cartesian gradient multipliers, six gradient fields, a channel and
+flux buffer, derivative coefficients, and two response potentials. All are
+prepared once per run with the owned slab/stick layout and reused by input,
+output-audit and verification maps. Existing FFT `Fields` and xcx return-vector
+allocations remain at the field boundary; there are no per-orbital allocations
+or full-grid payload gathers in this adapter. Empty owners join all transforms
+and scalar error reductions, skipping only the local xcx call.
+
+The actual combined samples `n_up+c/2` and `n_down+c/2` are forward transformed
+separately. This includes the same immutable real core as serial `SpinXc`,
+without clipping or normalization. G2B's cached core Fourier field remains
+used by the scalar initialization; spin maps forward the combined samples to
+match the serial input arithmetic. Cartesian derivatives remove each even-axis
+Nyquist Miller component before applying the reciprocal cell matrix. Three
+invariants (up-up, up-down, down-down) feed polarized GgaXPbe/GgaCPbe. Channel
+flux is `2*e_sigma_ss*grad(n_s+c/2) + e_sigma_ud*grad(n_other+c/2)`;
+axis-by-axis divergence subtraction follows the serial adapter's ordering.
+Each combined channel must be finite and nonnegative. The serial spin total
+threshold (1e-10 electrons/Bohr^3) screens both channels and all three sigma
+inputs together; gradients use unscreened samples. A fully polarized nonvacuum
+point is not screened, and divergence can remain nonzero at a screened point.
+
+Only XC sees the core. Hartree, charge, occupations, mixing and delivered
+channel densities remain valence-only. The complete potentials, including
+cross-channel divergence, enter the valence double-counting integral; the
+separate `integral c/2*(V_up+V_down)` is diagnostic in the NLCC ledger. The
+existing scalar Hartree assembly uses its local LDA-PW branch for spin PBE,
+whose scalar XC result is discarded, avoiding redundant unpolarized PBE FFTs.
+The G4B opt-in stiffness remains the documented local LDA-PW curvature proxy
+also for PBE; it is not asserted to be the PBE Hessian or an error bound.
+All existing scalar and LDA dispatch/arithmetic remains unchanged.
+
+Reproduction: `cargo test -p dft-physics --test spin_pbe_distributed --
+--nocapture` checks random positive channels, optional signed core, odd/even
+skew grids, reusable storage, and ranks 1/3/8 (including empty owners), against
+serial spin PBE with a 1e-13 relative gate. The release-only engine matrix is
+`cargo test --release -p dft-engine --test refscf g4c_spin_pbe_delivered --
+--ignored --nocapture`: synthetic one-electron open shell, core on/off, fixed
+sector and fixed-moment FD, all three G4B switches on, ranks 1/3/8,
+thresholds 1e-8/1e-12 Ry and legacy energy gates 5e-9/1e-10 Ha. These are Mac
+synthetic/serial comparisons, not real-MPI, real-material or QE qualification.
+
+G4C local results (2026-11-25, Mac, no tolerance changes): the random-grid
+potential/energy/integral comparison passes with maximum relative difference
+6.952422915745373e-16. Vacuum screening, exactly polarized channels, errors on
+one rank, empty owners and recovery after a rejected call also pass. All 24
+pre/post scientific fingerprints of `g4_synthetic_matrix` are byte-identical:
+scalar LDA-PZ FD and fixed-spin LDA-PW, Gamma/k222, ranks 1/3/8, both thresholds.
+
+Architect review qualifies fixed-sector and fixed-moment FD PBE with and
+without NLCC. `g4c_spin_pbe_delivered` covers these 24 comparisons. The separate
+ignored `g4d_free_moment_pbe_acceptance` retains all 12 free-moment comparisons
+and the original accuracy assertions; three standard no-core cases are expected
+to fail. Run it with `cargo test --release -p dft-engine --test refscf
+g4d_free_moment_pbe_acceptance -- --ignored --nocapture`. The explicit engine
+entry remains available for this diagnostic; production CLI routing below
+prevents claiming this policy is qualified.
+
+| Policy (maximum over core on/off and ranks 1/3/8) | Standard abs(delta F), Ha | Tight abs(delta F), Ha |
+| --- | ---: | ---: |
+| Fixed sector (F=E) | 1.0069276246138514e-9 | 2.353672812205332e-14 |
+| Fixed-moment FD | 1.2032827512165056e-10 | 8.926193117986259e-14 |
+| Free-moment FD | **9.206498157443566e-7 (FAIL)** | 1.7263968032921184e-14 |
+
+The no-core free-moment legacy oracle has M=1.0000000000000473 mu_B and
+F=-0.23459382746784757 Ha. At standard threshold, rank one delivers
+M=0.9999446771843783 mu_B and F=-0.234592906818031827 Ha despite passing the
+existing fixed-point verification. Tight threshold delivers
+F=-0.234593827467864835 Ha. With NLCC, free-moment FD passes both thresholds
+(maximum standard difference 5.537099667662915e-10 Ha). This exposes a remaining
+near-full-polarization stopping/verification qualification issue with the
+G4B local LDA curvature proxy; it does not establish a proven cause or a safe
+replacement estimator. No stopping-rule adjustment, forced occupation or
+material-specific branch is introduced in G4C.
+
+The CLI routes free-moment collinear FD + PBE to legacy regardless of all
+three G4B switches, with the exact reason
+`reference driver: free-moment collinear FD with PBE not yet qualified, G4D`.
+The reason is recorded at `reference_driver_fallback_reason`,
+`execution.reference_driver_fallback_reason`, and the routing switch manifest.
+Fixed-sector PBE remains reference-capable; fixed-moment PBE retains the G4B
+three-switch gate used for qualification. Free-moment LDA-PW routing is unchanged.
+Tests cover all eight G4B switch combinations and emitted legacy result metadata.
+The obsolete PBE rejection assertion now checks convergence, while polarized
+LDA-PZ still rejects. CLI limitation metadata reflects the G4D boundary.
+
+### G4D starting diagnosis: no-core free-moment PBE
+
+Measured with the shared G4C fixture above, Gamma, one simulated rank,
+threshold 1e-8 Ry, theta=0.01 Ha, all G4B switches on. The strict legacy oracle
+is F=-0.234593827467847571 Ha, M=1.00000000000004730 mu_B and minority occupation
+N_down=3.09057801998514300e-79 electrons. Here N_down is the sum of the 12
+minority-band occupations (the sole k point has weight one), not a single band.
+Errors below are signed map output minus the oracle. F is the Mermin energy;
+charge/spin/uniform terms are Ry, stiffness is Ha. The augmented estimator is
+charge + spin + uniform + 2*stiffness, in Ry. Trace capture is opt-in and prints
+only after the run, including verification; it does not change stopping rules.
+
+| Map | Charge (Ry) | Spin (Ry) | Uniform (Ry) | Stiffness (Ha) | delta F (Ha) | delta M (mu_B) | delta N_down (e) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.3235081547e-2 | 3.9155855220e-3 | 3.7876952238e-3 | 2.5780599862e-3 | 7.3564795323e-3 | -4.5607997736e-1 | 2.2803998868e-1 |
+| 2 | 1.2378305580e-3 | 2.1753968769e-3 | 6.0785868720e-3 | 2.5833494784e-3 | 3.6190665559e-3 | -2.2025401117e-1 | 1.1012700558e-1 |
+| 3 | 1.3745852296e-5 | 5.7210948066e-4 | 2.3538749687e-3 | 9.9004650211e-4 | 6.3437969940e-4 | -4.9470134861e-2 | 2.4735067430e-2 |
+| 4 | 1.6989383255e-6 | 1.1034603071e-5 | 2.3618040028e-5 | 4.0683161479e-5 | 4.3988174758e-5 | -6.7121104264e-3 | 3.3560552132e-3 |
+| 5 | 6.2287939400e-7 | 3.1041094226e-6 | 4.5203564108e-6 | 1.4922775423e-5 | 2.1626730087e-5 | -4.1051943499e-3 | 2.0525971749e-3 |
+| 6 | 3.7666646453e-10 | 1.6253431336e-7 | 9.0139350192e-7 | 3.7532555987e-6 | 1.1152301916e-5 | -2.5995944151e-3 | 1.2997972075e-3 |
+| 7 | 2.3822277013e-11 | 4.0522157406e-8 | 2.1264347720e-7 | 1.3248913100e-6 | 6.6845210760e-6 | -1.7868719499e-3 | 8.9343597488e-4 |
+| 8 | 4.3225903715e-11 | 1.7095746321e-9 | 4.8577228066e-9 | 7.9809844720e-8 | 2.4407404897e-6 | -6.9607938778e-4 | 3.4803969391e-4 |
+| 9 | 4.2573259839e-12 | 1.0322776393e-10 | 3.0049343553e-10 | 9.3671881529e-9 | 1.5706219113e-6 | -3.1307660644e-4 | 1.5653830322e-4 |
+| 10 | 5.0680109715e-12 | 2.1071153004e-11 | 4.1315659311e-11 | 3.9989240082e-9 | 9.2064981574e-7 | -5.5322815669e-5 | 2.7661407799e-5 |
+| 10 verify | 1.7855355597e-12 | 1.7402515194e-11 | 3.4841595080e-11 | 4.2709047420e-9 | 7.5776810851e-7 | -3.1928575017e-5 | 1.5964287490e-5 |
+
+Map 10's augmented estimator is 8.0653028397e-09 Ry, below 1e-8 Ry, while
+its true free-energy error is 9.2064981574e-7 Ha. The fresh verification map
+has augmented estimator 8.5958391298e-09 Ry and true error 7.5776810851e-7 Ha;
+it passes, but delivery correctly retains map 10's candidate. The tail reaches
+near-full polarization with a small residual-based estimate while a minority
+occupation remains. This is diagnostic evidence of an underestimated delivered
+error, not proof of a specific cause or permission to replace the estimator.
+G4D must address qualification; G4C changes no tolerances, occupation floors,
+stopping rules or verification criteria.
+
+After the architect's qualification/routing review, all four requested checks
+pass: workspace/test compilation; dft-physics (101 passed, 18 ignored);
+dft-engine `refscf` (79 passed, 22 ignored); and fmt/three-crate clippy with
+`-D warnings`. The qualified release matrix passes all 24 comparisons. The
+separate G4D release acceptance test exits 101 as expected, retaining its three
+standard no-core accuracy failures. With `BAANDI_TEST_TMP` and `TMPDIR` set to
+`/private/tmp/g4c-check`, `CHECK_NICE=0 CHECK_SCCACHE=0 scripts/check.sh fast
+dft-physics dft-engine dft-cli` exits 0: build/test/fmt/clippy all pass, 59
+binaries, 632 passed, 0 failed, 167 ignored. The sandbox still denies the
+non-gating `ps` load probe; cache tests now pass outside the checkout.
+No stopping rules or tolerances were changed. Changes remain uncommitted.

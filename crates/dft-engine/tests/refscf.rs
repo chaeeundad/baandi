@@ -7728,7 +7728,7 @@ fn g4_rejections_and_unverified_delivery() {
         functional: Functional::Pbe,
         ..pw
     };
-    assert!(run(&pbe, Policy::FixedSpin(sector)).is_err());
+    assert!(run(&pbe, Policy::FixedSpin(sector)).unwrap().converged);
 }
 
 #[test]
@@ -7860,4 +7860,237 @@ fn g4b_dump(run: &dft_engine::refscf::electronic::Run, name: String) {
     if let Some(dir) = std::env::var_os("G4B_FINGERPRINT_DIR") {
         std::fs::write(std::path::Path::new(&dir).join(name), g4b_fingerprint(run)).unwrap();
     }
+}
+
+// G4C: one-electron synthetic open shell. This is not a material/QE reference.
+fn g4c_potential(with_core: bool) -> dft_upf::Pseudopotential {
+    let base = common::potential_with_atomic_start(1., 1., true, 401, "PBE");
+    let r = base.mesh().r();
+    let array = |v: &[f64]| {
+        v.iter()
+            .map(|v| format!("{v:.17e}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let sample = |f: &dyn Fn(f64) -> f64| array(&r.iter().map(|&r| f(r)).collect::<Vec<_>>());
+    let mut beta = String::new();
+    for (j, l) in [0, 0, 1].into_iter().enumerate() {
+        let i = j + 1;
+        beta.push_str(&format!("<PP_BETA.{i} index=\"{i}\" angular_momentum=\"{l}\" cutoff_radius=\"12\" cutoff_radius_index=\"401\">{}</PP_BETA.{i}>", sample(&|r| r.powi(l+1)*(-r*r/i as f64).exp())));
+    }
+    let core = if with_core {
+        format!(
+            "<PP_NLCC>{}</PP_NLCC>",
+            sample(&|r| (0.5 / PI).powf(1.5) * (-0.5 * r * r).exp())
+        )
+    } else {
+        String::new()
+    };
+    dft_upf::parse_upf(&format!(r#"<UPF version="2.0.1"><PP_INFO>SYNTHETIC G4C Gaussian ion</PP_INFO>
+<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx" pseudo_type="NC" relativistic="scalar" is_ultrasoft="F" is_paw="F" is_coulomb="F" has_so="F" has_wfc="F" has_gipaw="F" core_correction="{}" functional="PBE" z_valence="1" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="1" l_max_rho="0" l_local="-1" mesh_size="401" number_of_wfc="2" number_of_proj="3"/>
+<PP_MESH mesh="401"><PP_R>{}</PP_R><PP_RAB>{}</PP_RAB></PP_MESH>
+<PP_LOCAL>{}</PP_LOCAL><PP_NONLOCAL>{beta}<PP_DIJ>2 0.4 0 0.4 4 0 0 0 6</PP_DIJ></PP_NONLOCAL>
+<PP_RHOATOM>{}</PP_RHOATOM>{core}<PP_PSWFC>
+<PP_CHI.1 l="0" label="s" occupation="1">{}</PP_CHI.1><PP_CHI.2 l="1" label="p" occupation="0">{}</PP_CHI.2>
+</PP_PSWFC></UPF>"#, if with_core {"T"} else {"F"}, array(r), array(base.mesh().rab()),
+        array(&base.local_hartree().iter().map(|v|2.*v).collect::<Vec<_>>()),
+        sample(&|r|4.*PI*r*r*(1./PI).powf(1.5)*(-r*r).exp()),
+        sample(&|r|r*(-0.6*r*r).exp()), sample(&|r|r*r*(-0.5*r*r).exp()))).unwrap()
+}
+
+#[test]
+#[ignore = "SCF matrix; cargo test --release -p dft-engine --test refscf g4c_spin_pbe_delivered -- --ignored --nocapture"]
+fn g4c_spin_pbe_delivered() {
+    g4c_pbe_matrix(&["fixed", "moment"]);
+}
+
+#[test]
+#[ignore = "G4D unqualified: expected standard no-core free-moment accuracy failure; cargo test --release -p dft-engine --test refscf g4d_free_moment_pbe_acceptance -- --ignored --nocapture"]
+fn g4d_free_moment_pbe_acceptance() {
+    g4c_pbe_matrix(&["free"]);
+}
+
+fn g4c_pbe_matrix(modes: &[&str]) {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+        refscf::electronic::{self, Policy},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    use dft_numerics::switches::RunConfig;
+    use dft_physics::occupations::Constraint;
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let config = RunConfig::from_pairs(&[
+        ("refscf_spin_fd_moment", "on"),
+        ("refscf_spin_stiffness", "on"),
+        ("refscf_history_conditioning", "on"),
+    ])
+    .unwrap();
+    let _scope = config.enter();
+    let mut failures = Vec::new();
+    for core in [false, true] {
+        let pp = g4c_potential(core);
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        for &mode in modes {
+            let sector = SpinSector {
+                n_up: 1,
+                n_down: 0,
+                axis_cartesian: [0., 0., 1.],
+                initial_moment_seed: Some(0.3),
+            };
+            let options = ScfOptions {
+                functional: Functional::Pbe,
+                cutoff_hartree: 2.5,
+                bands: Some(if mode == "fixed" { 4 } else { 12 }),
+                gamma_real: GammaReal::Off,
+                start_density: StartDensity::Atomic,
+                max_iterations: 400,
+                mixing: if mode == "free" {
+                    dft_engine::Mixing::Linear { beta: 1. }
+                } else {
+                    dft_engine::Mixing::default()
+                },
+                residual_eigen_schedule: false,
+                initial_eigen_tolerance: 1e-10,
+                eigen_tolerance: 1e-10,
+                density_tolerance: 1e-10,
+                energy_tolerance: 1e-11,
+                ..ScfOptions::strict_reference()
+            };
+            let constraint = if mode == "moment" {
+                Constraint::FixedMoment(0.3)
+            } else {
+                Constraint::Total
+            };
+            let legacy = if mode == "fixed" {
+                CollinearProblem::new(
+                    &cell,
+                    &atoms,
+                    &potentials,
+                    options.clone(),
+                    &points,
+                    sector.clone(),
+                )
+            } else {
+                CollinearProblem::new_fermi_dirac(
+                    &cell,
+                    &atoms,
+                    &potentials,
+                    options.clone(),
+                    &points,
+                    sector.clone(),
+                    0.01,
+                    constraint,
+                    12,
+                )
+            }
+            .unwrap()
+            .run()
+            .unwrap();
+            assert!(legacy.converged, "legacy {mode} core={core}");
+            eprintln!(
+                "G4C ORACLE mode={mode} core={core} M={} mu_B F={:?}",
+                legacy.moment_mu_b, legacy.thermodynamics
+            );
+            let oracle = legacy
+                .thermodynamics
+                .map_or(legacy.energy.total_hartree(), |t| t.free_energy_ha);
+            let policy = if mode == "fixed" {
+                Policy::FixedSpin(sector)
+            } else {
+                Policy::SpinFermiDirac {
+                    sector,
+                    theta_ha: 0.01,
+                    constraint,
+                    band_cap: 12,
+                }
+            };
+            let options = ScfOptions {
+                standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+                verification: dft_engine::Verification::FixedPoint,
+                ..options
+            };
+            for threshold in [1e-8, 1e-12] {
+                for ranks in [1, 3, 8] {
+                    let deltas = dft_mpi::simulate(ranks, |comm| {
+                        let _scope = config.enter();
+                        let diagnose = mode == "free" && !core && threshold == 1e-8 && ranks == 1;
+                        let mut trace = electronic::Trace::default();
+                        let r = electronic::run_with_trace(
+                            StartInput {
+                                cell: &cell,
+                                atoms: &atoms,
+                                potentials: &potentials,
+                                options: &options,
+                            },
+                            Profile {
+                                threshold_ry: threshold,
+                                ..Profile::default()
+                            },
+                            &points,
+                            policy.clone(),
+                            comm,
+                            diagnose.then_some(&mut trace),
+                        )
+                        .unwrap();
+                        if diagnose {
+                            let old_down: f64 =
+                                legacy.finite_occupations.as_ref().unwrap().occupations()[12..]
+                                    .iter()
+                                    .sum();
+                            eprintln!(
+                                "G4D_ORACLE F={oracle:.17e} Ha M={:.17e} mu_B Ndown={old_down:.17e} e",
+                                legacy.moment_mu_b
+                            );
+                            for t in trace.records() {
+                                let down: f64 = t.occupations[12..].iter().sum();
+                                eprintln!(
+                                    "G4D_TRACE {},{},{},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e}",
+                                    t.iteration,
+                                    t.verification,
+                                    t.redo,
+                                    t.estimator_terms_ry[0],
+                                    t.estimator_terms_ry[1],
+                                    t.estimator_terms_ry[2],
+                                    t.stiffness_ha,
+                                    t.free_energy_ha - oracle,
+                                    t.moment_mu_b - legacy.moment_mu_b,
+                                    down - old_down
+                                );
+                            }
+                        }
+                        assert!(
+                            r.converged && r.verification.as_ref().unwrap().passed(),
+                            "{mode} core={core}"
+                        );
+                        let delta = (r.thermodynamics.free_energy_ha - oracle).abs();
+                        if comm.rank() == 0 {
+                            eprintln!("G4C delivered M={} mu_B", r.moment_mu_b);
+                            eprintln!(
+                                "G4C {mode} core={core} P={ranks} threshold={threshold:e} Ry F={:.17e} Ha delta={delta:e} Ha",
+                                r.thermodynamics.free_energy_ha
+                            );
+                        }
+                        assert!((r.channel_electrons.iter().sum::<f64>() - 1.).abs() < 1e-10);
+                        assert_eq!(r.energy.nlcc.is_some(), core);
+                        delta
+                    });
+                    let delta = deltas.into_iter().fold(0., f64::max);
+                    if delta >= if threshold == 1e-8 { 5e-9 } else { 1e-10 } {
+                        failures.push(format!("{mode} core={core} P={ranks} threshold={threshold:e} Ry delta={delta:e} Ha"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

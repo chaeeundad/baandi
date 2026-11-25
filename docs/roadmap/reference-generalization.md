@@ -36,3 +36,7 @@ at least one non-Si NLCC/PBE system (e.g. MgO, GaAs, SiC with PseudoDojo files; 
 All within the standard class (5e-9 Ha). Evidence: dev08 /data/sig-dft/gen/RESULT.md /data/sig-dft/gen4/RESULT.md and /data/sig-dft/gen5/RESULT.md (binary e3a75a5, sha256 183df05a...5a49).
 
 Open gaps found by the runs: spin with PBE needs a two-channel distributed GGA evaluator (stage G4C; real PseudoDojo files are PBE, so this blocks spin on real materials in the reference driver); `refscf-check --stop-to-verified` does not read the k/FD results schema (fold into G5B). Evidence for G4: dev08 /data/sig-dft/gen6/RESULT.md.
+
+### bcc Fe (dev08 gen15, 2026-11-25)
+
+PseudoDojo Fe (PBE, NLCC), 2-atom cubic cell a = 5.42 bohr, ecut 80 Ry, 4x4x4 (64 k per spin, time reversal off), Fermi-Dirac 0.01 Ha, fixed total moment 4.4 mu_B, MPI8. Reference driver with the G4B switches on: VERIFIED in 75.8 s, 18 maps, F = -250.682665063 Ha, M = 4.4 mu_B, RSS 578 MB. The legacy driver and the strict legacy oracle each failed to finish within 45 min (2700 s timeouts; legacy prints no progress), so no oracle agreement exists for this case. Evidence: dev08 /data/sig-dft/gen15/RESULT.md.

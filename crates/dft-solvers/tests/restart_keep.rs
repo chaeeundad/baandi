@@ -303,7 +303,6 @@ fn serial_pair(
 
 fn tuning(keep: RestartKeep) -> DistributedTuning {
     DistributedTuning {
-        lean_algebra: true,
         restart_keep: keep,
         ..DistributedTuning::from_env()
     }

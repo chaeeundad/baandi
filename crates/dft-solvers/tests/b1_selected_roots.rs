@@ -342,7 +342,6 @@ fn default_options_are_the_default_path() {
     assert_eq!(
         ResearchOptions::from_env(),
         ResearchOptions {
-            b6: true,
             b1: B1Mode::On,
             sketch: SketchKind::Count,
             b5: true,

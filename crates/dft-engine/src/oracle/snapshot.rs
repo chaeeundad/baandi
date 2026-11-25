@@ -386,7 +386,7 @@ pub(crate) fn capture_entry(e: Entry<'_>) -> Option<Capture> {
                 "null".to_string()
             },
             sw_reuse = "off",
-            sw_lean = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_LEAN_ALGEBRA),
+            sw_lean = "on",
             sw_lazy = "off",
             sw_psi = "off",
             sw_dav = dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),

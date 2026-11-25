@@ -42,7 +42,7 @@ pub(super) struct AtomicSpan {
     report: AtomicStartReport,
 }
 
-/// `pool` (P48F, `BAANDI_PHASE_THREADS=on`): build the columns and run the
+/// `pool` (P48F, frozen parallel construction): build the columns and run the
 /// two-pass Gram-Schmidt on the SCF pool. Every column is computed by the
 /// same elementwise arithmetic and `orthonormalize_pooled` reproduces the
 /// serial bits, so the span is identical with and without the pool.
@@ -153,10 +153,7 @@ pub(super) fn span(
         split.filter(|_| npw > 0 && crate::parallel::tuning::tuning().atomic_block);
     // Local arithmetic reuse, not a new MPI mode. A disabled M2 split path
     // on a multi-rank job must not accidentally enter the local experiment.
-    let local_block = npw > 0
-        && split.is_none()
-        && dft_numerics::switches::on(dft_numerics::switches::Id::ATOMIC_LOCAL_BLOCK)
-        && crate::parallel::SharedComm::active().is_none();
+    let local_block = npw > 0 && split.is_none() && crate::parallel::SharedComm::active().is_none();
     if distributed_block.is_some() || local_block {
         if let Some(p) = profile.filter(|_| local_block) {
             p.count(IC::InitAtomicLocalAttempts, 1);

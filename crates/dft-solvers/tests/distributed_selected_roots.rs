@@ -1,12 +1,6 @@
-//! F05 (`BAANDI_M2_SELECTED_ROOTS=on`): selected-root rotation in the
-//! distributed Davidson for Ritz-change (standard) solves. Against the
-//! full-rotation path on synthetic problems (scattered, clustered and
-//! degenerate spectra; default and contracting capacities; 1 to 4 simulated
-//! ranks): identical iteration, H-column, restart and contraction counts,
-//! identical convergence flags and root ordering, eigenvalues and residuals
-//! (cluster invariants for degenerate roots) within rounding, every residual equal to an
-//! independent residual with the full matrix; fewer rotation columns, GEMM
-//! flops and reduction payload. Strict (residual) solves are unchanged bit for bit.
+//! Frozen distributed Davidson: independent residuals, root ordering and
+//! reproducible default work on scattered, clustered and degenerate spectra.
+//! The selected-root alternative was retired by R11b; no A/B switch remains.
 use dft_mpi::{Collective, MpiError, SimRank, simulate};
 use dft_numerics::{pool::WorkerPool, real::RealMatrix};
 use dft_solvers::distributed_davidson::{
@@ -176,12 +170,11 @@ impl DistributedRealOperator for RowsOp<'_> {
 
 fn entry_stack() -> DistributedTuning {
     DistributedTuning {
-        serial_ortho: true,
         wide_gemm: true,
-        lean: true,
+
         panel: Some(4),
         dgks: Some(0.1),
-        workspace: true,
+
         ..Default::default()
     }
 }
@@ -345,30 +338,43 @@ static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn compare(ranks_list: &[usize]) {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let full = entry_stack();
-    let selected = DistributedTuning {
-        selected_roots: true,
-        ..entry_stack()
-    };
+    let first_tuning = entry_stack();
+    let repeat_tuning = entry_stack();
     for p in problems() {
         for capacity in [6usize, 3] {
             for &ranks in ranks_list {
                 let r0 = rotation_stats();
                 let off = run(
-                    &p.a, &p.diag, p.bands, p.policy, p.tol, true, capacity, ranks, full,
+                    &p.a,
+                    &p.diag,
+                    p.bands,
+                    p.policy,
+                    p.tol,
+                    true,
+                    capacity,
+                    ranks,
+                    first_tuning,
                 );
                 let r1 = rotation_stats();
                 let on = run(
-                    &p.a, &p.diag, p.bands, p.policy, p.tol, true, capacity, ranks, selected,
+                    &p.a,
+                    &p.diag,
+                    p.bands,
+                    p.policy,
+                    p.tol,
+                    true,
+                    capacity,
+                    ranks,
+                    repeat_tuning,
                 );
                 let r2 = rotation_stats();
                 let (a, b) = (&off[0].solution, &on[0].solution);
                 let tag = format!("{} capacity {capacity} P={ranks}", p.name);
                 // Check every returned residual against its own vector FIRST,
-                // for both paths. A basis-dependent cross-path comparison (or
+                // for both default runs. A basis-dependent cross-path comparison (or
                 // a work/root assertion) must not hide this independent oracle.
                 let n = p.a.rows();
-                for (label, solution) in [("full", a), ("selected", b)] {
+                for (label, solution) in [("first", a), ("repeat", b)] {
                     for j in 0..p.bands {
                         let x = &solution.eigenvectors.as_slice()[j * n..(j + 1) * n];
                         let t = true_residual(&p.a, x, solution.eigenvalues[j]);
@@ -478,9 +484,9 @@ fn compare(ranks_list: &[usize]) {
                     off[0].payload,
                     on[0].payload
                 );
-                assert!(cols_on <= cols_off && fl_on <= fl_off, "{tag}: more work");
+                assert_eq!((cols_on, fl_on), (cols_off, fl_off), "{tag}: default work");
                 assert_eq!(off[0].tree_sums, on[0].tree_sums, "{tag}: reduction count");
-                assert!(on[0].payload <= off[0].payload, "{tag}: payload");
+                assert_eq!(on[0].payload, off[0].payload, "{tag}: payload");
             }
         }
     }
@@ -488,25 +494,22 @@ fn compare(ranks_list: &[usize]) {
 
 /// Ranks 2 and 3 (fast subset for `scripts/check.sh`).
 #[test]
-fn selected_roots_match_the_full_rotation_path() {
+fn default_solves_preserve_residuals_and_work() {
     compare(&[2, 3]);
 }
 
 /// Ranks 1 to 4.
 #[test]
 #[ignore = "about 20 s in debug; release: cargo test --release -p dft-solvers --test distributed_selected_roots -- --include-ignored --nocapture"]
-fn selected_roots_match_the_full_rotation_path_at_every_rank_count() {
+fn default_solves_preserve_residuals_and_work_at_every_rank_count() {
     compare(&[1, 2, 3, 4]);
 }
 
-/// Strict (residual) solves ignore the switch: bit-identical results.
+/// Strict default solves are bit-reproducible.
 #[test]
 fn strict_solves_are_unchanged() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    let selected = DistributedTuning {
-        selected_roots: true,
-        ..entry_stack()
-    };
+    let repeat_tuning = entry_stack();
     for p in problems().into_iter().take(2) {
         for ranks in [2usize, 3] {
             let a = run(
@@ -521,7 +524,15 @@ fn strict_solves_are_unchanged() {
                 entry_stack(),
             );
             let b = run(
-                &p.a, &p.diag, p.bands, p.policy, p.tol, false, 6, ranks, selected,
+                &p.a,
+                &p.diag,
+                p.bands,
+                p.policy,
+                p.tol,
+                false,
+                6,
+                ranks,
+                repeat_tuning,
             );
             let bits =
                 |m: &RealMatrix| m.as_slice().iter().map(|x| x.to_bits()).collect::<Vec<_>>();

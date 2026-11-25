@@ -92,27 +92,15 @@ fn table_defaults_match_accessors_with_environment_unset() {
 fn legacy_defaults_are_unchanged() {
     let on = |id: Id| switches::resolve(switches::switch(id), None).0 == Value::Choice("on");
     for id in [
-        Id::CERT_SCREEN,
-        Id::POTENTIAL_REUSE,
-        Id::EMPTY_LOOSE,
-        Id::DENSITY_PAIR,
-        Id::DENSITY_REDUCE,
-        Id::NL_ENERGY_REAL,
-        Id::ATOMIC_REAL,
         Id::MPI_M2,
         Id::M2_BATCH,
         Id::B1,
         Id::B5,
-        Id::B6,
-        Id::WIDE_DOT,
-        Id::MKL_NONLOCAL,
-        Id::APPLY_LEAN,
+        Id::M2_DGEMM,
         Id::MKL_DGEMM,
         Id::MKL_EVD,
         Id::STANDARD_RESIDUAL_GUARD,
-        Id::PHASE_THREADS,
         Id::STAGE_TIMERS,
-        Id::M2_WORKSPACE,
     ] {
         assert!(on(id), "{id:?} must default on");
     }
@@ -122,19 +110,9 @@ fn legacy_defaults_are_unchanged() {
         Id::NARROW_PROJ,
         Id::NARROW_REDUCED,
         Id::DAVIDSON_STAGES,
-        Id::HAPPLY_OVERLAP,
-        Id::HAPPLY_FOLD,
-        Id::SECOND_VECTOR,
-        Id::PROJECT_WIDE,
-        Id::B1_NARROW,
         Id::REFERENCE_STRICT,
-        Id::MIX_CELL_KERKER,
-        Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::DAVIDSON_PROFILE,
-        Id::DAVIDSON_UPPER_BORDER,
-        Id::DAVIDSON_ROTATE_COLUMNS,
-        Id::DAVIDSON_PACKED_REDUCE,
         Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
@@ -143,20 +121,12 @@ fn legacy_defaults_are_unchanged() {
         switches::table_of(Id::DAVIDSON_PROFILE),
         switches::Table::Profile
     );
-    assert_eq!(switches::choice(Id::LEAN_BORDER), "separate");
-    assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::M2_SELECTED_ROOTS));
+
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_CAPACITY), None).0,
         Value::Choice("auto")
     );
-    assert_eq!(
-        switches::resolve(switches::switch(Id::M2_EIGEN), None).0,
-        Value::Choice("replicated")
-    );
-    assert_eq!(
-        switches::resolve(switches::switch(Id::M2_ORTHO), None).0,
-        Value::Choice("serial")
-    );
+
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_FFT), None).0,
         Value::Choice("rust")
@@ -181,14 +151,7 @@ fn legacy_defaults_are_unchanged() {
             "packed"
         })
     );
-    assert_eq!(
-        value(Id::ORTHO_BLOCK),
-        Value::Choice(if dft_numerics::MKL_BACKEND {
-            "off"
-        } else {
-            "on"
-        })
-    );
+
     assert_eq!(
         value(Id::PAIR_FFT),
         Value::Choice(if dft_numerics::MKL_BACKEND {
@@ -199,32 +162,23 @@ fn legacy_defaults_are_unchanged() {
     );
     assert_eq!(value(Id::DAVIDSON), Value::Choice("lean"));
     assert_eq!(value(Id::NONLOCAL_BLOCK), Value::Choice("auto"));
-    assert_eq!(
-        value(Id::MGS),
-        Value::Choice(if dft_numerics::MKL_BACKEND {
-            "blocked"
-        } else {
-            "classic"
-        })
-    );
+
     assert_eq!(value(Id::ORTHO), Value::Number(Some(0.1)));
-    assert_eq!(value(Id::BUFFER_TOL), Value::Number(Some(1e-3)));
+
     assert_eq!(value(Id::EIGEN_FACTOR), Value::Number(Some(0.1)));
-    assert_eq!(value(Id::MIX_GROWTH_RESET), Value::Number(None));
-    assert_eq!(value(Id::B1_MARGIN), Value::Number(Some(0.5)));
-    assert_eq!(value(Id::B1_ROWS), Value::Number(None));
+
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
     // MPI-KEPT-START stays opt-in until dev08.
     // MPI-SCALING-GAP switches stay opt-in until dev08.
     assert_eq!(value(Id::M2_STICKS), Value::Choice("mirror"));
-    assert_eq!(value(Id::M2_START), Value::Choice("gram"));
+
     // MPI-OVERLAP-DAVIDSON stays opt-in until dev08.
-    assert_eq!(value(Id::M2_LEAN_ALGEBRA), Value::Choice("on"));
+
     // Adopted 2026-11-17 on dev08 evidence (ledger M2-LAZY-DEV08-STAGE0/-STAGE1, MPI-FS-PANEL-GS).
-    assert_eq!(value(Id::M2_PANEL_GS), Value::Choice("fused"));
+
     // MPI-REMAINING grid switches stay opt-in until dev08.
-    assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("on"));
+
     // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
     assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
     // BREAKTHROUGH-3 bounded subspace SCF stays off (rejected at stage 1, ledger BT3-*).
@@ -235,13 +189,11 @@ fn legacy_defaults_are_unchanged() {
     // stay off until dev08 (all bit-identical; the probe changes timing only).
     assert_eq!(value(Id::PHASE_WAIT), Value::Choice("off"));
     assert_eq!(value(Id::EWALD_CACHE), Value::Choice("on"));
-    assert_eq!(value(Id::M2_LIGHT_STATE), Value::Choice("on"));
-    assert_eq!(value(Id::M2_DENSITY), Value::Choice("fused"));
-    assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
+
     // ISSUE-20: lazy serial operator of M2 states, on since dev08 (si64 -1.22 %, bit-identical).
-    assert_eq!(value(Id::M2_LAZY_SERIAL), Value::Choice("on"));
+
     // LADDER-IMPORT-SPLIT: split import check (same verdict, bit-identical results).
-    assert_eq!(value(Id::IMPORT_CHECK), Value::Choice("split"));
+
     // LAZY-RESULT: lazy delivered orbitals when the caller reads none.
     assert_eq!(value(Id::M2_LAZY_RESULT), Value::Choice("on"));
     // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
@@ -251,22 +203,20 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::EWALD_FAST), Value::Choice("on"));
     assert_eq!(value(Id::IONIC_FAST), Value::Choice("on"));
     // SCF-TRAJECTORY: Coulomb guard of the L2 Pulay fit, off until dev08.
-    assert_eq!(value(Id::MIX_COULOMB_GUARD), Value::Choice("off"));
+
     // M2-OWNED: owned potential and density prototype, off until dev08.
     assert_eq!(value(Id::M2_LOCAL_FIELDS), Value::Choice("on"));
     assert_eq!(value(Id::M2_LOCAL_DENSITY), Value::Choice("on"));
     assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
     assert_eq!(value(Id::INIT_PROFILE), Value::Choice("off"));
     assert_eq!(value(Id::FFT_PROFILE), Value::Choice("off"));
-    assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("on"));
-    assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
-    assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
+
     assert_eq!(value(Id::FFT_KEPT_FUSE), Value::Choice("off"));
-    assert_eq!(value(Id::DAVIDSON_PACKED_REDUCE), Value::Choice("off"));
+
     assert_eq!(value(Id::COLLECTIVE_TRACE), Value::Choice("off"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 121);
+    assert_eq!(TABLE.len(), 75);
 }
 
 #[test]

@@ -8,8 +8,6 @@
 use crate::real_davidson::lane_profile;
 use crate::{
     BandTolerances, RealLinearOperator, SolverError,
-    bordered::{Bordered, MAX_STREAK},
-    distributed::{column_norms_squared, gram, project_out_with, rotate_local_with},
     real_davidson::{RealEigenSolution, free_electron_initial_guess},
 };
 use dft_mpi::{Collective, block_counts, block_displacements};
@@ -102,33 +100,10 @@ const STAGE_TOTAL: usize = 15;
 static STAGE_NANOS: [AtomicU64; 16] = [const { AtomicU64::new(0) }; 16];
 static STAGE_CALLS: [AtomicU64; 16] = [const { AtomicU64::new(0) }; 16];
 
-thread_local! {
-    /// This rank's local rows and the row layout of its previous solve
-    /// (`BAANDI_M2_LAYOUT_CACHE=on`).
-    static LAYOUT_CACHE: std::cell::RefCell<Option<(Vec<usize>, std::sync::Arc<Layout>)>> =
-        const { std::cell::RefCell::new(None) };
-    static LAYOUT_CACHE_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-}
 // Solves that reused the cached layout, solves that exchanged and stored it.
 static LAYOUT_COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
-/// `BAANDI_M2_LAYOUT_CACHE=on|off` (default off; per-thread override for
-/// simulated ranks): reuse the row-index layout of the previous solve when
-/// every rank's local rows are unchanged (bit-identical: same layout).
-fn layout_cache() -> bool {
-    LAYOUT_CACHE_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_LAYOUT_CACHE))
-    })
-}
-/// Override `BAANDI_M2_LAYOUT_CACHE` on the calling thread (`None`: the switch).
-pub fn set_layout_cache_override(on: Option<bool>) {
-    LAYOUT_CACHE_OVERRIDE.with(|o| o.set(on));
-    if on == Some(false) {
-        LAYOUT_CACHE.with(|l| *l.borrow_mut() = None);
-    }
-}
 /// (solves that reused the cached layout, solves that exchanged and stored it)
-/// of `BAANDI_M2_LAYOUT_CACHE=on`, summed over the threads of this process.
+/// of the retired layout-cache experiment (always zero).
 pub fn layout_cache_stats() -> (u64, u64) {
     (
         LAYOUT_COUNTS[0].load(Ordering::Relaxed),
@@ -191,6 +166,7 @@ static SOLVE_COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 /// cubic work and how each was solved. `p90` and `max` are exact orders.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ReducedSolveStats {
+    pub bordered: u64,
     /// Reduced eigenproblems (one per Davidson iteration).
     pub solves: u64,
     pub mean_order: f64,
@@ -200,9 +176,7 @@ pub struct ReducedSolveStats {
     pub sum_cubed: f64,
     /// Iterations whose reduced matrix grew by exactly one column.
     pub single_column: u64,
-    /// Solves done by the bordered (secular) update (`BAANDI_M2_B5=on`).
-    pub bordered: u64,
-    /// Solves done on rank 0 and broadcast (`BAANDI_M2_EIGEN=root`).
+    /// Retired root-broadcast counter (always zero).
     pub broadcast: u64,
 }
 
@@ -714,7 +688,7 @@ impl DistributedKeptStart {
 
 /// Run-time choices of the distributed solver (MPI entry cost,
 /// docs/performance/mpi-entry-cost-analysis.md). `from_env` reads the switches;
-/// `Default` is the classic M1/M2 code (all off). Every choice is a function of
+/// Oracle algorithm choices are frozen at their defaults (R11b). Every remaining choice uses
 /// replicated data only, so all ranks take the same branches.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DistributedTuning {
@@ -722,51 +696,12 @@ pub struct DistributedTuning {
     /// `multiply_slices_wide_into` (per-panel dgemm at any width on MKL builds;
     /// bit-identical on pure builds).
     pub wide_gemm: bool,
-    /// `BAANDI_M2_ORTHO=serial`: orthonormalize in the order of the serial solver
-    /// (one basis projection per pass, the DGKS second-pass rule, panel
-    /// Gram-Schmidt with the serial panel rule) instead of three projections and
-    /// two whole-block column sweeps. Rounding class.
-    pub serial_ortho: bool,
     /// DGKS keep ratio of the serial order (`BAANDI_ORTHO`); `None` = two passes.
     pub dgks: Option<f64>,
     /// Panel rule of the serial order: `Some(0)` = ORTHO-BLOCK shape rule on the
     /// widest local row count, `Some(w)` = fixed width w (MGS-B), `None` = the
     /// whole block as one panel (the classic sweep).
     pub panel: Option<usize>,
-    /// `BAANDI_M2_LEAN=on`: residual and correction blocks by slice loops
-    /// (bit-identical).
-    pub lean: bool,
-    /// `BAANDI_M2_EIGEN=root`: rank 0 solves the reduced eigenproblem and
-    /// broadcasts the lowest `bands` pairs (bit-identical: the same solve on the
-    /// same replicated matrix; removes the concurrent replicated solves).
-    pub eigen_root: bool,
-    /// `BAANDI_M2_B5=on`: bordered (secular) update of the reduced
-    /// eigenproblem when exactly one column was appended (the serial solver's B5;
-    /// rounding class).
-    pub bordered: bool,
-    /// `BAANDI_M2_WORKSPACE=on`: run on the persistent per-rank workspace
-    /// (`workspace.rs`; storage only, bit-identical).
-    pub workspace: bool,
-    /// `BAANDI_M2_SELECTED_ROOTS=on`: on Ritz-change (standard) solves, decide
-    /// the unconverged roots from the Ritz-value change before any rotation and
-    /// form Ritz vectors, H images and residuals for those roots only; all bands
-    /// are rotated only at return and at restarts (review F05, the serial lean
-    /// solver's rule). Runs on the workspace path. Strict (residual) solves are
-    /// unchanged. Rounding class (column subsets of the same GEMM).
-    pub selected_roots: bool,
-    /// `BAANDI_M2_PANEL_GS`: reduction scheme of the in-panel Gram-Schmidt
-    /// (`PanelGs`; default classic, three reductions per column).
-    pub panel_gs: PanelGs,
-    /// `BAANDI_M2_LEAN_ALGEBRA=on` (MPI-OVERLAP-DAVIDSON): Ritz-change
-    /// (standard) solves run the serial lean solver's algebra on the stick
-    /// rows: unit-norm corrections appended without Gram-Schmidt, overlap S and
-    /// its inverse Cholesky factor kept beside H_r, generalized reduced problem;
-    /// one tree sum per iteration carries the S border, the H border and the
-    /// selected residual norms (`workspace/lean.rs`,
-    /// docs/design/mpi-overlap-davidson.md). Implies the workspace path and
-    /// selected-root rotation on those solves; strict solves are unchanged.
-    /// Rounding class.
-    pub lean_algebra: bool,
     /// `BAANDI_RESTART_KEEP` (ticket BREAKTHROUGH-1-RESTART, R1-b): previous
     /// directions kept at a contraction of the lean algebra path
     /// (`RestartKeep`; default off = the plain restart, bit for bit).
@@ -774,7 +709,7 @@ pub struct DistributedTuning {
 }
 
 /// In-panel reduction scheme of the distributed panel Gram-Schmidt
-/// (`BAANDI_M2_PANEL_GS`, docs/performance/profile-2026-11-16-mpi.md). The
+/// (shared kernel; legacy oracle always uses Fused). The
 /// in-panel dot and norm reductions are about 88 percent of all reductions of the
 /// distributed solver and carry at most 64 doubles each (latency bound, ledger
 /// M2-REDUCTION-COUNTS-F08).
@@ -796,34 +731,18 @@ pub enum PanelGs {
     Fused,
 }
 impl DistributedTuning {
-    /// The switches of this process; the serial-order panel and DGKS rules are the
-    /// serial solver's (`BAANDI_ORTHO_BLOCK`, `BAANDI_MGS`, `BAANDI_ORTHO`).
+    /// Shared switches and the frozen backend-dependent serial panel rule.
     pub fn from_env() -> Self {
-        use dft_numerics::switches::{Id, choice, on};
-        let panel = if on(Id::ORTHO_BLOCK) {
-            Some(0)
+        use dft_numerics::switches::{Id, on};
+        let panel = Some(if dft_numerics::MKL_BACKEND {
+            crate::real_davidson::BLOCK_COLUMNS
         } else {
-            match choice(Id::MGS) {
-                "blocked" => Some(crate::real_davidson::BLOCK_COLUMNS),
-                _ => None,
-            }
-        };
+            0
+        });
         Self {
             wide_gemm: on(Id::M2_DGEMM),
-            serial_ortho: choice(Id::M2_ORTHO) == "serial",
             dgks: crate::real_davidson::dgks_keep(),
             panel,
-            lean: on(Id::M2_LEAN),
-            eigen_root: choice(Id::M2_EIGEN) == "root",
-            bordered: on(Id::M2_B5),
-            workspace: on(Id::M2_WORKSPACE),
-            selected_roots: on(Id::M2_SELECTED_ROOTS),
-            panel_gs: match choice(Id::M2_PANEL_GS) {
-                "pythag" => PanelGs::Pythag,
-                "fused" => PanelGs::Fused,
-                _ => PanelGs::Classic,
-            },
-            lean_algebra: on(Id::M2_LEAN_ALGEBRA),
             restart_keep: crate::real_davidson::RestartKeep::from_env(),
         }
     }
@@ -855,155 +774,6 @@ thread_local! {
 /// `None` restores the environment.
 pub fn set_tuning_override(tuning: Option<DistributedTuning>) {
     TUNING_OVERRIDE.with(|t| t.set(tuning));
-}
-
-thread_local! {
-    static START_GRAM_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-}
-/// Force `BAANDI_M2_START` for the calling thread (tests with simulated ranks;
-/// every rank thread sets the same value); `None` restores the switch.
-pub fn set_start_gram_override(gram: Option<bool>) {
-    START_GRAM_OVERRIDE.with(|o| o.set(gram));
-}
-/// `BAANDI_M2_START=gram` (MPI-SCALING-GAP): the workspace solver takes an
-/// orthonormal start block (Gram defect at most 1e-12, the restart contraction
-/// rule) as its basis after one Gram reduction instead of the panel Gram-Schmidt.
-pub fn start_gram() -> bool {
-    START_GRAM_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
-        dft_numerics::switches::choice(dft_numerics::switches::Id::M2_START) == "gram"
-    })
-}
-
-/// Serial-order orthonormalization (`BAANDI_M2_ORTHO=serial`), the distributed
-/// counterpart of the serial solver's projection: normalise (one reduction);
-/// per pass project once against `against` (one Gram reduction, local rotation)
-/// and run the panel Gram-Schmidt; the second pass is skipped when the DGKS rule
-/// holds (every column kept and the smallest kept norm at least `dgks`). Without
-/// `against` one pass. Rank decisions use the same relative floor as the serial
-/// solver and depend on reduced values only (identical on every rank).
-fn orthonormalize_serial<C: Collective>(
-    comm: &C,
-    ws: &mut RealGemmWorkspace,
-    against: Option<&RealMatrix>,
-    block: &RealMatrix,
-    tuning: &DistributedTuning,
-    panel: usize,
-) -> Result<RealMatrix, SolverError> {
-    let rows = block.rows();
-    let mut x = block.clone();
-    site(Site::OrthoNormalize);
-    let norms = column_norms_squared(comm, &x)?;
-    for (j, nn) in norms.iter().enumerate() {
-        let len = nn.sqrt();
-        for v in x.as_mut_slice()[j * rows..(j + 1) * rows].iter_mut() {
-            *v = if len == 0.0 { 0.0 } else { *v / len };
-        }
-    }
-    let against = against.filter(|q| q.cols() > 0);
-    let mut skip_second = false;
-    for pass in 0..if against.is_some() { 2 } else { 1 } {
-        if (pass > 0 && skip_second) || x.cols() == 0 {
-            break;
-        }
-        let count = x.cols();
-        if let Some(q) = against {
-            let mut overlap = RealMatrix::zeros(q.cols(), count)?;
-            let mut scratch = RealMatrix::zeros(rows, count)?;
-            site(Site::OrthoProjection);
-            project_out_with(
-                comm,
-                ws,
-                q,
-                &mut x,
-                &mut overlap,
-                &mut scratch,
-                tuning.wide_gemm,
-            )?;
-        }
-        let (y, min_len) = panel_gram_schmidt(comm, ws, &x, panel, tuning)?;
-        if pass == 0
-            && against.is_some()
-            && let Some(keep) = tuning.dgks
-        {
-            skip_second = y.cols() == count && min_len >= keep;
-        }
-        x = y;
-    }
-    Ok(x)
-}
-
-/// Panel Gram-Schmidt of a row-distributed block: panels of `panel` columns; each
-/// panel is projected twice against the columns already kept (Gram reduction plus
-/// local rotation), then every column of the panel is orthogonalised twice
-/// against the panel's earlier kept columns (one reduction of the dot products
-/// per pass, as `mgs_panel`) and normalised (one reduction); a column whose
-/// remaining norm is not above the dependence tolerance is dropped. With one
-/// panel covering the block this is exactly `mgs_panel`. Returns the kept columns
-/// and the smallest remaining norm seen (dropped columns included).
-fn panel_gram_schmidt<C: Collective>(
-    comm: &C,
-    ws: &mut RealGemmWorkspace,
-    x: &RealMatrix,
-    panel: usize,
-    tuning: &DistributedTuning,
-) -> Result<(RealMatrix, f64), SolverError> {
-    let wide = tuning.wide_gemm;
-    let (rows, cols) = (x.rows(), x.cols());
-    let mut out = RealMatrix::zeros(rows, cols)?;
-    let mut kept = 0usize;
-    let mut min_len = f64::INFINITY;
-    let mut start = 0;
-    while start < cols {
-        let w = panel.max(1).min(cols - start);
-        let mut p = RealMatrix::new(
-            rows,
-            w,
-            x.as_slice()[start * rows..(start + w) * rows].to_vec(),
-        )?;
-        if kept > 0 {
-            let q = RealMatrix::new(rows, kept, out.as_slice()[..kept * rows].to_vec())?;
-            let mut overlap = RealMatrix::zeros(kept, w)?;
-            let mut scratch = RealMatrix::zeros(rows, w)?;
-            site(Site::PanelCross);
-            for _ in 0..2 {
-                project_out_with(comm, ws, &q, &mut p, &mut overlap, &mut scratch, wide)?;
-            }
-        }
-        let first = kept;
-        let mut local = Vec::with_capacity(w + 1);
-        let mut sums = Vec::with_capacity(w + 1);
-        let mut v = vec![0.0; rows];
-        for jj in 0..w {
-            v.copy_from_slice(column_of(&p, jj));
-            let len = panel_column(
-                comm,
-                &out.as_slice()[first * rows..kept * rows],
-                rows,
-                kept - first,
-                &mut v,
-                &mut local,
-                &mut sums,
-                tuning.panel_gs,
-                tuning.dgks,
-            )?;
-            if len.is_finite() {
-                min_len = min_len.min(len);
-            }
-            if !len.is_finite() || len <= DEPENDENCE_TOLERANCE {
-                continue;
-            }
-            for (o, a) in out.as_mut_slice()[kept * rows..(kept + 1) * rows]
-                .iter_mut()
-                .zip(&v)
-            {
-                *o = a / len;
-            }
-            kept += 1;
-        }
-        start += w;
-    }
-    out.reshape_within_storage(rows, kept)?;
-    Ok((out, min_len))
 }
 
 /// Orthogonalise `v` (local rows) against the `q.len() / rows` orthonormal
@@ -1106,128 +876,13 @@ fn pythagorean(norm2: f64, removed: f64) -> Option<f64> {
     (left >= 0.25 * norm2).then(|| left.sqrt())
 }
 
-/// Sequential modified Gram-Schmidt inside the panel (two passes per column), the
-/// distributed counterpart of the serial solver's in-block orthogonalisation:
-/// a column is dropped only when its remaining relative norm is at most the
-/// dependence tolerance, so near-dependent corrections are kept exactly as in the
-/// serial solver (a Gram-matrix Cholesky would discard them). Each reduction is a
-/// deterministic tree sum of a short vector.
-fn mgs_panel<C: Collective>(comm: &C, x: &RealMatrix) -> Result<RealMatrix, SolverError> {
-    let rows = x.rows();
-    let mut kept: Vec<f64> = Vec::new(); // column-major, `count` columns of `rows`
-    let mut count = 0usize;
-    for j in 0..x.cols() {
-        let mut v = column_of(x, j).to_vec();
-        for _ in 0..2 {
-            if count > 0 {
-                let mut local = vec![0.0; count];
-                for (c, q) in local.iter_mut().zip(kept.chunks(rows)) {
-                    *c = q.iter().zip(&v).map(|(a, b)| a * b).sum();
-                }
-                let mut sums = vec![0.0; count];
-                comm.tree_sum_f64(&local, &mut sums).map_err(comm_error)?;
-                for (c, q) in sums.iter().zip(kept.chunks(rows)) {
-                    for (vi, qi) in v.iter_mut().zip(q) {
-                        *vi -= c * qi;
-                    }
-                }
-            }
-        }
-        let local = [v.iter().map(|a| a * a).sum::<f64>()];
-        let mut total = [0.0];
-        comm.tree_sum_f64(&local, &mut total).map_err(comm_error)?;
-        let len = total[0].sqrt();
-        if !len.is_finite() || len <= DEPENDENCE_TOLERANCE {
-            continue;
-        }
-        kept.extend(v.iter().map(|a| a / len));
-        count += 1;
-    }
-    Ok(RealMatrix::new(rows, count, kept)?)
-}
-
 fn column_of(x: &RealMatrix, j: usize) -> &[f64] {
     &x.as_slice()[j * x.rows()..(j + 1) * x.rows()]
 }
 
-/// Normalise the columns, project twice against `against` (block Gram-Schmidt),
-/// drop columns that vanish, then orthonormalise the rest with two CholeskyQR
-/// passes. Returns the kept block (possibly with zero columns).
-fn orthonormalize<C: Collective>(
-    comm: &C,
-    ws: &mut RealGemmWorkspace,
-    against: Option<&RealMatrix>,
-    block: &RealMatrix,
-    wide: bool,
-) -> Result<RealMatrix, SolverError> {
-    let rows = block.rows();
-    let mut x = block.clone();
-    let norms = column_norms_squared(comm, &x)?;
-    for (j, nn) in norms.iter().enumerate() {
-        let len = nn.sqrt();
-        let col = &mut x.as_mut_slice()[j * rows..(j + 1) * rows];
-        for v in col.iter_mut() {
-            *v = if len == 0.0 { 0.0 } else { *v / len };
-        }
-    }
-    if let Some(q) = against.filter(|q| q.cols() > 0) {
-        for _ in 0..2 {
-            let mut overlap = RealMatrix::zeros(q.cols(), x.cols())?;
-            let mut scratch = RealMatrix::zeros(rows, x.cols())?;
-            project_out_with(comm, ws, q, &mut x, &mut overlap, &mut scratch, wide)?;
-        }
-    }
-    // Drop columns that vanished after the projection, renormalise the others.
-    let norms = column_norms_squared(comm, &x)?;
-    let survivors: Vec<usize> = (0..x.cols())
-        .filter(|&j| norms[j].sqrt() > DEPENDENCE_TOLERANCE)
-        .collect();
-    if survivors.is_empty() {
-        return Ok(RealMatrix::zeros(rows, 0)?);
-    }
-    let mut y = RealMatrix::zeros(rows, survivors.len())?;
-    for (c, &j) in survivors.iter().enumerate() {
-        let len = norms[j].sqrt();
-        for i in 0..rows {
-            y[(i, c)] = x[(i, j)] / len;
-        }
-    }
-    let mut y = mgs_panel(comm, &y)?;
-    // Renormalising a nearly dependent column amplifies rounding error along the
-    // basis; one more projection plus a panel pass (nothing drops now) restores
-    // orthogonality to working precision.
-    if let Some(q) = against.filter(|q| q.cols() > 0 && y.cols() > 0) {
-        let mut overlap = RealMatrix::zeros(q.cols(), y.cols())?;
-        let mut scratch = RealMatrix::zeros(rows, y.cols())?;
-        project_out_with(comm, ws, q, &mut y, &mut overlap, &mut scratch, wide)?;
-        y = mgs_panel(comm, &y)?;
-    }
-    Ok(y)
-}
-
-/// The orthonormalization selected by `tuning` (classic or serial order).
-fn orthonormalize_tuned<C: Collective>(
-    comm: &C,
-    ws: &mut RealGemmWorkspace,
-    against: Option<&RealMatrix>,
-    block: &RealMatrix,
-    tuning: &DistributedTuning,
-    panel: usize,
-) -> Result<RealMatrix, SolverError> {
-    if tuning.serial_ortho {
-        orthonormalize_serial(comm, ws, against, block, tuning, panel)
-    } else {
-        orthonormalize(comm, ws, against, block, tuning.wide_gemm)
-    }
-}
-
-/// One reduced eigenproblem: the bordered (secular) update when exactly one
-/// column was appended to an unbroken base (`BAANDI_M2_B5=on`, same rule and
-/// streak bound as the serial solver), otherwise the dense solve. With B5 the
-/// result becomes the next base. All pairs are written.
+/// Frozen replicated dense reduced eigenproblem.
 fn solve_reduced(
     eig: &mut RealEighWorkspace,
-    b5: Option<(&mut Bordered, &mut RealGemmWorkspace)>,
     reduced: &RealMatrix,
     prefix: usize,
     values: &mut [f64],
@@ -1238,42 +893,12 @@ fn solve_reduced(
         reduced.rows(),
         prefix,
         reduced.rows(),
-        usize::from(b5.is_some()),
+        0,
     );
 
     let m = reduced.rows();
-    let Some((b, ws)) = b5 else {
-        {
-            let _full = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
-            eig.solve_into(reduced, values, coefficients)?;
-        }
-        return Ok(());
-    };
-    if prefix == 0 {
-        b.invalidate();
-    }
-    let bordered = prefix + 1 == m && b.order == prefix && b.streak < MAX_STREAK && {
-        let _bordered = lane_profile::span(lane_profile::Op::Bordered, m, prefix, m, 0);
-        b.update(ws, reduced, values, coefficients, None)?
-    };
-    if bordered {
-        b.streak += 1;
-        SOLVE_COUNTS[2].fetch_add(1, Ordering::Relaxed);
-    } else {
-        {
-            let _full = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
-            eig.solve_into(reduced, values, coefficients)?;
-        }
-        b.streak = 0;
-    }
-    b.store(values, coefficients);
-    Ok(())
-}
-
-fn append_columns(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), SolverError> {
-    let mut data = a.as_slice().to_vec();
-    data.extend_from_slice(b.as_slice());
-    *a = RealMatrix::new(a.rows(), a.cols() + b.cols(), data)?;
+    let _full = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
+    eig.solve_into(reduced, values, coefficients)?;
     Ok(())
 }
 
@@ -1317,14 +942,14 @@ impl crate::RealDavidson {
         let offset = layout.index[comm.rank()].first().copied().unwrap_or(0);
         let diag_local = &diagonal[offset..offset + nl];
         let tuning = DistributedTuning::current();
-        if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {
+        {
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
                 site(Site::Apply);
                 let r = apply_distributed(comm, &layout, op, x)?;
                 y.as_mut_slice().copy_from_slice(r.as_slice());
                 Ok(())
             };
-            return workspace::solve_core_ws(
+            workspace::solve_core_ws(
                 self,
                 comm,
                 &layout,
@@ -1341,31 +966,8 @@ impl crate::RealDavidson {
                 tuning,
                 None,
                 true,
-            );
+            )
         }
-        let pool = match op.worker_pool() {
-            Some(p) => p,
-            None => WorkerPool::new(op.inner_threads())
-                .map_err(|e| SolverError::Application(e.to_string()))?,
-        };
-        let mut apply = |x: &RealMatrix| {
-            site(Site::Apply);
-            apply_distributed(comm, &layout, op, x)
-        };
-        self.solve_core(
-            comm,
-            &layout,
-            pool,
-            &mut apply,
-            initial,
-            diag_local,
-            Some(diagonal),
-            policy,
-            ritz,
-            certify,
-            capacity_per_band,
-            tuning,
-        )
     }
 
     /// Distributed solve directly on the row partition of a distributed operator
@@ -1441,7 +1043,7 @@ impl crate::RealDavidson {
     /// `KEPT_START_TOLERANCE` and the Gram defect of X is at most 1e-12 (the
     /// contraction rule of a restart). Otherwise it takes the plain start. A
     /// Ritz-change return with `kept.keep` stores H X (the return rotation of the
-    /// H images). Needs the workspace path (`tuning.workspace` or
+    /// H images). Needs the workspace path (`true` or
     /// `selected_roots`); otherwise the kept data is dropped and the plain solver
     /// runs.
     #[allow(clippy::too_many_arguments)]
@@ -1548,43 +1150,7 @@ impl crate::RealDavidson {
             || mine.iter().any(|&r| r >= n)
             || matches!(initial, Some(DistributedStart::Local(x)) if x.rows() != mine.len());
         let ranks = comm.size();
-        // BREAKTHROUGH-4 (`BAANDI_M2_LAYOUT_CACHE=on`): the row lists of all
-        // ranks are reused from this thread's previous solve when every rank
-        // holds the same local rows (one 1-double reduction decides, so the
-        // decision is replicated); otherwise exchanged as before.
-        let cache = layout_cache();
-        let reuse = if cache {
-            let hit = LAYOUT_CACHE.with(|l| {
-                l.borrow().as_ref().is_some_and(|(rows, lay)| {
-                    lay.n == n
-                        && lay.rank == comm.rank()
-                        && lay.counts.len() == ranks
-                        && rows.as_slice() == mine
-                })
-            });
-            let mut flag = [0.0];
-            comm.tree_sum_f64(
-                &[if invalid {
-                    f64::NAN
-                } else {
-                    f64::from(u8::from(!hit))
-                }],
-                &mut flag,
-            )
-            .map_err(comm_error)?;
-            if flag[0].is_nan() {
-                return Err(SolverError::InvalidParameter(
-                    "invalid local rows, diagonal or start",
-                ));
-            }
-            flag[0] == 0.0
-        } else {
-            false
-        };
-        let layout: std::sync::Arc<Layout> = if reuse {
-            LAYOUT_COUNTS[0].fetch_add(1, Ordering::Relaxed);
-            LAYOUT_CACHE.with(|l| l.borrow().as_ref().expect("checked above").1.clone())
-        } else {
+        let layout: std::sync::Arc<Layout> = {
             // Setup (once per solve): every rank learns the row lists of all ranks.
             let mut counts_f = vec![0.0; ranks];
             comm.allgatherv_f64(
@@ -1623,26 +1189,22 @@ impl crate::RealDavidson {
                 counts,
                 index,
             });
-            if cache {
-                LAYOUT_COUNTS[1].fetch_add(1, Ordering::Relaxed);
-                LAYOUT_CACHE.with(|l| *l.borrow_mut() = Some((mine.to_vec(), layout.clone())));
-            }
+            {}
             layout
         };
-        let nl = layout.nl();
         let cap = self
             .max_subspace
             .max(self.bands.saturating_mul(capacity_per_band))
             .min(n);
         let payload = 2 * cap * cap + 2 * cap + 1;
-        let persistent = tuning.workspace || tuning.selected_roots || tuning.lean_algebra;
+        let persistent = true;
         let agreement = ApplyAgreement {
             inner: comm,
             failed: std::cell::Cell::new(false),
             scratch: workspace::AgreementScratch::acquire(payload, persistent),
         };
         stage_add(STAGE_SETUP, t_setup);
-        if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {
+        {
             let supplied = op.worker_pool();
             let threads = op.inner_threads();
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
@@ -1680,467 +1242,8 @@ impl crate::RealDavidson {
                 gather,
             );
             stage_add(STAGE_TOTAL, t_total);
-            return result;
+            result
         }
-        // The allocating path has no kept start: drop it, then give the local
-        // rows of the result below.
-        if let Some((_, k)) = kept.as_mut() {
-            k.invalidate();
-        }
-        // It also needs a replicated start: gather a local one (MPI-LAZY-ORBITALS
-        // with the workspace off), and it always returns the gathered block.
-        let gathered;
-        let initial = match initial {
-            Some(DistributedStart::Global(x)) => Some(x),
-            Some(DistributedStart::Local(x)) => {
-                if x.rows() != nl {
-                    return Err(SolverError::InvalidParameter(
-                        "local start rows differ from the operator's rows",
-                    ));
-                }
-                gathered = gather_full(comm, &layout, x)?;
-                Some(&gathered)
-            }
-            None => None,
-        };
-        let pool = match op.worker_pool() {
-            Some(p) => p,
-            None => WorkerPool::new(op.inner_threads())
-                .map_err(|e| SolverError::Application(e.to_string()))?,
-        };
-        let mut apply = |x: &RealMatrix| -> Result<RealMatrix, SolverError> {
-            site(Site::Apply);
-            let start = dft_numerics::stage_clock::start();
-            let mut y = RealMatrix::zeros(nl, x.cols())?;
-            let failed = op.apply_block(comm, x, &mut y).is_err();
-            stage_add(5, start);
-            stage_add(6, start);
-            if failed || y.as_slice().iter().any(|v| !v.is_finite()) {
-                agreement.failed.set(true);
-                y.as_mut_slice().fill(0.0);
-            }
-            Ok(y)
-        };
-        let result = self.solve_core(
-            &agreement,
-            &layout,
-            pool,
-            &mut apply,
-            initial,
-            diagonal_local,
-            None,
-            policy,
-            ritz,
-            certify,
-            capacity_per_band,
-            tuning,
-        )?;
-        if let Some((x, _)) = kept {
-            *x = local_rows(&layout, &result.eigenvectors)?;
-        }
-        stage_add(STAGE_TOTAL, t_total);
-        Ok(result)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn solve_core<C: Collective>(
-        &self,
-        comm: &C,
-        layout: &Layout,
-        pool: std::sync::Arc<WorkerPool>,
-        apply: &mut dyn FnMut(&RealMatrix) -> Result<RealMatrix, SolverError>,
-        initial: Option<&RealMatrix>,
-        diag_local: &[f64],
-        full_diagonal: Option<&[f64]>,
-        policy: BandTolerances,
-        ritz: bool,
-        certify: bool,
-        capacity_per_band: usize,
-        tuning: DistributedTuning,
-    ) -> Result<RealEigenSolution, SolverError> {
-        let n = layout.n;
-        if !(2..=12).contains(&capacity_per_band) {
-            return Err(SolverError::InvalidParameter(
-                "davidson_capacity_per_band must be 2 to 12",
-            ));
-        }
-        if self.bands == 0 || self.bands > n {
-            return Err(SolverError::InvalidParameter("bands or diagonal length"));
-        }
-        if !self.tolerance.is_finite()
-            || self.tolerance <= 0.0
-            || self.max_iterations == 0
-            || policy.strict_bands == 0
-            || policy.strict_bands > self.bands
-            || !policy.buffer_tolerance.is_finite()
-            || policy.buffer_tolerance < self.tolerance
-        {
-            return Err(SolverError::InvalidParameter(
-                "invalid tolerance, iteration limit or strict prefix",
-            ));
-        }
-        let bands = self.bands;
-        let capacity = self.max_subspace.max(bands * capacity_per_band).min(n);
-        let nl = layout.nl();
-        let max_rows = layout.counts.iter().copied().max().unwrap_or(1);
-        let b5_pool = pool.clone();
-        let mut ws = RealGemmWorkspace::with_pool(max_rows.max(1), capacity.max(1), pool)?;
-        // Reduced eigenproblem: replicated on every rank, or on rank 0 with a
-        // broadcast of the lowest `bands` pairs (status, values, coefficients).
-        let root_mode = tuning.eigen_root && comm.size() > 1;
-        let solves_here = !root_mode || comm.rank() == 0;
-        let mut eig = if solves_here {
-            Some(RealEighWorkspace::new(capacity)?)
-        } else {
-            None
-        };
-        // B5 state and its own GEMM workspace (the coefficient product is
-        // capacity x capacity, independent of the local row count).
-        let mut b5 = if tuning.bordered && solves_here {
-            Some((
-                Bordered::new(capacity),
-                RealGemmWorkspace::with_pool(capacity.max(1), capacity.max(1), b5_pool)?,
-            ))
-        } else {
-            None
-        };
-        let mut eigen_buffer = if root_mode {
-            vec![0.0; 1 + bands + capacity * bands]
-        } else {
-            Vec::new()
-        };
-        let mut rng = Rng(self.seed);
-        let panel = tuning.panel_width(max_rows.max(1));
-        let wide = tuning.wide_gemm;
-
-        // Initial basis.
-        let start = match initial {
-            Some(x) => x.clone(),
-            None => {
-                let full: Vec<f64> = match full_diagonal {
-                    Some(d) => d.to_vec(),
-                    None => {
-                        let mut flat = vec![0.0; n];
-                        comm.allgatherv_f64(diag_local, &layout.counts, &mut flat)
-                            .map_err(comm_error)?;
-                        let mut d = vec![0.0; n];
-                        let mut at = 0;
-                        for (r, &c) in layout.counts.iter().enumerate() {
-                            for (&g, &v) in layout.index[r].iter().zip(&flat[at..at + c]) {
-                                d[g] = v;
-                            }
-                            at += c;
-                        }
-                        d
-                    }
-                };
-                free_electron_initial_guess(&full, bands)?
-            }
-        };
-        let mut basis = orthonormalize_tuned(
-            comm,
-            &mut ws,
-            None,
-            &local_rows(layout, &start)?,
-            &tuning,
-            panel,
-        )?;
-        while basis.cols() < bands {
-            let w = bands - basis.cols();
-            let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
-            let extra = orthonormalize_tuned(
-                comm,
-                &mut ws,
-                Some(&basis),
-                &local_rows(layout, &random)?,
-                &tuning,
-                panel,
-            )?;
-            if extra.cols() == 0 {
-                return Err(SolverError::InvalidParameter(
-                    "unable to complete initial basis",
-                ));
-            }
-            append_columns(&mut basis, &extra)?;
-        }
-        let mut applications = 0usize;
-        let mut products = apply(&basis)?;
-        applications += basis.cols();
-
-        let threshold = |j: usize| {
-            if j < policy.strict_bands - usize::from(ritz) {
-                self.tolerance
-            } else {
-                policy.buffer_tolerance
-            }
-        };
-        let meets_policy = |r: &[f64]| r.iter().enumerate().all(|(j, &x)| x <= threshold(j));
-        let meets_strict = |r: &[f64]| {
-            r[..policy.strict_bands]
-                .iter()
-                .all(|&x| x <= self.tolerance)
-        };
-        let mut history = Vec::with_capacity(self.max_iterations);
-        let (mut restarts, mut contractions, mut certificates) = (0usize, 0usize, 0usize);
-        let mut previous = vec![f64::NAN; bands];
-        let mut reduced_width = 0usize;
-        let mut reduced_prev = RealMatrix::zeros(1, 1)?;
-        let mut max_basis = 0usize;
-        let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
-
-        for iteration in 1..=self.max_iterations {
-            workspace::call_probe(iteration);
-            let m = basis.cols();
-            max_basis = max_basis.max(m);
-            // Reduced matrix V^T HV (replicated), symmetrised from the upper triangle.
-            // Incremental, as in the serial solver: only the columns added since the last
-            // iteration are formed (m x new products); the rest is reused.
-            let t0 = dft_numerics::stage_clock::start();
-            let mut reduced = RealMatrix::zeros(m, m)?;
-            for c in 0..reduced_width {
-                for r in 0..reduced_width {
-                    reduced[(r, c)] = reduced_prev[(r, c)];
-                }
-            }
-            let fresh = m - reduced_width;
-            let prefix = reduced_width;
-            let mut fresh_products = RealMatrix::zeros(nl, fresh)?;
-            fresh_products
-                .as_mut_slice()
-                .copy_from_slice(&products.as_slice()[reduced_width * nl..m * nl]);
-            let mut block = RealMatrix::zeros(m, fresh)?;
-            site(Site::ReducedGram);
-            gram(comm, &mut ws, &basis, &fresh_products, &mut block)?;
-            for c in reduced_width..m {
-                for r in 0..=c {
-                    let v = block[(r, c - reduced_width)];
-                    reduced[(r, c)] = v;
-                    reduced[(c, r)] = v;
-                }
-            }
-            reduced_width = m;
-            stage_add(0, t0);
-            reduced_prev = reduced.clone();
-            let mut values = vec![0.0; m];
-            let mut coefficients = RealMatrix::zeros(m, m)?;
-            let t0 = dft_numerics::stage_clock::start();
-            record_solve(m, fresh);
-            let mut status: Result<(), SolverError> = Ok(());
-            if let Some(eig) = eig.as_mut() {
-                status = solve_reduced(
-                    eig,
-                    b5.as_mut().map(|(b, g)| (b, g)),
-                    &reduced,
-                    prefix,
-                    &mut values,
-                    &mut coefficients,
-                );
-            }
-            if root_mode {
-                let buffer = &mut eigen_buffer[..1 + bands + m * bands];
-                if comm.rank() == 0 {
-                    buffer[0] = if status.is_ok() { 0.0 } else { 1.0 };
-                    buffer[1..1 + bands].copy_from_slice(&values[..bands]);
-                    buffer[1 + bands..].copy_from_slice(&coefficients.as_slice()[..m * bands]);
-                }
-                comm.bcast_f64(buffer, 0).map_err(comm_error)?;
-                if comm.rank() != 0 {
-                    if buffer[0] != 0.0 {
-                        status = Err(SolverError::Application(
-                            "reduced eigenproblem failed on rank 0".into(),
-                        ));
-                    } else {
-                        values[..bands].copy_from_slice(&buffer[1..1 + bands]);
-                        coefficients.as_mut_slice()[..m * bands]
-                            .copy_from_slice(&buffer[1 + bands..]);
-                    }
-                }
-                SOLVE_COUNTS[3].fetch_add(1, Ordering::Relaxed);
-            }
-            status?;
-            stage_add(1, t0);
-            let t0 = dft_numerics::stage_clock::start();
-            let lowest = RealMatrix::new(m, bands, coefficients.as_slice()[..m * bands].to_vec())?;
-            let mut vectors = RealMatrix::zeros(nl, bands)?;
-            let mut rotated = RealMatrix::zeros(nl, bands)?;
-            rotate_local_with(&mut ws, &basis, &lowest, &mut vectors, wide)?;
-            rotate_local_with(&mut ws, &products, &lowest, &mut rotated, wide)?;
-            rotation_add(nl, m, bands);
-            stage_add(2, t0);
-            let residual_of = |hv: &RealMatrix,
-                               v: &RealMatrix,
-                               comm: &C|
-             -> Result<(RealMatrix, Vec<f64>), SolverError> {
-                let mut r = RealMatrix::zeros(nl, bands)?;
-                if tuning.lean {
-                    // M2_LEAN: the same element expression by column slices.
-                    for (j, &lambda) in values.iter().enumerate().take(bands) {
-                        let (h, x) = (column_of(hv, j), column_of(v, j));
-                        for ((r, &h), &x) in r.as_mut_slice()[j * nl..(j + 1) * nl]
-                            .iter_mut()
-                            .zip(h)
-                            .zip(x)
-                        {
-                            *r = h - lambda * x;
-                        }
-                    }
-                } else {
-                    for j in 0..bands {
-                        for i in 0..nl {
-                            r[(i, j)] = hv[(i, j)] - values[j] * v[(i, j)];
-                        }
-                    }
-                }
-                site(Site::ResidualNorms);
-                let norms = column_norms_squared(comm, &r)?
-                    .into_iter()
-                    .map(f64::sqrt)
-                    .collect();
-                Ok((r, norms))
-            };
-            let t0 = dft_numerics::stage_clock::start();
-            let (mut residual_block, mut residuals) = residual_of(&rotated, &vectors, comm)?;
-            stage_add(3, t0);
-            let mut certified = false;
-            let mut trusted = true;
-            if !ritz
-                && (certify || iteration == self.max_iterations)
-                && (meets_policy(&residuals)
-                    || (iteration == self.max_iterations && meets_strict(&residuals)))
-            {
-                certificates += 1;
-                let actual = apply(&vectors)?;
-                applications += bands;
-                (residual_block, residuals) = residual_of(&actual, &vectors, comm)?;
-                certified = true;
-                trusted = meets_policy(&residuals);
-            }
-            let maximum = residuals.iter().copied().fold(0.0, f64::max);
-            history.push(maximum);
-            let converged: Vec<bool> = (0..bands)
-                .map(|j| {
-                    if ritz {
-                        iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
-                    } else {
-                        residuals[j] <= threshold(j)
-                    }
-                })
-                .collect();
-            previous.copy_from_slice(&values[..bands]);
-            let finished = converged.iter().all(|&b| b)
-                || (iteration == self.max_iterations
-                    && converged[..policy.strict_bands].iter().all(|&b| b));
-            if finished {
-                let full = gather_full(comm, layout, &vectors)?;
-                return Ok(RealEigenSolution {
-                    eigenvalues: values[..bands].to_vec(),
-                    eigenvectors: full,
-                    residuals,
-                    converged,
-                    buffer,
-                    residuals_certified: certified,
-                    iterations: iteration,
-                    history,
-                    operator_applications: applications,
-                    restarts,
-                    contracted_restarts: contractions,
-                    certification_attempts: certificates,
-                    max_basis_dimension: max_basis,
-                });
-            }
-            if iteration == self.max_iterations {
-                return Err(SolverError::NotConverged {
-                    iterations: iteration,
-                    max_residual: maximum,
-                    residuals,
-                });
-            }
-            if ritz && iteration == 1 && basis.cols() == n {
-                continue;
-            }
-            // Corrections for the unconverged roots (row-local preconditioning).
-            let selected: Vec<usize> = (0..bands)
-                .filter(|&j| !converged[j])
-                .take(bands.min(capacity - bands))
-                .collect();
-            let mut corrections = RealMatrix::zeros(nl, selected.len())?;
-            let precondition = |d: f64, lambda: f64, r: f64| {
-                let delta = d - lambda;
-                let denominator = if delta < 0.0 {
-                    -delta.abs().max(0.1)
-                } else {
-                    delta.max(0.1)
-                };
-                -r / denominator
-            };
-            for (k, &j) in selected.iter().enumerate() {
-                if tuning.lean {
-                    let r = column_of(&residual_block, j);
-                    for ((c, &d), &r) in corrections.as_mut_slice()[k * nl..(k + 1) * nl]
-                        .iter_mut()
-                        .zip(diag_local)
-                        .zip(r)
-                    {
-                        *c = precondition(d, values[j], r);
-                    }
-                } else {
-                    for i in 0..nl {
-                        corrections[(i, k)] =
-                            precondition(diag_local[i], values[j], residual_block[(i, j)]);
-                    }
-                }
-            }
-            if !trusted || basis.cols() + corrections.cols() > capacity {
-                restarts += 1;
-                reduced_width = 0;
-                let mut defect = RealMatrix::zeros(bands, bands)?;
-                site(Site::RestartDefect);
-                gram(comm, &mut ws, &vectors, &vectors, &mut defect)?;
-                let mut worst = 0.0_f64;
-                for j in 0..bands {
-                    for i in 0..bands {
-                        worst = worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
-                    }
-                }
-                if trusted && worst <= 1e-12 {
-                    contractions += 1;
-                    basis = vectors.clone();
-                    products = rotated.clone();
-                } else {
-                    basis = orthonormalize_tuned(comm, &mut ws, None, &vectors, &tuning, panel)?;
-                    products = apply(&basis)?;
-                    applications += basis.cols();
-                }
-            }
-            let t0 = dft_numerics::stage_clock::start();
-            let mut extra =
-                orthonormalize_tuned(comm, &mut ws, Some(&basis), &corrections, &tuning, panel)?;
-            stage_add(4, t0);
-            if extra.cols() == 0 {
-                let w = bands.min(capacity - basis.cols());
-                let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
-                extra = orthonormalize_tuned(
-                    comm,
-                    &mut ws,
-                    Some(&basis),
-                    &local_rows(layout, &random)?,
-                    &tuning,
-                    panel,
-                )?;
-            }
-            if extra.cols() == 0 {
-                return Err(SolverError::NotConverged {
-                    iterations: iteration,
-                    max_residual: maximum,
-                    residuals,
-                });
-            }
-            let extra_products = apply(&extra)?;
-            applications += extra.cols();
-            append_columns(&mut products, &extra_products)?;
-            append_columns(&mut basis, &extra)?;
-        }
-        unreachable!("validated positive iteration limit")
     }
 }
 

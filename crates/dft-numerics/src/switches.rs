@@ -123,18 +123,7 @@ fn ladder_ratio_valid(v: f64) -> bool {
 fn eigen_factor_valid(v: f64) -> bool {
     v.is_finite() && (1e-3..=1.0).contains(&v)
 }
-fn buffer_tol_valid(v: f64) -> bool {
-    v.is_finite() && (1e-5..=1e-1).contains(&v)
-}
-fn growth_reset_valid(v: f64) -> bool {
-    v.is_finite() && v > 1.0
-}
-fn b1_margin_valid(v: f64) -> bool {
-    v.is_finite() && v > 0.0 && v < 1.0
-}
-fn b1_rows_valid(v: f64) -> bool {
-    v.fract() == 0.0 && (8.0..=65536.0).contains(&v)
-}
+
 fn relax_extrapolation_valid(v: &str) -> bool {
     matches!(v, "none" | "first_order" | "second_order")
 }
@@ -158,23 +147,13 @@ macro_rules! table {
 }
 
 table! {
+    ORTHO: Kind::Ortho, "dgks:0.1", "off, dgks, dgks:<ratio in [1e-3, 1]>",
+        "DGKS second-pass rule of the Davidson orthogonalization (value = ratio, null = two passes)";
     // Engine (dft-engine).
-    INIT_OWNED_STATES: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "owned Gamma projector rows and fixed-chunk atomic-start projections (rounding class)";
-    CERT_SCREEN: Kind::Choice { allowed: &["on", "off", "trace"], default: "on" }, "on", "on, off, trace",
-        "certificate screen (trace prints the estimates)";
-    POTENTIAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "certificate solve reuses the screen's Hartree/XC fields";
-    MIX_GROWTH_RESET: Kind::Number { default: None, valid: growth_reset_valid }, "none", "number > 1",
-        "reset the mixing history when the residual grows by more than this factor";
-    MIX_CELL_KERKER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G-MIXER-DIVERGENCE: replace plain Pulay by Kerker-Pulay only when the density basis has wavelengths longer than the equal-volume cube: q0^2 = max(0, (2*pi/volume^(1/3))^2 - min_nonzero_G^2); beta/history unchanged, charge mode removed, acceptance unchanged; replicated mixer (including on MPI), not a physical dielectric model";
+
     EIGEN_FACTOR: Kind::Number { default: Some(0.1), valid: eigen_factor_valid }, "0.1", "number in [1e-3, 1]",
         "eigen tolerance = factor x density residual";
-    EMPTY_LOOSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "first empty band is a buffer band in steps above the tolerance floor";
-    BUFFER_TOL: Kind::Number { default: Some(1e-3), valid: buffer_tol_valid }, "1e-3", "number in [1e-5, 1e-1]",
-        "residual floor (Ha) of empty buffer bands above the tolerance floor";
+
     NL_ENERGY: Kind::Choice { allowed: &["fast", "exact"], default: "fast" }, "fast", "fast, exact",
         "nonlocal energy from blocked projections (exact: band-by-band operator)";
     ENERGY_IDENTITY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -182,66 +161,39 @@ table! {
     // D1 ladder hand-off scan (work order 2026-11-14); defaults are the adopted ladder.
     STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold";
-    DENSITY_PAIR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "two bands per inverse transform in the density build";
-    DENSITY_REDUCE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "block-parallel band sum of the density, zero-occupation bands skipped";
-    NL_ENERGY_REAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "audit nonlocal energies from one real projector product on the real Gamma path";
-    ATOMIC_LOCAL_BLOCK: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "LANE-INIT: guarded CholQR2 on the atomic starting span when no multi-rank communicator is active; reuses adopted atomic block algebra, falls back to original MGS, leaves MPI and Davidson corrections unchanged; rounding class, default off pending dev08";
-    ATOMIC_REAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "atomic-start Ritz step through the real Gamma Hamiltonian";
+
     MPI_M2: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "MPI stick-row (M2) path; off selects the M1 row-block path";
     M2_BATCH: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "batched FFT transposes of the M2 path";
-    PHASE_THREADS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
+
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
     M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson rotations and projections and the M2 nonlocal products through the per-panel dgemm at any width (MKL builds: rounding class; pure builds bit-identical)";
-    M2_ORTHO: Kind::Choice { allowed: &["classic", "serial"], default: "serial" }, "serial",
-        "classic, serial",
-        "distributed Davidson orthonormalization: classic (three basis projections, two whole-block sweeps) or serial (the serial solver's order: one projection, DGKS second pass, panel Gram-Schmidt; rounding class)";
+
     M2_FFT: Kind::Choice { allowed: &["rust", "mkl"], default: "rust" }, "rust", "rust, mkl",
         "1D kernels of the M2 distributed FFT (mkl: MKL DFTI batch lanes on MKL builds, rounding class; pure builds stay rustfft)";
-    M2_LEAN: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
+
     M2_CAPACITY: Kind::Choice { allowed: &["auto", "off"], default: "auto" }, "auto", "auto, off",
         "MPI runs with four or more ranks use 3 Davidson basis columns per band when scf.davidson_capacity_per_band is not set (auto), else the default 6 (off)";
     STAGE_TIMERS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "F21: MPI stage and collective counters measure wall time (on, the earlier behaviour) or run count-only (off: calls and collective payload bytes counted, no clock read, stage seconds 0)";
     // MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md); default off.
-    M2_EIGEN: Kind::Choice { allowed: &["replicated", "root"], default: "replicated" }, "replicated",
-        "replicated, root",
-        "distributed Davidson reduced eigenproblem: replicated (every rank solves) or root (rank 0 solves and broadcasts the lowest pairs; bit-identical)";
-    M2_B5: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "distributed Davidson bordered (secular) reduced eigen update when one column was appended (the serial B5; rounding class)";
+
     // MPI solver workspace (review F06; ledger row M2-WORKSPACE-F06); bit-identical.
-    M2_WORKSPACE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "distributed Davidson keeps its basis, products, reduced matrix (fixed leading dimension, border update), Ritz, residual and orthonormalization buffers, GEMM and EVD workspaces in a per-rank workspace reused across iterations and solves (no per-iteration large allocation); bit-identical to off";
+
     // MPI selected-root rotation (review F05; ledger row M2-SELECTED-ROOTS-F05); default off until dev08.
-    M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
+
     // MPI in-panel Gram-Schmidt reductions (docs/performance/profile-2026-11-16-mpi.md); default classic until dev08.
-    M2_PANEL_GS: Kind::Choice { allowed: &["classic", "pythag", "fused"], default: "fused" }, "fused",
-        "classic, pythag, fused",
-        "distributed panel Gram-Schmidt reductions per column: classic (two dot reductions and one norm), pythag (norm rides with the second dots, Pythagorean update, 2 reductions), fused (input norm rides with the first dots, second pass only when the per-column DGKS rule of BAANDI_ORTHO fails, about 1 reduction); rounding class";
-    M2_DENSITY: Kind::Choice { allowed: &["bands", "fused"], default: "fused" }, "fused",
-        "bands, fused",
-        "M2 distributed density on the standard path: bands (per-band plane contributions kept, then summed) or fused (plane density accumulated in ascending band order, no bands x plane buffer; the per-band data only serves the strict certificate screen); bit-identical";
+
     // MPI kept start (ticket MPI-KEPT-START, docs/design/mpi-kept-start.md); default off until dev08.
     // MPI scaling gap (ticket MPI-SCALING-GAP, docs/performance/mpi-scaling-gap.md); default off.
     M2_STICKS: Kind::Choice { allowed: &["greedy", "mirror"], default: "mirror" }, "mirror",
         "greedy, mirror",
         "stick partition of the M2 distributed FFT: greedy (sticks one by one to the least loaded rank) or mirror (a stick and its Gamma mirror stick go to the same rank as one unit, so no ORC representative is split and the two mirror alltoalls of every apply vanish; rounding class: rows are summed in a different order)";
-    M2_START: Kind::Choice { allowed: &["ortho", "gram"], default: "gram" }, "gram",
-        "ortho, gram",
-        "start of a distributed Davidson solve (workspace path): ortho (panel Gram-Schmidt of the start block) or gram (one Gram matrix and one reduction; a start block with Gram defect at most 1e-12, the restart contraction rule, is taken as the basis without Gram-Schmidt, otherwise ortho; rounding class)";
+
     // MPI overlap-matrix Davidson (ticket MPI-OVERLAP-DAVIDSON, docs/design/mpi-overlap-davidson.md); default off.
-    M2_LEAN_ALGEBRA: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "MPI-OVERLAP-DAVIDSON: standard (Ritz-change) distributed Davidson solves run the serial lean algebra: unit-norm corrections appended without Gram-Schmidt, the overlap S = V^T V kept beside H_r with its inverse Cholesky factor (pivot rule eps/1e-12, reprojection and Ritz-basis fallbacks), reduced problem T H_r T^T; the S border, the H border and the selected residual norms share one tree sum per iteration; strict solves unchanged; implies the workspace path; rounding class";
+
     // MPI lazy orbitals (ticket MPI-LAZY-ORBITALS, docs/design/mpi-lazy-orbitals.md); default off.
     MPI_TREE: Kind::Choice { allowed: &["binomial", "rd", "rhd"], default: "rd" }, "rd",
         "binomial, rd, rhd",
@@ -265,24 +217,15 @@ table! {
     M2_LOCAL_DENSITY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "M2-OWNED (default on since 2026-11-18, dev08 si32/si64 np=8 wall -2.5 to -6.0 %; declines automatically for active-boundary consumers): with M2_LOCAL_FIELDS and M2_MIX on, the output density stays on the owned slab planes through the energy audit, the stop rule, the session metrics (residual, charge, minimum: canonical per-plane sums), the distributed Pulay mixer (window on the owned planes) and the next potential; the full density is gathered only for a consumer that needs it (delivered result, checkpoint, ladder hand-off, declined map); rounding class against M2_MIX alone (per-plane instead of per-chunk canonical sums)";
     // Solvers (dft-solvers).
-    MIX_COULOMB_GUARD: Kind::Choice { allowed: &["off", "trace", "on"], default: "off" }, "off", "off, trace, on",
-        "SCF-TRAJECTORY: plain Pulay (L2 fit) measures the residual its least squares predicts, R - dR gamma, in the Coulomb (Hartree-energy) metric; on: when that predicted residual is larger than the current one in the Coulomb metric, this step's coefficients are refitted in the Coulomb metric (no tuned constant: the rule is 'the fit must not predict a larger long-wavelength error'); trace: compute and record the ratio, never act; replicated PulayMixer and the M2 distributed mixer (chunk and owned-plane modes, Coulomb forms on the owned sticks; MIX-COULOMB-GUARD-DIST); not kerker-pulay, not mixing_metric = hartree";
-    MIX_INCREMENTAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "Pulay mixer keeps its difference vectors (and their metric images) and the Gram matrix entries across calls and forms only the newest difference and Gram row per step (O(m N) instead of O(m^2 N) grid work, no per-step difference allocation; ticket MPI-REMAINING); bit-identical";
+
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";
     B1_SKETCH: Kind::Choice { allowed: &["count", "dense"], default: "count" }, "count", "count, dense",
         "B1 residual sketch";
-    B1_NARROW: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "B1 narrow iteration whenever the explicit root set is smaller than the band count (off: fewer than half the bands)";
-    B1_MARGIN: Kind::Number { default: Some(0.5), valid: b1_margin_valid }, "0.5", "number in (0, 1)",
-        "B1 strict: a root whose sketch estimate is below margin x its threshold skips its explicit residual for one iteration";
-    B1_ROWS: Kind::Number { default: None, valid: b1_rows_valid }, "auto", "integer in [8, 65536]",
-        "B1 strict sketch rows (auto: ceil(32 / (1 - margin)^2), 128 at margin 0.5, same 8-sigma miss bound at any margin)";
+
     B5: Kind::Choice { allowed: &["on", "off", "par"], default: "on" }, "on", "on, off, par",
         "bordered reduced eigenproblem update (par: threaded)";
-    B6: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "B6 projector-product reuse";
+
     RITZ_FUSED: Kind::Choice { allowed: &["on", "off", "loop"], default: "off" }, "off", "on, off, loop",
         "fused Ritz rotation (loop: only the selected-root residuals inside the lean Davidson iteration, where H X is not kept; the return keeps the pair rotation that REUSE-PSI needs; PERCORE-KERNELS)";
     NARROW_PROJ: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -291,40 +234,16 @@ table! {
         "narrow-iteration reduced-matrix kernel";
     DAVIDSON_STAGES: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "Davidson stage timers";
-    SECOND_VECTOR: Kind::Choice { allowed: &["off", "v1", "v2", "v3", "v4"], default: "off" }, "off",
-        "off, v1, v2, v3, v4", "second correction vector variant";
-    ORTHO: Kind::Ortho, "dgks:0.1", "off, dgks, dgks:<ratio in [1e-3, 1]>",
-        "DGKS second-pass rule of the Davidson orthogonalization (value = ratio, null = two passes)";
-    MGS: Kind::Choice {
-        allowed: &["blocked", "classic"],
-        default: if crate::MKL_BACKEND { "blocked" } else { "classic" },
-    }, if crate::MKL_BACKEND { "blocked" } else { "classic" }, "blocked, classic",
-        "Gram-Schmidt variant (default blocked on MKL builds, classic otherwise)";
-    ORTHO_BLOCK: Kind::Choice {
-        allowed: ON_OFF,
-        default: if crate::MKL_BACKEND { "off" } else { "on" },
-    }, if crate::MKL_BACKEND { "off" } else { "on" }, "on, off",
-        "panel Gram-Schmidt of the correction block, L2 shape-rule panel width (P48D; overrides MGS; default on in pure builds where it replaces the serial classic sweep, off on MKL builds where MGS-B already blocks)";
-    WIDE_DOT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "wide dot products in the orthogonalization";
-    PROJECT_WIDE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "basis-projection apply X -= Q S and MGS-B cross-panel apply through the per-panel dgemm at any block width (MKL builds; pure builds unchanged)";
+
     DAVIDSON: Kind::Choice { allowed: &["classic", "lean"], default: "lean" }, "lean", "classic, lean",
         "serial real Gamma Davidson of Ritz-value (standard) solves: classic (orthonormal basis, Ritz vectors of all bands in wide iterations) or lean (work order phase B: residuals of unconverged roots only, all-band Ritz vectors at return and contraction, unit-norm corrections without projection and a generalized reduced problem by Cholesky reduction; one orthonormalization when a pivot ratio of the basis overlap falls below eps/1e-12; rounding class)";
     LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
     // Per-core kernels (ticket PERCORE-KERNELS, docs/performance/percore-kernels-2026-11-17.md); default off.
-    DAVIDSON_PACKED_REDUCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "Pack only consumed upper-border entries and residual norms for distributed lean reductions; GEMMs unchanged, default off.";
-    DAVIDSON_ROTATE_COLUMNS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "Serial real Davidson Ritz pairs through existing fixed column-group GEMMs; rounding class, default off.";
-    DAVIDSON_UPPER_BORDER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "Compute only retained upper-border tiles of real Davidson Gram products; rounding class, default off.";
+
     DAVIDSON_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "Bounded per-call Davidson lane trace with shapes and rank/map labels; diagnostic only.";
-    LEAN_BORDER: Kind::Choice { allowed: &["separate", "fused"], default: "separate" }, "separate",
-        "separate, fused",
-        "PERCORE-KERNELS: borders of the lean real Gamma Davidson: separate (overlap border V^T E before the H apply, reduced border V^T (H E) in the next iteration, two transposed products) or fused (H applied to the unit corrections first, then one transposed product V^T [E | H E] of twice the width forms both borders, so the basis is streamed once; the pivot test follows it and a failing append discards the images, takes the separate fallback and ends fusing for the rest of that solve; only blocks with 4 k <= m (basis width m) fuse, wider blocks such as the first append of every solve keep the separate products; bit-identical on the aarch64 pure kernel, rounding class on MKL and x86)";
+
     // History-preserving restart (ticket BREAKTHROUGH-1-RESTART, docs/design/restart-keep.md); default off.
     RESTART_KEEP: Kind::Choice {
         allowed: &["off", "1", "2", "4", "8", "b/8", "b/4", "b/2"],
@@ -332,14 +251,7 @@ table! {
     }, "off", "off, 1, 2, 4, 8, b/8, b/4, b/2",
         "BREAKTHROUGH-1-RESTART R1-b: at a contraction restart of the lean Davidson (serial lean path and the distributed lean algebra) keep, besides the Ritz vectors X and H X, up to r previous Ritz vectors of the unconverged roots with their X component removed (P = Y - X A, H P = (H V)(D - C A): no new H application); r is a count or a fraction of the band count (b/4 = bands / 4, at least 1), limited by the room left for the next correction block; directions whose squared sine to span(X and the kept directions) falls below the pivot rule eps/1e-12 are dropped, and the restart falls back to X alone when the factor of the new basis fails the pivot rule; off = the plain restart (bit-identical)";
     // Physics (dft-physics).
-    MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "nonlocal products by dgemm on the real Gamma path";
-    APPLY_LEAN: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "lean real Gamma H apply (no redundant scans)";
-    HAPPLY_OVERLAP: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "overlap local and nonlocal parts of the H apply";
-    HAPPLY_FOLD: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "fold the local potential into the pair FFT";
+
     NONLOCAL_BLOCK: Kind::Choice { allowed: &["auto", "on", "off"], default: "auto" }, "auto", "auto, on, off",
         "complex (k-point) nonlocal of a band block by two GEMMs (P48C; auto: when n_pw x n_projectors x 16 B >= 256 KiB)";
     // Numerics (dft-numerics).
@@ -383,12 +295,7 @@ table! {
         "LANE-GLUE Phase 0: rank-local grid and mixer spans/work; requires PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
-    M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "BREAKTHROUGH-4: on the M2 path the replicated serial real Gamma Hamiltonian of a solve state (rebuilt at every new problem and ladder stage) is built with the minimal block capacity 2 instead of the Davidson capacity: one pair FFT plan and scratch instead of capacity / 2 full-grid plans per rank; it only supplies the ORC half sphere there and is never applied (the full operator is built if the distributed operator is unavailable); bit-identical";
-    M2_LAZY_SERIAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "ISSUE-20: an M2 real Gamma solve state owns only the ORC half-sphere descriptor and the distributed operator; the serial real Gamma Hamiltonian (pair plans, real projector table) is built lazily only when a fallback applies it (distributed operator unavailable, threads path); supersedes M2_LIGHT_STATE on the M2 path when on; bit-identical";
-    M2_LAYOUT_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "BREAKTHROUGH-4: the distributed solver reuses the row-index layout (row counts and global row lists of every rank) of its previous solve on the same thread when every rank's local rows are unchanged (one 1-double reduction decides, replicated), instead of two allgathervs (one of N doubles) and the index rebuild per solve; bit-identical";
+
     EWALD_CACHE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "BREAKTHROUGH-4: problem construction reuses the Ewald energy of the previous construction on the same thread when the lattice, the ion charges and the fractional positions are bit-equal (the cutoff-ladder coarse problem after the full-cutoff one); bit-identical (the same pure function of the same inputs)";
     EWALD_FAST: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -399,8 +306,7 @@ table! {
         "LANE-INIT phase 0: rank-local startup call/work counters and nested timers; STAGE_TIMERS=off retains counts without clocks; no numerical changes, default off";
     PHASE_VALIDATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G-PHASE-VALIDATE: owned projector finite-dot validation uses a sufficient numerical range proof (finite momentum and position components with maxima <= 2^500); otherwise retains the original pair loop and errors; coefficients and lazy materialization unchanged; off until dev08 A/B";
-    IMPORT_CHECK: Kind::Choice { allowed: &["split", "serial"], default: "split" }, "split", "split, serial",
-        "LADDER-IMPORT-SPLIT: orthonormality check of an imported warm orbital block (cutoff-ladder and direct-minimization hand-off, `initialize_electronic`): split computes the same per-entry overlaps (each the sequential row sum, bit-identical) eight columns in lockstep and, with a registered communicator, only for this rank's columns j (j mod P), with one 1-double tree sum of the failure flags; serial is the former replicated scalar loop on every rank; same verdict, results bit-identical";
+
     M2_LAZY_RESULT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "LAZY-RESULT: when the caller declared that it reads no delivered orbitals (dft-cli run without forces, stress, ELF or partial-charge output, classic mode), an M2 result keeps its lazy distributed orbital blocks instead of gathering the full N x B block on every rank at delivery; ScfResult::materialize_orbitals gathers them on demand (collective); energy, density, eigenvalues and history unchanged; off = always gather";
     PHASE_WAIT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -1739,9 +1645,9 @@ mod tests {
     fn legacy_parsing_rules() {
         use Source::*;
         // Default-on flags: anything but "off" is on.
-        assert_eq!(eval(Id::B6, Some("off")), (Value::Choice("off"), Env));
+        assert_eq!(eval(Id::M2_DGEMM, Some("off")), (Value::Choice("off"), Env));
         assert_eq!(
-            eval(Id::B6, Some("yes")),
+            eval(Id::M2_DGEMM, Some("yes")),
             (Value::Choice("on"), InvalidToDefault)
         );
         // Default-off flags: only "on" is on.
@@ -1751,18 +1657,7 @@ mod tests {
         );
         assert_eq!(eval(Id::B5, Some("par")), (Value::Choice("par"), Env));
         assert_eq!(eval(Id::NL_ENERGY, Some("exact")).0, Value::Choice("exact"));
-        assert_eq!(
-            eval(Id::BUFFER_TOL, Some("1e-6")),
-            (Value::Number(Some(1e-3)), InvalidToDefault)
-        );
-        assert_eq!(
-            eval(Id::BUFFER_TOL, Some("1e-5")),
-            (Value::Number(Some(1e-5)), Env)
-        );
-        assert_eq!(
-            eval(Id::MIX_GROWTH_RESET, Some("1.0")),
-            (Value::Number(None), InvalidToDefault)
-        );
+
         assert_eq!(
             eval(Id::ORTHO, Some("dgks")).0,
             Value::Number(Some(std::f64::consts::FRAC_1_SQRT_2))
@@ -1783,31 +1678,13 @@ mod tests {
     #[test]
     fn mpi_entry_cost_switches_defaults() {
         use Source::*;
-        for id in [Id::M2_DGEMM, Id::M2_LEAN] {
+        {
+            let id = Id::M2_DGEMM;
             assert_eq!(eval(id, None), (Value::Choice("on"), Default));
             assert_eq!(eval(id, Some("off")), (Value::Choice("off"), Env));
             assert_eq!(eval(id, Some("1")), (Value::Choice("on"), InvalidToDefault));
         }
-        assert_eq!(eval(Id::M2_ORTHO, None).0, Value::Choice("serial"));
-        assert_eq!(
-            eval(Id::M2_ORTHO, Some("serial")).0,
-            Value::Choice("serial")
-        );
-        assert_eq!(eval(Id::M2_WORKSPACE, None), (Value::Choice("on"), Default));
-        assert_eq!(
-            eval(Id::M2_WORKSPACE, Some("off")),
-            (Value::Choice("off"), Env)
-        );
-        assert_eq!(
-            eval(Id::M2_SELECTED_ROOTS, None),
-            (Value::Choice("on"), Default)
-        );
-        assert_eq!(
-            eval(Id::M2_SELECTED_ROOTS, Some("off")),
-            (Value::Choice("off"), Env)
-        );
-        assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
-        assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));
+
         // MPI-SCALING-GAP switches (defaults mirror and gram since 0d87d6e).
         assert_eq!(
             eval(Id::M2_STICKS, None),
@@ -1821,23 +1698,7 @@ mod tests {
             eval(Id::M2_STICKS, Some("on")),
             (Value::Choice("mirror"), InvalidToDefault)
         );
-        assert_eq!(eval(Id::M2_START, None), (Value::Choice("gram"), Default));
-        assert_eq!(
-            eval(Id::M2_START, Some("ortho")),
-            (Value::Choice("ortho"), Env)
-        );
-        assert_eq!(
-            eval(Id::M2_EIGEN, None),
-            (Value::Choice("replicated"), Default)
-        );
-        assert_eq!(
-            eval(Id::M2_EIGEN, Some("root")),
-            (Value::Choice("root"), Env)
-        );
-        assert_eq!(
-            eval(Id::M2_EIGEN, Some("on")),
-            (Value::Choice("replicated"), InvalidToDefault)
-        );
+
         assert_eq!(eval(Id::M2_SCREEN, None), (Value::Choice("dist"), Default));
         assert_eq!(
             eval(Id::M2_SCREEN, Some("replicated")),
@@ -1885,8 +1746,8 @@ mod tests {
         assert_eq!(c.number(Id::EIGEN_FACTOR), Some(0.05));
         assert_eq!(c.source(Id::EIGEN_FACTOR), Source::Input);
         assert_eq!(c.text(Id::EIGEN_FACTOR), Some("0.05"));
-        assert_eq!(c.choice(Id::B6), "on");
-        assert_eq!(c.source(Id::B6), Source::Default);
+        assert_eq!(c.choice(Id::M2_DGEMM), "on");
+        assert_eq!(c.source(Id::M2_DGEMM), Source::Default);
         // Legacy environment semantics are unchanged even with an input value.
         let c = RunConfig::resolve_with(env_of(&[("BAANDI_M2_GRID", "yes")]), &input).unwrap();
         assert_eq!(c.choice(Id::M2_GRID), "on");
@@ -1905,8 +1766,8 @@ mod tests {
         assert!(err(&[perf("no_such", "on")]).contains("unknown switch"));
         assert!(err(&[perf("phase_profile", "on")]).contains("belongs to the [profile] table"));
         assert!(err(&[perf("pseudo_dir", "/x")]).contains("environment only"));
-        assert!(err(&[perf("b6", "on"), perf("b6", "off")]).contains("given twice"));
-        assert!(err(&[perf("buffer_tol", "1e-6")]).contains("allowed values"));
+        assert!(err(&[perf("m2_dgemm", "on"), perf("m2_dgemm", "off")]).contains("given twice"));
+
         let c = RunConfig::from_input(&[
             (Table::Profile, "phase_profile".into(), "on".into()),
             (Table::Profile, "dgemm_timers".into(), "on".into()),

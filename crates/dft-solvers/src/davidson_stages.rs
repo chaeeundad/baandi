@@ -9,10 +9,7 @@
 //!   iterations (proposal B1, ledger row B1-SELECTED-ROOTS). `standard` acts on
 //!   Ritz-change solves only, `strict` on residual solves only, `on` on both.
 //!   `BAANDI_B1_SKETCH=count` replaces the dense strict sketch by a CountSketch.
-//!   Gap-analysis rank 2 (default off / unchanged): `BAANDI_B1_NARROW=on` takes
-//!   the narrow path for any proper subset of the bands, `BAANDI_B1_MARGIN`
-//!   (default 0.5) sets the strict sketch margin and `BAANDI_B1_ROWS` the sketch
-//!   rows (default: the 8-sigma rule of `ResearchOptions::b1_sketch_rows`).
+//!   R11b fixes the narrow gate, sketch margin (0.5) and automatic row rule.
 //! * B5 (`BAANDI_B5=on`, default off): when exactly one column was appended,
 //!   the reduced eigenproblem is updated from the previous decomposition by the
 //!   secular equation (module `bordered`), with a full solve on any doubt and
@@ -83,7 +80,7 @@ pub enum SketchKind {
     Count,
 }
 
-/// Default B1 strict sketch margin (`BAANDI_B1_MARGIN`).
+/// Frozen B1 strict sketch margin (R11b).
 pub const B1_DEFAULT_MARGIN: f64 = 0.5;
 /// Miss bound of the automatic B1 sketch row rule, in standard deviations of
 /// the relative sketch error. A sketched norm has relative standard error about
@@ -99,23 +96,9 @@ const B1_SKETCH_SIGMAS: f64 = 8.0;
 pub struct ResearchOptions {
     pub b1: B1Mode,
     pub sketch: SketchKind,
-    /// B1-NARROW (`BAANDI_B1_NARROW=on`): narrow iteration whenever the explicit
-    /// root set is smaller than the band count; off keeps the original gate
-    /// (fewer than half the bands). Restart, return and the iteration limit keep
-    /// the all-band path either way.
-    pub b1_narrow: bool,
-    /// B1 strict sketch margin (`BAANDI_B1_MARGIN`, default 0.5): a root whose
-    /// estimate is below `b1_margin` times its threshold is flagged converged
-    /// for one iteration without an explicit residual. In (0, 1).
-    pub b1_margin: f64,
-    /// B1 strict sketch rows (`BAANDI_B1_ROWS`); `None` = the rule of
-    /// [`ResearchOptions::b1_sketch_rows`] (128 at the default margin).
-    pub b1_rows: Option<usize>,
     /// B5 bordered update of the reduced eigenproblem (`BAANDI_B5=on`).
     pub b5: bool,
     pub stage_timers: bool,
-    /// B6 cached projector products for the return certificate (`BAANDI_B6=on`).
-    pub b6: bool,
     /// B5 bordered update with the column-parallel coefficient product and
     /// root-parallel secular solve (`BAANDI_B5=par`; implies `b5`).
     pub b5_parallel: bool,
@@ -150,12 +133,6 @@ pub struct ResearchOptions {
     /// unchanged bit for bit; only the caller's use of the projections is a
     /// rounding-class change.
     pub lean_proj_cache: bool,
-    /// PERCORE-KERNELS (`BAANDI_LEAN_BORDER=fused`, default separate): the lean
-    /// solver applies H to the unit corrections E before the pivot test and
-    /// forms the overlap border V^T E and the reduced border V^T (H E) as one
-    /// product V^T [E | H E] (one stream of the basis instead of two). Bit-
-    /// identical on the aarch64 pure kernel, rounding class elsewhere.
-    pub lean_border_fused: bool,
     /// BREAKTHROUGH-1-RESTART R1-b (`BAANDI_RESTART_KEEP`, default off): previous
     /// directions kept at a lean contraction restart (`RestartKeep`).
     pub restart_keep: RestartKeep,
@@ -209,12 +186,8 @@ impl Default for ResearchOptions {
         Self {
             b1: B1Mode::default(),
             sketch: SketchKind::default(),
-            b1_narrow: false,
-            b1_margin: B1_DEFAULT_MARGIN,
-            b1_rows: None,
             b5: false,
             stage_timers: false,
-            b6: false,
             b5_parallel: false,
             ritz_fused: false,
             ritz_fused_loop: false,
@@ -222,33 +195,20 @@ impl Default for ResearchOptions {
             narrow_reduced: false,
             lean: false,
             lean_proj_cache: false,
-            lean_border_fused: false,
             restart_keep: RestartKeep::Off,
         }
     }
 }
 impl ResearchOptions {
-    /// Rows of the B1 strict sketch before the caps of the space (the dense
-    /// form is also capped by the subspace capacity, either form by the
-    /// dimension): `b1_rows`, or ceil((8 / (1 - margin))^2 / 2), which is 128
-    /// at margin 0.5, 356 at 0.7 and 512 at 0.75.
+    /// Fixed eight-sigma rule at margin 0.5: 128 sketch rows, capped by the caller.
     pub fn b1_sketch_rows(&self) -> usize {
-        match self.b1_rows {
-            Some(rows) => rows.max(1),
-            None => {
-                let z = B1_SKETCH_SIGMAS / (1. - self.b1_margin);
-                (0.5 * z * z).ceil() as usize
-            }
-        }
+        let z = B1_SKETCH_SIGMAS / (1. - B1_DEFAULT_MARGIN);
+        (0.5 * z * z).ceil() as usize
     }
     /// `BAANDI_B1` and `BAANDI_DAVIDSON_STAGES=on`, read once per solve.
     pub fn from_env() -> Self {
-        use dft_numerics::switches::{Id, number, on};
         Self {
             b1: B1Mode::from_env(),
-            b1_narrow: on(Id::B1_NARROW),
-            b1_margin: number(Id::B1_MARGIN).unwrap_or(B1_DEFAULT_MARGIN),
-            b1_rows: number(Id::B1_ROWS).map(|r| r as usize),
             sketch: match dft_numerics::switches::choice(dft_numerics::switches::Id::B1_SKETCH) {
                 "dense" => SketchKind::Dense,
                 _ => SketchKind::Count,
@@ -265,14 +225,10 @@ impl ResearchOptions {
             narrow_proj: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_PROJ),
             narrow_reduced: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_REDUCED),
             stage_timers: dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES),
-            b6: dft_numerics::switches::on(dft_numerics::switches::Id::B6),
             lean: dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON) == "lean",
             lean_proj_cache: dft_numerics::switches::on(
                 dft_numerics::switches::Id::LEAN_PROJ_CACHE,
             ),
-            lean_border_fused: dft_numerics::switches::choice(
-                dft_numerics::switches::Id::LEAN_BORDER,
-            ) == "fused",
             restart_keep: RestartKeep::from_env(),
         }
     }
@@ -737,10 +693,7 @@ pub struct LeanCounters {
     pub proj_cache_misses: u64,
     pub proj_cache_kept_loads: u64,
     pub proj_cache_columns: u64,
-    /// PERCORE-KERNELS (`BAANDI_LEAN_BORDER=fused`): appends whose overlap and
-    /// reduced borders came from one product V^T [E | H E], and H columns
-    /// applied before a failed pivot test and discarded (the fallback applies
-    /// H again to its own columns; expected zero, like the fallback rate).
+    /// Retired fused-border counters (always zero), retained for CLI reporting.
     pub fused_borders: u64,
     pub fused_wasted_columns: u64,
     /// R1-b (`BAANDI_RESTART_KEEP`): contractions that kept at least one

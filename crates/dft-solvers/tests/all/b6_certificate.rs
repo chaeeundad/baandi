@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 /// H = diag(d) + P D P^T with dense projector columns P (n x count).
 struct Operator {
+    cache_enabled: bool,
     d: Vec<f64>,
     p: Vec<f64>,
     coupling: Vec<f64>,
@@ -40,6 +41,7 @@ impl Operator {
             })
             .collect();
         Self {
+            cache_enabled: true,
             d,
             p,
             coupling,
@@ -102,7 +104,7 @@ impl RealLinearOperator for Operator {
         Ok(())
     }
     fn projector_count(&self) -> usize {
-        self.count
+        if self.cache_enabled { self.count } else { 0 }
     }
     fn copy_last_projections(&self, m: usize, out: &mut [f64]) -> bool {
         let last = self.last.borrow();
@@ -125,7 +127,7 @@ impl RealLinearOperator for Operator {
     }
 }
 
-fn solve(op: &Operator, b6: bool, capacity_per_band: usize) -> RealEigenSolution {
+fn solve(op: &Operator, _b6: bool, capacity_per_band: usize) -> RealEigenSolution {
     let n = op.dimension();
     let s = RealDavidson {
         bands: 12,
@@ -151,7 +153,6 @@ fn solve(op: &Operator, b6: bool, capacity_per_band: usize) -> RealEigenSolution
         &mut None,
         DavidsonPreconditioner::Default,
         ResearchOptions {
-            b6,
             ..ResearchOptions::default()
         },
     )
@@ -163,7 +164,8 @@ fn b6_certificate_matches_plain_apply() {
     for capacity_per_band in [2, 6] {
         let mut reference: Option<RealEigenSolution> = None;
         for threads in [1, 3] {
-            let plain_op = Operator::new(240, 6, threads);
+            let mut plain_op = Operator::new(240, 6, threads);
+            plain_op.cache_enabled = false;
             let plain = solve(&plain_op, false, capacity_per_band);
             assert_eq!(plain_op.cached_calls.get(), 0);
             let op = Operator::new(240, 6, threads);

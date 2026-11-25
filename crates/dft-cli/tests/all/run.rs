@@ -641,14 +641,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 121);
-    if std::env::var_os("BAANDI_BUFFER_TOL").is_none() {
-        let tol = &switches["BAANDI_BUFFER_TOL"];
-        assert_eq!(
-            (&tol["value"], &tol["source"]),
-            (&serde_json::json!(1e-3), &serde_json::json!("default"))
-        );
-    }
+    assert_eq!(switches.len(), 75);
+    assert!(switches.get("BAANDI_BUFFER_TOL").is_none());
     let expected_keys = [
         "band_accuracy",
         "preflight",

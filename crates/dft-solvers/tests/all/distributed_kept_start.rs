@@ -109,7 +109,7 @@ struct Outcome {
     perturbed_h: usize,
 }
 
-fn scenario(ranks: usize, selected: bool) -> Vec<Outcome> {
+fn scenario(ranks: usize, _selected: bool) -> Vec<Outcome> {
     let n = 96;
     let bands = 6;
     let old_shift = vec![0.0; n];
@@ -124,11 +124,8 @@ fn scenario(ranks: usize, selected: bool) -> Vec<Outcome> {
         seed: 42,
     };
     let tuning = DistributedTuning {
-        serial_ortho: true,
         wide_gemm: true,
-        lean: true,
-        workspace: true,
-        selected_roots: selected,
+
         ..Default::default()
     };
     let policy = BandTolerances {

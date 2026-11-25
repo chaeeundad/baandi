@@ -1,14 +1,9 @@
-//! MPI-SCALING-GAP `BAANDI_M2_START=gram`: the workspace solver takes an
-//! orthonormal start block (Gram defect at most 1e-12, one reduction) as its
-//! basis instead of running the panel Gram-Schmidt. On a synthetic operator, 1 to
-//! 4 simulated ranks, selected-root and full-rotation paths: warm and cold starts
-//! are taken, a start scaled by 1 + 1e-6 is declined (Gram-Schmidt as before),
-//! eigenvalues agree with the plain start to 1e-10 Ha (solve tolerance 1e-11),
-//! every rank returns the same bits, and a fixed rank count is bit-reproducible.
+//! Frozen Gram start: strict solves decline nonorthonormal starts; lean
+//! Ritz-change solves factor nonsingular starts. Rank repeatability is preserved.
 use dft_mpi::{Collective, SimRank, simulate};
 use dft_numerics::{pool::WorkerPool, real::RealMatrix};
 use dft_solvers::distributed_davidson::{
-    DistributedRealOperator, DistributedTuning, set_start_gram_override, start_gram_stats,
+    DistributedRealOperator, DistributedTuning, start_gram_stats,
 };
 use dft_solvers::{BandTolerances, RealDavidson, SolverError};
 use std::sync::Arc;
@@ -95,7 +90,7 @@ impl DistributedRealOperator for RowsOp<'_> {
     }
 }
 
-fn solve(ranks: usize, selected: bool, gram: bool, scale: f64) -> Vec<(Vec<u64>, usize)> {
+fn solve(ranks: usize, scale: f64, ritz: bool) -> Vec<(Vec<u64>, usize)> {
     let n = 96;
     let bands = 6;
     let a = matrix(n, &vec![0.0; n]);
@@ -109,11 +104,8 @@ fn solve(ranks: usize, selected: bool, gram: bool, scale: f64) -> Vec<(Vec<u64>,
         seed: 42,
     };
     let tuning = DistributedTuning {
-        serial_ortho: true,
         wide_gemm: true,
-        lean: true,
-        workspace: true,
-        selected_roots: selected,
+
         ..Default::default()
     };
     let policy = BandTolerances {
@@ -121,11 +113,10 @@ fn solve(ranks: usize, selected: bool, gram: bool, scale: f64) -> Vec<(Vec<u64>,
         buffer_tolerance: 1e-11,
     };
     simulate(ranks, |sim: &SimRank| {
-        set_start_gram_override(Some(gram));
         let mut op = RowsOp::new(&a, sim.rank(), ranks);
         let diag: Vec<f64> = op.rows.iter().map(|&r| a[(r, r)]).collect();
         let cold = solver
-            .solve_distributed_rows_tuned(sim, &mut op, None, &diag, policy, true, false, 4, tuning)
+            .solve_distributed_rows_tuned(sim, &mut op, None, &diag, policy, ritz, !ritz, 4, tuning)
             .unwrap();
         let mut warm = cold.eigenvectors.clone();
         for v in warm.as_mut_slice() {
@@ -140,13 +131,12 @@ fn solve(ranks: usize, selected: bool, gram: bool, scale: f64) -> Vec<(Vec<u64>,
                 Some(&warm),
                 &diag_b,
                 policy,
-                true,
-                false,
+                ritz,
+                !ritz,
                 4,
                 tuning,
             )
             .unwrap();
-        set_start_gram_override(None);
         let bits = cold
             .eigenvalues
             .iter()
@@ -160,31 +150,39 @@ fn solve(ranks: usize, selected: bool, gram: bool, scale: f64) -> Vec<(Vec<u64>,
 #[test]
 fn gram_start_takes_orthonormal_starts_and_keeps_the_eigenvalues() {
     for ranks in 1..=4 {
-        for selected in [false, true] {
-            let plain = solve(ranks, selected, false, 1.0);
+        for ritz in [false, true] {
+            let plain = solve(ranks, 1.0, ritz);
             let before = start_gram_stats();
-            let gram = solve(ranks, selected, true, 1.0);
+            let gram = solve(ranks, 1.0, ritz);
             let after = start_gram_stats();
             // Cold (free-electron unit vectors) and warm (returned Ritz vectors)
             // starts are orthonormal: both taken on every rank. Other tests of this
-            // binary do not set the switch, so the process counters move only here.
+            // binary do not run concurrently, so the counters move only here.
             assert_eq!(after.0 - before.0, 2 * ranks as u64, "ranks {ranks}");
             assert_eq!(after.1, before.1, "ranks {ranks}");
             for (p, g) in plain.iter().zip(&gram) {
                 for (x, y) in p.0.iter().zip(&g.0) {
                     let d = (f64::from_bits(*x) - f64::from_bits(*y)).abs();
-                    assert!(d <= 1e-10, "ranks {ranks} selected {selected}: {d:e}");
+                    assert!(d <= 1e-10, "ranks {ranks}: {d:e}");
                 }
             }
             // Every rank returns the same bits; a fixed rank count is reproducible.
             assert!(gram.iter().all(|r| r.0 == gram[0].0));
-            assert_eq!(solve(ranks, selected, true, 1.0)[0].0, gram[0].0);
-            // A start that is not orthonormal to 1e-12 is declined.
+            assert_eq!(solve(ranks, 1.0, ritz)[0].0, gram[0].0);
+            // Strict declines the scaled start; lean factors its nonsingular Gram.
             let before = start_gram_stats();
-            let scaled = solve(ranks, selected, true, 1.0 + 1e-6);
+            let scaled = solve(ranks, 1.0 + 1e-6, ritz);
             let after = start_gram_stats();
-            assert_eq!(after.1 - before.1, ranks as u64, "ranks {ranks}");
-            assert_eq!(after.0 - before.0, ranks as u64, "ranks {ranks}");
+            assert_eq!(
+                after.1 - before.1,
+                if ritz { 0 } else { ranks as u64 },
+                "ranks {ranks}"
+            );
+            assert_eq!(
+                after.0 - before.0,
+                if ritz { 2 * ranks as u64 } else { ranks as u64 },
+                "ranks {ranks}"
+            );
             for (x, y) in scaled[0].0.iter().zip(&plain[0].0) {
                 assert!((f64::from_bits(*x) - f64::from_bits(*y)).abs() <= 1e-10);
             }

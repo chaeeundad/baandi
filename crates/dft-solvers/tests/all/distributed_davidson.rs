@@ -502,11 +502,11 @@ fn work_of(r: &dft_solvers::RealEigenSolution) -> (usize, usize) {
     (r.iterations, r.operator_applications)
 }
 
-/// M2_LEAN is bit-identical; M2_DGEMM is bit-identical on pure builds (the wide
+/// M2_DGEMM is bit-identical on pure builds (the wide
 /// route is the same product there; on MKL builds it is a rounding change and only
 /// the accuracy checks of `check_rows_case_tuned` apply).
 #[test]
-fn lean_and_wide_tuning_keep_the_classic_bits() {
+fn shared_wide_tuning_keeps_the_default_bits() {
     let (op, diag) = fixture(260);
     let base = check_rows_case_tuned(
         &op,
@@ -516,18 +516,11 @@ fn lean_and_wide_tuning_keep_the_classic_bits() {
         1e-11,
         DistributedTuning::default(),
     );
-    let lean = DistributedTuning {
-        lean: true,
-        ..Default::default()
-    };
     let wide = DistributedTuning {
         wide_gemm: true,
         ..Default::default()
     };
-    for (name, tuning, exact) in [
-        ("lean", lean, true),
-        ("wide", wide, !dft_numerics::MKL_BACKEND),
-    ] {
+    for (name, tuning, exact) in [("wide", wide, !dft_numerics::MKL_BACKEND)] {
         let got = check_rows_case_tuned(&op, &diag, 9, policy(9), 1e-11, tuning);
         for (a, b) in got.iter().zip(&base) {
             if exact {
@@ -562,8 +555,6 @@ fn serial_order_orthonormalization_matches_serial_eigenpairs() {
         for panel in [None, Some(4), Some(0)] {
             for dgks in [None, Some(0.1)] {
                 let tuning = DistributedTuning {
-                    serial_ortho: true,
-                    lean: true,
                     wide_gemm: true,
                     panel,
                     dgks,
@@ -584,123 +575,4 @@ fn serial_order_orthonormalization_matches_serial_eigenpairs() {
             }
         }
     }
-}
-
-// ---- MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md) ----
-
-/// The adopted entry-cost stack (serial order, wide GEMM, lean loops) with the
-/// serial panel and DGKS rules; the reduced-eigen switches are added on top.
-fn entry_stack() -> DistributedTuning {
-    DistributedTuning {
-        serial_ortho: true,
-        wide_gemm: true,
-        lean: true,
-        panel: Some(4),
-        dgks: Some(0.1),
-        ..Default::default()
-    }
-}
-
-/// M2_EIGEN=root: rank 0 solves and broadcasts; eigenvectors, eigenvalues and
-/// work counts are bit-identical to the replicated solve at every rank count,
-/// on the entry-cost stack (scattered and clustered) and the classic default
-/// (clustered).
-#[test]
-fn root_eigen_broadcast_is_bit_identical_to_replicated() {
-    use dft_solvers::distributed_davidson::reduced_solve_stats;
-    let (a, d) = fixture(260);
-    let (b, e) = spectrum_fixture(64, 4);
-    let clustered = BandTolerances {
-        strict_bands: 4,
-        buffer_tolerance: 1e-5,
-    };
-    let before = reduced_solve_stats();
-    let cases = [
-        (&a, &d, 9, policy(9), 1e-11, entry_stack()),
-        (&b, &e, 6, clustered, 1e-9, entry_stack()),
-        (&b, &e, 6, clustered, 1e-9, DistributedTuning::default()),
-    ];
-    for (op, diag, bands, pol, tol, base) in cases {
-        {
-            let replicated = check_rows_case_tuned(op, diag, bands, pol, tol, base);
-            let root = DistributedTuning {
-                eigen_root: true,
-                ..base
-            };
-            let got = check_rows_case_tuned(op, diag, bands, pol, tol, root);
-            for (g, r) in got.iter().zip(&replicated) {
-                assert_eq!(bits_of(&g.eigenvectors), bits_of(&r.eigenvectors));
-                assert_eq!(
-                    g.eigenvalues
-                        .iter()
-                        .map(|x| x.to_bits())
-                        .collect::<Vec<_>>(),
-                    r.eigenvalues
-                        .iter()
-                        .map(|x| x.to_bits())
-                        .collect::<Vec<_>>()
-                );
-                assert_eq!(work_of(g), work_of(r));
-            }
-        }
-    }
-    let after = reduced_solve_stats();
-    assert!(after.broadcast > before.broadcast);
-    assert!(after.solves > before.solves && after.max_order >= after.p90_order);
-}
-
-/// M2_B5=on: the bordered update keeps eigenvalues within 1e-9 of the serial
-/// solver and residuals below 1e-8, ranks bit-equal and every rank count
-/// reproducible (inside `check_rows_case_tuned`), iterations within 10 percent
-/// plus two of the dense solve; with M2_EIGEN=root on top it is bit-identical
-/// to the replicated B5 run; the bordered update actually fires.
-#[test]
-fn bordered_reduced_update_stays_in_the_rounding_class() {
-    use dft_solvers::distributed_davidson::reduced_solve_stats;
-    let (a, d) = fixture(260);
-    let (b, e) = spectrum_fixture(64, 1);
-    let clustered = BandTolerances {
-        strict_bands: 4,
-        buffer_tolerance: 1e-5,
-    };
-    let before = reduced_solve_stats();
-    for (op, diag, bands, pol, tol) in [(&a, &d, 9, policy(9), 1e-11), (&b, &e, 6, clustered, 1e-9)]
-    {
-        for base in [entry_stack()] {
-            let dense = check_rows_case_tuned(op, diag, bands, pol, tol, base);
-            let b5 = DistributedTuning {
-                bordered: true,
-                ..base
-            };
-            let got = check_rows_case_tuned(op, diag, bands, pol, tol, b5);
-            let rooted = check_rows_case_tuned(
-                op,
-                diag,
-                bands,
-                pol,
-                tol,
-                DistributedTuning {
-                    eigen_root: true,
-                    ..b5
-                },
-            );
-            for ((g, c), r) in got.iter().zip(&dense).zip(&rooted) {
-                let (gi, _) = work_of(g);
-                let (ci, _) = work_of(c);
-                assert!(gi <= ci + ci / 10 + 2, "B5 iterations {gi} vs {ci}");
-                for (x, y) in g.eigenvalues.iter().zip(&c.eigenvalues) {
-                    assert!((x - y).abs() < 1e-9, "B5 {x} vs dense {y}");
-                }
-                assert_eq!(bits_of(&g.eigenvectors), bits_of(&r.eigenvectors));
-                assert_eq!(work_of(g), work_of(r));
-            }
-        }
-    }
-    let after = reduced_solve_stats();
-    println!(
-        "bordered {} of {} single-column solves",
-        after.bordered - before.bordered,
-        after.single_column - before.single_column
-    );
-    assert!(after.bordered > before.bordered, "B5 never fired");
 }

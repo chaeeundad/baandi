@@ -378,6 +378,24 @@ fn symmetrize(
 /// Stress with a separately reported isotropic cutoff-derivative Pulay estimate.
 /// No anisotropic convergence claim follows from this estimate.
 pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
+    stress_inner(state, None)
+}
+/// Retain the checked mesh and density projector in reference cutoff scans.
+pub fn stress_prepared(
+    state: &StressState<'_>,
+    prepared: &crate::refscf::symmetry::Prepared,
+) -> Result<StressResult, ScfError> {
+    if state.symmetry != prepared.operations(state.options.crystal_density_group) {
+        return Err(ScfError::InvalidInput(
+            "reference stress: derivative and scan symmetry differ",
+        ));
+    }
+    stress_inner(state, Some(prepared))
+}
+fn stress_inner(
+    state: &StressState<'_>,
+    prepared: Option<&crate::refscf::symmetry::Prepared>,
+) -> Result<StressResult, ScfError> {
     let mut result = frozen_stress(state)?;
     let start = std::time::Instant::now();
     let c = state.options.cutoff_hartree;
@@ -398,7 +416,14 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
     high.cutoff_hartree = c + steps[1];
     let db = high.basis(state.cell, [0.; 3], 4.)?;
     let required = FftGridSpec::new(&db, &db, None)?.dims();
-    let scan_dims = std::array::from_fn(|i| original_dims[i].max(required[i]));
+    let mut scan_dims = std::array::from_fn(|i| original_dims[i].max(required[i]));
+    if let Some(prepared) = prepared {
+        scan_dims = dft_geometry::symmetry::compatible_fft_grid(
+            scan_dims,
+            prepared.operations(state.options.crystal_density_group),
+        )
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    }
     let points: Vec<_> = match &state.electronic {
         ElectronicState::Fixed(r) => r.k_points.iter().map(|k| k.point).collect(),
         ElectronicState::FiniteTemperature(r) => r.state.k_points.iter().map(|k| k.point).collect(),
@@ -446,11 +471,13 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
             // standard profile, so their strict-caller scans always fell back
             // to strict; they go there directly to keep the reference bit for bit.
             None if !matches!(state.electronic, ElectronicState::Fixed(_)) => {
-                energy_at(state, state.cell, options).map(|e| (e, None))
+                energy_at_prepared(state, state.cell, options, prepared).map(|e| (e, None))
             }
-            None => match energy_at(state, state.cell, fast) {
+            None => match energy_at_prepared(state, state.cell, fast, prepared) {
                 Ok(e) => Ok((e, Some(scan_threshold))),
-                Err(_) => energy_at(state, state.cell, options).map(|e| (e, None)),
+                Err(_) => {
+                    energy_at_prepared(state, state.cell, options, prepared).map(|e| (e, None))
+                }
             },
             // Standard caller (ONEPATH-2): every scan runs the standard path
             // with the fixed-point verification (a scan energy is returned only
@@ -459,11 +486,11 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
             // threshold when that is looser; there is no strict fallback.
             Some(p) => {
                 fast.verification = crate::Verification::FixedPoint;
-                match energy_at(state, state.cell, fast) {
+                match energy_at_prepared(state, state.cell, fast, prepared) {
                     Ok(e) => Ok((e, Some(scan_threshold))),
                     Err(first) if p.threshold_ha > scan_threshold => {
                         options.verification = crate::Verification::FixedPoint;
-                        energy_at(state, state.cell, options)
+                        energy_at_prepared(state, state.cell, options, prepared)
                             .map(|e| (e, Some(p.threshold_ha)))
                             .map_err(|_| first)
                     }
@@ -538,6 +565,14 @@ pub fn energy_at(
     cell: &dft_geometry::Cell,
     options: crate::ScfOptions,
 ) -> Result<f64, ScfError> {
+    energy_at_prepared(state, cell, options, None)
+}
+fn energy_at_prepared(
+    state: &StressState<'_>,
+    cell: &dft_geometry::Cell,
+    options: crate::ScfOptions,
+    prepared: Option<&crate::refscf::symmetry::Prepared>,
+) -> Result<f64, ScfError> {
     use crate::{ScfProblem, collinear::CollinearProblem, finite_temperature::FiniteTProblem};
     match &state.electronic {
         ElectronicState::Fixed(r) if r.force_identity.reference_delivery => {
@@ -550,16 +585,22 @@ pub fn energy_at(
                     ))?
                     .threshold_ha,
             )?;
-            let run = crate::refscf::k_driver::run(
-                crate::refstart::StartInput {
-                    cell,
-                    atoms: state.atoms,
-                    potentials: state.potentials,
-                    options: &options,
-                },
-                profile,
-                &points,
-            )?;
+            let input = crate::refstart::StartInput {
+                cell,
+                atoms: state.atoms,
+                potentials: state.potentials,
+                options: &options,
+            };
+            let run = if let Some(prepared) = prepared {
+                crate::refscf::k_driver::run_prepared(input, profile, prepared)
+            } else {
+                if !state.symmetry.is_empty() {
+                    return Err(ScfError::InvalidInput(
+                        "reference symmetric cutoff scan requires stress_prepared",
+                    ));
+                }
+                crate::refscf::k_driver::run(input, profile, &points)
+            }?;
             if !run.outcome.converged {
                 return Err(ScfError::InvalidInput(
                     "reference stress scan did not converge",

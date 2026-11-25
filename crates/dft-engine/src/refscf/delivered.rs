@@ -198,29 +198,150 @@ pub fn gamma_seed<K: dft_mpi::Collective>(
     })
 }
 
+/// Fixed-cell ionic continuation. K seeds retain the delivered full complex
+/// blocks; injection selects the current communicator's owned rows.
+#[derive(Clone)]
+pub enum IonicSeed {
+    Gamma(Box<super::ladder::Seed>),
+    K(KSeed),
+}
+#[derive(Clone)]
+pub struct KSeed {
+    lattice: [[f64; 3]; 3],
+    cutoff: f64,
+    dims: [usize; 3],
+    points: Vec<dft_geometry::kpoints::KPoint>,
+    orbitals: Vec<dft_numerics::linalg::ComplexMatrix>,
+    density: Vec<f64>,
+    charge: f64,
+}
+
+pub fn ionic_seed<K: dft_mpi::Collective>(
+    input: StartInput<'_>,
+    result: &crate::ScfResult,
+    density: &[f64],
+    comm: &K,
+) -> Result<IonicSeed, ScfError> {
+    if result.gamma_real_used {
+        return gamma_seed(input, result, density, comm)
+            .map(|seed| IonicSeed::Gamma(Box::new(seed)));
+    }
+    validate_model(&input, result, &[])?;
+    let charge = density.iter().sum::<f64>() * input.cell.volume_bohr3() / density.len() as f64;
+    if !result.orbitals_delivered()
+        || density.len() != result.density.len()
+        || density.iter().any(|x| !x.is_finite())
+        || !charge.is_finite()
+        || (charge - result.charge).abs() > 1e-8 * result.charge.abs().max(1.)
+    {
+        return Err(ScfError::InvalidInput(
+            "reference k ionic seed: invalid delivery or density",
+        ));
+    }
+    Ok(IonicSeed::K(KSeed {
+        lattice: input.cell.lattice_columns_bohr(),
+        cutoff: input.options.cutoff_hartree,
+        dims: result
+            .density
+            .shape()
+            .try_into()
+            .map_err(|_| ScfError::InvalidInput("ionic seed: grid"))?,
+        points: result.k_points.iter().map(|k| k.point).collect(),
+        orbitals: result
+            .k_points
+            .iter()
+            .map(|k| k.solution.eigenvectors.clone())
+            .collect(),
+        density: density.to_vec(),
+        charge: result.charge,
+    }))
+}
+impl KSeed {
+    pub(super) fn inject(
+        self,
+        input: &StartInput<'_>,
+        state: &mut crate::refstart::KStartState,
+    ) -> Result<(), ScfError> {
+        if self.lattice != input.cell.lattice_columns_bohr()
+            || self.cutoff != input.options.cutoff_hartree
+            || self.dims != state.grid.dims()
+            || self.points != state.blocks.iter().map(|b| b.point).collect::<Vec<_>>()
+            || (self.charge - state.electrons).abs() > 1e-8 * state.electrons.max(1.)
+        {
+            return Err(ScfError::InvalidInput(
+                "reference k ionic seed: incompatible cell, basis, grid, mesh or charge",
+            ));
+        }
+        for ((full, block), owned) in self
+            .orbitals
+            .iter()
+            .zip(&state.blocks)
+            .zip(&mut state.orbitals.0)
+        {
+            if full.rows() != block.basis.vectors().len()
+                || full.cols() != owned.cols()
+                || full
+                    .as_slice()
+                    .iter()
+                    .any(|z| !z.re.is_finite() || !z.im.is_finite())
+            {
+                return Err(ScfError::InvalidInput(
+                    "reference k ionic seed: orbital shape or values",
+                ));
+            }
+            for band in 0..owned.cols() {
+                for (i, &g) in block.operator.local_rows().iter().enumerate() {
+                    owned[(i, band)] = full[(g, band)];
+                }
+            }
+        }
+        state.density = state
+            .fields
+            .plane_offsets()
+            .iter()
+            .map(|&i| self.density[i])
+            .collect();
+        Ok(())
+    }
+}
+
 /// Dispatch an ionic warm start with the active communicator. Fresh reference
 /// runs retain the regular Gamma/k dispatch and default switch configuration.
 pub fn run(
     input: StartInput<'_>,
     profile: super::profile::Profile,
     points: &[dft_geometry::kpoints::KPoint],
-    seed: Option<super::ladder::Seed>,
+    seed: Option<IonicSeed>,
 ) -> Result<super::driver::Run, ScfError> {
-    if let Some(seed) = seed {
-        if points.len() != 1
-            || points[0].fractional != [0.; 3]
-            || input.options.gamma_real != crate::GammaReal::On
-        {
-            return Err(ScfError::InvalidInput(
-                "reference k ionic warm seed requires a k-driver seed interface",
-            ));
+    match seed {
+        Some(IonicSeed::Gamma(seed)) => {
+            if points.len() != 1
+                || points[0].fractional != [0.; 3]
+                || input.options.gamma_real != crate::GammaReal::On
+            {
+                return Err(ScfError::InvalidInput(
+                    "reference ionic seed: Gamma/k mismatch",
+                ));
+            }
+            if let Some(comm) = crate::parallel::SharedComm::active() {
+                super::driver::run_seeded_with(input, profile, &comm, *seed)
+            } else {
+                super::driver::run_seeded_with(input, profile, &super::metric::Serial, *seed)
+            }
         }
-        if let Some(comm) = crate::parallel::SharedComm::active() {
-            super::driver::run_seeded_with(input, profile, &comm, seed)
-        } else {
-            super::driver::run_seeded_with(input, profile, &super::metric::Serial, seed)
+        Some(IonicSeed::K(seed)) => {
+            if let Some(comm) = crate::parallel::SharedComm::active() {
+                super::k_driver::run_seeded_with(input, profile, points, &comm, seed)
+            } else {
+                super::k_driver::run_seeded_with(
+                    input,
+                    profile,
+                    points,
+                    &super::metric::Serial,
+                    seed,
+                )
+            }
         }
-    } else {
-        super::k_driver::run(input, profile, points)
+        None => super::k_driver::run(input, profile, points),
     }
 }

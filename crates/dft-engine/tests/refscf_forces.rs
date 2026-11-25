@@ -618,3 +618,147 @@ fn lazy_delivery_materializes_once_and_preserves_derivatives() {
         });
     }
 }
+
+#[test]
+fn distributed_k_ionic_seed_matches_cold_delivery() {
+    let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+    let old = [
+        Atom::new("Xx", [0.1, 0.2, 0.3]),
+        Atom::new("Xx", [0.37, 0.43, 0.49]),
+    ];
+    let mut atoms = old.clone();
+    atoms[1].fractional_position[0] += 0.001;
+    let mut opts = options();
+    opts.gamma_real = GammaReal::Off;
+    let points = [
+        KPoint {
+            fractional: [0.25, 0., 0.],
+            weight: 0.5,
+        },
+        KPoint {
+            fractional: [-0.25, 0., 0.],
+            weight: 0.5,
+        },
+    ];
+    let profile = Profile::from_standard_ha(opts.standard.unwrap().threshold_ha).unwrap();
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let input = || StartInput {
+                cell: &cell,
+                atoms: &old,
+                potentials: &species,
+                options: &opts,
+            };
+            let mut initial = k_driver::run_with(input(), profile, &points, comm).unwrap();
+            delivered::force_state(input(), &mut initial.outcome).unwrap();
+            let density: Vec<_> = initial.outcome.result.density.iter().copied().collect();
+            let delivered::IonicSeed::K(seed) =
+                delivered::ionic_seed(input(), &initial.outcome.result, &density, comm).unwrap()
+            else {
+                panic!("k seed expected")
+            };
+            let next = || StartInput {
+                atoms: &atoms,
+                ..input()
+            };
+            let mut warm =
+                k_driver::run_seeded_with(next(), profile, &points, comm, seed.clone()).unwrap();
+            let mut cold = k_driver::run_with(next(), profile, &points, comm).unwrap();
+            let de =
+                (warm.outcome.result.total_hartree() - cold.outcome.result.total_hartree()).abs();
+            let wf =
+                dft_engine::forces(&delivered::force_state(next(), &mut warm.outcome).unwrap())
+                    .unwrap();
+            let cf =
+                dft_engine::forces(&delivered::force_state(next(), &mut cold.outcome).unwrap())
+                    .unwrap();
+            let df = delta(wf.values.iter().flatten(), cf.values.iter().flatten());
+            println!("k ionic seed ranks={ranks} dE={de:e} Ha dF={df:e} Ha/Bohr");
+            assert!(de <= 5e-9 && df <= 1e-6);
+            let mut wrong = opts.clone();
+            wrong.cutoff_hartree *= 1.1;
+            assert!(
+                k_driver::run_seeded_with(
+                    StartInput {
+                        options: &wrong,
+                        ..next()
+                    },
+                    profile,
+                    &points,
+                    comm,
+                    seed
+                )
+                .is_err()
+            );
+        });
+    }
+}
+
+#[test]
+#[ignore = "external Si2 cutoff scans; DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf_forces symmetric_si2_pulay -- --ignored --nocapture"]
+fn symmetric_si2_pulay_matches_full_mesh() {
+    let pp =
+        dft_upf::parse_upf(&std::fs::read_to_string(std::env::var("DFT_SI_UPF").unwrap()).unwrap())
+            .unwrap();
+    let cell = common::cell();
+    let atoms = [Atom::new("Si", [0.; 3]), Atom::new("Si", [0.25; 3])];
+    let species = [SpeciesPotential {
+        label: "Si",
+        potential: &pp,
+    }];
+    let mut opts = options();
+    opts.cutoff_hartree = 4.;
+    opts.bands = Some(5);
+    opts.gamma_real = GammaReal::Off;
+    let points: Vec<_> = (0..2)
+        .flat_map(|x| {
+            (0..2).flat_map(move |y| {
+                (0..2).map(move |z| KPoint {
+                    fractional: [x as f64 / 2., y as f64 / 2., z as f64 / 2.],
+                    weight: 0.125,
+                })
+            })
+        })
+        .collect();
+    let prepared =
+        dft_engine::refscf::symmetry::Prepared::new(&cell, &atoms, &points, 1e-8, false).unwrap();
+    let input = || StartInput {
+        cell: &cell,
+        atoms: &atoms,
+        potentials: &species,
+        options: &opts,
+    };
+    let profile = Profile::from_standard_ha(opts.standard.unwrap().threshold_ha).unwrap();
+    let mut full = k_driver::run(input(), profile, &points).unwrap();
+    let full_view = delivered::stress_state(input(), &mut full.outcome).unwrap();
+    let full_stress = dft_engine::stress(&full_view).unwrap();
+    let mut reduced = k_driver::run_prepared(input(), profile, &prepared).unwrap();
+    let reduced_view =
+        delivered::stress_state_prepared(input(), &mut reduced.outcome, &prepared).unwrap();
+    let reduced_stress = dft_engine::stress::stress_prepared(&reduced_view, &prepared).unwrap();
+    let ds = delta(
+        full_stress.values.iter().flatten(),
+        reduced_stress.values.iter().flatten(),
+    );
+    let dp = (full_stress.pulay.as_ref().unwrap().correction
+        - reduced_stress.pulay.as_ref().unwrap().correction)
+        .abs();
+    println!(
+        "Si2 symmetry full={} reduced={} dStress={ds:e} Ha/Bohr^3 dPulay={dp:e} Ha/Bohr^3",
+        points.len(),
+        prepared.points().len()
+    );
+    assert!(ds <= 1e-8 && dp <= 1e-8);
+    for i in 0..3 {
+        let corrected = (full_stress.values[i][i] + full_stress.pulay.as_ref().unwrap().correction
+            - reduced_stress.values[i][i]
+            - reduced_stress.pulay.as_ref().unwrap().correction)
+            .abs();
+        assert!(corrected <= 1e-8);
+    }
+}

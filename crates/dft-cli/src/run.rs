@@ -812,8 +812,28 @@ mod binary_hash_cache {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    const SCHEMA: &str = "baandi-binary-sha256-1";
+    const SCHEMA: &str = "baandi-binary-sha256-2";
     const MAX_RECORD: u64 = 4096;
+    // Two seconds covers whole-second ctime and coarse filesystem timestamps.
+    // An entry recorded in the same tick remains suspect even after aging.
+    const SAFETY_NS: i128 = 2_000_000_000;
+    fn now_ns() -> io::Result<u64> {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(io::Error::other)
+            .and_then(|d| u64::try_from(d.as_nanos()).map_err(io::Error::other))
+    }
+    fn racy(stamp: &Stamp, recorded: u64, now: u64) -> bool {
+        [
+            (stamp.modified_s, stamp.modified_ns),
+            (stamp.changed_s, stamp.changed_ns),
+        ]
+        .into_iter()
+        .any(|(s, ns)| {
+            let time = i128::from(s) * 1_000_000_000 + i128::from(ns);
+            time >= i128::from(recorded) - SAFETY_NS || time >= i128::from(now) - SAFETY_NS
+        }) || recorded > now
+    }
 
     #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -849,12 +869,13 @@ mod binary_hash_cache {
         schema: String,
         stamp: Stamp,
         sha256: String,
+        recorded_ns: u64,
         checksum: String,
     }
-    fn checksum(stamp: &Stamp, digest: &str) -> String {
+    fn checksum(stamp: &Stamp, digest: &str, recorded_ns: u64) -> String {
         // Detect accidental edits to even a syntactically valid digest; this is
         // deliberately not claimed to authenticate a malicious sidecar writer.
-        sha256(&serde_json::to_vec(&(stamp, digest)).expect("integer/string record"))
+        sha256(&serde_json::to_vec(&(stamp, digest, recorded_ns)).expect("integer/string record"))
     }
     pub(super) fn sidecar(path: &Path) -> PathBuf {
         let mut name = path.as_os_str().to_owned();
@@ -864,7 +885,7 @@ mod binary_hash_cache {
     fn trusted_record(m: &fs::Metadata, owner: u32) -> bool {
         m.is_file() && m.uid() == owner && m.mode() & 0o022 == 0
     }
-    fn read_record(path: &Path, stamp: &Stamp) -> Option<String> {
+    fn read_record(path: &Path, stamp: &Stamp, now: u64) -> Option<String> {
         let link = fs::symlink_metadata(path).ok()?;
         if !trusted_record(&link, stamp.owner) || link.len() > MAX_RECORD {
             return None;
@@ -881,13 +902,14 @@ mod binary_hash_cache {
         }
         let record: Record = serde_json::from_slice(&bytes).ok()?;
         if record.schema != SCHEMA
+            || racy(stamp, record.recorded_ns, now)
             || record.stamp != *stamp
             || record.sha256.len() != 64
             || !record
                 .sha256
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            || record.checksum != checksum(&record.stamp, &record.sha256)
+            || record.checksum != checksum(&record.stamp, &record.sha256, record.recorded_ns)
         {
             return None;
         }
@@ -937,6 +959,9 @@ mod binary_hash_cache {
         Ok(Stamp::of(&file.metadata()?) == *stamp && Stamp::of(&fs::metadata(path)?) == *stamp)
     }
     pub(super) fn digest(path: &Path) -> io::Result<Outcome> {
+        digest_at(path, now_ns()?)
+    }
+    fn digest_at(path: &Path, now: u64) -> io::Result<Outcome> {
         let mut file = fs::File::open(path)?;
         let meta = file.metadata()?;
         if !meta.is_file() {
@@ -944,7 +969,7 @@ mod binary_hash_cache {
         }
         let stamp = Stamp::of(&meta);
         let cache = sidecar(path);
-        if let Some(digest) = read_record(&cache, &stamp)
+        if let Some(digest) = read_record(&cache, &stamp, now)
             && stable(&file, path, &stamp)?
         {
             return Ok(Outcome {
@@ -974,7 +999,8 @@ mod binary_hash_cache {
         let digest = format!("{:x}", hash.finalize());
         let record = Record {
             schema: SCHEMA.into(),
-            checksum: checksum(&stamp, &digest),
+            checksum: checksum(&stamp, &digest, now),
+            recorded_ns: now,
             stamp,
             sha256: digest.clone(),
         };
@@ -1023,19 +1049,54 @@ mod binary_hash_cache {
             assert_eq!(cold.hashed_bytes, 8);
             assert_eq!(cold.status, "miss");
             assert!(cold.published);
-            let hit = digest(&path).unwrap();
-            assert_eq!(hit.digest, cold.digest);
-            assert_eq!((hit.status, hit.hashed_bytes), ("hit", 0));
-            fs::write(&path, b"replaced").unwrap();
-            fs::File::options()
-                .write(true)
-                .open(&path)
-                .unwrap()
-                .set_times(fs::FileTimes::new().set_modified(modified))
-                .unwrap();
-            let changed = digest(&path).unwrap();
-            assert_eq!(changed.status, "miss");
-            assert_eq!(changed.digest, sha256(b"replaced"));
+            // Immediate re-read is deliberately unverified; a later rehash
+            // records a safe timestamp and enables ordinary cache hits.
+            assert_eq!(digest(&path).unwrap().status, "miss");
+            let later = now_ns().unwrap() + 3_000_000_000;
+            assert_eq!(digest_at(&path, later).unwrap().status, "miss");
+            assert_eq!(digest_at(&path, later).unwrap().status, "hit");
+            for i in 0..50 {
+                let bytes: &[u8] = if i % 2 == 0 { b"replaced" } else { b"original" };
+                fs::write(&path, bytes).unwrap();
+                fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_times(fs::FileTimes::new().set_modified(modified))
+                    .unwrap();
+                // Force an exact metadata collision with a stale digest. This
+                // does not depend on the host ctime resolution or scheduling.
+                let stamp = Stamp::of(&fs::metadata(&path).unwrap());
+                let recorded_ns = now_ns().unwrap();
+                let stale = sha256(if i % 2 == 0 { b"original" } else { b"replaced" });
+                let record = Record {
+                    schema: SCHEMA.into(),
+                    checksum: checksum(&stamp, &stale, recorded_ns),
+                    stamp,
+                    recorded_ns,
+                    sha256: stale,
+                };
+                publish(&sidecar(&path), &record).unwrap();
+                let changed = digest(&path).unwrap();
+                assert_eq!(changed.status, "miss");
+                assert_eq!(changed.digest, sha256(bytes));
+                assert_eq!(changed.hashed_bytes, 8);
+            }
+        }
+        #[test]
+        fn safety_window_checks_both_clocks_and_future_timestamps() {
+            let f = Fixture::new("clock");
+            fs::write(f.binary(), b"x").unwrap();
+            let mut stamp = Stamp::of(&fs::metadata(f.binary()).unwrap());
+            stamp.modified_s = 10;
+            stamp.modified_ns = 0;
+            stamp.changed_s = 10;
+            stamp.changed_ns = 0;
+            assert!(!racy(&stamp, 13_000_000_000, 14_000_000_000));
+            assert!(racy(&stamp, 12_000_000_000, 14_000_000_000));
+            assert!(racy(&stamp, 13_000_000_000, 11_000_000_000));
+            stamp.changed_s = 20;
+            assert!(racy(&stamp, 13_000_000_000, 14_000_000_000));
         }
         #[test]
         fn replaced_inode_size_and_mode_invalidate() {
@@ -1126,7 +1187,11 @@ mod binary_hash_cache {
             for t in threads {
                 assert_eq!(t.join().unwrap(), sha256(&payload));
             }
-            assert_eq!(digest(&path).unwrap().status, "hit");
+            // Concurrent publishers can all finish in the binary's ctime tick.
+            // Their complete records remain unverified until a safe rehash.
+            let later = now_ns().unwrap() + 3_000_000_000;
+            assert_eq!(digest_at(&path, later).unwrap().status, "miss");
+            assert_eq!(digest_at(&path, later).unwrap().status, "hit");
             assert_eq!(fs::read_dir(&f.0).unwrap().count(), 2);
         }
     }
@@ -2697,11 +2762,6 @@ fn execute_mode_inner(
     )? {
         console.push_str(&stress_table(&stress));
         result["stress"] = stress_json(&stress);
-        if reference && reference_symmetry.is_some() {
-            result["stress"]["pulay_unavailable_reason"] = json!(
-                "reference symmetry cutoff scans require symmetry forwarding in stress::energy_at; analytic frozen-basis tensor is available"
-            );
-        }
         if reference {
             result["stress"]["verification"] = json!(stress.verification);
         }
@@ -3416,11 +3476,12 @@ fn requested_stress(
         density_floor,
         symmetry: &operations,
     };
-    if reference_requested(config) && !operations.is_empty() {
-        // G5 cutoff scans currently drop symmetry in stress::energy_at, outside
-        // G6 ownership. Deliver the analytic tensor; never run a reduced mesh
-        // without its projector or fabricate a cutoff correction.
-        dft_engine::stress::frozen_stress(&state)
+    if reference_requested(config) {
+        if let Some(prepared) = reference_symmetry(config)? {
+            dft_engine::stress::stress_prepared(&state, &prepared)
+        } else {
+            dft_engine::stress::stress(&state)
+        }
     } else {
         dft_engine::stress::stress(&state)
     }
@@ -4334,7 +4395,8 @@ mod tests {
             serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
         assert_eq!(symmetric_result["forces"]["verification"], "verified");
         assert_eq!(symmetric_result["stress"]["verification"], "verified");
-        assert!(symmetric_result["stress"]["pulay_unavailable_reason"].is_string());
+        assert!(symmetric_result["stress"]["pulay_assessment"].is_object());
+        assert!(symmetric_result["stress"]["pulay_unavailable_reason"].is_null());
         // G4 routes through the distributed reference map, with explicit axes.
         for (name, spin, finite) in [
             ("fd", false, true),

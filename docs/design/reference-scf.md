@@ -3142,10 +3142,10 @@ an internal unverified-delivery marker. Forces and stress then report
 SCF grants that marker. The delivered verification report must be absent for
 the opt-out; an empty report is not evidence of explicit opt-out. Changing a
 failed result's requested verification mode
-to Off does not make its failed attempts acceptable. Legacy derivative callers
-retain their existing certificate rule. The CLI parser's separate verify-off
-restriction still needs a scoped `config.rs` change before this opt-out can be
-requested from a file (outside G5's original ownership list).
+to Off does not make its failed attempts acceptable. Legacy derivative callers retain their existing certificate rule. G5B wires
+`scf.verify = "off"` for reference `run` forces/stress only; the JSON derivative
+blocks say `unverified` and retain false verification preconditions. Ionic
+relaxation still requires verification on every step.
 
 The current derivative kernels require replicated complex orbitals. The
 adapter calls the existing collective `materialize_orbitals` boundary once;
@@ -3171,7 +3171,7 @@ the scalar implementation remains the default. No timing or speed adoption is
 claimed. Synthetic identity coverage includes complex k orbitals, multiple
 atoms, s/s/p channels, off-diagonal coupling and fractional/zero occupations.
 
-Reference fixed-cell Gamma relaxation runs each ionic evaluation through the
+Reference fixed-cell relaxation runs each ionic evaluation through the
 reference driver. An in-memory owned `ladder::Seed` transfers both the preceding
 step's orbitals and density through the existing injection/reorthogonalization
 mechanism. Seed export checks the original model, orbital shape, finite density
@@ -3182,12 +3182,23 @@ start fields, mixer and verification are fresh.
 Per-step record and restart formats are retained. A disk restart contains only
 the existing density record, so the first resumed reference step reports a
 fresh atomic start with an explicit missing-orbital-seed fallback; subsequent
-Gamma steps are warm. Density extrapolation is rejected explicitly on this
-path. Complex-k warm seeding requires a k-driver entry point, and frozen-strain
-cell relaxation requires removing and validating the refstart rejection; those
-files are outside the original G5 ownership list. Reference stress cutoff scans
+Gamma and k-mesh steps are warm. G5B adds `IonicSeed::K`: the preceding
+stop map's full complex blocks and real density are retained, then scattered
+by the next start's actual owned G rows and field-plane offsets. Export checks
+the source model and charge; injection rejects changed cell, cutoff, FFT grid,
+k list/weights, band shape or charge. Davidson's generalized starting Gram
+factorization handles the transferred block. Ionic fields, mixer and
+verification are rebuilt; there is no exact-replay claim. K-seed storage is
+`16 B sum_k G_k + 8 F` bytes per rank, excluding metadata. Cold initialization
+is currently constructed before injection, so this is a correctness boundary,
+not a claim to eliminate setup cost. Density extrapolation and frozen-strain
+cell relaxation remain explicitly unsupported. Reference stress cutoff scans
 use independently converged reference SCFs, sequentially so MPI collectives
-cannot interleave between scans. Reference CLI stress requests retain the
+cannot interleave between scans. G5B `stress_prepared` forwards the checked symmetry preparation to every
+cutoff scan, including scan-grid compatibility and the irreducible list. The
+CLI now reports the Pulay assessment on symmetric runs. Calling the plain
+energy-scan entry on a symmetric reference state fails rather than silently
+dropping its projector. Reference CLI stress requests retain the
 existing stress default estimator threshold (5e-11 Ha); an explicit threshold
 still wins.
 
@@ -3205,13 +3216,22 @@ finite differences, not a new QE run. Force and stress comparison tolerances
 are respectively 1e-6 Ha/Bohr and 1e-6 Ha/Bohr^3; the trajectory also checks
 energy differences below 5e-9 Ha and positions below 1e-6 Bohr.
 
-G5 scope status: the implementation is not complete under the original
-`OWNED_FILES`. Complex-k ionic warm starts need a seed entry point in
-`refscf/k_driver.rs`; reference CLI `verify=off` needs a reference-only exception
-in `dft-cli/src/config.rs`. Neither file is changed here. Cold complex-k ionic
-steps can be requested with `warm_start=false`; this is not a substitute for
-the ticket's warm-start requirement. Variable-cell relaxation and reference
-density extrapolation also remain explicit unsupported requests.
+G5B closes the previously recorded complex-k seed, CLI opt-out and symmetry
+cutoff-scan gaps. The stop-to-verified reader recognizes `reference-spin-fd-1`
+using its top-level verification and threshold. Those historical outputs lack
+monotonic map boundaries: the reader reports the recorded verdict and attempt
+durations, with a null interval and `parts_sum_checked=false`; it never invents
+clocks. Gamma and fixed-occupation k outputs retain full interval validation.
+The executable hash sidecar uses schema v2 with its recording time: mtime or
+ctime within two seconds of recording or lookup is unverified and rehashed.
+An entry recorded during the timestamp collision window stays suspect even
+when later read after that window. Deterministic tests force 50 stale-digest
+metadata collisions and also test the safe hit path with a controlled clock.
+
+G5B additional commands (external files stay outside the checkout):
+- `cargo test -p dft-cli --test reference_gaps`
+- `DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-cli --test reference_gaps reference_k_relax -- --ignored --nocapture`
+- `DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf_forces symmetric_si2_pulay -- --ignored --nocapture`
 
 Local validation (Mac, pure Rust; continuation review, 2026-11-25): all five
 G5 `TEST_COMMANDS` pass. `scripts/check.sh` also passes build/test/fmt/clippy
@@ -3256,6 +3276,37 @@ including the initial frame). Every subsequent reference frame records
 position, under unchanged gates of 5e-9 Ha, 1e-6 Ha/Bohr and 1e-6 Bohr.
 This trajectory is serial Gamma; rank coverage applies to the derivative and
 ionic-seed tests, not a real MPI CLI relaxation campaign.
+
+G5B local evidence (Mac, pure Rust; 2026-11-25): the eight-point 2x2x2 Si2
+trajectory completes its prescribed three ionic steps (four frames), with
+`warm_transfer` on every subsequent reference frame. Both optimizers stop at
+the step budget, not at the deliberately tight ionic convergence tolerance.
+At the 5e-13 Ha electronic threshold, maximum reference/legacy differences
+are 6.497e-12 Ha in energy, 6.789e-8 Ha/Bohr in forces and 3.599e-7 Bohr in
+positions (gates 5e-9 Ha, 1e-6 Ha/Bohr and 1e-6 Bohr). The unchanged Gamma
+trajectory oracle also passes. These are engine comparisons, not QE evidence.
+
+For symmetric undisplaced Si2, the eight-point mesh reduces to three points.
+The frozen tensor differs from the full-mesh reference by 1.559e-10
+Ha/Bohr^3 and the Pulay correction by 5.947e-10 Ha/Bohr^3; the corrected
+diagonal components also pass the 1e-8 Ha/Bohr^3 gate. The correction remains
+an isotropic cutoff estimate, not a cutoff-convergence certificate.
+
+The synthetic k-seed test passes at simulated ranks 1/3/8: maximum warm/cold
+energy difference 4.863e-13 Ha and force difference 9.420e-8 Ha/Bohr.
+The CLI fixture delivers identical energy, density cube, all k eigenvalues
+and occupations, forces and stress with verification on/off: 22 ordinary
+maps in each run, four per-k verification solves versus zero. Actual k, FD
+and fixed-sector spin results pass the offline reader, including the CLI
+subcommand for FD/spin. The six cache tests include 50 forced same-metadata
+rewrites and concurrent publication. No real MPI, dev08 or speed adoption is
+claimed; generated README and dashboard updates remain outside G5B ownership.
+The full `scripts/check.sh` gate exits 0: build, test, fmt and clippy pass;
+992 tests pass, 217 are ignored across 99 binaries. All six ticket command
+groups pass, as do the explicit release trajectory and symmetry tests above.
+README freshness checks pass (9 tests); no generated evidence files were edited.
+The sandbox denies optional `ps`/`nice` load inspection; verification still ran.
+
 
 ## Spin and Fermi-Dirac
 

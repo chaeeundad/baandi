@@ -472,6 +472,8 @@ impl Config {
             dft_engine::Verification::FixedPoint
         };
         if verification == dft_engine::Verification::Off
+            && !(dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
+                || s.is_some_and(|s| s.driver.as_deref() == Some("reference")))
             && self.output.as_ref().is_some_and(|o| o.forces)
         {
             return Err(invalid(
@@ -479,6 +481,8 @@ impl Config {
             ));
         }
         if verification == dft_engine::Verification::Off
+            && !(dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
+                || s.is_some_and(|s| s.driver.as_deref() == Some("reference")))
             && self.output.as_ref().is_some_and(|o| o.stress)
         {
             return Err(invalid(

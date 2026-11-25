@@ -366,3 +366,23 @@ fn first_verification_schedule_is_opt_in() {
         );
     }
 }
+
+// R6a adopts the measured G4B combination while retaining explicit A/B overrides.
+#[test]
+fn moment_fd_defaults_on_and_off_remains_available() {
+    for id in [
+        Id::REFSCF_SPIN_FD_MOMENT,
+        Id::REFSCF_SPIN_STIFFNESS,
+        Id::REFSCF_HISTORY_CONDITIONING,
+    ] {
+        let switch = switches::switch(id);
+        assert_eq!(
+            switches::resolve(switch, None),
+            (Value::Choice("on"), Source::Default)
+        );
+        assert_eq!(
+            switches::resolve(switch, Some(std::ffi::OsStr::new("off"))).0,
+            Value::Choice("off")
+        );
+    }
+}

@@ -40,7 +40,6 @@ fn atomic(name: &str) -> String {
 fn reason(key: &str) -> &'static str {
     match key {
         "G4D_FALLBACK" => route::G4D_FALLBACK,
-        "G4B_FALLBACK" => route::G4B_FALLBACK,
         "VARIABLE_CELL" => route::VARIABLE_CELL,
         "EXTRAPOLATION" => route::EXTRAPOLATION,
         "CHECKPOINT" => route::CHECKPOINT,
@@ -487,7 +486,7 @@ max_iterations = 2
 }
 
 #[test]
-fn preexisting_spin_fd_fallback_mixer_defaults_are_preserved() {
+fn moment_fd_reference_and_g4d_fallback_mixer_defaults() {
     // Fallback compatibility is an implicit/environment request contract.
     let _scope = RunConfig::resolve_with(
         |key| (key == "BAANDI_REFERENCE_SCF").then(|| "on".into()),
@@ -495,18 +494,26 @@ fn preexisting_spin_fd_fallback_mixer_defaults_are_preserved() {
     )
     .unwrap()
     .enter();
-    for text in [
-        include_str!("fixtures/routing/l01-free-moment-pbe-fd.toml"),
-        include_str!("fixtures/routing/l02-moment-fd.toml"),
+    let moment = include_str!("fixtures/routing/l02-moment-fd.toml");
+    let free_lda = moment.replace("total_moment = 2.0\n", "");
+    let fixed_pbe = moment.replace("lda-pw", "pbe");
+    // R6a uses reference beta for moment FD; only L1/G4D retains fallback beta.
+    for (text, beta) in [
+        (
+            include_str!("fixtures/routing/l01-free-moment-pbe-fd.toml"),
+            0.5,
+        ),
+        (moment, 0.7),
+        (free_lda.as_str(), 0.7),
+        (fixed_pbe.as_str(), 0.7),
     ] {
         let config = Config::parse(text).unwrap();
+        let selection = route::preliminary(&config);
+        assert_eq!(selection.reference(), beta == 0.7);
         let options = dft_cli::run::options(&config).unwrap();
         assert!(matches!(
             options.mixing,
-            dft_engine::Mixing::Pulay {
-                beta: 0.5,
-                history: 8
-            }
+            dft_engine::Mixing::Pulay { beta: actual, history: 8 } if actual == beta
         ));
         let config = Config::parse(&text.replace("[scf]", "[scf]\ndriver='legacy'\n")).unwrap();
         let options = dft_cli::run::options(&config).unwrap();

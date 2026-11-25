@@ -7155,7 +7155,8 @@ fn g4_synthetic_matrix() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 #[test]
-#[ignore = "G4B qualification requires REFSCF_SPIN_STIFFNESS=on and REFSCF_HISTORY_CONDITIONING=on; both-off intentionally fails the unchanged bounds"]
+// R6a qualifies moment policies with registry defaults; keep the long matrix in release.
+#[ignore = "release matrix: cargo test --release -p dft-engine --test refscf g4b_moment_acceptance -- --ignored --nocapture"]
 fn g4b_moment_acceptance() {
     let mut failures = Vec::new();
     for mode in ["free", "moment"] {
@@ -8441,6 +8442,7 @@ fn g4c_pbe_matrix(modes: &[&str]) {
         fractional: [0.; 3],
         weight: 1.,
     }];
+    // Pin the qualified G4B combination to isolate PBE/NLCC coverage from routing defaults.
     let config = RunConfig::from_pairs(&[
         ("refscf_spin_fd_moment", "on"),
         ("refscf_spin_stiffness", "on"),

@@ -1,6 +1,6 @@
 # ADR 0045: Oldest-first conditioning of Broyden histories
 
-Status: proposed (G4B-SPIN-MOMENT, 2026-11-25). Defaults remain off.
+Status: accepted (R6A-G4B-DEFAULT, 2026-11-25). Enabled by default for collinear FD.
 
 ## Motivation and scope
 
@@ -10,13 +10,13 @@ solve rejects at conditions near 1e15–1e16, even where the true energy already
 meets the tight accuracy class. This is distinct from premature standard
 stopping; history recovery alone cannot certify delivered accuracy.
 
-`REFSCF_HISTORY_CONDITIONING=on` opts the collinear FD reference entry into
-the candidate. Scalar FD, fixed collinear sectors, fixed unpolarized drivers
+`REFSCF_HISTORY_CONDITIONING=on` selects conditioning for the collinear FD reference entry
+(default on). Scalar FD, fixed collinear sectors, fixed unpolarized drivers
 and legacy drivers retain the old arithmetic even with the switch on. The
 Broyden adapter exposes explicit setup-time opt-in for manufactured tests.
-No performance/default promotion is established by local tests.
+Default adoption is supported by the synthetic and dev08 evidence below.
 
-## Proposed rule
+## Accepted rule
 
 For p retained unnormalized pairs, diagonalize the same metric Gram matrix
 A with the existing symmetric EVD adapter. Define rcond=lambda_min/lambda_max.
@@ -39,7 +39,7 @@ never insert pairs. Failed verification retains the ordinary input pair.
 Do not normalize secants, add a ridge, use a pseudoinverse, adjust beta or
 project an unconstrained uniform spin mode. The unchanged linear solve acts
 on the retained history. Scratch storage is allocated at construction. Gram
-reuse is disabled in the candidate FIFO branch to avoid stale ring indices;
+reuse is disabled in the conditioned FIFO branch to avoid stale ring indices;
 the existing ring/cache remains untouched with the switch off. The optional
 ring-based secant predictor returns unavailable for a conditioned history;
 the electronic FD entry does not use it.
@@ -48,10 +48,20 @@ the electronic FD entry does not use it.
 
 Off keeps the existing min <= p*epsilon*max rejection, insertion order and
 arithmetic. Every drop is explicit in `Diagnostics` and optional per-map traces.
-The candidate changes the singular-history contract only when selected.
-Qualification requires all 48 G4 comparisons at unchanged energy, moment,
-chemical-potential and weighted-occupation bounds, Si2 FD, and bit identity
-of already qualified paths. A negative result leaves moment policies
-unqualified and defaults off. Local rank simulation is not dev08 real MPI
-or MKL validation. Detailed measurements live in the Spin and Fermi-Dirac
-section of `docs/design/reference-scf.md`.
+Conditioning changes the singular-history contract only when selected.
+Acceptance: all 48 G4 synthetic comparisons pass with the three switches on
+at unchanged energy, moment, chemical-potential and weighted-occupation bounds;
+Si2 FD and already qualified paths retain their recorded identity. Detailed
+measurements live in [Spin and Fermi-Dirac](../design/reference-scf.md#spin-and-fermi-dirac).
+
+The R6a work order records dev08 gen15 bcc Fe (PBE+NLCC, 4x4x4 k mesh,
+fixed moment 4.4 mu_B) VERIFIED in 75.8 s on the reference driver; legacy
+and the strict oracle did not finish within 45 min. This is convergence
+and verification evidence, not a completed strict-oracle accuracy comparison
+or a QE timing comparison. It was supplied by the orchestrator, not rerun locally.
+
+R6a enables REFSCF_SPIN_FD_MOMENT, REFSCF_SPIN_STIFFNESS and
+REFSCF_HISTORY_CONDITIONING by default and removes the L2 routing predicate.
+Explicit off values remain available for A/B diagnostics without changing
+driver selection. Free-moment FD with PBE remains on legacy under L1/G4D.
+Local rank simulation is not real-MPI or MKL validation.

@@ -617,13 +617,13 @@ table! {
 
     FORCE_BAND_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G5: one projector/derivative GEMM over all bands per k for nonlocal forces; unmeasured, default off";
-    REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G4B: enable unqualified reference collinear Fermi-Dirac moment policies for development";
+    REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "R6a: reference collinear FD moment policies enabled by default; G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s; free-moment PBE remains G4D";
 
-    REFSCF_SPIN_STIFFNESS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G4B candidate: add absolute local LDA-PW spin curvature residual energy for collinear FD only";
-    REFSCF_HISTORY_CONDITIONING: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G4B candidate: oldest-first history pruning at rcond <= sqrt(p*epsilon), collinear FD only; proposed ADR 0045";
+    REFSCF_SPIN_STIFFNESS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "R6a: absolute local LDA-PW spin curvature residual energy for collinear FD only; G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s";
+    REFSCF_HISTORY_CONDITIONING: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "R6a: oldest-first history pruning at rcond <= sqrt(p*epsilon), collinear FD only; accepted ADR 0045, G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s";
     XC_SCREEN_NEGATIVE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "G4E: screen XC-only small/signed vacuum densities with a screened-charge budget; accepted ADR 0046";
 }

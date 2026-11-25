@@ -53,10 +53,10 @@ impl Selection {
     pub fn strict(self) -> bool {
         self.driver == Driver::StrictOracle
     }
-    /// The G4B/G4D routes predate R1 and already accepted reference mixer
+    /// The G4D route predates R1 and already accepted reference mixer
     /// aliases/defaults before falling back. Keep that input contract intact.
     pub(crate) fn reference_mixing(self) -> bool {
-        self.reference() || matches!(self.reason, Some(G4B_FALLBACK | G4D_FALLBACK))
+        self.reference() || matches!(self.reason, Some(G4D_FALLBACK))
     }
     /// A reference selection with an eligibility reason is a rejected explicit
     /// request, never permission to execute a different driver.
@@ -115,7 +115,6 @@ impl Selection {
 pub const STRICT: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
 pub const G4D_FALLBACK: &str =
     "reference driver: free-moment collinear FD with PBE not yet qualified, G4D";
-pub const G4B_FALLBACK: &str = "reference driver: collinear Fermi-Dirac not yet qualified, G4B";
 pub const VARIABLE_CELL: &str =
     "L4: variable-cell relaxation requires legacy frozen-strain support";
 pub const EXTRAPOLATION: &str = "L5: relaxation density extrapolation requires the legacy driver";
@@ -173,12 +172,6 @@ fn l1(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
             c.finite_constraint(),
             dft_physics::occupations::Constraint::Total
         )
-}
-fn l2(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    spin_fd(c)
-        && !(switches::on(Id::REFSCF_SPIN_FD_MOMENT)
-            && switches::on(Id::REFSCF_SPIN_STIFFNESS)
-            && switches::on(Id::REFSCF_HISTORY_CONDITIONING))
 }
 
 fn l8(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
@@ -264,7 +257,6 @@ fn l11(_: &Config, _: Mode, _: Command, upfs: &[&Pseudopotential]) -> bool {
 type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
 const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l1, G4D_FALLBACK),
-    (l2, G4B_FALLBACK),
     (l8, SESSION),
     (l9, LEGACY_INPUT),
     (l10, COMPAT),

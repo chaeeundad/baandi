@@ -1,5 +1,5 @@
-# expected_driver = legacy
-# expected_reason = G4B_FALLBACK: collinear Fermi-Dirac not yet qualified unless all three G4B switches are on
+# expected_driver = reference
+# expected_reason = none: R6a adopts G4B 48/48 and dev08 fixed-moment Fe qualification
 # command = run
 # expected_parse = ok
 # switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides
@@ -31,7 +31,3 @@ band_cap = 16
 [spin]
 mode = "collinear"
 total_moment = 2.0
-[performance]
-refscf_spin_fd_moment = false
-refscf_spin_stiffness = false
-refscf_history_conditioning = false

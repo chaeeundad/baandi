@@ -1412,9 +1412,11 @@ impl Config {
             {
                 return Err(ConfigError::Invalid("symmetry.fft_grid: explicit grid does not preserve translations/rotations; omit basis.fft_grid for automatic compatible dimensions".into()));
             }
-            let dims = dft_geometry::symmetry::compatible_fft_grid(grid.dims(), &ops)
-                .map_err(|e| ConfigError::Invalid(e.to_string()))?;
-            grid = FftGridSpec::new(&wavefunctions, &density, Some(dims))?;
+            if self.basis.fft_grid.is_none() {
+                let dims = dft_geometry::symmetry::compatible_fft_grid(grid.dims(), &ops)
+                    .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+                grid = FftGridSpec::automatic_with_dims(&wavefunctions, &density, dims)?;
+            }
         }
         let first = self.basis.resolve_kpoints()?[0].fractional;
         let wavefunctions = PlaneWaveBasis::at_k(&cell, cutoff, first)?;

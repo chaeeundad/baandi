@@ -5,7 +5,7 @@ use crate::{
 };
 use dft_geometry::{Atom, Cell, kpoints::KPoint, symmetry::SymmetryOperation};
 use dft_mpi::Collective;
-use dft_physics::symmetry::DistributedDensitySymmetrizer;
+use dft_physics::{data::Complex64, symmetry::DistributedDensitySymmetrizer};
 
 /// A checked view of the same preparation used by legacy SCF. The geometry
 /// identity is retained so a caller cannot reuse a map after moving atoms.
@@ -105,6 +105,12 @@ pub struct Residual {
     pub verification: bool,
     /// sqrt(integral sum_spin |rho - P rho|^2), electrons/Bohr^(3/2).
     pub norm: f64,
+    /// ||rho - P rho|| / ||rho|| before projection, dimensionless. Zero for
+    /// zero density; an irreducible-k sum need not be invariant at convergence.
+    pub pre_projection_relative_norm: f64,
+    /// ||P(P rho) - P rho||, electrons/Bohr^(3/2). Diagnostic only: the
+    /// second projection never replaces the physical density.
+    pub post_projection_invariance_norm: f64,
 }
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -119,6 +125,7 @@ pub(super) struct Workspace {
     pub iteration: usize,
     pub verification: bool,
     volume: f64,
+    invariance_scratch: Vec<Vec<Complex64>>,
 }
 impl Workspace {
     pub fn new<K: Collective>(
@@ -139,8 +146,11 @@ impl Workspace {
                 "reference symmetry: stick layout mismatch",
             ));
         }
+        let invariance_scratch =
+            vec![vec![Complex64::default(); projector.local_indices().len()]; channels];
         Ok(Self {
             projector,
+            invariance_scratch,
             report: Report {
                 group_order: ops.len(),
                 irreducible_k_count: prepared.points.len(),
@@ -162,9 +172,14 @@ impl Workspace {
             .iter()
             .map(|n| fields.forward(comm, n))
             .collect::<Result<Vec<_>, _>>()?;
+        let density_norm2: f64 = coefficients.iter().flatten().map(|z| z.norm_sqr()).sum();
         let local = self.projector.apply(comm, &mut coefficients)?;
-        let mut total = [0.];
-        comm.tree_sum_f64(&[local], &mut total)
+        for (scratch, projected) in self.invariance_scratch.iter_mut().zip(&coefficients) {
+            scratch.copy_from_slice(projected);
+        }
+        let post = self.projector.apply(comm, &mut self.invariance_scratch)?;
+        let mut total = [0.; 3];
+        comm.tree_sum_f64(&[local, density_norm2, post], &mut total)
             .map_err(super::numerical)?;
         for (n, g) in density.iter_mut().zip(&coefficients) {
             *n = fields.inverse(comm, g)?;
@@ -173,6 +188,12 @@ impl Workspace {
             iteration: self.iteration,
             verification: self.verification,
             norm: (self.volume * total[0]).sqrt(),
+            pre_projection_relative_norm: if total[1] == 0. {
+                0.
+            } else {
+                (total[0] / total[1]).sqrt()
+            },
+            post_projection_invariance_norm: (self.volume * total[2]).sqrt(),
         });
         Ok(())
     }

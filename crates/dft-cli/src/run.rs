@@ -239,8 +239,14 @@ fn reference_symmetry(
 fn reference_symmetry_json(report: &dft_engine::refscf::symmetry::Report) -> Value {
     json!({"group_order":report.group_order,"irreducible_k_count":report.irreducible_k_count,
         "channels":report.channels,"residual_units":"electrons/Bohr^(3/2)",
-        "residual_definition":"sqrt(integral sum_spin |rho_out - P rho_out|^2)",
-        "maps":report.maps.iter().map(|r| json!({"iteration":r.iteration,"verification":r.verification,"residual_norm":r.norm})).collect::<Vec<_>>()})
+        "residual_definition":"pre-projection ||rho - P rho||; residual_norm aliases pre_projection_norm",
+        "pre_projection_relative_units":"dimensionless",
+        "pre_projection_relative_definition":"||rho - P rho|| / ||rho|| (zero for zero density); rho is the irreducible-k sum before projection",
+        "post_projection_invariance_definition":"||P(P rho) - P rho||; diagnostic only, expected at rounding",
+        "maps":report.maps.iter().map(|r| json!({"iteration":r.iteration,"verification":r.verification,
+            "residual_norm":r.norm,"pre_projection_norm":r.norm,
+            "pre_projection_relative_norm":r.pre_projection_relative_norm,
+            "post_projection_invariance_norm":r.post_projection_invariance_norm})).collect::<Vec<_>>()})
 }
 
 fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {

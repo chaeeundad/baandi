@@ -8591,3 +8591,114 @@ fn g4c_pbe_matrix(modes: &[&str]) {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Synthetic diamond: automatic-grid trajectory fingerprint for G6B.
+#[test]
+fn g6b_symmetry_diamond_diagnostics() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{k_driver, symmetry::Prepared},
+        refstart::StartInput,
+    };
+    let cell = common::cell();
+    let atoms = common::atoms();
+    let full = dft_geometry::kpoints::monkhorst_pack([2; 3], [0.5; 3]).unwrap();
+    let prepared = Prepared::new(&cell, &atoms, &full, 1e-7, true).unwrap();
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 81, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        max_iterations: 3,
+        verification: dft_engine::Verification::Off,
+        ..Default::default()
+    };
+    let run = k_driver::run_prepared(
+        StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        },
+        Profile::default(),
+        &prepared,
+    )
+    .unwrap();
+    let density_hash = run
+        .outcome
+        .result
+        .density
+        .iter()
+        .fold(0xcbf29ce484222325u64, |hash, value| {
+            (hash ^ value.to_bits()).wrapping_mul(0x100000001b3)
+        });
+    println!(
+        "G6B automatic diamond energy={:.17e} Ha density_fnv={density_hash:016x}",
+        run.outcome.result.energy.total_hartree()
+    );
+    for r in &run.symmetry.unwrap().maps {
+        assert!(r.pre_projection_relative_norm > 1e-6);
+        assert!(r.post_projection_invariance_norm < 1e-13);
+        println!(
+            "G6B map={} pre_norm={:.17e} e/Bohr^(3/2) relative={:.17e} post={:.17e} e/Bohr^(3/2)",
+            r.iteration, r.norm, r.pre_projection_relative_norm, r.post_projection_invariance_norm
+        );
+    }
+}
+
+/// Direct reference API must agree with the CLI's explicit-grid rule.
+#[test]
+fn g6b_symmetry_direct_explicit_grid() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{k_driver, symmetry::Prepared},
+        refstart::StartInput,
+    };
+    let cell = common::cell();
+    let atoms = common::atoms();
+    let full = dft_geometry::kpoints::monkhorst_pack([2; 3], [0.5; 3]).unwrap();
+    let prepared = Prepared::new(&cell, &atoms, &full, 1e-7, true).unwrap();
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 81, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for dims in [[28; 3], [25; 3]] {
+        let options = ScfOptions {
+            cutoff_hartree: 1.,
+            bands: Some(3),
+            max_iterations: 1,
+            grid_override: Some(dims),
+            verification: dft_engine::Verification::Off,
+            ..Default::default()
+        };
+        dft_mpi::simulate(3, |comm| {
+            let result = k_driver::run_prepared_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &prepared,
+                comm,
+            );
+            if dims == [25; 3] {
+                assert!(
+                    matches!(result, Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("incompatible explicit FFT grid"))
+                );
+            } else {
+                let run = result.unwrap();
+                assert_eq!(run.outcome.result.density.shape(), &dims);
+                for r in &run.symmetry.unwrap().maps {
+                    assert!(r.pre_projection_relative_norm > 1e-6);
+                    assert!(r.post_projection_invariance_norm < 1e-13);
+                }
+            }
+        });
+    }
+}

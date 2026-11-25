@@ -62,7 +62,7 @@ impl fmt::Display for Error {
     }
 }
 impl std::error::Error for Error {}
-impl From<Error> for crate::ScfError {
+impl From<Error> for crate::model::ScfError {
     fn from(e: Error) -> Self {
         Self::Numerical(e.to_string())
     }

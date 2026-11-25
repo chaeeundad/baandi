@@ -7,27 +7,6 @@ use crate::{ExecutionMode, ScfError, ScfOptions, ScfOutcome, ScfSession, StepRep
 use std::time::{Instant, SystemTime};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RuntimeState {
-    Created,
-    Initialized,
-    Running,
-    PauseRequested,
-    Paused,
-    Restarting,
-    Converged,
-    Exhausted,
-    Failed,
-    Cancelled,
-}
-impl RuntimeState {
-    pub fn terminal(self) -> bool {
-        matches!(
-            self,
-            Self::Converged | Self::Exhausted | Self::Failed | Self::Cancelled
-        )
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
     Initialize,
     Start,
@@ -1167,3 +1146,5 @@ impl Runtime {
         Ok(runtime)
     }
 }
+
+pub use crate::model::runtime::RuntimeState;

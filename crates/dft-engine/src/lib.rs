@@ -68,6 +68,12 @@ pub use gamma_real::{
 /// Research radial conventions; default variants retain the legacy path.
 pub use dft_upf::radial::{LocalMesh, RadialEvenRule};
 
+mod atomic_start;
+pub mod refscf;
 /// Final-cutoff, explicitly selected distributed reference initialization.
 pub mod refstart;
-pub use scf::refscf;
+
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/common/mod.rs"]
+mod pool_fixture;

@@ -2,27 +2,10 @@
 //! reference code's default starting potential), as an opt-in alternative to the
 //! uniform density. Unpolarized fixed-occupation problems only.
 use super::*;
+pub use crate::model::StartDensity;
 
 fn numerical(e: impl std::fmt::Display) -> ScfError {
     ScfError::Numerical(e.to_string())
-}
-
-/// Starting density of the SCF. Default `Uniform` is bit-identical to before.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum StartDensity {
-    #[default]
-    Uniform,
-    /// Sum of the atomic charge densities of the pseudopotentials (UPF
-    /// `PP_RHOATOM`, 4 pi r^2 rho), negative ringing clipped, charge renormalised.
-    Atomic,
-}
-impl StartDensity {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Uniform => "uniform",
-            Self::Atomic => "atomic",
-        }
-    }
 }
 
 /// rho(G) = (1/Omega) sum_atoms exp(-i G.tau) int 4 pi r^2 rho_at(r) sinc(G r) dr,

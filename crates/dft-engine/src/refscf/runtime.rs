@@ -4,7 +4,7 @@
 //! Transport approval, audit persistence and collective command distribution
 //! belong to the caller. Every rank must receive the same control sequence.
 use super::stepper::{StepReport, Stepper};
-use crate::{ScfError, runtime::RuntimeState};
+use crate::{model::ScfError, model::runtime::RuntimeState};
 
 /// The numerical driver alone determines convergence.
 pub trait Completion {
@@ -65,8 +65,8 @@ impl PolicyPatch {
         }
         .validate()?)
     }
-    pub fn from_legacy(change: &crate::policy::PolicyChange) -> Result<Self, ScfError> {
-        use crate::policy::PolicyChange;
+    pub fn from_legacy(change: &crate::model::runtime::PolicyChange) -> Result<Self, ScfError> {
+        use crate::model::runtime::PolicyChange;
         match *change {
             PolicyChange::MixingBeta(beta) => Ok(Self {
                 beta: Some(beta),

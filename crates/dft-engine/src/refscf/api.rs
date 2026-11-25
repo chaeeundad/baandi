@@ -312,7 +312,7 @@ async fn run_request<K: dft_mpi::Collective>(
             if request.symmetry.is_some()
                 || points.len() != 1
                 || points[0].fractional != [0.; 3]
-                || input.options.gamma_real != crate::GammaReal::On
+                || input.options.gamma_real != crate::model::GammaReal::On
             {
                 return Err(ScfError::InvalidInput(
                     "reference ionic seed: Gamma/k mismatch",
@@ -335,7 +335,7 @@ async fn run_request<K: dft_mpi::Collective>(
         None if request.symmetry.is_none()
             && points.len() == 1
             && points[0].fractional == [0.; 3]
-            && input.options.gamma_real == crate::GammaReal::On =>
+            && input.options.gamma_real == crate::model::GammaReal::On =>
         {
             dft_geometry::kpoints::validate(points).map_err(super::numerical)?;
             driver::run_inner(input, request.profile, comm, owned_comm, boundary).await?
@@ -370,7 +370,7 @@ pub fn ionic_seed(input: StartInput<'_>, result: &ScfResult) -> Result<IonicSeed
 #[cfg(test)]
 mod seeded_symmetry_tests {
     use super::*;
-    use crate::{SpeciesPotential, model::ScfOptions};
+    use crate::{model::ScfOptions, model::SpeciesPotential};
     use dft_geometry::{Atom, Cell};
 
     #[test]
@@ -382,8 +382,7 @@ mod seeded_symmetry_tests {
         let target =
             Cell::from_user_rows_bohr([[5.02, 0., 0.], [0., 5.02, 0.], [0., 0., 5.02]]).unwrap();
         let atoms = [Atom::new("Xx", [0.; 3])];
-        let pp =
-            crate::scf::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let pp = crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
         let potentials = [SpeciesPotential {
             label: "Xx",
             potential: &pp,

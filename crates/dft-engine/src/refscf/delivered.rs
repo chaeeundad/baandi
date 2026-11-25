@@ -6,7 +6,7 @@ use crate::{
 
 fn validate_model(
     input: &StartInput<'_>,
-    result: &crate::ScfResult,
+    result: &crate::model::ScfResult,
     operations: &[dft_geometry::symmetry::SymmetryOperation],
 ) -> Result<(), ScfError> {
     use crate::force_identity::{ModelDescription, OccupationIdentity};
@@ -82,7 +82,7 @@ fn force_state_with_operations<'a>(
     validate_model(&input, r, operations)?;
     let verified = r.verification.as_ref().is_some_and(|v| v.passed());
     let opted_out =
-        input.options.verification == crate::Verification::Off && r.verification.is_none();
+        input.options.verification == crate::model::Verification::Off && r.verification.is_none();
     if r.standard.is_none() || (!verified && !opted_out) {
         return Err(ScfError::InvalidInput(
             "reference derivatives require verification or explicit verify=off",
@@ -114,7 +114,7 @@ pub use force_state_prepared as stress_state_prepared;
 /// The next start rebuilds ionic fields and reorthogonalizes these orbitals.
 pub fn gamma_seed<K: dft_mpi::Collective>(
     input: StartInput<'_>,
-    result: &crate::ScfResult,
+    result: &crate::model::ScfResult,
     density: &[f64],
     comm: &K,
 ) -> Result<super::ladder::Seed, ScfError> {
@@ -224,7 +224,7 @@ pub struct KSeed {
 
 pub fn ionic_seed<K: dft_mpi::Collective>(
     input: StartInput<'_>,
-    result: &crate::ScfResult,
+    result: &crate::model::ScfResult,
     density: &[f64],
     comm: &K,
 ) -> Result<IonicSeed, ScfError> {
@@ -239,7 +239,7 @@ pub fn ionic_seed<K: dft_mpi::Collective>(
 /// use complex k blocks, including Gamma; no representation conversion occurs.
 pub fn ionic_seed_prepared(
     input: StartInput<'_>,
-    result: &crate::ScfResult,
+    result: &crate::model::ScfResult,
     density: &[f64],
     prepared: &super::symmetry::Prepared,
 ) -> Result<IonicSeed, ScfError> {
@@ -258,7 +258,7 @@ pub fn ionic_seed_prepared(
 
 fn k_seed(
     input: StartInput<'_>,
-    result: &crate::ScfResult,
+    result: &crate::model::ScfResult,
     density: &[f64],
     operations: &[dft_geometry::symmetry::SymmetryOperation],
 ) -> Result<IonicSeed, ScfError> {
@@ -306,7 +306,7 @@ impl IonicSeed {
         mut self,
         source: &dft_geometry::Cell,
         target: &dft_geometry::Cell,
-        options: &crate::ScfOptions,
+        options: &crate::model::ScfOptions,
     ) -> Result<Self, ScfError> {
         if options.strain_reference.is_none() || options.grid_override.is_none() {
             return Err(ScfError::InvalidInput(
@@ -471,7 +471,7 @@ pub fn run(
         Some(IonicSeed::Gamma(seed)) => {
             if points.len() != 1
                 || points[0].fractional != [0.; 3]
-                || input.options.gamma_real != crate::GammaReal::On
+                || input.options.gamma_real != crate::model::GammaReal::On
             {
                 return Err(ScfError::InvalidInput(
                     "reference ionic seed: Gamma/k mismatch",
@@ -514,7 +514,7 @@ mod cell_seed_tests {
             Cell::from_user_rows_bohr([[5., 0., 0.], [0.4, 4., 0.], [0., 0.3, 6.]]).unwrap();
         let target =
             Cell::from_user_rows_bohr([[5.2, 0., 0.], [0.5, 3.9, 0.], [0., 0.2, 6.1]]).unwrap();
-        let mut options = crate::ScfOptions {
+        let mut options = crate::model::ScfOptions {
             cutoff_hartree: 1.,
             strain_reference: Some(Box::new(source.clone())),
             ..Default::default()
@@ -528,7 +528,7 @@ mod cell_seed_tests {
         let orbitals = RealMatrix::zeros(rows.len(), 1).unwrap();
         let dims = grid.dims();
         let count = dims.iter().product();
-        let seed = IonicSeed::Gamma(Box::new(super::super::ladder::Seed {
+        let seed = IonicSeed::Gamma(Box::new(crate::refscf::ladder::Seed {
             basis,
             grid,
             half,

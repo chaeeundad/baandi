@@ -1,6 +1,5 @@
 //! Shared SCF outputs and fixed-point records.
 use super::{CompatMode, ScfError, StandardProfile, VerificationReport};
-pub use crate::AtomicStartReport;
 use crate::energy::{self, EnergyAudit};
 use dft_geometry::kpoints::KPoint;
 use dft_physics::{
@@ -191,4 +190,16 @@ impl ScfResult {
 pub struct ScfOutcome {
     pub converged: bool,
     pub result: ScfResult,
+}
+
+/// Initialization work is separate from Davidson work; MACs are complex MACs.
+#[derive(Debug, Clone, Default)]
+pub struct AtomicStartReport {
+    pub atomic_orbitals: usize,
+    pub initial_h_applications: usize,
+    pub gram_rotation_macs: usize,
+    pub mgs_projection_macs: usize,
+    pub radial_samples: usize,
+    pub evd_orders: Vec<usize>,
+    pub fallback_reason: Option<String>,
 }

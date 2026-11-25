@@ -1,6 +1,6 @@
 //! Geometry-checked symmetry input and owned-stick density projection.
 use crate::{
-    PreparedSymmetry,
+    model::PreparedSymmetry,
     model::ScfError,
     refstart::{StartFields, StartInput},
 };

@@ -28,7 +28,7 @@ use dft_geometry::kpoints::{self, KPoint};
 pub fn run(input: StartInput<'_>, profile: Profile, points: &[KPoint]) -> Result<Run, ScfError> {
     if points.len() == 1
         && points[0].fractional == [0.; 3]
-        && input.options.gamma_real == crate::GammaReal::On
+        && input.options.gamma_real == crate::model::GammaReal::On
     {
         kpoints::validate(points).map_err(numerical)?;
         return super::driver::run(input, profile);
@@ -122,7 +122,7 @@ pub(super) async fn run_continuation<K: Collective>(
         && prepared.is_none()
         && points.len() == 1
         && points[0].fractional == [0.; 3]
-        && input.options.gamma_real == crate::GammaReal::On
+        && input.options.gamma_real == crate::model::GammaReal::On
     {
         return super::driver::run_inner(input, profile, comm, None, boundary).await;
     }
@@ -665,7 +665,7 @@ pub(super) async fn run_continuation<K: Collective>(
                     .map(|(p, k)| (p.weight, k.residuals.as_slice())),
                 &occupations,
             );
-            let mut attempt = crate::assess_fixed_point(
+            let mut attempt = crate::model::assess_fixed_point(
                 &options,
                 iteration,
                 tol / 2.,

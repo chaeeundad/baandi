@@ -72,12 +72,6 @@ impl Selection {
                     keys.push("xc.functional");
                 }
             }
-            if l4(config, Mode::Classic, Command::Run, &[]) {
-                keys.push("relax.mode");
-            }
-            if l5(config, Mode::Classic, Command::Run, &[]) {
-                keys.push("relax.start_extrapolation");
-            }
             if config.compat.reference() {
                 keys.push("compat.mode");
             }

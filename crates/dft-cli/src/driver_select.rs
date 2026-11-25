@@ -194,7 +194,8 @@ fn l9(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
                 || s.eigen_tolerance.is_some()
                 || s.standard_stall_guard.is_some()
                 || s.standard_density_forcing.is_some()
-                || s.cutoff_ladder.is_some()
+                // "off" is the reference behaviour; only an explicit legacy ladder is legacy-only.
+                || s.cutoff_ladder.as_deref() == Some("on")
                 || s.cutoff_ladder_fraction.is_some()
         })
 }

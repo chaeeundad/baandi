@@ -300,5 +300,12 @@
     "reference_reason": null,
     "parse_error": null,
     "options_error": null
+  },
+  "plain-cutoff-ladder-off": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
   }
 }

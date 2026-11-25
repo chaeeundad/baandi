@@ -14,6 +14,7 @@ use dft_solvers::{ref_davidson, ref_davidson_complex};
 /// The local LDA adapter owns spectral scratch even though LDA needs no
 /// derivatives. Construct it once, never once per SCF map or verification.
 pub(super) struct Workspace {
+    pub symmetry: Option<super::symmetry::Workspace>,
     spin: Option<SpinFields>,
 }
 struct SpinFields {
@@ -55,7 +56,10 @@ impl Workspace {
                 "reference spin XC setup failed on a rank",
             ));
         }
-        Ok(Self { spin: local? })
+        Ok(Self {
+            spin: local?,
+            symmetry: None,
+        })
     }
     /// Positive residual measure 1/2 integral |d²e_xc/dm²| d_m², Ha.
     /// Finite differences of the existing polarized LDA-PW potentials hold n
@@ -462,6 +466,9 @@ pub(super) fn evaluate<K: Collective>(
             }
         }
     }
+    if let Some(s) = &mut workspace.symmetry {
+        s.apply(&mut states[0].fields, comm, &mut density)?;
+    }
     let total: Vec<_> = (0..density[0].len())
         .map(|i| density.iter().map(|n| n[i]).sum::<f64>())
         .collect();
@@ -589,6 +596,7 @@ mod g4b_kernel_tests {
                     kernel_difference: vec![0.; 8],
                     kernel_span: vec![0.; 8],
                 }),
+                symmetry: None,
             };
             let input = vec![vec![0.04; 8], vec![0.02; 8]];
             let dm = 1e-5;

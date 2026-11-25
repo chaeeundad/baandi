@@ -3739,3 +3739,164 @@ across 98 binaries. The sandbox denies the optional `ps` load probe; the
 script continues and runs every gate. No git metadata was written and all
 changes are uncommitted. The routing patch remains a separate, unapplied
 ownership handoff, so these checks do not qualify that CLI change.
+
+## Symmetry
+
+G6 adds `refscf::symmetry::Prepared` and the `run_prepared` /
+`run_prepared_with` entries in `k_driver` and `electronic`. Preparation uses
+`scf::PreparedSymmetry` and its existing `KOrbitMap`; representatives, ordering,
+multiplicities, normalized weights and time reversal are unchanged. The CLI
+reuses its cached preparation through `from_prepared`, which checks the exact
+geometry, full mesh, tolerance and time-reversal setting. The reference wrapper
+retains the geometry and rejects reuse after an atom/cell change. Explicit FFT
+grids must preserve the selected density group; automatic grids use the same
+`compatible_fft_grid` routine as legacy. `crystal_density_group` selects the
+full crystal group; otherwise the mesh-preserving unitary subgroup is used.
+Antiunitary partners contribute only to k weights, never to the scalar density
+projector. Collinear magnetization is a scalar; spatial operations do not swap
+channels or rotate its quantization axis.
+
+The full-stick distributed projector implements the serial expression
+
+```
+(P rho)(G) = sum_{(R,tau)} exp(-2 pi i G.tau) rho(R^T G) / |group|.
+```
+
+The density sphere is closed under every operation; missing rotated Miller
+indices reject instead of being aliased. Coefficients outside the sphere are
+zeroed, as in the serial projector. Ownership is the existing full-grid FFT
+stick partition. A deterministic plan is built once per run: each destination
+requests each needed source coefficient once, sorted by global FFT index within
+each source rank. Every map packs all channels into **one** equal-block
+all-to-all for symmetry, including self blocks and empty owners. FFT transpose
+collectives are separate and unchanged. No full-valued density gather is added.
+The phase/accumulation order is density-basis order then operation order,
+independent of rank count; receive order never controls a floating-point sum.
+Plan buffers and terms are reused. The engine wrapper uses the existing owned
+field-transform API, which returns owned vectors; this does not claim that the
+whole SCF map or its FFT boundary is allocation-free.
+
+Projection follows the complete k-weighted band-density sum and precedes the
+output functional audit, stopping residual and Broyden mixing. Fresh verification
+maps take the identical path. Both spin channels share the same exchange.
+Initial atomic or uniform channel densities are checked against their projected
+values at the legacy pointwise allowance of 1e-12 electrons/Bohr^3, without
+replacing the initial values. There is no additional normalization, clipping,
+magnetization constraint or change to any convergence threshold.
+
+`Run.symmetry` / `results.json.reference_scf.symmetry` records density group
+order, irreducible k count, channel count and chronological map residuals.
+Each residual is `sqrt(Omega sum_G,spin |rho - P rho|^2)`, in electrons/Bohr^(3/2),
+using forward-normalized coefficients and Parseval. It includes discarded
+out-of-sphere components, requires only a scalar reduction and is a diagnostic,
+not a convergence gate. Rows identify the SCF iteration and verification phase;
+first-step redo produces another row with the same iteration. Startup checks
+are excluded. Off-path records omit the JSON block.
+
+G5 delivery records the same operations in the force model identity.
+`delivered::force_state_prepared` validates that identity and exposes the group
+to the unchanged force and frozen-stress projectors (atom permutations and
+Cartesian vector/tensor rotations). A mismatched/omitted group fails closed.
+Symmetry-enabled Gamma uses the complex prepared entry; symmetry-off Gamma
+still dispatches to the existing real driver with unchanged arithmetic.
+Real-only ladder/RMM restrictions and the existing collinear-FD qualification
+switch remain unchanged. No QE source was read, no QE reference was generated,
+and no speed/default promotion follows from this feature.
+
+Validation commands (external UPF is never committed):
+
+```sh
+cargo test -p dft-physics symmetry
+cargo test -p dft-engine --test refscf
+DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf g6_si444 -- --ignored --nocapture
+cargo test --release -p dft-engine --test refscf g6_spin_fd -- --ignored --nocapture
+```
+
+The projector oracle covers two channels, fractional translations, idempotence,
+serial agreement and empty owners. The SCF matrix compares diamond Si2 4x4x4
+and a skew deformation, full mesh versus reduced reference versus reduced
+legacy, at standard 1e-8 Ry and tight 1e-12 Ry estimator thresholds and simulated
+ranks 1/3/8. Acceptance energy differences remain 5e-9 / 1e-10 Ha. Separate
+synthetic fixed-spin and scalar-FD comparisons exercise channel projection.
+These are internal and legacy-code oracles, not new QE or native-MPI evidence.
+
+### G6 local evidence and limits
+
+Mac pure Rust, base `841682a6afa0ca668ecbcc71663ea6bd92b13a86`, simulated
+collectives. Si2 uses 4 Ha cutoff, 5 bands, an unshifted 4x4x4 mesh and the
+external `Si.pz-vbc.UPF` SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+The diamond group has 48 unitary operations and 8 irreducible k points; its
+skew deformation has 2 operations and 36 points. Each row covers ranks 1/3/8.
+These are new engine-to-engine measurements, not QE references or timings.
+
+| Comparison | Standard maximum difference (Ha) | Tight maximum difference (Ha) |
+| --- | ---: | ---: |
+| Si diamond reduced vs full reference | 4.2944e-10 | 3.1974e-14 |
+| Si diamond reduced vs strict reduced legacy | 4.5784e-10 | 6.7502e-14 |
+| Skew Si reduced vs full reference | 7.9936e-15 | 5.3291e-15 |
+| Skew Si reduced vs strict reduced legacy | 1.0373e-10 | 1.8652e-14 |
+| Synthetic scalar FD vs strict reduced legacy, free energy | 1.2418e-11 | 7.5079e-14 |
+| Synthetic fixed spin vs strict reduced legacy, energy | 2.2880e-10 | 4.9127e-14 |
+
+Maximum diamond reduced/full density differences are 2.0124e-7 and 1.1513e-8
+electrons/Bohr^3 at the standard/tight thresholds. Tight symmetrized derivative
+differences against legacy are at most 4.0960e-8 Ha/Bohr (force component)
+and 3.6403e-10 Ha/Bohr^3 (stress component), below the unchanged G5 1e-6
+limits. All delivered comparisons converge and pass fresh verification.
+
+The synthetic spin/FD fixture is a one-electron Gaussian nonlocal potential,
+width 1.8 Bohr, skew 5-Bohr cell, atom at fractional (1/4,1/4,1/4), 2.5 Ha
+cutoff, grid 16^3 and shifted 2^3 mesh. Scalar FD uses LDA-PZ, theta=0.01 Ha
+and 12 bands; fixed spin uses LDA-PW, sector (1,0) and 4 bands. Collinear
+preparation rejects time reversal, exactly as legacy. Both channels are also
+checked with nonzero data against the serial projector in the physics test.
+This does not qualify the previously unqualified collinear-FD moment policies.
+
+An initial narrow synthetic atomic-start fixture failed invariant validation:
+clipping at insufficient cutoff generates coefficients outside the density
+sphere. The fast test now explicitly proves that both legacy and reference
+reject it at the same 1e-12 allowance. Passing fixtures use a resolved broad
+atomic density; no numerical tolerance or production start policy changed.
+Initial oracle setup also needed the existing strict-profile `Verification::Off`
+setting and a compatible explicit FFT grid; these are fixture corrections.
+
+The G5 optional cutoff-correction scan in `stress::energy_at` does not forward
+symmetry and lies outside G6's owned files. Symmetry-enabled CLI stress therefore
+returns the symmetrized analytic frozen-basis tensor, `pulay=null`, and an explicit
+`pulay_unavailable_reason`; it never evaluates an irreducible mesh without its
+projector. Symmetry-off stress retains its three cutoff scans. Extending those
+scans requires the separate symmetry-forwarding change in `stress.rs`.
+Native MPI/MKL, dev08 performance and independent external symmetry oracles
+remain unmeasured. Shared README evidence generation, dashboard/session registry
+and performance ledgers remain outside the ticket's ownership.
+
+Symmetry-off Gamma preservation was checked against the actual base source,
+with all modified tracked Rust files restored from `git show HEAD:<path>` for
+the baseline build and then restored byte-for-byte to this implementation.
+Both builds ran `g3_gamma_base_fingerprint` in the same debug profile. Complete
+scientific fingerprint byte streams (density, energies, eigenvalues, histories,
+verification and orbitals; clocks excluded) are identical, not merely their
+hashes. Rank 1/3/8 lengths are 100801/100763/100729 bytes and SHA-256 values are
+respectively `9afed278586f803a836e19d46470789de0c6e337c7ad59474bef8f2cdaef729d`,
+`6f329ff3360630d73610dfbb0931de7c3f9d7626159b5315ec8aadc63a49ba5e`, and
+`0cc15ffcf4d25a1ddfff91c9c4740a0a900d8b4bc463f276c5d9da6f11cee57f`.
+Logs and fingerprint streams are in the ignored `target/g6-*.log` and
+`target/tmp/g6-{base,current}/` directories. Changes are uncommitted.
+The existing memory census is not extended to count symmetry exchange buffers
+or group-term metadata; it must not be treated as a complete symmetry-run peak
+or RSS measurement.
+
+Final local gates all exited 0: `cargo check --workspace --tests`, physics
+`symmetry` tests (2 passed), engine `--test refscf` (79 passed, 22 ignored),
+CLI `reference` tests (15 passed, 10 ignored), `cargo fmt --check`, and Clippy
+for engine/physics/CLI with `--all-targets -- -D warnings`. The release `g6_`
+matrix with `--include-ignored --nocapture --test-threads=1` passed all 3 tests,
+including the external-UPF cases above. The full `scripts/check.sh` also
+exited 0: PASS build/test/fmt/clippy, 98 test binaries, 984 passed, 0 failed,
+215 ignored. Its environment was `CHECK_SCCACHE=0 CHECK_TEST_JOBS=2
+CARGO_NET_OFFLINE=true BAANDI_TEST_TMP=/private/tmp/g6-symmetry-gates`;
+sandbox-denied optional `ps`/priority probes did not prevent any gate.
+`python3 -I scripts/tests/test_readme_figures.py` passed all 9 checks, and
+`git diff --check` passed. These checks do not add G6 results to the shared
+README generator; that integration remains with the owner of those files.

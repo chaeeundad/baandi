@@ -74,6 +74,7 @@ pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
 }
 
 pub struct Run {
+    pub symmetry: Option<super::symmetry::Report>,
     pub verification_k_call_indices: Vec<usize>,
     pub memory_breakdown: memory::Breakdown,
     pub kept_hx: super::kept_hx::Report,
@@ -1025,6 +1026,7 @@ fn run_stage<K: Collective>(
                 )
             });
             return Ok(StageRun::Fine(Box::new(Run {
+                symmetry: None,
                 verification_k_call_indices: Vec::new(),
                 memory_breakdown: memory_scope.report(comm)?,
                 kept_hx: kept.report(comm)?,

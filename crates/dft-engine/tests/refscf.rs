@@ -7861,3 +7861,500 @@ fn g4b_dump(run: &dft_engine::refscf::electronic::Run, name: String) {
         std::fs::write(std::path::Path::new(&dir).join(name), g4b_fingerprint(run)).unwrap();
     }
 }
+
+// G6: synthetic checks are internal oracles, never QE evidence.
+#[test]
+fn g6_symmetry_geometry_guard_and_small_map() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{k_driver, symmetry::Prepared},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::monkhorst_pack};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.25; 3])];
+    let full = monkhorst_pack([2; 3], [0.5; 3]).unwrap();
+    let prepared = Prepared::new(&cell, &atoms, &full, 1e-7, true).unwrap();
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 81, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        max_iterations: 1,
+        verification: dft_engine::Verification::Off,
+        ..Default::default()
+    };
+    let spin_tr = dft_engine::refscf::electronic::run_prepared(
+        StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        },
+        Profile::default(),
+        &prepared,
+        dft_engine::refscf::electronic::Policy::FixedSpin(dft_engine::collinear::SpinSector {
+            n_up: 1,
+            n_down: 1,
+            axis_cartesian: [0., 0., 1.],
+            initial_moment_seed: None,
+        }),
+    );
+    assert!(
+        matches!(spin_tr, Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("disable time reversal"))
+    );
+    let moved = [Atom::new("Xx", [0.125; 3])];
+    assert!(
+        k_driver::run_prepared(
+            StartInput {
+                cell: &cell,
+                atoms: &moved,
+                potentials: &potentials,
+                options: &options
+            },
+            Profile::default(),
+            &prepared
+        )
+        .is_err()
+    );
+    // Clipping an under-resolved atomic start introduces out-of-sphere
+    // components. Both drivers must reject it at the same invariant check.
+    let narrow = common::potential_with_atomic_start(2., 1., true, 81, "SLA PZ");
+    let narrow_potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &narrow,
+    }];
+    let narrow_options = ScfOptions {
+        grid_override: Some([8; 3]),
+        start_density: dft_engine::StartDensity::Atomic,
+        ..options.clone()
+    };
+    let bad = k_driver::run_prepared(
+        StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &narrow_potentials,
+            options: &narrow_options,
+        },
+        Profile::default(),
+        &prepared,
+    );
+    assert!(
+        matches!(bad,Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("symmetry.density"))
+    );
+    let mut old = dft_engine::ScfProblem::with_kpoints(
+        &cell,
+        &atoms,
+        &narrow_potentials,
+        narrow_options,
+        prepared.points(),
+        dft_engine::OccupationPolicy::Insulator {
+            minimum_gap_hartree: 1e-7,
+        },
+    )
+    .unwrap();
+    old.enable_symmetry(&full, 1e-7, true).unwrap();
+    assert!(
+        matches!(old.run(),Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("symmetry.density"))
+    );
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let run = k_driver::run_prepared_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &prepared,
+                comm,
+            )
+            .unwrap();
+            let report = run.symmetry.unwrap();
+            assert_eq!(report.group_order, 2);
+            assert_eq!(report.irreducible_k_count, 4);
+            assert!(!report.maps.is_empty());
+            assert!(
+                report
+                    .maps
+                    .iter()
+                    .all(|r| r.norm.is_finite() && r.iteration == 1 && !r.verification)
+            );
+            assert!((run.outcome.result.charge - 2.).abs() < 1e-12);
+        });
+    }
+}
+
+/// External UPF stays outside git. Full mesh, reduced reference and strict
+/// reduced legacy share cutoff/grid/start. Release-only (ADR 0004):
+/// DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf g6_si444 -- --ignored --nocapture
+#[test]
+#[ignore = "Si 4x4x4 SCF matrix; release command above"]
+fn g6_si444_symmetry_full_legacy_and_derivatives() {
+    use dft_engine::{
+        GammaReal, OccupationPolicy, PreparedSymmetry, ScfOptions, ScfProblem, SpeciesPotential,
+        StartDensity,
+        refscf::{delivered, k_driver, symmetry::Prepared},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Cell, kpoints::monkhorst_pack};
+    let pp = dft_upf::parse_upf(
+        &std::fs::read_to_string(std::env::var("DFT_SI_UPF").expect("DFT_SI_UPF required"))
+            .unwrap(),
+    )
+    .unwrap();
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let atoms = common::atoms();
+    let cubic = common::cell();
+    let mut a = cubic.lattice_columns_bohr();
+    a[0][1] += 0.17;
+    a[1][2] -= 0.11;
+    let skew = Cell::from_user_rows_bohr(std::array::from_fn(|i| std::array::from_fn(|j| a[j][i])))
+        .unwrap();
+    for (name, cell) in [("diamond", cubic), ("skew", skew)] {
+        let full = monkhorst_pack([4; 3], [0.; 3]).unwrap();
+        let legacy_prepared = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, true).unwrap();
+        let prepared =
+            Prepared::from_prepared(&cell, &atoms, &full, 1e-7, true, &legacy_prepared).unwrap();
+        let operations = prepared.operations(false);
+        assert!(
+            operations
+                .iter()
+                .any(|o| o.translation.iter().any(|t| *t != 0.))
+        );
+        if name == "diamond" {
+            assert_eq!(operations.len(), 48);
+        } else {
+            assert!(operations.len() <= 4);
+        }
+        let b = dft_basis::PlaneWaveBasis::new(&cell, dft_units::Hartree(4.)).unwrap();
+        let db = dft_basis::PlaneWaveBasis::new(&cell, dft_units::Hartree(16.)).unwrap();
+        let grid = dft_geometry::symmetry::compatible_fft_grid(
+            dft_basis::FftGridSpec::new(&b, &db, None).unwrap().dims(),
+            operations,
+        )
+        .unwrap();
+        let options = ScfOptions {
+            cutoff_hartree: 4.,
+            bands: Some(5),
+            gamma_real: GammaReal::Off,
+            start_density: StartDensity::Atomic,
+            max_iterations: 200,
+            grid_override: Some(grid),
+            ..Default::default()
+        };
+        let strict = ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            eigen_tolerance: 1e-11,
+            density_tolerance: 1e-11,
+            energy_tolerance: 1e-12,
+            ..options.clone()
+        };
+        let mut legacy = ScfProblem::with_kpoints(
+            &cell,
+            &atoms,
+            &potentials,
+            strict.clone(),
+            prepared.points(),
+            OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-7,
+            },
+        )
+        .unwrap();
+        legacy.enable_prepared_symmetry(&legacy_prepared).unwrap();
+        let oracle = legacy.run().unwrap();
+        assert!(oracle.certified);
+        let view = dft_engine::ForceState {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &strict,
+            electronic: dft_engine::ElectronicState::Fixed(&oracle),
+            density_floor: None,
+            symmetry: operations,
+        };
+        let old_forces = dft_engine::forces(&view).unwrap().values;
+        let old_stress = dft_engine::stress::frozen_stress(&view).unwrap().values;
+        for threshold_ry in [1e-8, 1e-12] {
+            let profile = Profile {
+                threshold_ry,
+                ..Default::default()
+            };
+            let full_run = k_driver::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                profile,
+                &full,
+                &Serial,
+            )
+            .unwrap();
+            assert!(
+                full_run.outcome.converged,
+                "full {name}: {}",
+                full_run.exit_reason
+            );
+            let full_result = &full_run.outcome.result;
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let mut run = k_driver::run_prepared_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        profile,
+                        &prepared,
+                        comm,
+                    )
+                    .unwrap();
+                    assert!(run.outcome.converged, "{name}/{ranks}: {}", run.exit_reason);
+                    let r = &run.outcome.result;
+                    assert!(r.verification.as_ref().unwrap().passed());
+                    let de = (r.total_hartree() - full_result.total_hartree()).abs();
+                    let dl = (r.total_hartree() - oracle.total_hartree()).abs();
+                    let dn = r
+                        .density
+                        .iter()
+                        .zip(&full_result.density)
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0., f64::max);
+                    let cap = if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 };
+                    assert!(
+                        de < cap && dl < cap,
+                        "{name}/{ranks}: full={de:e}, legacy={dl:e} Ha"
+                    );
+                    assert!(
+                        dn < if threshold_ry == 1e-8 { 1e-5 } else { 1e-7 },
+                        "density={dn:e} e/Bohr^3"
+                    );
+                    let report = run.symmetry.as_ref().unwrap();
+                    assert!(report.maps.iter().any(|r| r.verification));
+                    if comm.rank() == 0 {
+                        println!(
+                            "G6 {name} P={ranks} threshold={threshold_ry:e} Ry group={} nk={} E={:.17e} Ha full_delta={de:e} Ha legacy_delta={dl:e} Ha density_max={dn:e} e/Bohr^3",
+                            report.group_order,
+                            report.irreducible_k_count,
+                            r.total_hartree()
+                        );
+                    }
+                    if threshold_ry == 1e-12 {
+                        let view = delivered::force_state_prepared(
+                            StartInput {
+                                cell: &cell,
+                                atoms: &atoms,
+                                potentials: &potentials,
+                                options: &options,
+                            },
+                            &mut run.outcome,
+                            &prepared,
+                        )
+                        .unwrap();
+                        let forces = dft_engine::forces::forces(&view).unwrap();
+                        let stress = dft_engine::stress::frozen_stress(&view).unwrap();
+                        let df = forces
+                            .values
+                            .iter()
+                            .flatten()
+                            .zip(old_forces.iter().flatten())
+                            .map(|(a, b)| (a - b).abs())
+                            .fold(0., f64::max);
+                        let ds = stress
+                            .values
+                            .iter()
+                            .flatten()
+                            .zip(old_stress.iter().flatten())
+                            .map(|(a, b)| (a - b).abs())
+                            .fold(0., f64::max);
+                        assert!(
+                            df < 1e-6 && ds < 1e-6,
+                            "symmetrized derivatives dF={df:e} Ha/Bohr dS={ds:e} Ha/Bohr^3"
+                        );
+                        if comm.rank() == 0 {
+                            println!(
+                                "G6 derivatives {name} P={ranks} dF={df:e} Ha/Bohr dS={ds:e} Ha/Bohr^3"
+                            );
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// cargo test --release -p dft-engine --test refscf g6_spin_fd -- --ignored --nocapture
+#[test]
+#[ignore = "spin/FD full SCF matrix; release command above"]
+fn g6_spin_fd_symmetry_matches_full_and_legacy() {
+    use dft_engine::{
+        Functional, GammaReal, PreparedSymmetry, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+        finite_temperature::FiniteTProblem,
+        refscf::{
+            electronic::{self, Policy},
+            symmetry::Prepared,
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::monkhorst_pack};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.25; 3])];
+    let full = monkhorst_pack([2; 3], [0.5; 3]).unwrap();
+    for spin in [false, true] {
+        let old = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, !spin).unwrap();
+        let prepared = Prepared::from_prepared(&cell, &atoms, &full, 1e-7, !spin, &old).unwrap();
+        let pp = common::potential_with_atomic_start(
+            1.,
+            1.8,
+            true,
+            161,
+            if spin { "SLA PW" } else { "SLA PZ" },
+        );
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            functional: if spin {
+                Functional::LdaPw
+            } else {
+                Functional::LdaPz
+            },
+            cutoff_hartree: 2.5,
+            bands: Some(if spin { 4 } else { 12 }),
+            gamma_real: GammaReal::Off,
+            start_density: StartDensity::Atomic,
+            max_iterations: 300,
+            grid_override: Some([16; 3]),
+            ..Default::default()
+        };
+        let strict = ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            eigen_tolerance: 1e-10,
+            density_tolerance: 1e-10,
+            energy_tolerance: 1e-11,
+            ..options.clone()
+        };
+        let sector = SpinSector {
+            n_up: 1,
+            n_down: 0,
+            axis_cartesian: [0., 0., 1.],
+            initial_moment_seed: None,
+        };
+        let policy = if spin {
+            Policy::FixedSpin(sector.clone())
+        } else {
+            Policy::FermiDirac {
+                theta_ha: 0.01,
+                band_cap: 12,
+            }
+        };
+        let legacy_energy = if spin {
+            let mut p = CollinearProblem::new(
+                &cell,
+                &atoms,
+                &potentials,
+                strict,
+                prepared.points(),
+                sector,
+            )
+            .unwrap();
+            p.enable_prepared_symmetry(&old).unwrap();
+            let r = p.run().unwrap();
+            assert!(r.converged);
+            r.energy.total_hartree()
+        } else {
+            let mut p = FiniteTProblem::new(
+                &cell,
+                &atoms,
+                &potentials,
+                strict,
+                prepared.points(),
+                0.01,
+                12,
+            )
+            .unwrap();
+            p.enable_prepared_symmetry(&old).unwrap();
+            let r = p.run().unwrap();
+            assert!(r.converged);
+            r.thermodynamics.free_energy_ha
+        };
+        for threshold_ry in [1e-8, 1e-12] {
+            let profile = Profile {
+                threshold_ry,
+                ..Default::default()
+            };
+            let full_run = electronic::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                profile,
+                &full,
+                policy.clone(),
+                &Serial,
+            )
+            .unwrap();
+            assert!(full_run.converged);
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let r = electronic::run_prepared_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        profile,
+                        &prepared,
+                        policy.clone(),
+                        comm,
+                    )
+                    .unwrap();
+                    assert!(r.converged && r.verification.as_ref().unwrap().passed());
+                    let delta = (r.thermodynamics.free_energy_ha - legacy_energy).abs();
+                    let full_delta = (r.thermodynamics.free_energy_ha
+                        - full_run.thermodynamics.free_energy_ha)
+                        .abs();
+                    let cap = if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 };
+                    assert!(
+                        delta < cap && full_delta < cap,
+                        "spin={spin} legacy={delta:e} full={full_delta:e} Ha"
+                    );
+                    let dn = r
+                        .density
+                        .iter()
+                        .flatten()
+                        .zip(full_run.density.iter().flatten())
+                        .map(|(a, b)| (a - b).abs())
+                        .fold(0., f64::max);
+                    assert!(dn < if threshold_ry == 1e-8 { 1e-5 } else { 1e-7 });
+                    let report = r.symmetry.unwrap();
+                    assert_eq!(report.channels, if spin { 2 } else { 1 });
+                    assert!(report.maps.iter().any(|r| r.verification));
+                    if comm.rank() == 0 {
+                        println!(
+                            "G6 spin={spin} P={ranks} threshold={threshold_ry:e} Ry F={:.17e} Ha legacy_delta={delta:e} Ha full_delta={full_delta:e} Ha density_max={dn:e} e/Bohr^3",
+                            r.thermodynamics.free_energy_ha
+                        );
+                    }
+                });
+            }
+        }
+    }
+}

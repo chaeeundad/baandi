@@ -24,6 +24,7 @@ pub mod metric;
 pub mod profile;
 pub mod qe_reference;
 pub mod record;
+pub mod symmetry;
 
 use std::fmt;
 #[derive(Debug, Clone, PartialEq)]

@@ -194,6 +194,38 @@ pub fn reference_profile(
     .map_err(|e| error(1, e))
 }
 
+fn reference_symmetry(
+    config: &Config,
+) -> Result<Option<dft_engine::refscf::symmetry::Prepared>, RunError> {
+    config
+        .prepared_symmetry()
+        .map_err(|e| error(1, e))?
+        .map(|p| {
+            let atoms: Vec<_> = config
+                .system
+                .atoms
+                .iter()
+                .map(|a| Atom::new(&a.species, a.fractional))
+                .collect();
+            dft_engine::refscf::symmetry::Prepared::from_prepared(
+                &config.cell().map_err(|e| error(1, e))?,
+                &atoms,
+                &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                config.symmetry.tolerance_bohr,
+                config.basis.time_reversal(),
+                &p,
+            )
+            .map_err(engine_error)
+        })
+        .transpose()
+}
+fn reference_symmetry_json(report: &dft_engine::refscf::symmetry::Report) -> Value {
+    json!({"group_order":report.group_order,"irreducible_k_count":report.irreducible_k_count,
+        "channels":report.channels,"residual_units":"electrons/Bohr^(3/2)",
+        "residual_definition":"sqrt(integral sum_spin |rho_out - P rho_out|^2)",
+        "maps":report.maps.iter().map(|r| json!({"iteration":r.iteration,"verification":r.verification,"residual_norm":r.norm})).collect::<Vec<_>>()})
+}
+
 fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
     let profile = reference_profile(config)?;
     let s = config.scf.as_ref();
@@ -202,14 +234,6 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
         return Err(error(
             1,
             "reference spin XC requires lda-pw: polarized lda-pz is unavailable in legacy; distributed PBE has no two-channel evaluator",
-        ));
-    }
-    if config.symmetry.mode != crate::config::SymmetryMode::Off
-        || config.symmetry.density_group == crate::config::DensityGroup::Crystal
-    {
-        return Err(error(
-            1,
-            "reference SCF: crystal symmetry reduction requires G6; time-reversal k weights remain supported",
         ));
     }
     let points = config.resolved_points().map_err(|e| error(1, e))?;
@@ -1717,6 +1741,12 @@ fn execute_mode_inner(
         crate::config::Scf::cutoff_ladder(config.scf.as_ref())
             .map_err(|e| error(1, e.to_string()))?
     };
+    let reference_symmetry = if reference {
+        reference_symmetry(&config)?
+    } else {
+        None
+    };
+    let mut reference_symmetry_record = Value::Null;
     let mut reference_return = None;
     let mut reference_setup = Value::Null;
     let mut reference_output = Value::Null;
@@ -1765,9 +1795,20 @@ fn execute_mode_inner(
         crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
         let run = if reference {
-            dft_engine::refscf::k_driver::run(dft_engine::refstart::StartInput {
-                cell: &prepared.cell, atoms: &atoms, potentials: &refs, options: &opts,
-            }, reference_profile(&config)?, &points).map(|run| {
+            let input = dft_engine::refstart::StartInput {
+                cell: &prepared.cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &opts,
+            };
+            let profile = reference_profile(&config)?;
+            let result = if let Some(symmetry) = &reference_symmetry {
+                dft_engine::refscf::k_driver::run_prepared(input, profile, symmetry)
+            } else {
+                dft_engine::refscf::k_driver::run(input, profile, &points)
+            };
+            result.map(|run| {
+                reference_symmetry_record = run.symmetry.as_ref().map_or(Value::Null, reference_symmetry_json);
                 reference_return = Some(Instant::now());
                 reference_diagnostics = run.full_diagnostics;
                 reference_qe_clock = run.qe_clock;
@@ -1914,15 +1955,17 @@ fn execute_mode_inner(
     launch::elapsed("scf_driver", scf_clock);
     launch::mark("scf_return");
     if reference && config.output.as_ref().is_some_and(|o| o.forces || o.stress) {
-        dft_engine::refscf::delivered::force_state(
-            dft_engine::refstart::StartInput {
-                cell: &prepared.cell,
-                atoms: &atoms,
-                potentials: &refs,
-                options: &opts,
-            },
-            &mut outcome,
-        )
+        let input = dft_engine::refstart::StartInput {
+            cell: &prepared.cell,
+            atoms: &atoms,
+            potentials: &refs,
+            options: &opts,
+        };
+        if let Some(symmetry) = &reference_symmetry {
+            dft_engine::refscf::delivered::force_state_prepared(input, &mut outcome, symmetry)
+        } else {
+            dft_engine::refscf::delivered::force_state(input, &mut outcome)
+        }
         .map_err(engine_error)?;
     }
     let r = outcome.result;
@@ -2654,6 +2697,11 @@ fn execute_mode_inner(
     )? {
         console.push_str(&stress_table(&stress));
         result["stress"] = stress_json(&stress);
+        if reference && reference_symmetry.is_some() {
+            result["stress"]["pulay_unavailable_reason"] = json!(
+                "reference symmetry cutoff scans require symmetry forwarding in stress::energy_at; analytic frozen-basis tensor is available"
+            );
+        }
         if reference {
             result["stress"]["verification"] = json!(stress.verification);
         }
@@ -2817,6 +2865,9 @@ fn execute_mode_inner(
     }
     let result_path = out.join("results.json");
     let serialize_clock = launch::clock();
+    if !reference_symmetry_record.is_null() {
+        result["reference_scf"]["symmetry"] = reference_symmetry_record;
+    }
     if reference {
         let total = io_clock.elapsed().as_secs_f64();
         let output = json!({"schema":"reference-output-1","rank":crate::parallel::rank(),
@@ -2920,17 +2971,18 @@ fn reference_electronic_run(
         ));
     }
     let profile = reference_profile(config)?;
-    let r = electronic::run(
-        dft_engine::refstart::StartInput {
-            cell: &prepared.cell,
-            atoms,
-            potentials,
-            options: opts,
-        },
-        profile,
-        points,
-        policy,
-    )
+    let symmetry = reference_symmetry(config)?;
+    let input = dft_engine::refstart::StartInput {
+        cell: &prepared.cell,
+        atoms,
+        potentials,
+        options: opts,
+    };
+    let r = if let Some(symmetry) = &symmetry {
+        electronic::run_prepared(input, profile, symmetry, policy)
+    } else {
+        electronic::run(input, profile, points, policy)
+    }
     .map_err(engine_error)?;
     let mut total = r.density[0].clone();
     if r.density.len() == 2 {
@@ -3066,6 +3118,12 @@ fn reference_electronic_run(
         "reference_scf":{"schema":"reference-spin-fd-1","iterations":rows,"verification_calls":calls(&r.verification_calls),
             "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>()},
         "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ and distributed spin PBE unavailable"]});
+    if let Some(report) = &r.symmetry {
+        result["reference_scf"]["symmetry"] = reference_symmetry_json(report);
+    }
+    if let Some(metadata) = config.symmetry_json().map_err(|e| error(1, e))? {
+        result["symmetry"] = metadata;
+    }
     result["scf"]["driver"] = json!("reference");
     result["execution"]["effective_solver"] = json!("reference_complex_davidson");
     let run_config = dft_numerics::switches::RunConfig::current();
@@ -3271,7 +3329,9 @@ fn requested_forces(
     if !config.output.as_ref().is_some_and(|o| o.forces) {
         return Ok(None);
     }
-    let operations: Vec<_> =
+    let operations = if reference_requested(config) {
+        config.density_operations().map_err(|e| error(1, e))?
+    } else {
         config
             .symmetry_map()
             .map_err(|e| error(1, e))?
@@ -3280,7 +3340,8 @@ fn requested_forces(
                     .into_iter()
                     .filter(|o| !o.antiunitary)
                     .collect()
-            });
+            })
+    };
     dft_engine::forces::forces(&dft_engine::forces::ForceState {
         cell,
         atoms,
@@ -3333,7 +3394,9 @@ fn requested_stress(
     if !config.output.as_ref().is_some_and(|o| o.stress) {
         return Ok(None);
     }
-    let operations: Vec<_> =
+    let operations = if reference_requested(config) {
+        config.density_operations().map_err(|e| error(1, e))?
+    } else {
         config
             .symmetry_map()
             .map_err(|e| error(1, e))?
@@ -3342,8 +3405,9 @@ fn requested_stress(
                     .into_iter()
                     .filter(|o| !o.antiunitary)
                     .collect()
-            });
-    dft_engine::stress::stress(&dft_engine::forces::ForceState {
+            })
+    };
+    let state = dft_engine::forces::ForceState {
         cell,
         atoms,
         potentials,
@@ -3351,7 +3415,15 @@ fn requested_stress(
         electronic,
         density_floor,
         symmetry: &operations,
-    })
+    };
+    if reference_requested(config) && !operations.is_empty() {
+        // G5 cutoff scans currently drop symmetry in stress::energy_at, outside
+        // G6 ownership. Deliver the analytic tensor; never run a reduced mesh
+        // without its projector or fabricate a cutoff correction.
+        dft_engine::stress::frozen_stress(&state)
+    } else {
+        dft_engine::stress::stress(&state)
+    }
     .map(Some)
     .map_err(engine_error)
 }
@@ -4169,10 +4241,11 @@ mod tests {
             reference_options(&config).unwrap().gamma_real,
             dft_engine::GammaReal::Off
         );
-        for suffix in ["[spin]\nmode='collinear'\n", "[symmetry]\nmode='auto'\n"] {
-            let config = Config::parse_unvalidated(&format!("{base}{suffix}")).unwrap();
+        {
+            let config =
+                Config::parse_unvalidated(&format!("{base}[spin]\nmode='collinear'\n")).unwrap();
             let failure = reference_options(&config).unwrap_err();
-            assert!(failure.cause.contains("spin XC") || failure.cause.contains("G6"));
+            assert!(failure.cause.contains("spin XC"));
         }
         for suffix in [
             "[spin]\nmode='noncollinear'\n",
@@ -4198,6 +4271,25 @@ mod tests {
                 assert!(call["k_index"].as_u64().is_some_and(|k| k < 4));
             }
         }
+        // G6: the CLI passes its verified preparation and exports per-map residuals.
+        let symmetric = format!(
+            "{}[symmetry]\nmode='auto'\n",
+            base.replace("7.0", "5.0")
+                .replace("fractional=[0.13,0.21,0.32]", "fractional=[0.25,0.25,0.25]")
+        );
+        fs::write(&input, symmetric).unwrap();
+        execute(&input, Some(&out)).unwrap();
+        let sym: Value =
+            serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+        assert_eq!(sym["reference_scf"]["symmetry"]["group_order"], 2);
+        assert_eq!(sym["reference_scf"]["symmetry"]["irreducible_k_count"], 4);
+        assert!(
+            sym["reference_scf"]["symmetry"]["maps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|m| m["residual_norm"].as_f64().unwrap().is_finite())
+        );
         // G5: actual complex-k derivative output, including the three reference
         // cutoff scans, and the established stress-specific default threshold.
         let derivatives = format!(
@@ -4225,6 +4317,24 @@ mod tests {
             result["stress"]["pulay_assessment"]["scan_profile"],
             "standard_verified"
         );
+        let symmetric_derivatives = format!(
+            "{}[symmetry]\nmode='auto'\n",
+            base.replace("7.0", "5.0")
+                .replace("fractional=[0.13,0.21,0.32]", "fractional=[0.25,0.25,0.25]")
+                .replace("max_iterations=2", "max_iterations=100")
+                .replace("verify='off'", "verify='fixed_point'")
+        );
+        fs::write(
+            &input,
+            format!("{symmetric_derivatives}[output]\nforces=true\nstress=true\n"),
+        )
+        .unwrap();
+        execute(&input, Some(&out)).unwrap();
+        let symmetric_result: Value =
+            serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+        assert_eq!(symmetric_result["forces"]["verification"], "verified");
+        assert_eq!(symmetric_result["stress"]["verification"], "verified");
+        assert!(symmetric_result["stress"]["pulay_unavailable_reason"].is_string());
         // G4 routes through the distributed reference map, with explicit axes.
         for (name, spin, finite) in [
             ("fd", false, true),

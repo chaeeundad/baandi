@@ -506,8 +506,48 @@ pub(super) async fn run_continuation<K: Collective>(
     let mut previous = f64::INFINITY;
     let guard = config.on(Id::STANDARD_RESIDUAL_GUARD);
     let diagnostic = config.on(Id::DAVIDSON_STAGES);
-    boundary.ready().await;
-    for iteration in 1..=opts.max_iterations {
+    let mut completed = 0usize;
+    macro_rules! checkpoint_state {
+        () => {
+            |io: &mut super::checkpoint::Exchange<'_>| -> Result<usize, ScfError> {
+                if trace.is_some() {
+                    return Err(super::checkpoint::invalid(
+                        "electronic checkpoint with external trace is unsupported",
+                    ));
+                }
+                super::checkpoint::header(io, &input, profile, comm, "electronic", dims)?;
+                io.same(&format!("{policy:?}"))?;
+                super::checkpoint::symmetry(io, &mut workspace.symmetry)?;
+                io.same(&plan.g2)?;
+                io.value(&mut completed)?;
+                io.same(&n.len())?;
+                for channel in &mut n {
+                    io.planes(channel)?;
+                }
+                io.reciprocal(&mut x)?;
+                mixer.checkpoint(io, &metric)?;
+                for (state, cache) in states.iter_mut().zip(&mut kept) {
+                    super::checkpoint::k_state(io, state)?;
+                    cache.checkpoint(io, state)?;
+                }
+                io.value(&mut ethr)?;
+                io.value(&mut previous)?;
+                io.value(&mut history)?;
+                io.value(&mut verification)?;
+                io.value(&mut verification_calls)?;
+                super::checkpoint::counters(
+                    completed,
+                    opts.max_iterations,
+                    history.len(),
+                    ethr,
+                    previous,
+                )?;
+                Ok(completed)
+            }
+        };
+    }
+    boundary.ready_state(checkpoint_state!()).await;
+    for iteration in completed + 1..=opts.max_iterations {
         if let Some(s) = &mut workspace.symmetry {
             s.iteration = iteration;
             s.verification = false;
@@ -857,7 +897,8 @@ pub(super) async fn run_continuation<K: Collective>(
                 total_s: clock.elapsed().as_secs_f64(),
             });
         }
-        boundary.emit(map_report).await;
+        completed = iteration;
+        boundary.emit_state(map_report, checkpoint_state!()).await;
     }
     unreachable!("positive budget checked")
 }

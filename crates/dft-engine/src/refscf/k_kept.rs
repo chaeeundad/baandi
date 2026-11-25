@@ -119,3 +119,70 @@ impl KeptHx {
         })
     }
 }
+
+impl KeptHx {
+    pub(super) fn checkpoint(
+        &mut self,
+        io: &mut super::checkpoint::Exchange<'_>,
+        state: &KStartState,
+    ) -> Result<(), ScfError> {
+        use super::checkpoint::invalid;
+        io.same(&self.enabled)?;
+        io.value(&mut self.preserve)?;
+        if self.preserve {
+            return Err(invalid("k HX capture during verification"));
+        }
+        let mut data = if io.loading() {
+            Vec::new()
+        } else {
+            self.entries
+                .iter()
+                .map(|e| {
+                    e.as_ref()
+                        .map(|e| (e.x.clone(), e.hx.clone(), (e.potential.clone(), e.epoch)))
+                })
+                .collect()
+        };
+        io.value(&mut data)?;
+        if data.len() > state.blocks.len() {
+            return Err(invalid("k HX block count"));
+        }
+        if io.loading() {
+            self.entries.clear();
+        }
+        for (k, entry) in data.into_iter().enumerate() {
+            let op = &state.blocks[k].operator;
+            let restored = if let Some((x, hx, (potential, epoch))) = entry {
+                let bands = state.orbitals.0[k].cols();
+                if x.rows() != op.local_rows().len()
+                    || x.cols() != bands
+                    || hx.rows() != x.rows()
+                    || hx.cols() != bands
+                    || potential.len() != op.plane_points()
+                    || x.as_slice()
+                        .iter()
+                        .chain(hx.as_slice())
+                        .any(|v| !v.re.is_finite() || !v.im.is_finite())
+                {
+                    return Err(invalid("k HX shape/values"));
+                }
+                io.finite(&potential)?;
+                Some(Entry {
+                    identity: op.identity(),
+                    x,
+                    hx,
+                    potential,
+                    epoch,
+                })
+            } else {
+                None
+            };
+            if io.loading() {
+                self.entries.push(restored);
+            }
+        }
+        io.value(&mut self.hits)?;
+        io.value(&mut self.columns)?;
+        Ok(())
+    }
+}

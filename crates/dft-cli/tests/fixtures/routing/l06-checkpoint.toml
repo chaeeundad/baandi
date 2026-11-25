@@ -1,5 +1,5 @@
-# expected_driver = legacy
-# expected_reason = checkpoint_io::context constructs ScfProblem/ScfSession despite reference options; v1 continuation stays legacy
+# expected_driver = reference
+# expected_reason = R8b reference checkpoint v2; v1 continuation stays legacy
 # command = checkpoint --iteration 1; restart
 # expected_parse = ok
 # switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides

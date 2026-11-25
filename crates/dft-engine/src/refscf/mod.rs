@@ -9,6 +9,7 @@
 //! reuses the Hamiltonian/density kernels and the new reference Davidson.
 pub mod api;
 pub mod broyden;
+pub mod checkpoint;
 pub mod delivered;
 pub mod density;
 pub mod driver;

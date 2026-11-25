@@ -10,8 +10,9 @@ use serde_json::Value;
 use std::{fs, path::Path};
 
 fn atomic(name: &str) -> String {
+    let z = if name == "l06-checkpoint" { 2. } else { 4. };
     let mut pp =
-        common::gaussian_with(4., 1., true, 161).replace("element=\"Xx\"", "element=\"Si\"");
+        common::gaussian_with(z, 1., true, 161).replace("element=\"Xx\"", "element=\"Si\"");
     let p = dft_upf::parse_upf(&pp).unwrap();
     let values = p
         .mesh()
@@ -32,7 +33,7 @@ fn atomic(name: &str) -> String {
     }
     if name != "l11-missing-pswfc" {
         let l = if name == "l11-high-l" { 4 } else { 0 };
-        pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>", &format!("<PP_PSWFC><PP_CHI.1 l=\"{l}\" label=\"s\" occupation=\"4\">{values}</PP_CHI.1></PP_PSWFC></UPF>"));
+        pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>", &format!("<PP_PSWFC><PP_CHI.1 l=\"{l}\" label=\"s\" occupation=\"{z}\">{values}</PP_CHI.1></PP_PSWFC></UPF>"));
     }
     pp
 }
@@ -351,8 +352,8 @@ fn command_boundaries_and_input_switch_provenance() {
     for command in [Command::Checkpoint, Command::Restart] {
         let selection = route::select(&config, Mode::Classic, command, &[&pp]);
         assert_eq!(selection.driver, Driver::Reference);
-        assert_eq!(selection.reason, Some(route::CHECKPOINT));
-        assert!(dft_cli::run::options_for(&config, selection).is_err());
+        assert_eq!(selection.reason, None);
+        assert!(dft_cli::run::options_for(&config, selection).is_ok());
     }
     let selection = route::select(
         &config,
@@ -393,10 +394,28 @@ fn command_boundaries_and_input_switch_provenance() {
 fn checkpoint_restart_and_explain_record_selection() {
     let dir = std::env::temp_dir().join(format!("r1-checkpoint-routing-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("synthetic-atomic.upf"), atomic("gamma-lda")).unwrap();
+    fs::write(dir.join("synthetic-atomic.upf"), atomic("l06-checkpoint")).unwrap();
     let input = dir.join("input.toml");
-    let text = include_str!("fixtures/routing/gamma-lda.toml")
-        .replace("max_iterations = 100", "max_iterations = 2");
+    // L6 now executes the reference driver; use a numerical fixture, rather
+    // than the parse-only routing corpus's intentionally minimal Si2 grid.
+    let text = r#"[system]
+name = "L6 checkpoint routing"
+lattice_unit = "bohr"
+lattice_vectors = [[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.13,0.21,0.32]
+[pseudopotentials]
+Si = "synthetic-atomic.upf"
+[basis]
+ecutwfc_ry = 5.0
+kpoints = [[0.0,0.0,0.0]]
+[xc]
+functional = "lda-pz"
+[scf]
+nbands = 4
+max_iterations = 2
+"#;
     fs::write(&input, text).unwrap();
     let invoke = |args: &[&str], strict: bool| {
         let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"));
@@ -438,14 +457,14 @@ fn checkpoint_restart_and_explain_record_selection() {
             .unwrap();
             assert_eq!(
                 result["scf"]["driver"],
-                if strict { "strict_oracle" } else { "legacy" }
+                if strict { "strict_oracle" } else { "reference" }
             );
             assert_eq!(
                 result["scf"]["driver_reason"],
                 if strict {
-                    route::STRICT
+                    serde_json::json!(route::STRICT)
                 } else {
-                    route::CHECKPOINT
+                    Value::Null
                 }
             );
             assert_eq!(result["scf"]["driver_source"], "env");

@@ -1,0 +1,1148 @@
+{
+  "task_id": "R8B-CHECKPOINT",
+  "status": "BLOCKED",
+  "recorded_utc": "2026-11-25T07:24:14.618837+00:00",
+  "base_commit": "f3964c1e663a744022b52ae208c72321f08c0251",
+  "source_state": "uncommitted implementation; v2 explain wrapper ownership extension pending",
+  "source_sha256": {
+    "crates/dft-cli/src/checkpoint_inspect.rs": "8e5459726548a40cf9068911995c9e0dc005e2365cf6b94fa5fe233ef7f726ac",
+    "crates/dft-cli/src/checkpoint_io.rs": "da7744fd8423d258f542ef0ecde94812c338947bd68ac74ca251e8d6506a21e2",
+    "crates/dft-cli/src/driver_select.rs": "f2e54b6a0c6e95287800c6d9bd9c4b8e914b1607de9197cdf0ed870079294106",
+    "crates/dft-cli/tests/checkpoint_v2.rs": "630b9cbe6ac4f76a89a51558865b5eff1ac346501bd057631032e98d27e134bf",
+    "crates/dft-cli/tests/driver_routing.rs": "3ea92e39c9aeba0081cafe00c5dca6d9cef981243e928c8bb1f9987beee8ccf2",
+    "crates/dft-cli/tests/fixtures/routing/expectations.json": "c32951ade80d483e0256b6eec3548d8804bcb547cbeb8960d60626aa25941617",
+    "crates/dft-cli/tests/fixtures/routing/l06-checkpoint.toml": "89fe55591cc62d10659563b8355811e8e9cd004828c86459425812c0076cce90",
+    "crates/dft-engine/src/refscf/broyden.rs": "9b0c22cd656642f1a5a7d206947e0feeec9d40e358db4e71c63e121c9ea0328d",
+    "crates/dft-engine/src/refscf/checkpoint.rs": "869837df9744159cc6c7630e1acf76c63a6cab90fcd58d5ecb7103c09f6b68ad",
+    "crates/dft-engine/src/refscf/driver.rs": "e002b68f5544dd87d3228433389250a1a1f2b0370a3e3f3cb5e9b1cda9baf8a8",
+    "crates/dft-engine/src/refscf/electronic.rs": "c22038a499cbc87f31a6b3d2d89d14a61017dd40098bb65c45ea2b8423ce108e",
+    "crates/dft-engine/src/refscf/k_driver.rs": "411fd398e07d92b7d6140e471d28c07d6cf321c76a397e6e3985264859c3d3f9",
+    "crates/dft-engine/src/refscf/k_kept.rs": "9f1d2c277220a8a5cad302971df82d44c114d5f41855801cf8de0991d9465c7f",
+    "crates/dft-engine/src/refscf/k_map.rs": "71d73bf0d2e157bd39ff2115c5a0393cef863c1272d5e385085d761ff1fc3851",
+    "crates/dft-engine/src/refscf/kept_hx.rs": "789cc0c54f10778e49cbc201996bac97bb127f632be3fda8428359ffe392505b",
+    "crates/dft-engine/src/refscf/map.rs": "eccfae57f2daa5e4204cdeff5364551772cd44467472a98d78aae8c6fcde6801",
+    "crates/dft-engine/src/refscf/mod.rs": "0ed7bb786bd0d56a07cb55073f0e6eff63fdfe271813ac64220c186c53bf8c09",
+    "crates/dft-engine/src/refscf/stepper.rs": "82aebf7add23cba90c55c9c5cd6b05a885e48380095add77b3c3d46dee787a24",
+    "crates/dft-engine/tests/refscf_checkpoint.rs": "f4e87a66c61312f9b474823d50d6052d93260d58054f17e7b7343b701eefdf68",
+    "docs/checkpoint-format.md": "d89127ed61fa601c3d3eae83cdd0b1e66c9326788fc00b6cb07be25fd2dc1931",
+    "crates/dft-engine/tests/common/mod.rs": "dc664ac59ee0f2a5b9e5d87fcba9b6b9ef50b9ba97d5cda457dc7ce32f373b11",
+    "crates/dft-cli/tests/common/mod.rs": "d3b7e4f858c5c122e0aa473f6cff7a070e29391b80c20aa42179ab15205dbefb"
+  },
+  "environment": {
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "platform": "Darwin arm64",
+    "profile": "release for convergence matrices and baseline",
+    "ranks": [
+      1,
+      3,
+      8
+    ],
+    "rank_backend": "deterministic collective simulator; no physical MPI run",
+    "threads": 1,
+    "CHECK_SCCACHE": "0",
+    "RUSTC_WRAPPER": "",
+    "BAANDI_TEST_TMP": "/private/tmp/r8b-checkpoint-tests",
+    "TMPDIR": "/private/tmp/r8b-checkpoint-tests",
+    "benchmark_exception": "BAANDI_TEST_TMP unset because benchmark switch validation rejects it; TMPDIR remains outside checkout",
+    "release_cli_sha256": "b560f249c915445fa9435674bf686e97b7baa5ff9bae584c720149cc6d43aae9"
+  },
+  "reference": "Independent uninterrupted BAANDI trajectory with the same fixture, build, switches and rank count. No QE claim; no cross-rank bit-identity claim.",
+  "protocol": {
+    "comparison": "Energy to_bits and every density/orbital binary64 component compared directly; FNV-1a hashes displayed for compact matrix evidence. CLI result uses SHA-256. Historical v1 results.json preserved.",
+    "matrix_safe_points": [
+      0,
+      1,
+      3
+    ],
+    "converged_memory_cases": 27,
+    "converged_file_cases": 27,
+    "additional_memory_cases": 5,
+    "additional_file_cases": 5,
+    "hash_encoding": "IEEE-754 binary64 little-endian; density grid order; orbitals k/column-major real then imaginary. FNV-1a-64 offset cbf29ce484222325, prime 100000001b3.",
+    "capture_check": "Repeated capture byte-identical; capture then continue matches uninterrupted; restore then recapture byte-identical.",
+    "file_check": "Gather rank-owned sections; atomic no-clobber write/read; independent envelope length, SHA-256 and byte-offset checks."
+  },
+  "fixture_definitions": {
+    "gamma": {
+      "cell_rows_bohr": [
+        [
+          5,
+          0,
+          0
+        ],
+        [
+          0,
+          5,
+          0
+        ],
+        [
+          0,
+          0,
+          5
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0.13,
+          0.21,
+          0.32
+        ]
+      ],
+      "species_z_rc": [
+        [
+          2,
+          1
+        ]
+      ],
+      "cutoff_ha": 2.5,
+      "bands": 4,
+      "gamma_real": true
+    },
+    "k222s": {
+      "same_as": "gamma",
+      "gamma_real": false,
+      "monkhorst_pack": [
+        2,
+        2,
+        2
+      ],
+      "shift": [
+        0.5,
+        0.5,
+        0.5
+      ]
+    },
+    "skew-two-species": {
+      "cell_rows_bohr": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0.6,
+          5.5,
+          0
+        ],
+        [
+          0.1,
+          0.3,
+          6.5
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0.13,
+          0.21,
+          0.32
+        ],
+        [
+          0.63,
+          0.71,
+          0.72
+        ]
+      ],
+      "species_z_rc": [
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          1.2
+        ]
+      ],
+      "cutoff_ha": 2.5,
+      "bands": 6,
+      "gamma_real": true
+    }
+  },
+  "memory_results": [
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 6,
+      "converged": false,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175524238215136,
+      "energy_bits": "bfed5c96e695b9d0",
+      "density_fnv1a": "a266c2d093c2ecb1",
+      "orbitals_fnv1a": "207eef76463693e9",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 6,
+      "converged": false,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175524238215136,
+      "energy_bits": "bfed5c96e695b9d0",
+      "density_fnv1a": "a266c2d093c2ecb1",
+      "orbitals_fnv1a": "207eef76463693e9",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "b17abcb431a81ef1",
+      "orbitals_fnv1a": "0d4a23bdb4686acc",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 6,
+      "converged": false,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175524238215136,
+      "energy_bits": "bfed5c96e695b9d0",
+      "density_fnv1a": "a266c2d093c2ecb1",
+      "orbitals_fnv1a": "207eef76463693e9",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "b17abcb431a81ef1",
+      "orbitals_fnv1a": "0d4a23bdb4686acc",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "b17abcb431a81ef1",
+      "orbitals_fnv1a": "0d4a23bdb4686acc",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": true,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 8,
+      "reuse": true,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "ebd680def28859cb",
+      "orbitals_fnv1a": "eef9d224e7c6fb68",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "ebd680def28859cb",
+      "orbitals_fnv1a": "eef9d224e7c6fb68",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "ebd680def28859cb",
+      "orbitals_fnv1a": "eef9d224e7c6fb68",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "e906b0c684403c7a",
+      "orbitals_fnv1a": "8d4028f9b0c9dfb9",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "e906b0c684403c7a",
+      "orbitals_fnv1a": "8d4028f9b0c9dfb9",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "e906b0c684403c7a",
+      "orbitals_fnv1a": "8d4028f9b0c9dfb9",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.009189969503778483,
+      "energy_bits": "bf82d230d3c27d80",
+      "density_fnv1a": "3b9ad391389bf132",
+      "orbitals_fnv1a": "b6f8de88154677a8",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.009189969503778483,
+      "energy_bits": "bf82d230d3c27d80",
+      "density_fnv1a": "3b9ad391389bf132",
+      "orbitals_fnv1a": "b6f8de88154677a8",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.009189969503778483,
+      "energy_bits": "bf82d230d3c27d80",
+      "density_fnv1a": "3b9ad391389bf132",
+      "orbitals_fnv1a": "b6f8de88154677a8",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "f973a34ab24f94f1",
+      "orbitals_fnv1a": "8eda609135f1efd3",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "f973a34ab24f94f1",
+      "orbitals_fnv1a": "8eda609135f1efd3",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "f973a34ab24f94f1",
+      "orbitals_fnv1a": "8eda609135f1efd3",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -1.100248785520342,
+      "energy_bits": "bff19a9e7874609d",
+      "density_fnv1a": "6938621f6d05eafc",
+      "orbitals_fnv1a": "d644df96b659a370",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -1.100248785520342,
+      "energy_bits": "bff19a9e7874609d",
+      "density_fnv1a": "6938621f6d05eafc",
+      "orbitals_fnv1a": "d644df96b659a370",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -1.100248785520342,
+      "energy_bits": "bff19a9e7874609d",
+      "density_fnv1a": "6938621f6d05eafc",
+      "orbitals_fnv1a": "d644df96b659a370",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -1.1002487855203402,
+      "energy_bits": "bff19a9e78746095",
+      "density_fnv1a": "84fb395953564799",
+      "orbitals_fnv1a": "90ed0eb4875b6f02",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -1.1002487855203402,
+      "energy_bits": "bff19a9e78746095",
+      "density_fnv1a": "84fb395953564799",
+      "orbitals_fnv1a": "90ed0eb4875b6f02",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -1.1002487855203402,
+      "energy_bits": "bff19a9e78746095",
+      "density_fnv1a": "84fb395953564799",
+      "orbitals_fnv1a": "90ed0eb4875b6f02",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -1.10024878552034,
+      "energy_bits": "bff19a9e78746094",
+      "density_fnv1a": "18b70cd5af8eb729",
+      "orbitals_fnv1a": "647053bb34123ded",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -1.10024878552034,
+      "energy_bits": "bff19a9e78746094",
+      "density_fnv1a": "18b70cd5af8eb729",
+      "orbitals_fnv1a": "647053bb34123ded",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -1.10024878552034,
+      "energy_bits": "bff19a9e78746094",
+      "density_fnv1a": "18b70cd5af8eb729",
+      "orbitals_fnv1a": "647053bb34123ded",
+      "identity": true
+    }
+  ],
+  "file_results": [
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 6,
+      "converged": false,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175524238215136,
+      "energy_bits": "bfed5c96e695b9d0",
+      "density_fnv1a": "a266c2d093c2ecb1",
+      "orbitals_fnv1a": "207eef76463693e9",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "b17abcb431a81ef1",
+      "orbitals_fnv1a": "0d4a23bdb4686acc",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": true,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 6,
+      "converged": false,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175524238215136,
+      "energy_bits": "bfed5c96e695b9d0",
+      "density_fnv1a": "a266c2d093c2ecb1",
+      "orbitals_fnv1a": "207eef76463693e9",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "b17abcb431a81ef1",
+      "orbitals_fnv1a": "0d4a23bdb4686acc",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 6,
+      "converged": false,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175524238215136,
+      "energy_bits": "bfed5c96e695b9d0",
+      "density_fnv1a": "a266c2d093c2ecb1",
+      "orbitals_fnv1a": "207eef76463693e9",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "b17abcb431a81ef1",
+      "orbitals_fnv1a": "0d4a23bdb4686acc",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 8,
+      "reuse": true,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175526914330132,
+      "energy_bits": "bfed5c977641f864",
+      "density_fnv1a": "e0d99f99690bc431",
+      "orbitals_fnv1a": "daa7896599c5b46a",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "ebd680def28859cb",
+      "orbitals_fnv1a": "eef9d224e7c6fb68",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "ebd680def28859cb",
+      "orbitals_fnv1a": "eef9d224e7c6fb68",
+      "identity": true
+    },
+    {
+      "fixture": "gamma",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.9175526914330127,
+      "energy_bits": "bfed5c977641f85f",
+      "density_fnv1a": "ebd680def28859cb",
+      "orbitals_fnv1a": "eef9d224e7c6fb68",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "e906b0c684403c7a",
+      "orbitals_fnv1a": "8d4028f9b0c9dfb9",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "e906b0c684403c7a",
+      "orbitals_fnv1a": "8d4028f9b0c9dfb9",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "e906b0c684403c7a",
+      "orbitals_fnv1a": "8d4028f9b0c9dfb9",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.009189969503778483,
+      "energy_bits": "bf82d230d3c27d80",
+      "density_fnv1a": "3b9ad391389bf132",
+      "orbitals_fnv1a": "b6f8de88154677a8",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.009189969503778483,
+      "energy_bits": "bf82d230d3c27d80",
+      "density_fnv1a": "3b9ad391389bf132",
+      "orbitals_fnv1a": "b6f8de88154677a8",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.009189969503778483,
+      "energy_bits": "bf82d230d3c27d80",
+      "density_fnv1a": "3b9ad391389bf132",
+      "orbitals_fnv1a": "b6f8de88154677a8",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "f973a34ab24f94f1",
+      "orbitals_fnv1a": "8eda609135f1efd3",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "f973a34ab24f94f1",
+      "orbitals_fnv1a": "8eda609135f1efd3",
+      "identity": true
+    },
+    {
+      "fixture": "k222s",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -0.009189969503778705,
+      "energy_bits": "bf82d230d3c27e00",
+      "density_fnv1a": "f973a34ab24f94f1",
+      "orbitals_fnv1a": "8eda609135f1efd3",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -1.100248785520342,
+      "energy_bits": "bff19a9e7874609d",
+      "density_fnv1a": "6938621f6d05eafc",
+      "orbitals_fnv1a": "d644df96b659a370",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -1.100248785520342,
+      "energy_bits": "bff19a9e7874609d",
+      "density_fnv1a": "6938621f6d05eafc",
+      "orbitals_fnv1a": "d644df96b659a370",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 1,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -1.100248785520342,
+      "energy_bits": "bff19a9e7874609d",
+      "density_fnv1a": "6938621f6d05eafc",
+      "orbitals_fnv1a": "d644df96b659a370",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -1.1002487855203402,
+      "energy_bits": "bff19a9e78746095",
+      "density_fnv1a": "84fb395953564799",
+      "orbitals_fnv1a": "90ed0eb4875b6f02",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -1.1002487855203402,
+      "energy_bits": "bff19a9e78746095",
+      "density_fnv1a": "84fb395953564799",
+      "orbitals_fnv1a": "90ed0eb4875b6f02",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 3,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -1.1002487855203402,
+      "energy_bits": "bff19a9e78746095",
+      "density_fnv1a": "84fb395953564799",
+      "orbitals_fnv1a": "90ed0eb4875b6f02",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 0,
+      "reuse": false,
+      "energy_ha": -1.10024878552034,
+      "energy_bits": "bff19a9e78746094",
+      "density_fnv1a": "18b70cd5af8eb729",
+      "orbitals_fnv1a": "647053bb34123ded",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 1,
+      "reuse": false,
+      "energy_ha": -1.10024878552034,
+      "energy_bits": "bff19a9e78746094",
+      "density_fnv1a": "18b70cd5af8eb729",
+      "orbitals_fnv1a": "647053bb34123ded",
+      "identity": true
+    },
+    {
+      "fixture": "skew-two-species",
+      "ranks": 8,
+      "budget": 400,
+      "converged": true,
+      "safe_point": 3,
+      "reuse": false,
+      "energy_ha": -1.10024878552034,
+      "energy_bits": "bff19a9e78746094",
+      "density_fnv1a": "18b70cd5af8eb729",
+      "orbitals_fnv1a": "647053bb34123ded",
+      "identity": true
+    }
+  ],
+  "failed_verification_reuse": {
+    "ranks": 3,
+    "gamma_real": [
+      "On",
+      "Off"
+    ],
+    "safe_point": 23,
+    "memory_identity": [
+      true,
+      true
+    ],
+    "container_roundtrip_identity": [
+      true,
+      true
+    ],
+    "next_map_reused": true,
+    "next_map_new_h_columns": 0,
+    "unsafe_capture_rejected": true
+  },
+  "electronic_supplement": {
+    "policies": [
+      "FermiDirac",
+      "FixedSpin"
+    ],
+    "ranks": 3,
+    "budget": 2,
+    "safe_points": [
+      0,
+      1
+    ],
+    "cases_passed": 4,
+    "converged": false,
+    "comparison": "energy/free-energy bits and all channel density/orbital bits",
+    "scope": "Two-map exhaustion only. The longer inherited one-electron FD fixture rejects negative mixed XC density before any checkpoint; no tolerance/default changes."
+  },
+  "cross_process": {
+    "restart_identity": true,
+    "checkpoint_iteration": 3,
+    "result": {
+      "energy_ha_bits": 13829811836316498686,
+      "density_sha256": "a3d94485108b0f06b1db7d7c765790cabaf54f014286861826283a65b3a084a8",
+      "orbitals_sha256": "1690a465aceae0b6ce44755a671f09fa7affa6fe5f587beed8617b5dba89c5e8",
+      "converged": true,
+      "iterations": 6,
+      "verification_attempts": 1
+    },
+    "changed_input_rejected": true,
+    "changed_upf_rejected": true,
+    "changed_binary_identity_rejected": true,
+    "corrupted_checksum_rejected": true,
+    "explain_passed": false
+  },
+  "negative_tests": [
+    "bad checksum",
+    "truncation",
+    "unsupported version",
+    "duplicate/unknown header fields",
+    "offset/count overflow and overlap",
+    "rank count mismatch",
+    "invalid identity hashes",
+    "truncated/trailing engine state",
+    "iteration metadata mismatch",
+    "changed input/UPF/binary identity",
+    "no-clobber publication"
+  ],
+  "baseline": {
+    "baseline": "docs/performance/baseline.json (default)",
+    "gamma": {
+      "energy_difference_ha": 0.0,
+      "density": "identical",
+      "iterations": 7
+    },
+    "k222": {
+      "energy_difference_ha": 0.0,
+      "density": "identical",
+      "iterations": 7
+    },
+    "performance_claim": null,
+    "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+  },
+  "gates": {
+    "build": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "workspace_tests": {
+      "binaries": 112,
+      "passed": 1035,
+      "failed": 1,
+      "ignored": 235,
+      "failure": "checkpoint_v2 cross-process explain invokes the legacy decoder in inspect.rs after successful v2 evidence decoding"
+    }
+  },
+  "commands": [
+    {
+      "command": "cargo check --workspace --tests",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-engine --test refscf_checkpoint",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --test checkpoint_v2",
+      "exit_code": 101
+    },
+    {
+      "command": "cargo test -p dft-cli --test checkpoint_io",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --test driver_routing",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test refscf_checkpoint -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test checkpoint_v2 -- --include-ignored --nocapture",
+      "exit_code": 101
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --require-identical",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --check && cargo clippy -p dft-engine -p dft-cli --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test checkpoint_io -- --include-ignored",
+      "exit_code": 101
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test refscf_stepper gamma_k222s_fd_spin_ranks_1_3_8 -- --ignored --nocapture",
+      "exit_code": 101
+    }
+  ],
+  "limitations": [
+    "inspect.rs is outside approved OWNED_FILES; prepared three-line version dispatch patch at /private/tmp/r8b-inspect-ownership.patch awaits ownership extension.",
+    "Actual MPI backend not exercised.",
+    "Gamma coarse-ladder/external seeded continuations, external electronic trace sinks, warm v2 import and terminal exact capture reject explicitly.",
+    "Additional ignored v1 matrix: 6 pass, 2 fail because existing v1 IterationRecord decoder defaults pulay diagnostics to None; required fast v1 suite passes 4 tests.",
+    "Additional inherited R8a full electronic matrix rejects a negative mixed XC density in its FD fixture; unchanged numerical path, not a checkpoint mismatch.",
+    "scripts/check.sh load-report ps invocation is sandbox-denied; all gate phases still execute."
+  ],
+  "commit": "uncommitted",
+  "pending_patch": "--- a/crates/dft-cli/src/inspect.rs\n+++ b/crates/dft-cli/src/inspect.rs\n@@ -25,6 +25,9 @@\n     let path = source(path);\n     if crate::checkpoint_inspect::recognizes(&path)? {\n         let mut result = crate::checkpoint_inspect::evidence(&path)?;\n+        if result[\"schema_version\"] == 2 {\n+            return Ok(result);\n+        }\n         let cp = crate::checkpoint_io::read(&path)?;\n         if let Some(c) = &cp.continuation {\n             result[\"preconditioner\"] = json!(c.options.preconditioner.name());\n"
+}

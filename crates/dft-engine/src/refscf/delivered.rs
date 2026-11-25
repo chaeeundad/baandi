@@ -230,7 +230,37 @@ pub fn ionic_seed<K: dft_mpi::Collective>(
         return gamma_seed(input, result, density, comm)
             .map(|seed| IonicSeed::Gamma(Box::new(seed)));
     }
-    validate_model(&input, result, &[])?;
+    k_seed(input, result, density, &[])
+}
+
+/// Export a seed with the delivered symmetry identity intact. Prepared solves
+/// use complex k blocks, including Gamma; no representation conversion occurs.
+pub fn ionic_seed_prepared(
+    input: StartInput<'_>,
+    result: &crate::ScfResult,
+    density: &[f64],
+    prepared: &super::symmetry::Prepared,
+) -> Result<IonicSeed, ScfError> {
+    prepared.validate(
+        &input,
+        &result.k_points.iter().map(|k| k.point).collect::<Vec<_>>(),
+    )?;
+    if result.gamma_real_used {
+        return Err(ScfError::InvalidInput(
+            "prepared ionic seed requires complex k blocks",
+        ));
+    }
+    let operations = prepared.operations(input.options.crystal_density_group);
+    k_seed(input, result, density, operations)
+}
+
+fn k_seed(
+    input: StartInput<'_>,
+    result: &crate::ScfResult,
+    density: &[f64],
+    operations: &[dft_geometry::symmetry::SymmetryOperation],
+) -> Result<IonicSeed, ScfError> {
+    validate_model(&input, result, operations)?;
     let charge = density.iter().sum::<f64>() * input.cell.volume_bohr3() / density.len() as f64;
     if !result.orbitals_delivered()
         || density.len() != result.density.len()
@@ -265,6 +295,113 @@ pub fn ionic_seed<K: dft_mpi::Collective>(
         charge: result.charge,
     }))
 }
+impl IonicSeed {
+    /// Affine fractional-grid transfer within one frozen-Miller segment.
+    /// Coefficients are normalized in the cell-volume-normalized plane-wave
+    /// basis, so only density scales by Omega_old/Omega_new. A rebuild starts
+    /// fresh instead of transferring across different reference supports.
+    pub fn in_cell(
+        mut self,
+        source: &dft_geometry::Cell,
+        target: &dft_geometry::Cell,
+        options: &crate::ScfOptions,
+    ) -> Result<Self, ScfError> {
+        if options.strain_reference.is_none() || options.grid_override.is_none() {
+            return Err(ScfError::InvalidInput(
+                "cell seed requires frozen basis and grid",
+            ));
+        }
+        let ratio = source.volume_bohr3() / target.volume_bohr3();
+        match &mut self {
+            Self::Gamma(seed) => {
+                let basis = options.basis(target, [0.; 3], 1.)?;
+                if seed.basis.cutoff().0 != options.cutoff_hartree
+                    || seed.grid.dims() != options.grid_override.unwrap()
+                    || seed
+                        .basis
+                        .vectors()
+                        .iter()
+                        .map(|g| g.miller)
+                        .ne(basis.vectors().iter().map(|g| g.miller))
+                {
+                    return Err(ScfError::InvalidInput(
+                        "cell seed: frozen Miller map changed",
+                    ));
+                }
+                seed.basis = basis;
+                for value in &mut seed.density_g {
+                    *value *= ratio;
+                }
+            }
+            Self::K(seed) => {
+                if seed.lattice != source.lattice_columns_bohr()
+                    || seed.strain_reference.as_deref().copied()
+                        != options
+                            .strain_reference
+                            .as_ref()
+                            .map(|c| c.lattice_columns_bohr())
+                    || seed.cutoff != options.cutoff_hartree
+                    || Some(seed.dims) != options.grid_override
+                {
+                    return Err(ScfError::InvalidInput("cell seed: source segment changed"));
+                }
+                seed.lattice = target.lattice_columns_bohr();
+                for value in &mut seed.density {
+                    *value *= ratio;
+                }
+            }
+        }
+        Ok(self)
+    }
+
+    /// Replace only the density of an ionic seed (C3 predictor). Orbitals and
+    /// their Miller map are retained; the input is on the source cell's grid.
+    pub fn with_density(
+        mut self,
+        density: &[f64],
+        volume: f64,
+        charge: f64,
+    ) -> Result<Self, ScfError> {
+        use dft_numerics::Fft3d;
+        use dft_physics::data::{Array3, Complex64, FftPlan3d};
+        let dims = match &self {
+            Self::Gamma(s) => s.grid.dims(),
+            Self::K(s) => s.dims,
+        };
+        let integral = density.iter().sum::<f64>() * volume / density.len() as f64;
+        if !volume.is_finite()
+            || volume <= 0.
+            || !charge.is_finite()
+            || charge <= 0.
+            || density.len() != dims.iter().product::<usize>()
+            || density.iter().any(|v| !v.is_finite() || *v < 0.)
+            || !integral.is_finite()
+            || (integral - charge).abs() > 1e-8 * charge.abs().max(1.)
+        {
+            return Err(ScfError::InvalidInput(
+                "ionic predictor: invalid density or charge",
+            ));
+        }
+        match &mut self {
+            Self::Gamma(seed) => {
+                let real = Array3::from_shape_vec(
+                    dims,
+                    density.iter().map(|&v| Complex64::new(v, 0.)).collect(),
+                )
+                .map_err(super::numerical)?;
+                let mut reciprocal = Array3::zeros(dims);
+                FftPlan3d::new(dims)?.to_reciprocal(&real, &mut reciprocal)?;
+                let flat = reciprocal
+                    .as_slice()
+                    .ok_or(ScfError::InvalidInput("ionic predictor: density layout"))?;
+                seed.density_g = seed.indices.iter().map(|&i| flat[i]).collect();
+            }
+            Self::K(seed) => seed.density = density.to_vec(),
+        }
+        Ok(self)
+    }
+}
+
 impl KSeed {
     pub(super) fn inject(
         self,
@@ -358,5 +495,110 @@ pub fn run(
             }
         }
         None => super::k_driver::run(input, profile, points),
+    }
+}
+
+#[cfg(test)]
+mod cell_seed_tests {
+    use super::*;
+    use dft_basis::{FftGridSpec, HalfSphere};
+    use dft_geometry::Cell;
+    use dft_numerics::RealMatrix;
+    use dft_physics::data::Complex64;
+
+    #[test]
+    fn cell_seed_affine_charge_and_frozen_orbitals() {
+        let source =
+            Cell::from_user_rows_bohr([[5., 0., 0.], [0.4, 4., 0.], [0., 0.3, 6.]]).unwrap();
+        let target =
+            Cell::from_user_rows_bohr([[5.2, 0., 0.], [0.5, 3.9, 0.], [0., 0.2, 6.1]]).unwrap();
+        let mut options = crate::ScfOptions {
+            cutoff_hartree: 1.,
+            strain_reference: Some(Box::new(source.clone())),
+            ..Default::default()
+        };
+        let basis = options.basis(&source, [0.; 3], 1.).unwrap();
+        let db = options.basis(&source, [0.; 3], 4.).unwrap();
+        let grid = FftGridSpec::new(&basis, &db, None).unwrap();
+        options.grid_override = Some(grid.dims());
+        let half = HalfSphere::new(&basis, &grid).unwrap();
+        let rows: Vec<_> = (0..basis.vectors().len()).collect();
+        let orbitals = RealMatrix::zeros(rows.len(), 1).unwrap();
+        let dims = grid.dims();
+        let count = dims.iter().product();
+        let seed = IonicSeed::Gamma(Box::new(super::super::ladder::Seed {
+            basis,
+            grid,
+            half,
+            orbitals,
+            rows,
+            density_g: vec![Complex64::default(); count],
+            indices: (0..count).collect(),
+        }));
+        let charge = 2.;
+        let density = vec![charge / source.volume_bohr3(); count];
+        let seed = seed
+            .with_density(&density, source.volume_bohr3(), charge)
+            .unwrap();
+        let moved = seed.clone().in_cell(&source, &target, &options).unwrap();
+        let (IonicSeed::Gamma(old), IonicSeed::Gamma(new)) = (&seed, &moved) else {
+            panic!()
+        };
+        assert_eq!(old.orbitals.as_slice(), new.orbitals.as_slice());
+        assert_eq!(old.rows, new.rows);
+        assert_eq!(old.half.plus(), new.half.plus());
+        assert!((new.density_g[0].re * target.volume_bohr3() - charge).abs() < 1e-13);
+        assert!(new.density_g[1..].iter().all(|z| z.norm() < 1e-14));
+        assert!(
+            old.basis.vectors().iter().map(|g| g.miller).eq(new
+                .basis
+                .vectors()
+                .iter()
+                .map(|g| g.miller))
+        );
+        assert_ne!(
+            old.basis.vectors()[1].norm_squared,
+            new.basis.vectors()[1].norm_squared
+        );
+        let k = IonicSeed::K(KSeed {
+            lattice: source.lattice_columns_bohr(),
+            strain_reference: Some(Box::new(source.lattice_columns_bohr())),
+            cutoff: options.cutoff_hartree,
+            dims,
+            points: vec![],
+            orbitals: vec![],
+            density: density.clone(),
+            charge,
+        });
+        let IonicSeed::K(k_moved) = k.clone().in_cell(&source, &target, &options).unwrap() else {
+            panic!()
+        };
+        assert_eq!(k_moved.lattice, target.lattice_columns_bohr());
+        assert!(
+            (k_moved.density.iter().sum::<f64>() * target.volume_bohr3() / count as f64 - charge)
+                .abs()
+                < 1e-12
+        );
+        assert!(k.clone().in_cell(&target, &source, &options).is_err());
+        let mut changed_reference = options.clone();
+        changed_reference.strain_reference = Some(Box::new(target.clone()));
+        assert!(k.in_cell(&source, &target, &changed_reference).is_err());
+        let mut invalid = options.clone();
+        invalid.strain_reference = None;
+        assert!(seed.clone().in_cell(&source, &target, &invalid).is_err());
+        invalid = options.clone();
+        invalid.cutoff_hartree *= 2.;
+        assert!(seed.clone().in_cell(&source, &target, &invalid).is_err());
+        assert!(
+            seed.clone()
+                .with_density(&density, source.volume_bohr3(), 3.)
+                .is_err()
+        );
+        let mut invalid_density = density;
+        invalid_density[0] = f64::NAN;
+        assert!(
+            seed.with_density(&invalid_density, source.volume_bohr3(), charge)
+                .is_err()
+        );
     }
 }

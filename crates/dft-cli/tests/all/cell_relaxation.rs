@@ -594,3 +594,226 @@ fn real_files_rebuild_start_agreement() {
         work.display()
     );
 }
+
+// Same Gaussian-ion model as the stored P23A protocol, with explicit atomic
+// start data added so L11 cannot silently route these tests to legacy.
+fn reference_atomic_fixture(dir: &std::path::Path) {
+    let mut xml =
+        common::gaussian_with(1., 1.5, false, 801).replace("element=\"Xx\"", "element=\"H\"");
+    let pp = dft_upf::parse_upf(&xml).unwrap();
+    let values = |f: &dyn Fn(f64) -> f64| {
+        pp.mesh()
+            .r()
+            .iter()
+            .map(|&r| format!("{:.17e}", f(r)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let start = xml.find("<PP_RHOATOM>").unwrap() + "<PP_RHOATOM>".len();
+    let end = xml.find("</PP_RHOATOM>").unwrap();
+    xml.replace_range(
+        start..end,
+        &values(&|r| {
+            4. / (std::f64::consts::PI.sqrt() * 1.5_f64.powi(3))
+                * r
+                * r
+                * (-(r / 1.5).powi(2)).exp()
+        }),
+    );
+    xml = xml.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>",
+        &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"1\">{}</PP_CHI.1></PP_PSWFC></UPF>", values(&|r| r*(-0.6*r*r).exp())));
+    fs::write(dir.join("syn.xml"), xml).unwrap();
+}
+fn reference_input() -> String {
+    input()
+        .replace("energy_tolerance_ha=1e-12\n", "")
+        .replace("density_residual_tolerance=1e-10\n", "")
+        .replace("eigen_tolerance=1e-11\n", "")
+        + "standard_threshold_ha=5e-15\n"
+}
+fn reference_relax_run(
+    dir: &std::path::Path,
+    name: &str,
+    text: &str,
+    driver: &str,
+) -> serde_json::Value {
+    let name = format!("{name}-{driver}");
+    fs::write(
+        dir.join(format!("{name}.toml")),
+        text.replace("[scf]", &format!("[scf]\ndriver='{driver}'")),
+    )
+    .unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+    for (key, _) in std::env::vars().filter(|(key, _)| key.starts_with("BAANDI_")) {
+        cmd.env_remove(key);
+    }
+    let output = cmd
+        .current_dir(dir)
+        .args(["relax", &format!("{name}.toml"), "--output-dir", &name])
+        .output()
+        .unwrap();
+    assert!(
+        matches!(output.status.code(), Some(0 | 3)),
+        "{name}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let doc: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join(&name).join("results.json")).unwrap()).unwrap();
+    assert_eq!(doc["scf"]["driver"], driver);
+    // Gaining symmetry at the cubic minimum can invalidate the previous
+    // density/model. Both drivers retain the existing one-fresh-half-step
+    // retry contract; these recorded retries are not failed trajectories.
+    for failure in doc["relaxation"]["failures"].as_array().unwrap() {
+        let reason = failure["reason"].as_str().unwrap();
+        assert!(
+            failure["attempt"] == 1
+                && (reason.contains("symmetry.density: input breaks the selected symmetry")
+                    || reason.contains("warm_transfer: model differs beyond atom positions")),
+            "{name}: {failure}"
+        );
+    }
+    doc
+}
+fn compare_reference_cell(name: &str, reference: &serde_json::Value, legacy: &serde_json::Value) {
+    let r = &reference["relaxation"];
+    let l = &legacy["relaxation"];
+    assert_eq!(r["status"], l["status"], "{name}");
+    let rf = r["frames"].as_array().unwrap();
+    let lf = l["frames"].as_array().unwrap();
+    assert_eq!(rf.len(), lf.len(), "{name}: trajectory lengths");
+    let de = rf
+        .iter()
+        .zip(lf)
+        .map(|(a, b)| (a["energy_ha"].as_f64().unwrap() - b["energy_ha"].as_f64().unwrap()).abs())
+        .fold(0., f64::max);
+    let a = &r["frozen_final"]["frame"]["cell_columns_bohr"];
+    let b = &l["frozen_final"]["frame"]["cell_columns_bohr"];
+    let da = (0..3)
+        .flat_map(|i| {
+            (0..3).map(move |j| (a[i][j].as_f64().unwrap() - b[i][j].as_f64().unwrap()).abs())
+        })
+        .fold(0., f64::max);
+    let dp = (r["frozen_final"]["pressure_ha_bohr3"].as_f64().unwrap()
+        - l["frozen_final"]["pressure_ha_bohr3"].as_f64().unwrap())
+    .abs();
+    println!(
+        "R7B {name}: frames={} max dE={de:e} Ha final dA={da:e} Bohr dP={dp:e} Ha/Bohr^3",
+        rf.len()
+    );
+    assert!(
+        de <= 5e-9 && da <= 1e-5 && dp <= 1e-6,
+        "{name}: dE={de:e} dA={da:e} dP={dp:e}"
+    );
+    assert!(rf.iter().all(|f| f["verification"]["passed"] == true));
+    assert_eq!(rf[1]["provenance"], "warm_transfer");
+}
+#[test]
+#[ignore = "R7B stored protocol reference/legacy trajectories; cargo test --release -p dft-cli --test all cell_relaxation::reference_cell_protocol -- --ignored --nocapture"]
+fn reference_cell_protocol() {
+    let dir = std::env::temp_dir().join(format!("r7b-protocol-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    reference_atomic_fixture(&dir);
+    // At the tightened 5e-15 Ha threshold this low-dimensional model's
+    // default eight-vector history is rank deficient before convergence
+    // (condition 4.28e15). Use the same minimal secant history in both arms;
+    // no SCF, derivative or comparison tolerance is changed.
+    let protocol: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../tests/reference/relaxation/cell/validation.json"
+    ))
+    .unwrap();
+    for (i, case) in protocol["synthetic_scans"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let start = case["start_bohr"].as_f64().unwrap();
+        let p = case["pressure_ha_bohr3"].as_f64().unwrap();
+        let text = reference_input()
+            .replace("[scf]", "[scf]\nmixing_history=1")
+            .replace("[0.27,0.23,0.19]", "[0.5,0.5,0.5]")
+            .replace("ecutwfc_ry=3.0", "ecutwfc_ry=12.0")
+            .replace(
+                "[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]",
+                &format!("[[{start},0.0,0.0],[0.0,{start},0.0],[0.0,0.0,{start}]]"),
+            )
+            + &format!(
+                "\n[relax]\nmode='cell'\ncell_dofs='isotropic'\nmax_steps=150\nstress_tol_ha_bohr3=1e-10\nenergy_tol_ha=1e-12\npressure_ha_bohr3={p}\n[symmetry]\nmode='auto'\n"
+            );
+        let name = format!("scan-{i}");
+        let r = reference_relax_run(&dir, &name, &text, "reference");
+        let l = reference_relax_run(&dir, &name, &text, "legacy");
+        assert_eq!(r["relaxation"]["status"], "converged");
+        compare_reference_cell(&name, &r, &l);
+    }
+    let text = reference_input()
+        .replace("[scf]", "[scf]\nmixing_history=1")
+        .replace("[0.27,0.23,0.19]", "[0.5,0.5,0.5]")
+        .replace("ecutwfc_ry=3.0", "ecutwfc_ry=12.0")
+        .replace(
+            "[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]",
+            "[[3.85,0.0,0.0],[0.0,3.85,0.0],[0.0,0.0,3.95]]",
+        )
+        + "\n[relax]\nmode='cell'\ncell_dofs='full'\nmax_steps=150\nstress_tol_ha_bohr3=1e-9\nenergy_tol_ha=1e-12\n[symmetry]\nmode='auto'\n";
+    let r = reference_relax_run(&dir, "tetragonal", &text, "reference");
+    let l = reference_relax_run(&dir, "tetragonal", &text, "legacy");
+    assert_eq!(r["relaxation"]["status"], "converged");
+    compare_reference_cell("tetragonal", &r, &l);
+}
+#[test]
+#[ignore = "R7B Gamma/k, combined strain/ion, rebuild and C3 trajectories; release only"]
+fn reference_cell_seed_and_predictor() {
+    let dir = std::env::temp_dir().join(format!("r7b-seeds-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    reference_atomic_fixture(&dir);
+    for (name, basis, relax) in [
+        (
+            "combined",
+            "kpoints=[[0.0,0.0,0.0]]",
+            "mode='ions_cell'\ncell_dofs='isotropic'",
+        ),
+        (
+            "complex",
+            "kpoints=[[0.125,0.0,0.0,1.0]]",
+            "mode='cell'\ncell_dofs='full'",
+        ),
+        (
+            "rebuild",
+            "kpoints=[[0.0,0.0,0.0]]",
+            "mode='cell'\nrebuild_every=1\nfixed_axes=[false,false,true]",
+        ),
+    ] {
+        let text = reference_input().replace("kpoints=[[0.0,0.0,0.0]]", basis)
+            + &format!("\n[relax]\n{relax}\nmax_steps=3\nforce_tol_ha_bohr=1e-8\n");
+        let r = reference_relax_run(&dir, name, &text, "reference");
+        let l = reference_relax_run(&dir, name, &text, "legacy");
+        compare_reference_cell(name, &r, &l);
+    }
+    for mode in ["none", "first_order", "second_order"] {
+        let text = reference_input()
+            + &format!(
+                "\n[relax]\nmax_steps=3\nforce_tol_ha_bohr=1e-8\nstart_extrapolation='{mode}'\n"
+            );
+        let r = reference_relax_run(&dir, mode, &text, "reference");
+        let l = reference_relax_run(&dir, mode, &text, "legacy");
+        let rf = r["relaxation"]["frames"].as_array().unwrap();
+        let lf = l["relaxation"]["frames"].as_array().unwrap();
+        assert_eq!(rf.len(), lf.len());
+        for (a, b) in rf.iter().zip(lf) {
+            assert!(
+                (a["energy_ha"].as_f64().unwrap() - b["energy_ha"].as_f64().unwrap()).abs() <= 5e-9
+            );
+        }
+        assert_eq!(
+            rf[1]["provenance"],
+            if mode == "none" {
+                "warm_transfer"
+            } else {
+                "extrapolated_first_order"
+            }
+        );
+        if mode == "second_order" {
+            assert_eq!(rf[2]["provenance"], "extrapolated_second_order");
+        }
+    }
+}

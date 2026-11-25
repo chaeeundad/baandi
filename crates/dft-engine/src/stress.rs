@@ -577,7 +577,7 @@ fn energy_at_prepared(
     match &state.electronic {
         ElectronicState::Fixed(r) if r.force_identity.reference_delivery => {
             let points: Vec<_> = r.k_points.iter().map(|k| k.point).collect();
-            let profile = crate::refscf::profile::Profile::from_standard_ha(
+            let mut profile = crate::refscf::profile::Profile::from_standard_ha(
                 options
                     .standard
                     .ok_or(ScfError::InvalidInput(
@@ -585,6 +585,19 @@ fn energy_at_prepared(
                     ))?
                     .threshold_ha,
             )?;
+            // Preserve the caller's reference mixer for independent cutoff
+            // scans as well as its convergence threshold.
+            match options.mixing {
+                crate::Mixing::Pulay { beta, history } => {
+                    profile.beta = beta;
+                    profile.history = history;
+                }
+                crate::Mixing::Linear { beta } => {
+                    profile.beta = beta;
+                    profile.history = 0;
+                }
+                _ => {}
+            }
             let input = crate::refstart::StartInput {
                 cell,
                 atoms: state.atoms,

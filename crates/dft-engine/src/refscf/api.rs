@@ -85,6 +85,21 @@ pub struct Observables {
     stress_done: bool,
 }
 impl Observables {
+    /// Export continuation at the adapter's delivery boundary, using the same
+    /// checked symmetry as derivatives rather than discarding model identity.
+    pub fn ionic_seed(
+        &self,
+        input: StartInput<'_>,
+        result: &ScfResult,
+    ) -> Result<IonicSeed, ScfError> {
+        if let Some(prepared) = &self.symmetry {
+            let density: Vec<_> = result.density.iter().copied().collect();
+            delivered::ionic_seed_prepared(input, result, &density, prepared)
+        } else {
+            ionic_seed(input, result)
+        }
+    }
+
     pub fn prepare(
         &mut self,
         input: StartInput<'_>,
@@ -197,9 +212,9 @@ async fn solve_continuation(
     comm: Option<crate::parallel::SharedComm>,
     boundary: &super::stepper::Boundary,
 ) -> Result<Delivered, ScfError> {
-    if request.seed.is_some() && (request.symmetry.is_some() || request.policy.is_some()) {
+    if request.seed.is_some() && request.policy.is_some() {
         return Err(ScfError::InvalidInput(
-            "reference API: ionic seeds with symmetry or electronic policy are unsupported",
+            "reference API: ionic seeds with electronic policy are unsupported",
         ));
     }
     if request.policy.is_some()
@@ -209,9 +224,9 @@ async fn solve_continuation(
             "reference API: spin/FD derivatives and ionic seeds are unsupported",
         ));
     }
-    if request.save_ionic_seed && (request.symmetry.is_some() || request.derivatives.deferred) {
+    if request.save_ionic_seed && request.derivatives.deferred {
         return Err(ScfError::InvalidInput(
-            "reference API: ionic seed export requires immediate delivery without symmetry",
+            "reference API: ionic seed export requires immediate delivery",
         ));
     }
     // StartInput contains immutable references; reconstruct it without cloning
@@ -260,7 +275,7 @@ async fn solve_continuation(
         if request.save_ionic_seed {
             let result = &mut run.outcome.result;
             result.materialize_orbitals()?;
-            output.ionic_seed = Some(ionic_seed(model(), result)?);
+            output.ionic_seed = Some(output.derivatives.ionic_seed(model(), result)?);
         }
     }
     Ok(output)
@@ -294,7 +309,8 @@ async fn run_request<K: dft_mpi::Collective>(
     }
     let run = match request.seed.take() {
         Some(IonicSeed::Gamma(seed)) => {
-            if points.len() != 1
+            if request.symmetry.is_some()
+                || points.len() != 1
                 || points[0].fractional != [0.; 3]
                 || input.options.gamma_real != crate::GammaReal::On
             {
@@ -310,7 +326,7 @@ async fn run_request<K: dft_mpi::Collective>(
                 request.profile,
                 points,
                 comm,
-                None,
+                request.symmetry.as_ref(),
                 Some(seed),
                 boundary,
             )
@@ -348,5 +364,115 @@ pub fn ionic_seed(input: StartInput<'_>, result: &ScfResult) -> Result<IonicSeed
         delivered::ionic_seed(input, result, &density, &comm)
     } else {
         delivered::ionic_seed(input, result, &density, &super::metric::Serial)
+    }
+}
+
+#[cfg(test)]
+mod seeded_symmetry_tests {
+    use super::*;
+    use crate::{ScfOptions, SpeciesPotential};
+    use dft_geometry::{Atom, Cell};
+
+    #[test]
+    fn prepared_seed_preserves_stepper_delivery() {
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+            .unwrap()
+            .enter();
+        let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+        let target =
+            Cell::from_user_rows_bohr([[5.02, 0., 0.], [0., 5.02, 0.], [0., 0., 5.02]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.; 3])];
+        let pp =
+            crate::scf::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let points = vec![KPoint {
+            fractional: [0.; 3],
+            weight: 1.,
+        }];
+        let mut options = ScfOptions {
+            cutoff_hartree: 1.,
+            bands: Some(2),
+            max_iterations: 100,
+            strain_reference: Some(Box::new(cell.clone())),
+            ..Default::default()
+        };
+        let prepared = symmetry::Prepared::new(&cell, &atoms, &points, 1e-7, false).unwrap();
+        options.grid_override = Some(
+            prepared
+                .grid(&StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                })
+                .unwrap(),
+        );
+        let input = |cell| StartInput {
+            cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        };
+        let request = |cell, seed| {
+            let mut request = Request::new(Profile::default(), points.clone());
+            request.symmetry =
+                Some(symmetry::Prepared::new(cell, &atoms, &points, 1e-7, false).unwrap());
+            request.seed = seed;
+            request.save_ionic_seed = true;
+            request.derivatives.forces = true;
+            request
+        };
+        let mut first = solve(input(&cell), request(&cell, None)).unwrap();
+        let seed = first
+            .ionic_seed
+            .take()
+            .unwrap()
+            .in_cell(&cell, &target, &options)
+            .unwrap();
+        let a = solve(input(&target), request(&target, Some(seed.clone()))).unwrap();
+        let mut stepping = stepper(input(&target), request(&target, Some(seed)));
+        stepping.initialize().unwrap();
+        let mut steps = 0;
+        while !stepping.is_done() {
+            stepping.step().unwrap();
+            steps += 1;
+        }
+        assert!(steps > 0);
+        let b = stepping.finish().unwrap();
+        assert_eq!(
+            a.derivatives.forces.as_ref().unwrap().values,
+            b.derivatives.forces.as_ref().unwrap().values
+        );
+        assert!(a.ionic_seed.is_some() && b.ionic_seed.is_some());
+        let a = a.run.into_scalar().unwrap();
+        let b = b.run.into_scalar().unwrap();
+        assert!(a.outcome.converged && b.outcome.converged);
+        assert_eq!(
+            a.outcome.result.total_hartree().to_bits(),
+            b.outcome.result.total_hartree().to_bits()
+        );
+        assert_eq!(a.outcome.result.density, b.outcome.result.density);
+        for (a, b) in a
+            .outcome
+            .result
+            .k_points
+            .iter()
+            .zip(&b.outcome.result.k_points)
+        {
+            assert_eq!(
+                a.solution.eigenvectors.as_slice(),
+                b.solution.eigenvectors.as_slice()
+            );
+        }
+        // The unsymmetrized export must not silently discard this identity.
+        assert!(ionic_seed(input(&target), &a.outcome.result).is_err());
+        let density: Vec<_> = a.outcome.result.density.iter().copied().collect();
+        assert!(
+            delivered::ionic_seed_prepared(input(&target), &a.outcome.result, &density, &prepared)
+                .is_err()
+        );
     }
 }

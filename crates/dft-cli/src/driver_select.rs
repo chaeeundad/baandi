@@ -187,21 +187,6 @@ fn l2(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
             && switches::on(Id::REFSCF_SPIN_STIFFNESS)
             && switches::on(Id::REFSCF_HISTORY_CONDITIONING))
 }
-fn l4(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    c.relax
-        .as_ref()
-        .is_some_and(|r| r.mode != crate::relax::cell::Mode::Ions)
-}
-fn l5(c: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
-    (command == Command::Relax || c.relax.is_some())
-        && match switches::text(Id::RELAX_EXTRAPOLATION) {
-            Some(v) => v != "none",
-            None => c
-                .relax
-                .as_ref()
-                .is_some_and(|r| r.start_extrapolation != crate::relax::Extrapolation::None),
-        }
-}
 fn l6(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
     matches!(command, Command::Checkpoint | Command::Restart)
 }
@@ -292,8 +277,6 @@ type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
 const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l1, G4D_FALLBACK),
     (l2, G4B_FALLBACK),
-    (l4, VARIABLE_CELL),
-    (l5, EXTRAPOLATION),
     (l6, CHECKPOINT),
     (l7, RUNTIME),
     (l8, SESSION),

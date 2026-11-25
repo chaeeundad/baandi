@@ -1995,7 +1995,17 @@ fn execute_mode_inner(
                 reference_status = Some((run.reference_stopped, run.exit_reason));
                 run.outcome
             })
+        } else if config
+            .scf
+            .as_ref()
+            .is_some_and(|s| s.cutoff_ladder.as_deref() == Some("off"))
+        {
+            // R10A retained this input pin but accidentally ignored it. The
+            // strict oracle must keep the original full-cutoff cold start.
+            problem.take().expect("legacy mode").run_outcome()
         } else {
+            // Omitted pin: retain the historical fixed-default coarse start,
+            // without restoring the retired ladder experiments or switches.
             dft_engine::cutoff_ladder::run_oracle(problem.take().expect("legacy mode"), &refs)
         };
         match run {
@@ -4251,6 +4261,135 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn strict_cli_ladder_off_preserves_oracle() {
+        let dir = std::env::temp_dir().join(format!("r10a-oracle-cli-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut xml = crate::test_fixtures::gaussian_with(2., 1., true, 161)
+            .replace("element=\"Xx\"", "element=\"He\"");
+        let pp = dft_upf::parse_upf(&xml).unwrap();
+        let charge = pp
+            .mesh()
+            .r()
+            .iter()
+            .map(|&r| {
+                format!(
+                    "{:.17e}",
+                    8. / std::f64::consts::PI.sqrt() * r * r * (-r * r).exp()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let start = xml.find("<PP_RHOATOM>").unwrap() + "<PP_RHOATOM>".len();
+        let end = xml.find("</PP_RHOATOM>").unwrap();
+        xml.replace_range(start..end, &charge);
+        fs::write(dir.join("syn.xml"), &xml).unwrap();
+        let pp = dft_upf::parse_upf(&xml).unwrap();
+        // The dev08 reproducer selected STRICT despite driver=legacy and the
+        // standard-only keys, and explicitly disabled the legacy ladder.
+        // Smaller synthetic geometry keeps this full CLI execution debug-fast.
+        let base = "[system]\nname='R10A oracle'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nfft_grid=[12,12,12]\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nmixing='pulay'\nmixing_beta=0.7\nmixing_history=8\nstandard_threshold_ha=5e-9\nverify='fixed_point'\nthreads=1\nmax_iterations=200\nnbands=5\nstart_density='atomic'\n";
+        let mut densities = Vec::new();
+        for (name, pin) in [("off", "cutoff_ladder='off'\n"), ("default", "")] {
+            let text = format!(
+                "{base}{pin}[performance]\nreference_strict=true\n[profile]\ndavidson_stages=false\n"
+            );
+            let config = Config::parse(&text).unwrap();
+            let (_, _scope) = crate::run_config::for_run(&config).unwrap();
+            let opts = options(&config).unwrap();
+            assert!(opts.standard.is_none());
+            assert_eq!(opts.eigen_tolerance, 1e-8);
+            let cell = config.cell().unwrap();
+            let atoms = [dft_geometry::Atom::new("He", [0.13, 0.21, 0.32])];
+            let potentials = [SpeciesPotential {
+                label: "He",
+                potential: &pp,
+            }];
+            let problem = ScfProblem::with_kpoints(
+                &cell,
+                &atoms,
+                &potentials,
+                opts,
+                &config.resolved_points().unwrap(),
+                dft_engine::OccupationPolicy::Insulator {
+                    minimum_gap_hartree: 1e-7,
+                },
+            )
+            .unwrap();
+            // Independent of CLI dispatch: these are the two pre-R10A entry
+            // points. Check both so respecting "off" cannot disable the default.
+            let expected = if name == "off" {
+                problem.run_outcome().unwrap()
+            } else {
+                dft_engine::cutoff_ladder::run_oracle(problem, &potentials).unwrap()
+            };
+            assert!(expected.converged);
+            let expected = expected.result;
+            let input = dir.join(format!("{name}.toml"));
+            let out = dir.join(name);
+            fs::write(&input, text).unwrap();
+            execute(&input, Some(&out)).unwrap();
+            let result: Value =
+                serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+            assert_eq!(result["scf"]["driver"], "strict_oracle");
+            assert_eq!(result["single_path"]["effective_profile"], "strict");
+            assert_eq!(
+                result["total_energy"]["ha"].as_f64().unwrap().to_bits(),
+                expected.total_hartree().to_bits(),
+                "{name}"
+            );
+            assert_eq!(result["convergence"]["iterations"], expected.history.len());
+            let history = result["convergence"]["history"].as_array().unwrap();
+            for (actual, expected) in history.iter().zip(&expected.history) {
+                assert_eq!(actual["davidson_iterations"], expected.davidson_iterations);
+                assert_eq!(
+                    actual["requested_eigen_tolerance_ha"]
+                        .as_f64()
+                        .unwrap()
+                        .to_bits(),
+                    expected.requested_eigen_tolerance.to_bits()
+                );
+            }
+            let density = fs::read(out.join("density.bin")).unwrap();
+            let expected: Vec<_> = expected
+                .density
+                .iter()
+                .flat_map(|v| v.to_le_bytes())
+                .collect();
+            assert_eq!(density, expected, "{name}");
+            if name == "off"
+                && (std::env::consts::OS, std::env::consts::ARCH) == ("macos", "aarch64")
+                && !dft_numerics::MKL_BACKEND
+            {
+                // Captured with the pre-R10A a5ce9cf4 CLI, Rust 1.99.1.
+                // The dev08 Si8 regression was c03f5261b8862aca -> ...2ad4
+                // at MPI8; platform/backend bits are not interchangeable.
+                assert_eq!(
+                    result["total_energy"]["ha"].as_f64().unwrap().to_bits(),
+                    0xbfe3_f626_c809_494f
+                );
+                assert_eq!(result["convergence"]["iterations"], 11);
+                assert_eq!(
+                    history
+                        .iter()
+                        .map(|h| h["davidson_iterations"].as_u64().unwrap())
+                        .collect::<Vec<_>>(),
+                    [3, 2, 3, 2, 2, 3, 1, 3, 3, 3, 2]
+                );
+                assert_eq!(
+                    sha256(&density),
+                    "310f2763cbc5f728e40f510460c39eb8ed19326a4f2484ee0b7351285fe84a1e"
+                );
+            }
+            densities.push(density);
+        }
+        assert_ne!(
+            densities[0], densities[1],
+            "fixture must exercise the ladder"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn reference_k_mesh_records_and_unsupported_combinations() {

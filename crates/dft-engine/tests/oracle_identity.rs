@@ -5,9 +5,10 @@
 //! c03f5261b8862aca -> c03f5261b8862ad4 (Ha binary64), SCF 11 -> 9,
 //! final-map Davidson 16 -> 7. Those are relayed numbers, not this synthetic
 //! fixture's goldens. Local Si8 pre-R10A and HEAD both give c03f5261b8862aca,
-//! SCF 10, final-map Davidson 6 with explicit Pulay beta=0.5/history=6.
-//! This test protects the retained default ladder; it does not reproduce or
-//! resolve the reported dev08 discrepancy.
+//! SCF 10, final-map Davidson 6 with explicit Pulay beta=0.5/history=6 and
+//! the ladder key omitted. The actual regression ignored an explicit CLI
+//! cutoff_ladder="off"; run::tests::strict_cli_ladder_off_preserves_oracle
+//! covers that dispatch. This test protects the retained omitted-key default.
 
 #[allow(dead_code)]
 mod common;

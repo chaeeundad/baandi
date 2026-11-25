@@ -7,10 +7,12 @@
 use dft_engine::{
     CompletionMode, ExecutionConfig, Mixing, ScfOptions, ScfProblem, ScfSession, SpeciesPotential,
     StepStatus,
-    input::{Atom, Cell, parse_upf},
+    input::{Atom, Cell, Pseudopotential, kpoints, parse_upf},
+    refscf::{api, profile::Profile},
+    refstart::StartInput,
 };
 use pyo3::{
-    exceptions::{PyRuntimeError, PyValueError},
+    exceptions::{PyNotImplementedError, PyRuntimeError, PyValueError},
     prelude::*,
 };
 use std::{collections::BTreeMap, sync::mpsc};
@@ -22,28 +24,41 @@ fn runtime_error(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
-/// Gamma-only LDA settings; omitted fields preserve engine defaults.
-/// ADR 0043 ONEPATH-4: the default is the single standard SCF path with the
-/// fixed-point verification (`standard_threshold_ha` 5e-9 Ha, `verify` True,
-/// mixing beta 0.5). `reference_strict = True` selects the strict reference
-/// path (beta 0.3 when that is the construction-time choice); its default
-/// mirrors the CLI switch `BAANDI_REFERENCE_STRICT=on`.
-#[pyclass(name = "Options", get_all, set_all)]
+/// LDA settings. Reference batch runs use atomic starts, Broyden beta 0.7,
+/// history 8 and fixed-point verification. Explicit legacy sessions retain
+/// their former Pulay defaults and support stepwise control until R8.
+#[pyclass(name = "Options")]
 #[derive(Clone)]
 struct Options {
+    #[pyo3(get, set)]
+    driver: String,
+    /// Unshifted mesh, reduced by time reversal as in the CLI.
+    #[pyo3(get, set)]
+    kgrid: [usize; 3],
+    #[pyo3(get, set)]
     reference_strict: bool,
+    #[pyo3(get, set)]
     standard_threshold_ha: f64,
+    #[pyo3(get, set)]
     verify: bool,
+    #[pyo3(get, set)]
     cutoff_hartree: f64,
+    #[pyo3(get, set)]
     bands: Option<usize>,
+    #[pyo3(get, set)]
     extra_bands: usize,
+    #[pyo3(get, set)]
     max_iterations: usize,
+    #[pyo3(get, set)]
     density_tolerance: f64,
+    #[pyo3(get, set)]
     energy_tolerance: f64,
+    #[pyo3(get, set)]
     eigen_tolerance: f64,
+    #[pyo3(get, set)]
     seed: u64,
-    mixing_beta: f64,
-    mixing_history: usize,
+    mixing_beta: Option<f64>,
+    mixing_history: Option<usize>,
 }
 #[pymethods]
 impl Options {
@@ -51,6 +66,8 @@ impl Options {
     fn new() -> Self {
         let o = ScfOptions::from_reference_switch();
         Self {
+            driver: "reference".into(),
+            kgrid: [1; 3],
             reference_strict: o.is_strict_reference(),
             standard_threshold_ha: dft_engine::StandardProfile::default().threshold_ha,
             verify: true,
@@ -62,16 +79,48 @@ impl Options {
             energy_tolerance: o.energy_tolerance,
             eigen_tolerance: o.eigen_tolerance,
             seed: o.seed,
-            mixing_beta: match o.mixing {
-                Mixing::Pulay { beta, .. } => beta,
-                _ => 0.5,
-            },
-            mixing_history: 6,
+            mixing_beta: None,
+            mixing_history: None,
         }
+    }
+    #[getter(mixing_beta)]
+    fn beta(&self) -> f64 {
+        self.mixing_beta.unwrap_or(if self.driver == "reference" {
+            0.7
+        } else if self.reference_strict {
+            0.3
+        } else {
+            0.5
+        })
+    }
+    #[setter(mixing_beta)]
+    fn set_beta(&mut self, beta: f64) {
+        self.mixing_beta = Some(beta);
+    }
+    #[getter(mixing_history)]
+    fn history(&self) -> usize {
+        self.mixing_history
+            .unwrap_or(if self.driver == "reference" { 8 } else { 6 })
+    }
+    #[setter(mixing_history)]
+    fn set_history(&mut self, history: usize) {
+        self.mixing_history = Some(history);
     }
 }
 impl Options {
     fn engine(&self) -> PyResult<ScfOptions> {
+        if !matches!(self.driver.as_str(), "reference" | "legacy") {
+            return Err(value_error("driver must be 'reference' or 'legacy'"));
+        }
+        if self.driver == "legacy" && self.kgrid != [1; 3] {
+            return Err(value_error("non-Gamma kgrid requires driver='reference'"));
+        }
+        if self.driver == "reference" && self.reference_strict {
+            return Err(value_error("reference_strict requires driver='legacy'"));
+        }
+        if self.driver == "reference" {
+            self.profile()?;
+        }
         if self.max_iterations == 0
             || [
                 self.cutoff_hartree,
@@ -102,7 +151,7 @@ impl Options {
                 ..ScfOptions::default()
             }
         };
-        Ok(ScfOptions {
+        let mut options = ScfOptions {
             cutoff_hartree: self.cutoff_hartree,
             bands: self.bands,
             extra_bands: self.extra_bands,
@@ -112,11 +161,30 @@ impl Options {
             eigen_tolerance: self.eigen_tolerance,
             seed: self.seed,
             mixing: Mixing::Pulay {
-                beta: self.mixing_beta,
-                history: self.mixing_history,
+                beta: self.beta(),
+                history: self.history(),
             },
             ..base
-        })
+        };
+        if self.driver == "reference" {
+            options.start_density = dft_engine::StartDensity::Atomic;
+            options.start_wavefunctions = dft_engine::StartWavefunctions::Atomic;
+            options.gamma_real = if self.kgrid == [1; 3] {
+                dft_engine::GammaReal::On
+            } else {
+                dft_engine::GammaReal::Off
+            };
+        }
+        Ok(options)
+    }
+    fn profile(&self) -> PyResult<Profile> {
+        Profile {
+            beta: self.beta(),
+            history: self.history(),
+            ..Profile::from_standard_ha(self.standard_threshold_ha).map_err(value_error)?
+        }
+        .validate()
+        .map_err(value_error)
     }
 }
 
@@ -133,7 +201,103 @@ struct ResultView {
 // The engine's mixer trait is not Send. Construct and retain the entire session
 // on one worker; only owned boundary values cross channels. This also avoids
 // unsafe Send implementations and releases the GIL while waiting for SCF work.
-type Job = Box<dyn FnOnce(&mut ScfSession) + Send>;
+enum Worker {
+    Legacy(Box<ScfSession>),
+    Reference(Box<ReferenceSession>),
+}
+
+struct ReferenceSession {
+    cell: Cell,
+    atoms: Vec<Atom>,
+    potentials: Vec<(String, Pseudopotential)>,
+    options: ScfOptions,
+    profile: Profile,
+    points: Vec<kpoints::KPoint>,
+    delivered: Option<api::Delivered>,
+}
+impl ReferenceSession {
+    fn run(&mut self) -> PyResult<()> {
+        if self.delivered.is_some() {
+            return Ok(());
+        }
+        let refs: Vec<_> = self
+            .potentials
+            .iter()
+            .map(|(s, p)| SpeciesPotential {
+                label: s,
+                potential: p,
+            })
+            .collect();
+        let mut request = api::Request::new(self.profile, self.points.clone());
+        request.derivatives = api::Derivatives {
+            forces: true,
+            stress: true,
+            deferred: true,
+        };
+        self.delivered = Some(
+            api::solve(
+                StartInput {
+                    cell: &self.cell,
+                    atoms: &self.atoms,
+                    potentials: &refs,
+                    options: &self.options,
+                },
+                request,
+            )
+            .map_err(runtime_error)?,
+        );
+        Ok(())
+    }
+    fn outcome(&self) -> PyResult<&dft_engine::ScfOutcome> {
+        match &self
+            .delivered
+            .as_ref()
+            .ok_or_else(|| runtime_error("terminal result not available; run first"))?
+            .run
+        {
+            api::Run::Scalar(run) => Ok(&run.outcome),
+            api::Run::Electronic(_) => Err(runtime_error("expected scalar reference result")),
+        }
+    }
+    fn derivatives(&mut self, stress: bool) -> PyResult<&api::Observables> {
+        let refs: Vec<_> = self
+            .potentials
+            .iter()
+            .map(|(s, p)| SpeciesPotential {
+                label: s,
+                potential: p,
+            })
+            .collect();
+        let input = || StartInput {
+            cell: &self.cell,
+            atoms: &self.atoms,
+            potentials: &refs,
+            options: &self.options,
+        };
+        let delivered = self
+            .delivered
+            .as_mut()
+            .ok_or_else(|| runtime_error("derivatives require a converged result"))?;
+        let api::Run::Scalar(run) = &mut delivered.run else {
+            return Err(runtime_error("expected scalar reference result"));
+        };
+        let derivatives = &mut delivered.derivatives;
+        derivatives
+            .prepare(input(), &mut run.outcome)
+            .map_err(runtime_error)?;
+        derivatives
+            .evaluate_forces(input(), &run.outcome.result)
+            .map_err(runtime_error)?;
+        if stress {
+            derivatives
+                .evaluate_stress(input(), &run.outcome.result)
+                .map_err(runtime_error)?;
+        }
+        Ok(derivatives)
+    }
+}
+
+type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 #[pyclass(name = "Session")]
 struct Session {
     cell_rows_bohr: [[f64; 3]; 3],
@@ -143,12 +307,13 @@ struct Session {
     force_options: ScfOptions,
     jobs: mpsc::Sender<Job>,
     volume: f64,
+    reference: bool,
 }
 impl Session {
-    fn call<T: Send + 'static>(
+    fn worker_call<T: Send + 'static>(
         &self,
         py: Python<'_>,
-        f: impl FnOnce(&mut ScfSession) -> PyResult<T> + Send + 'static,
+        f: impl FnOnce(&mut Worker) -> PyResult<T> + Send + 'static,
     ) -> PyResult<T> {
         py.detach(|| {
             let (tx, rx) = mpsc::channel();
@@ -159,6 +324,31 @@ impl Session {
                 .map_err(|_| runtime_error("session worker stopped"))?;
             rx.recv()
                 .map_err(|_| runtime_error("session worker failed"))?
+        })
+    }
+    fn call<T: Send + 'static>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&mut ScfSession) -> PyResult<T> + Send + 'static,
+    ) -> PyResult<T> {
+        if self.reference {
+            return Err(PyNotImplementedError::new_err(
+                "stepwise control requires driver='legacy' until the reference stepper (R8)",
+            ));
+        }
+        self.worker_call(py, move |s| match s {
+            Worker::Legacy(s) => f(s),
+            Worker::Reference(_) => unreachable!("driver fixed at construction"),
+        })
+    }
+    fn reference_call<T: Send + 'static>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&mut ReferenceSession) -> PyResult<T> + Send + 'static,
+    ) -> PyResult<T> {
+        self.worker_call(py, move |s| match s {
+            Worker::Reference(s) => f(s),
+            Worker::Legacy(_) => unreachable!("driver fixed at construction"),
         })
     }
 }
@@ -179,7 +369,18 @@ impl Session {
                 "species and positions must have the same nonzero length",
             ));
         }
-        let options = options.cloned().unwrap_or_else(Options::new).engine()?;
+        let settings = options.cloned().unwrap_or_else(Options::new);
+        let reference = settings.driver == "reference";
+        let options = settings.engine()?;
+        let points = kpoints::reduce_time_reversal(
+            &kpoints::monkhorst_pack(settings.kgrid, [0.; 3]).map_err(value_error)?,
+        )
+        .map_err(value_error)?;
+        let profile = if reference {
+            Some(settings.profile()?)
+        } else {
+            None
+        };
         let retained = (
             species.clone(),
             positions_fractional.clone(),
@@ -192,7 +393,7 @@ impl Session {
             std::thread::Builder::new()
                 .name("baandi-session".into())
                 .spawn(move || {
-                    let setup = || -> PyResult<(ScfSession, f64)> {
+                    let setup = || -> PyResult<(Worker, f64)> {
                         let cell =
                             Cell::from_user_rows_bohr(cell_rows_bohr).map_err(value_error)?;
                         let volume = cell.volume_bohr3();
@@ -203,7 +404,9 @@ impl Session {
                             .collect();
                         let potentials: Vec<_> = pseudopotentials
                             .iter()
-                            .map(|(s, text)| parse_upf(text).map(|p| (s, p)).map_err(value_error))
+                            .map(|(s, text)| {
+                                parse_upf(text).map(|p| (s.clone(), p)).map_err(value_error)
+                            })
                             .collect::<PyResult<_>>()?;
                         let refs: Vec<_> = potentials
                             .iter()
@@ -212,6 +415,20 @@ impl Session {
                                 potential: p,
                             })
                             .collect();
+                        if let Some(profile) = profile {
+                            return Ok((
+                                Worker::Reference(Box::new(ReferenceSession {
+                                    cell,
+                                    atoms,
+                                    potentials,
+                                    options,
+                                    profile,
+                                    points,
+                                    delivered: None,
+                                })),
+                                volume,
+                            ));
+                        }
                         let problem =
                             ScfProblem::new(&cell, &atoms, &refs, options).map_err(value_error)?;
                         let session = ScfSession::new(
@@ -220,7 +437,7 @@ impl Session {
                             ExecutionConfig::default(),
                         )
                         .map_err(value_error)?;
-                        Ok((session, volume))
+                        Ok((Worker::Legacy(Box::new(session)), volume))
                     };
                     match setup() {
                         Ok((mut session, volume)) => {
@@ -242,6 +459,7 @@ impl Session {
             Ok(Self {
                 jobs,
                 volume,
+                reference,
                 cell_rows_bohr,
                 species: retained.0,
                 positions_fractional: retained.1,
@@ -262,6 +480,9 @@ impl Session {
         })
     }
     fn run(&mut self, py: Python<'_>) -> PyResult<()> {
+        if self.reference {
+            return self.reference_call(py, ReferenceSession::run);
+        }
         self.call(py, |s| {
             if s.snapshot().status == StepStatus::Created {
                 s.initialize().map_err(runtime_error)?;
@@ -284,6 +505,18 @@ impl Session {
         self.call(py, |s| Ok(s.snapshot().iteration))
     }
     fn result(&self, py: Python<'_>) -> PyResult<ResultView> {
+        if self.reference {
+            return self.reference_call(py, |s| {
+                let o = s.outcome()?;
+                Ok(ResultView {
+                    converged: o.converged,
+                    energy_hartree: o.result.total_hartree(),
+                    eigenvalues_hartree: o.result.eigenvalues.clone(),
+                    charge_electrons: o.result.charge,
+                    iterations: o.result.history.len(),
+                })
+            });
+        }
         self.call(py, |s| {
             let o = s.result().ok_or_else(|| {
                 runtime_error("terminal result not available; initialize and step or run first")
@@ -297,9 +530,20 @@ impl Session {
             })
         })
     }
-    /// Cartesian forces in input atom order, Ha/Bohr. Requires a strict
-    /// certificate or a passed fixed-point verification (`verify` True).
+    /// Cartesian forces in input atom order, Ha/Bohr. Reference delivery uses
+    /// the facade verification contract, including explicit verify=False opt-out.
+    /// Legacy delivery requires its strict certificate or passed verification.
     fn forces(&self, py: Python<'_>) -> PyResult<Vec<[f64; 3]>> {
+        if self.reference {
+            return self.reference_call(py, |s| {
+                Ok(s.derivatives(false)?
+                    .forces
+                    .as_ref()
+                    .expect("requested forces")
+                    .values
+                    .clone())
+            });
+        }
         let rows = self.cell_rows_bohr;
         let species = self.species.clone();
         let positions = self.positions_fractional.clone();
@@ -339,8 +583,8 @@ impl Session {
             .map_err(runtime_error)
         })
     }
-    /// Tensile-positive Cartesian stress, Ha/Bohr^3; frozen Miller set. Requires
-    /// a strict certificate or a passed verification at a threshold of at most
+    /// Tensile-positive Cartesian stress, Ha/Bohr^3; frozen Miller set. Uses
+    /// the same delivery contract as forces, at a threshold of at most
     /// `StandardProfile::STRESS_THRESHOLD_HA` (5e-11 Ha, the stress class; the
     /// CLI default for stress inputs, ADR 0043 ONEPATH-2/4).
     fn stress(&self, py: Python<'_>) -> PyResult<[[f64; 3]; 3]> {
@@ -352,6 +596,23 @@ impl Session {
                 dft_engine::StandardProfile::STRESS_THRESHOLD_HA,
                 p.threshold_ha
             )));
+        }
+        if self.reference {
+            let (values, pulay) = self.reference_call(py, |s| {
+                let r = s
+                    .derivatives(true)?
+                    .stress
+                    .as_ref()
+                    .expect("requested stress");
+                Ok((
+                    r.values,
+                    r.pulay
+                        .as_ref()
+                        .map(|p| (p.correction, p.uncertainty, p.warning)),
+                ))
+            })?;
+            warn_pulay(py, pulay)?;
+            return Ok(values);
         }
         let rows = self.cell_rows_bohr;
         let species = self.species.clone();
@@ -396,14 +657,25 @@ impl Session {
             })
             .map_err(runtime_error)
         })?;
-        if let Some((correction, uncertainty, true)) = pulay {
-            py.import("warnings")?.call_method1("warn", (format!("Frozen-Miller stress is not cutoff converged: isotropic Pulay estimate {correction:e} +/- {uncertainty:e} Ha/Bohr^3 exceeds 1e-5 or sampled shells are unresolved; increase cutoff"),))?;
-        }
+        warn_pulay(py, pulay)?;
         Ok(values)
     }
     /// (shape, minimum, maximum, mean [Bohr^-3], integrated electrons).
     fn density_summary(&self, py: Python<'_>) -> PyResult<(Vec<usize>, f64, f64, f64, f64)> {
         let volume = self.volume;
+        if self.reference {
+            return self.reference_call(py, move |s| {
+                let d = &s.outcome()?.result.density;
+                let mean = d.iter().sum::<f64>() / d.len() as f64;
+                Ok((
+                    d.shape().to_vec(),
+                    d.iter().copied().fold(f64::INFINITY, f64::min),
+                    d.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                    mean,
+                    mean * volume,
+                ))
+            });
+        }
         self.call(py, move |s| {
             let d = s
                 .density()
@@ -418,6 +690,13 @@ impl Session {
             ))
         })
     }
+}
+
+fn warn_pulay(py: Python<'_>, pulay: Option<(f64, f64, bool)>) -> PyResult<()> {
+    if let Some((correction, uncertainty, true)) = pulay {
+        py.import("warnings")?.call_method1("warn", (format!("Frozen-Miller stress is not cutoff converged: isotropic Pulay estimate {correction:e} +/- {uncertainty:e} Ha/Bohr^3 exceeds 1e-5 or sampled shells are unresolved; increase cutoff"),))?;
+    }
+    Ok(())
 }
 
 /// Use precisely the CLI's conversion operation, not ASE's CODATA constants.

@@ -124,3 +124,138 @@ strict values, inside the 5e-9 Ha standard class; loosely converged
 empty bands beyond the first differ, as the standard band policy allows). The
 ASE stress oracle runs at `standard_threshold_ha = 5e-11` (max FD error 8.8e-8
 eV/Angstrom^3, bound 1e-5); a default-threshold session refuses `stress()`.
+
+
+## R5 reference batch migration (2026-11-25)
+
+The approved `dft-engine::input::kpoints` re-export lets the binding use the
+same mesh and time-reversal helpers as the CLI without a new dependency.
+`Options.kgrid` defaults to `[1, 1, 1]` (Gamma). Other positive integer meshes
+use unshifted Monkhorst-Pack sampling and time-reversal reduction, matching CLI
+`basis.kgrid` defaults. Gamma selects the real driver; other meshes select the
+complex k driver. Legacy sessions remain Gamma-only and reject other meshes.
+
+Native acceptance: all **6 tests passed, zero skips**, using the CPython 3.9
+debug extension and same-build CLI. New measured evidence is in
+[`tests/r5-reference-evidence.json`](tests/r5-reference-evidence.json); it records
+the input TOML, CLI command/tool identity, external UPF SHA-256, and both sides'
+hexadecimal results. Every comparison uses exact float bits, with no tolerance:
+
+| Si2 mesh | Energy (Ha) | SCF iterations | Max energy difference (Ha) | Max force difference (Ha/Bohr) | Max stress difference (Ha/Bohr^3) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Gamma | -7.233591259346283 | 8 | 0 | 0 | 0 |
+| 2×2×2 | -7.776922790383691 | 7 | 0 | 0 | 0 |
+
+These are displaced Si2 adapter-parity measurements at a low cutoff, not
+converged physical predictions or new QE references. The native suite also
+checks defaults/overrides, invalid options, explicit stepwise gating, rejection
+of unsupported atomic-start data without fallback, legacy mesh rejection and
+legacy batch/step/owned-result equivalence.
+
+The measurements above and `native-evidence.json` / `ase-evidence.json` are
+historical **legacy-driver** evidence. They are preserved, not re-labelled as
+reference results. R5 changes the Python default driver to `"reference"`.
+
+`Options()` now selects atomic density and wavefunction starts, reference
+Broyden mixing beta **0.7**, history **8**, standard threshold **5e-9 Ha**, and
+fixed-point verification **on**, matching the CLI reference facade. Explicit
+mixing overrides are passed into the reference profile (threshold in Ry = twice
+the Ha option). `driver = "legacy"` retains the prior session implementation,
+Pulay beta **0.5**, history **6**, and stepwise control. Strict legacy defaults
+use beta **0.3**. Mixing defaults resolve when read/used, so changing `driver`
+restores the appropriate defaults without overwriting explicit overrides.
+
+`reference_strict = True` (including its existing environment-derived default)
+requires `driver = "legacy"`; it never silently redirects an explicit reference
+session. Reference inputs need the atomic UPF data accepted by `refstart`;
+unsupported inputs fail, with no legacy retry. The former synthetic tests have
+zero atomic density and no atomic wavefunctions; they remain legacy fixtures.
+
+`run()` calls `refscf::api::solve` once and retains its delivery. `result()` and
+`density_summary()` read that delivery, while `forces()` and `stress()` use the
+facade's deferred observable preparation/evaluation. Stress called before forces
+still follows prepare → forces → stress. Repeated calls reuse the delivered
+state. The GIL is released while the worker calculates. Reference `verify=False`
+uses the facade's explicit unverified opt-out, as on the CLI.
+
+Until the reference stepper (R8), `initialize()`, `step()`, `status` and
+`iteration` raise exactly:
+
+```text
+stepwise control requires driver='legacy' until the reference stepper (R8)
+```
+
+Select `standard_threshold_ha = 5e-11` or tighter **before** creating a session
+whose stress will be requested. Python cannot infer a later stress request at
+construction, whereas CLI `[output] stress=true` selects this threshold by
+default. The returned stress is tensile-positive, frozen-Miller Ha/Bohr^3, with
+the existing separate Pulay warning; it is not a cutoff-convergence claim.
+
+New native tests are in `tests/test_reference.py`, discoverable by pytest or
+standard-library unittest. They skip when the extension is unavailable. Si2
+parity additionally requires `BAANDI_CLI` and `BAANDI_SI_UPF` pointing to a
+same-build CLI and an external Si.pz-vbc.UPF. The two cases use the same
+slightly displaced Si2 cell with Gamma and an unshifted 2×2×2 mesh, 4 Ha cutoff,
+8 bands, 5e-11 Ha threshold, and verification on. They assert the CLI driver is
+reference and require hexadecimal identity for energy, all six force components
+and all nine stress components. This is adapter parity, not independent physics
+validation or a QE comparison. Stress adds three cutoff SCF scans; run these
+explicitly outside the fast Cargo gate.
+
+```sh
+# Build CLI and extension with the same debug profile/toolchain.
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+cargo build -p dft-cli -p baandi-py --features baandi-py/python-extension --offline --locked
+# Load a wheel built with maturin, or stage the cdylib in a scratch baandi package.
+PYTHONPATH=/path/to/scratch/package BAANDI_CLI="$PWD/target/debug/dft-cli" \
+BAANDI_SI_UPF=/path/to/Si.pz-vbc.UPF \
+BAANDI_R5_EVIDENCE="$PWD/crates/baandi-py/tests/r5-reference-evidence.json" \
+python -m unittest discover -s crates/baandi-py/tests -v
+```
+
+Default `cargo test -p baandi-py` still has zero binding tests because PyO3 is
+omitted from Rust test builds. It cannot establish native acceptance. Always run
+the feature-enabled check/clippy and the native suite as well. README generation,
+existing top-level `python/baandi` compatibility tests/ASE option forwarding, and
+registry/dashboard updates are outside this ticket's owned files and remain
+orchestrator follow-up.
+
+R5 local checks (2026-11-25):
+
+- `cargo check --workspace --tests`: exit 0.
+- `cargo test -p baandi-py`: exit 0, zero Rust tests and zero doctests.
+- `cargo fmt --check && cargo clippy -p baandi-py --all-targets -- -D warnings`: exit 0.
+- Feature-enabled Clippy (`--features python-extension --all-targets`): exit 0.
+- Native build (`cargo build -p baandi-py -p dft-cli --features
+  baandi-py/python-extension --offline --locked`): exit 0. CPython 3.9 loaded
+  the cdylib from a scratch package under `target/r5-python`; no wheel-install
+  acceptance is claimed.
+- Native unittest command above, with the external Si UPF and built CLI:
+  exit 0, 6 passed, zero skipped (1.304 s).
+
+Logs are local, ignored files under `target/r5-*.log`. Native assertions and the
+new stored evidence establish the adapter comparisons; zero-test Cargo passes
+alone do not establish native acceptance.
+
+The full workspace gate was also run with
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP="$PWD/target/tmp" scripts/check.sh`:
+exit **1**, build/fmt/clippy PASS; 107 test binaries, **1012 passed, 3 failed,
+221 ignored**, 335 s total (42 s test wall). All three failures are existing
+CLI cache tests whose successful-cache fixtures reject the sandbox's checkout-
+local scratch directory with `pseudopotential cache must be outside repositories`:
+
+- `pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites`
+- `pseudo::cache_resolution_and_no_network_side_effects`
+- `pseudo::cached_fetch_checks_hash_and_provenance`
+
+A direct rerun of the first test under the same scratch root exited 101 and
+confirmed the same path rejection at `crates/dft-cli/src/pseudo.rs:611`. No cache
+policy or unrelated tests were changed. The sandbox also denies the gate's
+optional `ps` load probe and `nice` priority adjustment. These limitations are
+separate from the six passing native binding tests. The no-extension run skips
+all six methods cleanly (exit 0), which is not numerical acceptance.
+
+The final scoped gate,
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP="$PWD/target/tmp" scripts/check.sh baandi-py`,
+exited **0**: build/test/fmt/clippy all PASS (2 s). It remains a zero-Rust-test
+crate gate; the separate native suite supplies the binding acceptance.

@@ -1,0 +1,240 @@
+{
+  "task": "R5-PYTHON-RUN",
+  "reference": "same-build BAANDI CLI, not QE",
+  "cases": [
+    {
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "input_toml": "[system]\nname=\"R5 Si2\"\nlattice_unit=\"bohr\"\nlattice_vectors=[[0.0, 5.13, 5.13], [5.13, 0.0, 5.13], [5.13, 5.13, 0.0]]\n[[system.atoms]]\nspecies=\"Si\"\nfractional=[0.0, 0.0, 0.0]\n[[system.atoms]]\nspecies=\"Si\"\nfractional=[0.251, 0.249, 0.252]\n[pseudopotentials]\nSi=\"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n[basis]\necutwfc_ry=8.0\nkgrid=[1, 1, 1]\n[xc]\nfunctional=\"lda-pz\"\n[scf]\ndriver=\"reference\"\nnbands=8\nstandard_threshold_ha=5e-11\n[output]\nforces=true\nstress=true\n",
+      "cli_command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/R5-PYTHON-RUN/target/debug/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/R5-PYTHON-RUN/target/tmp/r5-python-w8kzee6i/input.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/R5-PYTHON-RUN/target/tmp/r5-python-w8kzee6i/out"
+      ],
+      "driver": "reference",
+      "cli_tool": {
+        "git_commit": "2c96b9ac53f5c3a4ef401de6d54582f52ecdeac1",
+        "name": "dft-cli",
+        "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+        "version": "0.1.0"
+      },
+      "cli_energy_hex": "-0x1.cef328c0e184fp+2",
+      "cli_forces_hex": [
+        [
+          "0x1.69b5ddc3fd010p-10",
+          "0x1.0f45738e49743p-8",
+          "-0x1.d1f1a92834af8p-17"
+        ],
+        [
+          "-0x1.69c993c53c3dfp-10",
+          "-0x1.0f4fe04638d91p-8",
+          "0x1.d23002724bb20p-17"
+        ]
+      ],
+      "cli_stress_hex": [
+        [
+          "-0x1.639fca00e6f80p-10",
+          "-0x1.38d97522fb21ep-25",
+          "0x1.a51d68bda0ae0p-17"
+        ],
+        [
+          "-0x1.38d97522fb21ep-25",
+          "-0x1.638e9696f37b0p-10",
+          "0x1.18c474a0bf724p-18"
+        ],
+        [
+          "0x1.a51d68bda0ae0p-17",
+          "0x1.18c474a0bf724p-18",
+          "-0x1.63a1f1fb32a50p-10"
+        ]
+      ],
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "energy_ha": -7.233591259346283,
+      "energy_hex": "-0x1.cef328c0e184fp+2",
+      "forces_ha_bohr": [
+        [
+          0.0013798157315223526,
+          0.00413927146136023,
+          -1.3886212926560764e-05
+        ],
+        [
+          -0.0013801094476628623,
+          -0.004139892820805528,
+          1.3893471280638332e-05
+        ]
+      ],
+      "forces_hex": [
+        [
+          "0x1.69b5ddc3fd010p-10",
+          "0x1.0f45738e49743p-8",
+          "-0x1.d1f1a92834af8p-17"
+        ],
+        [
+          "-0x1.69c993c53c3dfp-10",
+          "-0x1.0f4fe04638d91p-8",
+          "0x1.d23002724bb20p-17"
+        ]
+      ],
+      "stress_ha_bohr3": [
+        [
+          -0.0013565985720793428,
+          -3.642046866162558e-08,
+          1.2550201400123582e-05
+        ],
+        [
+          -3.642046866162558e-08,
+          -0.0013563422596578438,
+          4.183760353935495e-06
+        ],
+        [
+          1.2550201400123582e-05,
+          4.183760353935495e-06,
+          -0.0013566307014111385
+        ]
+      ],
+      "stress_hex": [
+        [
+          "-0x1.639fca00e6f80p-10",
+          "-0x1.38d97522fb21ep-25",
+          "0x1.a51d68bda0ae0p-17"
+        ],
+        [
+          "-0x1.38d97522fb21ep-25",
+          "-0x1.638e9696f37b0p-10",
+          "0x1.18c474a0bf724p-18"
+        ],
+        [
+          "0x1.a51d68bda0ae0p-17",
+          "0x1.18c474a0bf724p-18",
+          "-0x1.63a1f1fb32a50p-10"
+        ]
+      ],
+      "iterations": 8,
+      "max_energy_difference_ha": 0.0,
+      "max_force_difference_ha_bohr": 0.0,
+      "max_stress_difference_ha_bohr3": 0.0
+    },
+    {
+      "kgrid": [
+        2,
+        2,
+        2
+      ],
+      "input_toml": "[system]\nname=\"R5 Si2\"\nlattice_unit=\"bohr\"\nlattice_vectors=[[0.0, 5.13, 5.13], [5.13, 0.0, 5.13], [5.13, 5.13, 0.0]]\n[[system.atoms]]\nspecies=\"Si\"\nfractional=[0.0, 0.0, 0.0]\n[[system.atoms]]\nspecies=\"Si\"\nfractional=[0.251, 0.249, 0.252]\n[pseudopotentials]\nSi=\"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n[basis]\necutwfc_ry=8.0\nkgrid=[2, 2, 2]\n[xc]\nfunctional=\"lda-pz\"\n[scf]\ndriver=\"reference\"\nnbands=8\nstandard_threshold_ha=5e-11\n[output]\nforces=true\nstress=true\n",
+      "cli_command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/R5-PYTHON-RUN/target/debug/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/R5-PYTHON-RUN/target/tmp/r5-python-sjzqjdl8/input.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/R5-PYTHON-RUN/target/tmp/r5-python-sjzqjdl8/out"
+      ],
+      "driver": "reference",
+      "cli_tool": {
+        "git_commit": "2c96b9ac53f5c3a4ef401de6d54582f52ecdeac1",
+        "name": "dft-cli",
+        "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+        "version": "0.1.0"
+      },
+      "cli_energy_hex": "-0x1.f1b91a5e0dc2dp+2",
+      "cli_forces_hex": [
+        [
+          "0x1.c845c2040ff20p-11",
+          "0x1.563f234573d08p-9",
+          "-0x1.d106a9c4b7d3cp-17"
+        ],
+        [
+          "-0x1.c84a5e4cbc426p-11",
+          "-0x1.5642617e42758p-9",
+          "0x1.d13c867fd1b54p-17"
+        ]
+      ],
+      "cli_stress_hex": [
+        [
+          "-0x1.1b38090706800p-15",
+          "-0x1.d3875bdca81bep-25",
+          "0x1.77240d7d0f8f8p-17"
+        ],
+        [
+          "-0x1.d3875bdca81bep-25",
+          "-0x1.19ff915917400p-15",
+          "0x1.f3fd5f4c70348p-19"
+        ],
+        [
+          "0x1.77240d7d0f8f8p-17",
+          "0x1.f3fd5f4c70348p-19",
+          "-0x1.1b5f0fde34800p-15"
+        ]
+      ],
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "energy_ha": -7.776922790383691,
+      "energy_hex": "-0x1.f1b91a5e0dc2dp+2",
+      "forces_ha_bohr": [
+        [
+          0.0008702707132286248,
+          0.0026111345821174838,
+          -1.385885560395308e-05
+        ],
+        [
+          -0.0008703050640105389,
+          -0.002611231232667526,
+          1.3865125992785415e-05
+        ]
+      ],
+      "forces_hex": [
+        [
+          "0x1.c845c2040ff20p-11",
+          "0x1.563f234573d08p-9",
+          "-0x1.d106a9c4b7d3cp-17"
+        ],
+        [
+          "-0x1.c84a5e4cbc426p-11",
+          "-0x1.5642617e42758p-9",
+          "0x1.d13c867fd1b54p-17"
+        ]
+      ],
+      "stress_ha_bohr3": [
+        [
+          -3.376232239578336e-05,
+          -5.4427509365133876e-08,
+          1.1180067980839651e-05
+        ],
+        [
+          -5.4427509365133876e-08,
+          -3.361681837852487e-05,
+          3.725213821165552e-06
+        ],
+        [
+          1.1180067980839651e-05,
+          3.725213821165552e-06,
+          -3.378049562886842e-05
+        ]
+      ],
+      "stress_hex": [
+        [
+          "-0x1.1b38090706800p-15",
+          "-0x1.d3875bdca81bep-25",
+          "0x1.77240d7d0f8f8p-17"
+        ],
+        [
+          "-0x1.d3875bdca81bep-25",
+          "-0x1.19ff915917400p-15",
+          "0x1.f3fd5f4c70348p-19"
+        ],
+        [
+          "0x1.77240d7d0f8f8p-17",
+          "0x1.f3fd5f4c70348p-19",
+          "-0x1.1b5f0fde34800p-15"
+        ]
+      ],
+      "iterations": 7,
+      "max_energy_difference_ha": 0.0,
+      "max_force_difference_ha_bohr": 0.0,
+      "max_stress_difference_ha_bohr3": 0.0
+    }
+  ]
+}

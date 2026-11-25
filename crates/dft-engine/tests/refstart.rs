@@ -289,9 +289,13 @@ fn completion_and_empty_owners() {
 }
 #[test]
 fn unsupported_and_dependent_input_fails_collectively() {
+    #[allow(dead_code)]
+    #[path = "common/mod.rs"]
+    mod common;
     let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
     let atoms = [Atom::new("Xx", [0.; 3])];
     let pp = synthetic(false, 3);
+    let pbe_core = common::potential_with_nlcc(true, "PBE");
     for ranks in [1, 3, 8] {
         simulate(ranks, |comm: &SimRank| {
             let species = [SpeciesPotential {
@@ -311,6 +315,28 @@ fn unsupported_and_dependent_input_fails_collectively() {
                 )
                 .is_err()
             );
+            // G2B removes the PBE+NLCC rejection; dependent atomic columns
+            // above still fail, and the CLI's spin guard remains unchanged.
+            let species = [SpeciesPotential {
+                label: "Xx",
+                potential: &pbe_core,
+            }];
+            let o = ScfOptions {
+                functional: Functional::Pbe,
+                ..o
+            };
+            let state = refstart::start(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &species,
+                    options: &o,
+                },
+                comm,
+            )
+            .unwrap();
+            assert!(state.core_density.is_some());
+            assert!(state.pbe_core.is_some());
         });
     }
 }

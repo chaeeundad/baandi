@@ -49,13 +49,18 @@ pub(super) fn fields<K: Collective>(
     // Reuse rho(G) before the Poisson multiplier overwrites it. GGA owns only
     // this rank's slabs/sticks and follows the serial signed-density policy.
     let pbe = if functional == Functional::Pbe {
-        Some(dft_physics::gga::distributed::evaluate(
-            &mut state.fields,
-            comm,
-            cell,
-            density,
-            &coeff,
-        )?)
+        Some(if let Some(core) = &mut state.pbe_core {
+            core.evaluate(
+                &mut state.fields,
+                comm,
+                cell,
+                density,
+                &coeff,
+                state.core_density.as_ref().unwrap(),
+            )?
+        } else {
+            dft_physics::gga::distributed::evaluate(&mut state.fields, comm, cell, density, &coeff)?
+        })
     } else {
         None
     };

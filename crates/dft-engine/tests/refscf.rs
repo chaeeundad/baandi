@@ -6367,3 +6367,332 @@ fn memory_trim_case(name: &str, rows: [[f64; 3]; 3], nonlocal: bool, ranks: usiz
         );
     });
 }
+
+// G2B: core Fourier coefficients and gradients are compared with a full serial
+// FFT of the independently built legacy total density, including skew/Nyquist.
+#[test]
+fn pbe_nlcc_total_gradient_and_start_match_serial() {
+    use dft_engine::{Functional, ScfOptions, ScfProblem, SpeciesPotential, refstart::StartInput};
+    use dft_numerics::Fft3d;
+    use dft_physics::{data::FftPlan3d, gga};
+    let pp = common::potential_with_nlcc(true, "PBE");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0.1, 0.2, 5.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for dims in [[8, 10, 12], [9, 11, 7], [7, 8, 9]] {
+        let options = ScfOptions {
+            functional: Functional::Pbe,
+            cutoff_hartree: 3.,
+            start_density: dft_engine::StartDensity::Atomic,
+            bands: Some(3),
+            grid_override: Some(dims),
+            ..Default::default()
+        };
+        let old = ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+        let n = old.starting_density();
+        let core = old.core_density().unwrap();
+        let total = &n + core;
+        let mut fft = FftPlan3d::new(dims).unwrap();
+        let x = gga::evaluate(&total, &cell, &mut fft).unwrap();
+        let h = dft_physics::hartree::evaluate(&n, &cell, &mut fft).unwrap();
+        let mut coeff = Array3::zeros(dims);
+        fft.to_reciprocal(&total.mapv(c), &mut coeff).unwrap();
+        let b = cell.reciprocal_columns_inverse_bohr();
+        let gradients: Vec<_> = (0..3)
+            .map(|axis| {
+                let mut derivative = coeff.clone();
+                for ((i, j, k), z) in derivative.indexed_iter_mut() {
+                    let indices = [i, j, k];
+                    let wavevector: f64 = (0..3)
+                        .map(|a| {
+                            let m = if dims[a] % 2 == 0 && indices[a] == dims[a] / 2 {
+                                0.
+                            } else if indices[a] <= (dims[a] - 1) / 2 {
+                                indices[a] as f64
+                            } else {
+                                indices[a] as f64 - dims[a] as f64
+                            };
+                            b[axis][a] * m
+                        })
+                        .sum();
+                    *z *= C::new(0., wavevector);
+                }
+                let mut out = Array3::zeros(dims);
+                fft.to_real(&derivative, &mut out).unwrap();
+                out.mapv(|z| z.re)
+            })
+            .collect();
+        for ranks in [1, 3, 8] {
+            let errors = dft_mpi::simulate(ranks, |comm| {
+                let mut state = dft_engine::refstart::start(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &species,
+                        options: &options,
+                    },
+                    comm,
+                )
+                .unwrap();
+                let offsets = state.fields.plane_offsets();
+                let cached = state.pbe_core.as_ref().unwrap().density_g();
+                let total_g: Vec<_> = state
+                    .density_g
+                    .iter()
+                    .zip(cached)
+                    .map(|(n, c)| n + c)
+                    .collect();
+                let owned = PbeNoGather(comm);
+                let actual =
+                    gga::distributed::gradient(&mut state.fields, &owned, &cell, &total_g).unwrap();
+                let mut max_gradient = 0_f64;
+                let mut max_potential = 0_f64;
+                for (local, &global) in offsets.iter().enumerate() {
+                    assert!(
+                        (state.core_density.as_ref().unwrap()[local]
+                            - core.as_slice().unwrap()[global])
+                            .abs()
+                            < 2e-14
+                    );
+                    for axis in 0..3 {
+                        max_gradient = max_gradient.max(
+                            (actual[axis][local] - gradients[axis].as_slice().unwrap()[global])
+                                .abs(),
+                        );
+                    }
+                    let expected = state.ionic[local]
+                        + h.potential.as_slice().unwrap()[global].re
+                        + x.potential.as_slice().unwrap()[global];
+                    max_potential = max_potential.max((state.potential[local] - expected).abs());
+                }
+                assert!(max_gradient < 2e-13, "gradient {max_gradient:e} Bohr^-4");
+                assert!(
+                    max_potential < 2e-12,
+                    "start potential {max_potential:e} Ha"
+                );
+                [max_gradient, max_potential]
+            });
+            let maxima: [f64; 2] =
+                std::array::from_fn(|i| errors.iter().map(|v| v[i]).fold(0., f64::max));
+            eprintln!(
+                "G2B_NLCC grid={dims:?} ranks={ranks} gradient={} Bohr^-4 start_potential={} Ha",
+                maxima[0], maxima[1]
+            );
+        }
+    }
+}
+
+fn pbe_nlcc_delivered_fixture(nonlocal: bool) {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, ScfProblem, SpeciesPotential, StartWavefunctions,
+        refstart::StartInput,
+    };
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_nlcc(nonlocal, "PBE");
+    let cell = dft_geometry::Cell::from_user_rows_bohr(if nonlocal {
+        [[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 6.]]
+    } else {
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]
+    })
+    .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        cutoff_hartree: if nonlocal { 3. } else { 2. },
+        start_density: dft_engine::StartDensity::Atomic,
+        bands: Some(3),
+        max_iterations: 160,
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    let old = ScfProblem::new(
+        &cell,
+        &atoms,
+        &species,
+        ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            start_wavefunctions: StartWavefunctions::FreeElectron,
+            free_electron_initial_guess: false,
+            eigen_tolerance: 1e-11,
+            energy_tolerance: 1e-12,
+            density_tolerance: 1e-9,
+            ..options.clone()
+        },
+    )
+    .unwrap();
+    let core = old.core_density().unwrap().clone();
+    let dims = old.grid_dimensions();
+    let old = old.run().unwrap();
+    assert!(old.certified);
+    let mut rank_energies = Vec::new();
+    for ranks in [1, 3, 8] {
+        let answers = dft_mpi::simulate(ranks, |comm| {
+            let mut values = Vec::new();
+            for threshold_ry in [1e-8, 1e-12] {
+                let mut full = None;
+                for lean in ["off", "on"] {
+                    let config = RunConfig::from_pairs(&[("refscf_lean_energy", lean)]).unwrap();
+                    let _scope = config.enter();
+                    let run = dft_engine::refscf::driver::run_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &species,
+                            options: &options,
+                        },
+                        Profile {
+                            threshold_ry,
+                            ..Default::default()
+                        },
+                        comm,
+                    )
+                    .unwrap();
+                    assert!(run.outcome.converged, "{}", run.exit_reason);
+                    let r = &run.outcome.result;
+                    assert!(r.verification.as_ref().unwrap().passed());
+                    let energy = r.total_hartree();
+                    let de = (energy - old.total_hartree()).abs();
+                    assert!(
+                        de < if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 },
+                        "dE={de:e} Ha"
+                    );
+                    assert!((energy - r.energy.band_form).abs() < 1e-10);
+                    assert!(
+                        (energy - r.energy.harris_foulkes).abs()
+                            <= r.energy.functional_difference_bound + 1e-12
+                    );
+                    let ledger = r.energy.nlcc.as_ref().unwrap();
+                    assert!((ledger.core_electrons - 1.).abs() < 1e-12);
+                    assert!(
+                        (ledger.core_potential_integral_ha
+                            - old.energy.nlcc.as_ref().unwrap().core_potential_integral_ha)
+                            .abs()
+                            < 1e-5
+                    );
+                    // Independently recompute XC on the delivered valence + fixed
+                    // core, including the valence-only double-counting integral.
+                    let mut fft = dft_physics::data::FftPlan3d::new(dims).unwrap();
+                    let xc = Functional::Pbe
+                        .evaluate_with_core(
+                            &r.density,
+                            Some(&core),
+                            &mut Array3::zeros(r.density.raw_dim()),
+                            &cell,
+                            &mut fft,
+                        )
+                        .unwrap();
+                    assert!((r.energy.xc - xc.energy.0).abs() < 2e-12);
+                    assert!(
+                        (ledger.valence_potential_integral_ha - xc.potential_integral.0).abs()
+                            < 2e-12
+                    );
+                    let dv = cell.volume_bohr3() / r.density.len() as f64;
+                    let core_integral = dv
+                        * core
+                            .iter()
+                            .zip(&xc.potential)
+                            .map(|(c, v)| c * v)
+                            .sum::<f64>();
+                    assert!((ledger.core_potential_integral_ha - core_integral).abs() < 2e-12);
+                    assert!((dv * r.density.sum() - 2.).abs() < 1e-12);
+                    if let Some((e, n)) = &full {
+                        assert_eq!(*e, energy.to_bits(), "lean energy");
+                        assert_eq!(n, &r.density, "lean density");
+                    } else {
+                        full = Some((energy.to_bits(), r.density.clone()));
+                    }
+                    if comm.rank() == 0 {
+                        eprintln!(
+                            "G2B_NLCC nonlocal={nonlocal} ranks={ranks} lean={lean} threshold={threshold_ry:e} Ry E={energy:.17e} Ha dE={de:e} Ha maps={}",
+                            run.records.len()
+                        );
+                    }
+                    values.push(energy);
+                }
+            }
+            values
+        });
+        for answer in &answers[1..] {
+            assert_eq!(answer, &answers[0]);
+        }
+        rank_energies.push(answers[0].clone());
+    }
+    for energies in &rank_energies[1..] {
+        for (a, b) in energies.iter().zip(&rank_energies[0]) {
+            assert!((a - b).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+#[ignore = "SCF matrix; cargo test --release -p dft-engine --test refscf pbe_nlcc_delivered -- --ignored --nocapture"]
+fn pbe_nlcc_delivered_local() {
+    pbe_nlcc_delivered_fixture(false);
+}
+
+#[test]
+#[ignore = "SCF matrix; cargo test --release -p dft-engine --test refscf pbe_nlcc_delivered -- --ignored --nocapture"]
+fn pbe_nlcc_delivered_nonlocal() {
+    pbe_nlcc_delivered_fixture(true);
+}
+
+#[test]
+fn pbe_nlcc_negative_total_start_fails_collectively() {
+    use dft_engine::{
+        Functional, ScfOptions, ScfProblem, SpeciesPotential, StartDensity, refstart::StartInput,
+    };
+    let pp = common::potential_with_nlcc(true, "PBE");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.5, 6., 0.], [0.3, 0.2, 5.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        start_density: StartDensity::Atomic,
+        grid_override: Some([8, 10, 12]),
+        ..Default::default()
+    };
+    // This deliberately under-resolved core rings below zero where the atomic
+    // valence was clipped to zero. PBE must reject the total, never repair it.
+    let old = ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+    let density = old.starting_density();
+    let total = &density + old.core_density().unwrap();
+    let minimum = total.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!(minimum < 0.);
+    let mut fft = dft_physics::data::FftPlan3d::new(old.grid_dimensions()).unwrap();
+    assert!(Functional::Pbe.evaluate(&total, &cell, &mut fft).is_err());
+    eprintln!("G2B_NLCC rejected total minimum={minimum:e} e/Bohr^3");
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let result = dft_engine::refstart::start(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &species,
+                    options: &options,
+                },
+                comm,
+            );
+            let Err(error) = result else {
+                panic!("negative total density accepted");
+            };
+            assert!(error.to_string().contains("XC failed"), "{error}");
+        });
+    }
+}

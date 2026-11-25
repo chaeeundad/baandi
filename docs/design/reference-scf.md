@@ -2719,8 +2719,9 @@ internal oracles, not a physical Si128 SCF or MPI/MKL speed evidence.
 G1-NLCC extends the implemented Start/Driver envelope above to norm-conserving
 LDA-PZ and modified LDA-PW datasets with nonlinear core correction. Earlier
 statements in those sections that NLCC rejects are superseded by this section.
-PBE/distributed gradients, spin, smearing, symmetry, density floors and
-force/stress delivery remain outside this stage. Functional mismatch still
+G2B extends this support to unpolarized PBE, including the total-density
+gradient (see PBE below). Spin, smearing, symmetry, density floors and
+force/stress delivery remain outside these stages. Functional mismatch still
 rejects unless the caller explicitly requests the existing diagnostic override;
 using that override does not qualify a PBE dataset for physical LDA work.
 
@@ -2735,14 +2736,17 @@ same atomic structure factors as the ionic local field. Both setup variants
 reuse the density-sphere ownership, shell IDs/cache and structure factors already
 built for atomic charge and the ionic potential. Species without a core add
 nothing. One additional owned inverse transform constructs the core; no full
-core grid or reciprocal core array is gathered or retained. The legacy global
+core grid or reciprocal core array is gathered. LDA discards the reciprocal
+core; PBE retains an owned Fourier cache as described below. The legacy global
 reality/finite-value guard is preserved using scalar rank maxima. Core ringing
 is neither clipped nor normalized, and G=0 is the radial integral, never the
 valence electron count. A prolonged ladder seed carries only valence density;
 the core is rebuilt on the target grid from the same immutable atomic data.
 
-The core adds `8 F_r` retained bytes and transient owned reciprocal/transform
-storage. `StartMemory` includes those named buffers. With no NLCC there is no
+The LDA core adds `8 F_r` retained bytes and transient owned reciprocal/transform
+storage. PBE additionally retains `32 G_r + 8 F_r` bytes for the core Fourier
+cache and two combined-density scratch arrays. `StartMemory` includes those
+named buffers. With no NLCC there is no
 additional field allocation, transform or collective; charge, ionic and XC
 arithmetic and the existing energy reduction retain their previous order.
 
@@ -2870,7 +2874,18 @@ remain the orchestrator's reporting boundary; no such files were changed.
 G2 enables unpolarized PBE in `refstart` and reference map fields. This
 supersedes the historical PBE rejection in Start above. The existing CLI
 unpolarized/fixed-occupation guard remains; collinear PBE is G4. Original
-PW92, explicit density floors and NLCC remain outside this G2 change.
+PW92 and explicit density floors remain outside this change. G2B adds NLCC
+without changing the unpolarized/fixed-occupation guard.
+
+For NLCC, `StartState.pbe_core` caches the normalized forward transform of
+the immutable owned real core once per run (including each ladder-grid rebuild).
+This differentiates exactly the same real core as the legacy evaluator, without
+clipping, renormalizing or changing its G=0. Initialization and every map fill
+reusable owned buffers with `n_total(r) = n_valence(r) + n_core(r)` and
+`n_total(G) = n_valence(G) + n_core(G)` before the distributed GGA call. No
+per-map core transform or new combined-input allocation is needed. Species
+without core charge contribute zero. LDA/NLCC and PBE without NLCC retain
+their previous arithmetic paths.
 
 `dft_physics::gga::distributed` uses the run-owned `StartFields` plan through
 an owned Fourier-field interface. Both initialization and each uncached field
@@ -2895,7 +2910,7 @@ the existing FFT transposes communicate. Even empty slab owners participate
 in every collective; local library failures are agreed before later FFTs.
 
 The density policy is the existing serial PBE policy: negative/nonfinite
-input fails collectively; n <= 1e-10 Bohr^-3 has zero local library inputs.
+total XC input fails collectively; n <= 1e-10 Bohr^-3 has zero local library inputs.
 Gradients use the unscreened density and the divergence can be nonzero at a
 screened point. No LDA absolute-density rule is imposed on PBE. Start density
 clipping/normalization remains in the pre-existing atomic start. Prolonged
@@ -2904,16 +2919,39 @@ outputs are allocated at the field-evaluation boundary, not per orbital/H
 application; all payloads scale with owned slabs/sticks. Existing StartMemory
 counters do not include these transient GGA arrays and are not PBE RSS bounds.
 
-Energy is dv*sum(n*exc), summed locally then reduced together with Hartree
-and the valence potential integral. Double counting uses the **complete**
+Energy is dv*sum(n_total*exc), summed locally then reduced together with Hartree
+and the valence potential integral. Only XC sees the core: Hartree, occupations,
+mixing, delivered density and charge verification remain valence-only. Double
+counting uses dv*sum(n_valence*Vxc) with the **complete**
 Vxc including divergence. The existing band form, Harris–Foulkes expression
 and exact discrete XC functional remainder therefore apply unchanged; no
 local-density Hessian approximation is introduced. LEAN_ENERGY cache,
 continuing-map deferral, candidate/delivery audit and fresh verification
-semantics are unchanged. G1 integration must supply n_valence+n_core and its
-Fourier coefficients to this helper for XC only, while retaining valence
-Hartree and valence-only potential integrals. It must not reuse valence-only
-rho(G) for the combined-density gradient.
+semantics are unchanged. The NLCC ledger records the core charge and the
+separate core/valence potential integrals; the core integral is diagnostic,
+never an extra energy term or part of the band double-counting subtraction.
+
+G2B synthetic validation: `cargo test -p dft-engine --test refscf
+pbe_nlcc_total_gradient_and_start_match_serial -- --nocapture` compares the
+total-density gradient and starting potential with serial FFT/XC on three
+odd/even skew grids at 1/3/8 simulated ranks (including empty slab owners).
+`cargo test --release -p dft-engine --test refscf pbe_nlcc_delivered --
+--ignored --nocapture` covers cubic/local and skew/nonlocal PBE NC fixtures
+with core charge, thresholds 1e-8/1e-12 Ry, 1/3/8 simulated ranks, full/lean
+energy audits and fresh verification. Gates are 5e-9/1e-10 Ha against the
+certified legacy result, plus serial delivered XC energy/double counting.
+These are synthetic Mac oracles, not real-MPI or QE/material qualification.
+
+Measured G2B release results (same commands, full/lean, all three rank counts):
+maximum legacy energy differences are 4.0734438045e-10 Ha at 1e-8 Ry and
+2.5313084961e-14 Ha at 1e-12 Ry. Maximum total-gradient difference is
+1.3877787808e-16 Bohr^-4 and starting-potential difference is
+1.1241008124e-15 Ha. Full/lean delivered density and energy are bit-identical.
+The intentionally under-resolved 1 Ha skew fixture has minimum total density
+-7.1689028855e-4 electrons/Bohr^3 and is rejected by both serial PBE and
+reference initialization at 1/3/8 ranks; no core clipping or tolerance change
+is used to make this fixture run. Successful comparisons use explicit atomic
+starts on both paths and the resolved fixtures encoded in the tests.
 
 Validation and pending MPI8 measurements are recorded in
 [the G2 request](../performance/lanes/RSCF/g2-pbe-dev08-request.md). Synthetic

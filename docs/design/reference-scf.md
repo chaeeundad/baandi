@@ -3120,3 +3120,139 @@ Evidence logs and fingerprint streams are under the ignored
 Native MPI, MKL and dev08 speed measurements remain unperformed. No performance
 default changed. README generation, dashboard/session registry and the
 performance ledger remain outside this ticket's approved ownership.
+
+## Forces, stress and relaxation
+
+G5 uses `refscf::delivered::force_state` (also exported as `stress_state`)
+with the original `StartInput` and a converged `ScfOutcome`. This borrows the
+stop map's density, orbitals, occupations, k weights and energy audit; the
+independent verification map is never substituted. The independently recorded
+force model identity still checks the cell, ordered atoms, pseudopotentials,
+functional, cutoff, grid and occupation policy. Local/Hartree/XC derivative
+fields are reconstructed from the delivered density and the original model.
+The existing spin/finite-temperature views already carry per-spin/per-k
+occupations and the E/F distinction, providing the extension boundary for G4.
+
+A passed reference verification (ADR 0043 or the opt-in ADR 0044 assessment)
+is accepted. This is a convergence precondition, not a rigorous derivative
+error bound: the energy-only rule does not establish a density/force bound.
+With an explicit `Verification::Off`, a converged delivery can instead grant
+an internal unverified-delivery marker. Forces and stress then report
+`verification = "unverified"`; neither a failed verification nor an exhausted
+SCF grants that marker. The delivered verification report must be absent for
+the opt-out; an empty report is not evidence of explicit opt-out. Changing a
+failed result's requested verification mode
+to Off does not make its failed attempts acceptable. Legacy derivative callers
+retain their existing certificate rule. The CLI parser's separate verify-off
+restriction still needs a scoped `config.rs` change before this opt-out can be
+requested from a file (outside G5's original ownership list).
+
+The current derivative kernels require replicated complex orbitals. The
+adapter calls the existing collective `materialize_orbitals` boundary once;
+subsequent force/stress calls reuse those arrays. Both Gamma and complex k
+blocks are supported. Every rank participates, and no root-only full-orbital
+bottleneck is introduced. This is **replicated derivative evaluation**, not a
+claim of distributed force/stress kernels. For B bands, wave counts G_k and F
+real grid points, delivered orbital storage is
+`16 B (sum_k G_k + G_0)` bytes per rank (the common result retains a first-k
+compatibility copy), plus `8 F` density bytes. Derivative potentials and FFT
+workspaces are additional replicated grid arrays. These are logical payloads,
+not RSS measurements; lazy-to-full conversion can temporarily coexist with
+owned storage and collective buffers. No repeated orbital gather occurs in
+the nonlocal term or in a stress call after a force call.
+
+`BAANDI_FORCE_BAND_FIRST=on` (input `[performance] force_band_first = true`)
+stacks all atomic projectors and their three Cartesian position derivatives,
+then evaluates the overlaps for all bands in one adjoint GEMM per k block.
+The remaining small contraction includes full off-diagonal projector coupling,
+occupations and k weights. Extra scratch is `64 G_k P + 64 P B` bytes for P
+projector columns at that k point. This changes floating-point reduction order;
+the scalar implementation remains the default. No timing or speed adoption is
+claimed. Synthetic identity coverage includes complex k orbitals, multiple
+atoms, s/s/p channels, off-diagonal coupling and fractional/zero occupations.
+
+Reference fixed-cell Gamma relaxation runs each ionic evaluation through the
+reference driver. An in-memory owned `ladder::Seed` transfers both the preceding
+step's orbitals and density through the existing injection/reorthogonalization
+mechanism. Seed export checks the original model, orbital shape, finite density
+and charge (relative tolerance 1e-8), before selecting the owned rows. Retained
+seed payload is `8 B G_owned + 16 F_owned` bytes per rank, excluding metadata;
+export additionally uses replicated density FFT work arrays. Ionic potentials,
+start fields, mixer and verification are fresh.
+Per-step record and restart formats are retained. A disk restart contains only
+the existing density record, so the first resumed reference step reports a
+fresh atomic start with an explicit missing-orbital-seed fallback; subsequent
+Gamma steps are warm. Density extrapolation is rejected explicitly on this
+path. Complex-k warm seeding requires a k-driver entry point, and frozen-strain
+cell relaxation requires removing and validating the refstart rejection; those
+files are outside the original G5 ownership list. Reference stress cutoff scans
+use independently converged reference SCFs, sequentially so MPI collectives
+cannot interleave between scans. Reference CLI stress requests retain the
+existing stress default estimator threshold (5e-11 Ha); an explicit threshold
+still wins.
+
+Validation commands: `cargo test -p dft-engine --test refscf_forces` includes
+synthetic finite differences, ranks 1/3/8, verification rejection/opt-out,
+Gamma ionic seeds and lazy materialization (idempotent, bit-identical
+force/stress against eager delivery). External-file Si2 tests are ignored by
+default and run with
+`DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test
+refscf_forces -- --include-ignored --nocapture`. The real Si2 three-step ionic
+trajectory oracle is `DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release
+-p dft-cli reference_relax_tests -- --ignored --nocapture`. UPF files stay
+external. These compare against the existing engine and reference-energy
+finite differences, not a new QE run. Force and stress comparison tolerances
+are respectively 1e-6 Ha/Bohr and 1e-6 Ha/Bohr^3; the trajectory also checks
+energy differences below 5e-9 Ha and positions below 1e-6 Bohr.
+
+G5 scope status: the implementation is not complete under the original
+`OWNED_FILES`. Complex-k ionic warm starts need a seed entry point in
+`refscf/k_driver.rs`; reference CLI `verify=off` needs a reference-only exception
+in `dft-cli/src/config.rs`. Neither file is changed here. Cold complex-k ionic
+steps can be requested with `warm_start=false`; this is not a substitute for
+the ticket's warm-start requirement. Variable-cell relaxation and reference
+density extrapolation also remain explicit unsupported requests.
+
+Local validation (Mac, pure Rust; continuation review, 2026-11-25): all five
+G5 `TEST_COMMANDS` pass. `scripts/check.sh` also passes build/test/fmt/clippy
+(979 passed, 209 ignored across 98 binaries). Its optional process-load
+inspection could not run in the sandbox; this did not skip any gate. README
+freshness checks pass (9 tests); adding this evidence to the generated README
+and dashboard remains with the owners of those files.
+
+The external release derivative command above passes all 6 tests. The
+comparison matrix covers cubic/skew synthetic nonlocal cells at Gamma and a
+weighted two-point k list, displaced Si2 at Gamma and that k list, and skew
+Si2 at Gamma; each is compared at simulated ranks 1/3/8. Finite differences
+hold the FFT grid fixed and assert unchanged wavefunction and density Miller
+sets for strain. They check Cartesian atom-1 x force and xx stress; they do
+not establish cutoff convergence or every tensor component independently.
+
+| Quantity | Maximum observed absolute difference | Acceptance |
+| --- | ---: | ---: |
+| Reference vs legacy energy | 3.781e-13 Ha | 5e-9 Ha |
+| Reference vs legacy force component | 8.926e-8 Ha/Bohr | 1e-6 Ha/Bohr |
+| Reference vs legacy stress component | 6.373e-10 Ha/Bohr^3 | 1e-6 Ha/Bohr^3 |
+| Reference-energy finite-difference force | 3.558e-7 Ha/Bohr | 1e-6 Ha/Bohr |
+| Reference-energy finite-difference stress | 5.879e-10 Ha/Bohr^3 | 1e-6 Ha/Bohr^3 |
+| Band-first vs scalar nonlocal fixture | 8.674e-17 Ha/Bohr | 1e-12 Ha/Bohr |
+
+Derivative oracles deliberately tighten the standard estimator to 5e-13 Ha
+(5e-12 Ha in the certificate/opt-out fixture); these are not a guarantee of
+1e-6 derivative accuracy at the default energy estimator. No production
+threshold is tuned. Si2 uses 4 Ha wavefunction cutoff and 5 bands; synthetic
+fixtures use 2 Ha and 3 bands. The external Si UPF SHA-256 is
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+There is no new QE reference, real-MPI validation, timing or switch adoption.
+The additional CLI test
+`cargo test -p dft-cli --lib reference_k_mesh_records_and_unsupported_combinations`
+passes verified complex-k force/stress JSON and the three reference cutoff
+scans at the default stress threshold.
+
+The external three-step Si2 release relaxation test also passes (4 frames,
+including the initial frame). Every subsequent reference frame records
+`warm_transfer`. Maximum differences against the legacy trajectory are
+7.177e-13 Ha in energy, 7.697e-8 Ha/Bohr in force and 2.027e-7 Bohr in Cartesian
+position, under unchanged gates of 5e-9 Ha, 1e-6 Ha/Bohr and 1e-6 Bohr.
+This trajectory is serial Gamma; rank coverage applies to the derivative and
+ionic-seed tests, not a real MPI CLI relaxation campaign.

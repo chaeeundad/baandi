@@ -615,6 +615,8 @@ table! {
     REFSCF_MEMORY_TRIM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-MEM: release dead start/map/delivery arrays and return band-sized Davidson storage; identical arithmetic; pending dev08";
 
+    FORCE_BAND_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G5: one projector/derivative GEMM over all bands per k for nonlocal forces; unmeasured, default off";
 }
 
 struct Resolved {

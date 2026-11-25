@@ -189,6 +189,14 @@ impl Default for Settings {
 /// and a resumed relaxation must reproduce the uninterrupted files bit for bit.
 fn verification_summary(state: &dft_engine::ScfResult, opts: &ScfOptions) -> Option<Value> {
     let p = opts.standard?;
+    if opts.verification == dft_engine::Verification::Off {
+        return Some(json!({
+            "mode":"off", "status":"unverified", "passed":false,
+            "threshold_ha":p.threshold_ha, "attempts":0,
+            "coulomb_error_ha":null, "residual_bound_ha":null,
+            "strict_criteria_met":null, "h_vectors":0,
+        }));
+    }
     let v = state.verification.as_ref()?;
     let last = v.attempts.last();
     Some(json!({
@@ -297,6 +305,7 @@ struct Context {
     provenance: Value,
     /// ADR 0043 path of every ionic step's SCF (recorded in results.json).
     scf_path: crate::config::ScfPath,
+    reference_seed: std::cell::RefCell<Option<dft_engine::refscf::ladder::Seed>>,
 }
 impl Context {
     fn position(&mut self, fractional: &[[f64; 3]]) {
@@ -364,8 +373,15 @@ impl Context {
         warm: Option<(&ScfProblem, &[f64])>,
         settings: &Settings,
     ) -> Result<(Frame, Vec<f64>), RunError> {
-        self.evaluate_with(positions, length, warm, None, false, settings)
-            .map(|(frame, density, _)| (frame, density))
+        self.evaluate_with(
+            positions,
+            length,
+            warm.map(|(p, d)| (Some(p), d)),
+            None,
+            false,
+            settings,
+        )
+        .map(|(frame, density, _)| (frame, density))
     }
     /// `predicted`: bonding density d and start kind for a C3 start
     /// n_at(R_new) + d (used only with a warm transfer); `atomic`: also return
@@ -374,89 +390,148 @@ impl Context {
         &self,
         positions: Vec<f64>,
         length: f64,
-        warm: Option<(&ScfProblem, &[f64])>,
+        warm: Option<(Option<&ScfProblem>, &[f64])>,
         predicted: Option<(&[f64], &'static str)>,
         atomic: bool,
         settings: &Settings,
     ) -> Result<Evaluated, RunError> {
-        let atomic_here = atomic && warm.is_some();
-        let problem = self.problem_with(atomic_here)?;
-        let n_at: Option<Vec<f64>> = if !atomic {
-            None
-        } else if atomic_here {
-            problem
-                .atomic_superposition_density()
-                .map(|a| a.iter().copied().collect())
-        } else {
-            // A cold evaluation keeps its own start; n_at is built aside.
-            self.problem_with(true)?
-                .atomic_superposition_density()
-                .map(|a| a.iter().copied().collect())
-        };
-        let mut density = problem.uniform_density();
-        let mut session =
-            ScfSession::new(problem, CompletionMode::Strict, ExecutionConfig::default())
-                .map_err(|e| error(4, e))?;
-        let mut provenance = if warm.is_some() {
-            "warm_transfer"
-        } else {
-            "fresh"
-        };
-        let mut start_fallback = None;
-        let mut start_clipped_fraction = None;
-        if let Some((source, values)) = warm {
-            if values.len() != density.len() {
-                return Err(error(4, "warm_transfer: density size mismatch"));
+        let reference = crate::run::reference_requested(&self.config);
+        let (state, n_at, provenance, start_fallback, start_clipped_fraction) = if reference {
+            if predicted.is_some() || atomic {
+                return Err(error(
+                    1,
+                    "reference relaxation: density extrapolation is not yet supported",
+                ));
             }
-            for (d, v) in density.iter_mut().zip(values) {
-                *d = *v;
-            }
-            if let Some((bonding, kind)) = predicted {
-                match &n_at {
-                    Some(n_at) if n_at.len() == bonding.len() && n_at.len() == density.len() => {
-                        // Project onto the feasible set the same way the atomic
-                        // start does: clip negative samples, restore the charge.
-                        let mut start: Vec<f64> =
-                            n_at.iter().zip(bonding).map(|(a, d)| a + d).collect();
-                        let total: f64 = start.iter().sum();
-                        let negative: f64 = start.iter().filter(|v| **v < 0.).sum();
-                        start.iter_mut().for_each(|v| *v = v.max(0.));
-                        let kept: f64 = start.iter().sum();
-                        if total.is_finite() && total > 0. && kept > 0. {
-                            for (d, v) in density.iter_mut().zip(&start) {
-                                *d = v * (total / kept);
+            let atoms = self.atoms();
+            let refs = self.refs();
+            let points = self.config.resolved_points().map_err(|e| error(1, e))?;
+            let seed = if warm.is_some() {
+                self.reference_seed.borrow().clone()
+            } else {
+                None
+            };
+            let provenance = if seed.is_some() {
+                "warm_transfer"
+            } else {
+                "fresh"
+            };
+            let fallback = (warm.is_some() && seed.is_none())
+                .then(|| "reference restart has no orbital seed; fresh atomic start".to_string());
+            let mut run = dft_engine::refscf::delivered::run(
+                dft_engine::refstart::StartInput {
+                    cell: &self.cell,
+                    atoms: &atoms,
+                    potentials: &refs,
+                    options: &self.opts,
+                },
+                crate::run::reference_profile(&self.config)?,
+                &points,
+                seed,
+            )
+            .map_err(|e| error(4, e))?;
+            dft_engine::refscf::delivered::force_state(
+                dft_engine::refstart::StartInput {
+                    cell: &self.cell,
+                    atoms: &atoms,
+                    potentials: &refs,
+                    options: &self.opts,
+                },
+                &mut run.outcome,
+            )
+            .map_err(|e| error(4, e))?;
+            (run.outcome.result, None, provenance, fallback, None)
+        } else {
+            let atomic_here = atomic && warm.is_some();
+            let problem = self.problem_with(atomic_here)?;
+            let n_at: Option<Vec<f64>> = if !atomic {
+                None
+            } else if atomic_here {
+                problem
+                    .atomic_superposition_density()
+                    .map(|a| a.iter().copied().collect())
+            } else {
+                // A cold evaluation keeps its own start; n_at is built aside.
+                self.problem_with(true)?
+                    .atomic_superposition_density()
+                    .map(|a| a.iter().copied().collect())
+            };
+            let mut density = problem.uniform_density();
+            let mut session =
+                ScfSession::new(problem, CompletionMode::Strict, ExecutionConfig::default())
+                    .map_err(|e| error(4, e))?;
+            let mut provenance = if warm.is_some() {
+                "warm_transfer"
+            } else {
+                "fresh"
+            };
+            let mut start_fallback = None;
+            let mut start_clipped_fraction = None;
+            if let Some((source, values)) = warm {
+                let source = source
+                    .ok_or_else(|| error(4, "legacy warm transfer requires its source model"))?;
+                if values.len() != density.len() {
+                    return Err(error(4, "warm_transfer: density size mismatch"));
+                }
+                for (d, v) in density.iter_mut().zip(values) {
+                    *d = *v;
+                }
+                if let Some((bonding, kind)) = predicted {
+                    match &n_at {
+                        Some(n_at)
+                            if n_at.len() == bonding.len() && n_at.len() == density.len() =>
+                        {
+                            // Project onto the feasible set the same way the atomic
+                            // start does: clip negative samples, restore the charge.
+                            let mut start: Vec<f64> =
+                                n_at.iter().zip(bonding).map(|(a, d)| a + d).collect();
+                            let total: f64 = start.iter().sum();
+                            let negative: f64 = start.iter().filter(|v| **v < 0.).sum();
+                            start.iter_mut().for_each(|v| *v = v.max(0.));
+                            let kept: f64 = start.iter().sum();
+                            if total.is_finite() && total > 0. && kept > 0. {
+                                for (d, v) in density.iter_mut().zip(&start) {
+                                    *d = v * (total / kept);
+                                }
+                                provenance = kind;
+                                if negative < 0. {
+                                    start_clipped_fraction = Some(-negative / total);
+                                }
+                            } else {
+                                start_fallback =
+                                    Some("extrapolated density not finite".to_string());
                             }
-                            provenance = kind;
-                            if negative < 0. {
-                                start_clipped_fraction = Some(-negative / total);
-                            }
-                        } else {
-                            start_fallback = Some("extrapolated density not finite".to_string());
+                        }
+                        Some(_) => start_fallback = Some("predictor size mismatch".into()),
+                        None => {
+                            start_fallback = Some("no atomic charge density (PP_RHOATOM)".into());
                         }
                     }
-                    Some(_) => start_fallback = Some("predictor size mismatch".into()),
-                    None => {
-                        start_fallback = Some("no atomic charge density (PP_RHOATOM)".into());
-                    }
                 }
-            }
-            if settings.mode == cell::Mode::Ions {
-                session.initialize_density_transfer(source, &density)
+                if settings.mode == cell::Mode::Ions {
+                    session.initialize_density_transfer(source, &density)
+                } else {
+                    session.initialize_cell_density_transfer(source, &density)
+                }
+                .map_err(|e| error(4, e))?;
             } else {
-                session.initialize_cell_density_transfer(source, &density)
+                session.initialize().map_err(|e| error(4, e))?;
             }
-            .map_err(|e| error(4, e))?;
-        } else {
-            session.initialize().map_err(|e| error(4, e))?;
-        }
-        while session.step().map_err(|e| error(4, e))?.status == StepStatus::Ready {}
-        let result = session
-            .into_result()
-            .ok_or_else(|| error(4, "SCF unconverged; forces unavailable"))?;
-        if !result.converged {
-            return Err(error(4, "SCF unconverged; forces unavailable"));
-        }
-        let state = result.result;
+            while session.step().map_err(|e| error(4, e))?.status == StepStatus::Ready {}
+            let result = session
+                .into_result()
+                .ok_or_else(|| error(4, "SCF unconverged; forces unavailable"))?;
+            if !result.converged {
+                return Err(error(4, "SCF unconverged; forces unavailable"));
+            }
+            (
+                result.result,
+                n_at,
+                provenance,
+                start_fallback,
+                start_clipped_fraction,
+            )
+        };
         let ops = self
             .config
             .symmetry_map()
@@ -544,6 +619,29 @@ impl Context {
             start_clipped_fraction,
             verification: verification_summary(&state, &self.opts),
         };
+        if reference && settings.warm_start && state.gamma_real_used {
+            let atoms = self.atoms();
+            let refs = self.refs();
+            let input = dft_engine::refstart::StartInput {
+                cell: &self.cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &self.opts,
+            };
+            let density: Vec<_> = state.density.iter().copied().collect();
+            let seed = if let Some(comm) = dft_engine::parallel::SharedComm::active() {
+                dft_engine::refscf::delivered::gamma_seed(input, &state, &density, &comm)
+            } else {
+                dft_engine::refscf::delivered::gamma_seed(
+                    input,
+                    &state,
+                    &density,
+                    &dft_engine::refscf::metric::Serial,
+                )
+            }
+            .map_err(|e| error(4, e))?;
+            *self.reference_seed.borrow_mut() = Some(seed);
+        }
         Ok((frame, state.density.iter().copied().collect(), n_at))
     }
 }
@@ -659,6 +757,31 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     // verification; forces and stress come from the verified step.
     let scf_path = config.scf_path().map_err(|e| error(1, e))?;
     let opts = options(&config)?;
+    if crate::run::reference_requested(&config) {
+        if settings.mode != cell::Mode::Ions {
+            return Err(error(
+                1,
+                "reference cell relaxation requires frozen-strain support in refstart",
+            ));
+        }
+        let points = config.resolved_points().map_err(|e| error(1, e))?;
+        if settings.warm_start
+            && (points.len() != 1
+                || points[0].fractional != [0.; 3]
+                || opts.gamma_real != dft_engine::GammaReal::On)
+        {
+            return Err(error(
+                1,
+                "reference k relaxation warm starts require a k-driver seed entry point; warm_start=false permits cold steps",
+            ));
+        }
+        if settings.start_extrapolation != Extrapolation::None {
+            return Err(error(
+                1,
+                "reference relaxation density extrapolation is not yet supported",
+            ));
+        }
+    }
     if opts.energy_tolerance > 1e-8 || opts.eigen_tolerance > 1e-8 || opts.density_tolerance > 1e-7
     {
         return Err(error(
@@ -766,6 +889,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         opts,
         potentials,
         scf_path,
+        reference_seed: std::cell::RefCell::new(None),
         provenance: json!({"input_sha256":sha256(&bytes),"executable_sha256":build_sha256,"pseudopotentials_sha256":pp_hashes,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH}),
     };
     if settings.mode != cell::Mode::Ions {
@@ -828,7 +952,11 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     while state.frames.len() - 1 < settings.max_steps && state.status == "running" {
         let last = state.frames.last().unwrap().clone();
         ctx.position(&last.fractional);
-        let source = ctx.problem()?;
+        let source = if crate::run::reference_requested(&ctx.config) {
+            None
+        } else {
+            Some(ctx.problem()?)
+        };
         let mut f: Vec<_> = last.forces_ha_bohr.iter().flatten().copied().collect();
         settings.project(&mut f);
         let mut proposed = state.optimizer.clone();
@@ -867,7 +995,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
                 .map(|s| s.iter().map(|v| v * v).sum::<f64>().sqrt() * scale)
                 .fold(0., f64::max);
             let warm = (attempt == 0 && settings.warm_start)
-                .then_some((&source, state.density.as_slice()));
+                .then_some((source.as_ref(), state.density.as_slice()));
             let predicted = if extrapolate && warm.is_some() {
                 predict(
                     &state.extrapolation,
@@ -1209,5 +1337,92 @@ mod extrapolation_tests {
         assert_eq!(settings.start_extrapolation, Extrapolation::SecondOrder);
         assert_eq!(Settings::default().start_extrapolation, Extrapolation::None);
         assert!(toml::from_str::<Settings>("start_extrapolation = \"cubic\"").is_err());
+    }
+}
+
+#[cfg(test)]
+mod reference_relax_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "external Si2, 3 ionic steps; DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-cli reference_relax_tests -- --ignored --nocapture"]
+    fn reference_three_step_si2_matches_legacy() {
+        let pp = std::env::var("DFT_SI_UPF").expect("external Si UPF required");
+        let root = std::env::temp_dir().join(format!("g5-si2-relax-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let mut trajectories = Vec::new();
+        for driver in ["legacy", "reference"] {
+            let input = format!(
+                r#"
+[system]
+name='G5 Si2'
+lattice_unit='bohr'
+lattice_vectors=[[0.0,5.13,5.13],[5.13,0.0,5.13],[5.13,5.13,0.0]]
+[[system.atoms]]
+species='Si'
+fractional=[0.0,0.0,0.0]
+[[system.atoms]]
+species='Si'
+fractional=[0.253,0.25,0.25]
+[pseudopotentials]
+Si={pp:?}
+[basis]
+ecutwfc_ry=8.0
+kpoints=[[0.0,0.0,0.0]]
+[xc]
+functional='lda-pz'
+[scf]
+driver='{driver}'
+nbands=5
+max_iterations=200
+standard_threshold_ha=5e-13
+start_density='atomic'
+start_wavefunctions='atomic'
+[relax]
+max_steps=3
+force_tol_ha_bohr=1e-12
+energy_tol_ha=1e-12
+"#
+            );
+            let path = root.join(format!("{driver}.toml"));
+            fs::write(&path, input).unwrap();
+            let out = root.join(driver);
+            let result = execute(&path, &out, false);
+            assert!(
+                result.is_ok() || result.as_ref().is_err_and(|e| e.code == 3),
+                "{driver}: {result:?}"
+            );
+            let restart: Value =
+                serde_json::from_slice(&fs::read(out.join("restart.json")).unwrap()).unwrap();
+            let mut payload: Value =
+                serde_json::from_str(restart["payload"].as_str().unwrap()).unwrap();
+            bits(&mut payload, false).unwrap();
+            let state: Restart = serde_json::from_value(payload).unwrap();
+            assert_eq!(state.frames.len(), 4);
+            if driver == "reference" {
+                for frame in &state.frames[1..] {
+                    assert_eq!(frame.provenance, "warm_transfer");
+                }
+            }
+            trajectories.push(state.frames);
+        }
+        for (step, (old, new)) in trajectories[0].iter().zip(&trajectories[1]).enumerate() {
+            let de = (old.energy_ha - new.energy_ha).abs();
+            let df = old
+                .forces_ha_bohr
+                .iter()
+                .flatten()
+                .zip(new.forces_ha_bohr.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f64::max);
+            let dx = old
+                .positions
+                .iter()
+                .zip(&new.positions)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f64::max);
+            println!("G5 step={step} dE={de:e} Ha dF={df:e} Ha/Bohr dR={dx:e} Bohr");
+            assert!(de < 5e-9 && df < 1e-6 && dx < 1e-6);
+        }
     }
 }

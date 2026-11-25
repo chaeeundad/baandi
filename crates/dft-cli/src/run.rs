@@ -154,7 +154,14 @@ pub fn reference_profile(
     Profile {
         beta: s.and_then(|s| s.mixing_beta).unwrap_or(0.7),
         history: s.and_then(|s| s.mixing_history).unwrap_or(8),
-        threshold_ry: 2.0 * s.and_then(|s| s.standard_threshold_ha).unwrap_or(5e-9),
+        threshold_ry: 2.0
+            * s.and_then(|s| s.standard_threshold_ha).unwrap_or_else(|| {
+                if config.wants_stress() {
+                    dft_engine::StandardProfile::STRESS_THRESHOLD_HA
+                } else {
+                    dft_engine::StandardProfile::default().threshold_ha
+                }
+            }),
         preconditioning: if s.and_then(|s| s.reference_preconditioning.as_deref()) == Some("tf") {
             Preconditioning::ThomasFermi
         } else {
@@ -188,14 +195,12 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
         ));
     }
     let points = config.resolved_points().map_err(|e| error(1, e))?;
-    if config.relax.is_some()
-        || config.xc.density_floor.is_some()
-        || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
+    if config.xc.density_floor.is_some()
         || s.and_then(|s| s.start_density.as_deref()) == Some("uniform")
     {
         return Err(error(
             1,
-            "reference SCF requires atomic density; forces/stress/relaxation and density floors are unavailable",
+            "reference SCF requires atomic density; density floors are unavailable",
         ));
     }
     let mut o = ScfOptions {
@@ -1709,7 +1714,7 @@ fn execute_mode_inner(
     launch::mark("scf_entry");
     let driver_entry = Instant::now();
     let driver_entry_s = driver_entry.duration_since(start).as_secs_f64();
-    let outcome = if mode.observe || mode.agent {
+    let mut outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
         let run = if reference {
@@ -1861,6 +1866,18 @@ fn execute_mode_inner(
     };
     launch::elapsed("scf_driver", scf_clock);
     launch::mark("scf_return");
+    if reference && config.output.as_ref().is_some_and(|o| o.forces || o.stress) {
+        dft_engine::refscf::delivered::force_state(
+            dft_engine::refstart::StartInput {
+                cell: &prepared.cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &opts,
+            },
+            &mut outcome,
+        )
+        .map_err(engine_error)?;
+    }
     let r = outcome.result;
     // RUN-CONFIG: what the computation consulted (result writers below read
     // more switches for their report blocks; those reads do not count).
@@ -2555,11 +2572,14 @@ fn execute_mode_inner(
         &atoms,
         &refs,
         &opts,
-        dft_engine::forces::ElectronicState::Fixed(&r),
+        dft_engine::ElectronicState::Fixed(&r),
         density_floor,
     )? {
         console.push_str(&force_table(&force));
         result["forces"] = force_json(&force);
+        if reference {
+            result["forces"]["verification"] = json!(force.verification);
+        }
         if let Some(p) = opts.standard {
             // ADR 0043: forces of a standard state rest on the passed verification
             // (the engine refuses forces otherwise). ONEPATH-1: the threshold and
@@ -2582,11 +2602,14 @@ fn execute_mode_inner(
         &atoms,
         &refs,
         &opts,
-        dft_engine::forces::ElectronicState::Fixed(&r),
+        dft_engine::ElectronicState::Fixed(&r),
         density_floor,
     )? {
         console.push_str(&stress_table(&stress));
         result["stress"] = stress_json(&stress);
+        if reference {
+            result["stress"]["verification"] = json!(stress.verification);
+        }
         if let Some(p) = opts.standard {
             // ONEPATH-2 (ADR 0043): stress of a standard state rests on its
             // passed verification (the engine refuses it otherwise); the cutoff
@@ -3889,6 +3912,33 @@ mod tests {
                 assert!(call["k_index"].as_u64().is_some_and(|k| k < 4));
             }
         }
+        // G5: actual complex-k derivative output, including the three reference
+        // cutoff scans, and the established stress-specific default threshold.
+        let derivatives = format!(
+            "{}[output]\nforces=true\nstress=true\n",
+            base.replace("max_iterations=2", "max_iterations=100")
+                .replace("verify='off'", "verify='fixed_point'")
+        );
+        let config = Config::parse(&derivatives).unwrap();
+        assert_eq!(
+            reference_profile(&config).unwrap().threshold_ry / 2.,
+            dft_engine::StandardProfile::STRESS_THRESHOLD_HA
+        );
+        fs::write(&input, derivatives).unwrap();
+        execute(&input, Some(&out)).unwrap();
+        let result: Value =
+            serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+        for name in ["forces", "stress"] {
+            assert_eq!(result[name]["verification"], "verified");
+            assert_eq!(
+                result[name]["preconditions"]["fixed_point_verification_passed"],
+                true
+            );
+        }
+        assert_eq!(
+            result["stress"]["pulay_assessment"]["scan_profile"],
+            "standard_verified"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

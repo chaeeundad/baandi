@@ -123,6 +123,8 @@ impl ModelDescription {
         ForceIdentity {
             model: self.clone(),
             policy,
+            unverified_delivery: false,
+            reference_delivery: false,
         }
     }
 }
@@ -151,6 +153,10 @@ impl OccupationIdentity {
 }
 #[derive(Clone)]
 pub(crate) struct ForceIdentity {
+    /// Granted only after converged verify-off delivery by the adapter.
+    pub(crate) unverified_delivery: bool,
+    /// Selects the reference occupation layout and cutoff-scan driver.
+    pub(crate) reference_delivery: bool,
     model: ModelDescription,
     policy: OccupationIdentity,
 }

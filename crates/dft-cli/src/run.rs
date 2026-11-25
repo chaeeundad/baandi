@@ -165,7 +165,7 @@ pub fn reference_requested(config: &Config) -> bool {
     crate::driver_select::preliminary(config).reference()
 }
 #[cfg(test)]
-use crate::driver_select::{G4B_FALLBACK, G4D_FALLBACK};
+use crate::driver_select::G4D_FALLBACK;
 #[cfg(test)]
 fn reference_spin_fd_fallback(config: &Config) -> bool {
     reference_spin_fd_fallback_reason(config).is_some()
@@ -174,7 +174,7 @@ fn reference_spin_fd_fallback(config: &Config) -> bool {
 fn reference_spin_fd_fallback_reason(config: &Config) -> Option<&'static str> {
     crate::driver_select::preliminary(config)
         .reason
-        .filter(|r| matches!(*r, G4B_FALLBACK | G4D_FALLBACK))
+        .filter(|r| *r == G4D_FALLBACK)
 }
 
 /// Independent profile resolution: no legacy session tuning or ladder reads.
@@ -4414,14 +4414,7 @@ mod tests {
             }
             fs::write(&input, &text).unwrap();
             if spin && finite {
-                let dest = dir.join(format!("{name}-legacy"));
-                execute(&input, Some(&dest)).unwrap();
-                let result: Value =
-                    serde_json::from_slice(&fs::read(dest.join("results.json")).unwrap()).unwrap();
-                assert_eq!(result["reference_driver_fallback_reason"], G4B_FALLBACK);
-                assert_eq!(result["scf"]["driver"], "legacy");
-                assert!(result.get("reference_scf").is_none());
-                // Only the measured three-switch combination may route to reference.
+                // R6a keeps moment FD on reference for every A/B switch combination.
                 let route_config = Config::parse(&text).unwrap();
                 for mask in 0..8 {
                     let scope = dft_numerics::switches::RunConfig::from_pairs(&[
@@ -4440,7 +4433,7 @@ mod tests {
                     ])
                     .unwrap();
                     let _guard = scope.enter();
-                    assert_eq!(reference_spin_fd_fallback(&route_config), mask != 7);
+                    assert!(!reference_spin_fd_fallback(&route_config));
                     let pbe =
                         Config::parse(&text.replace("functional='lda-pw'", "functional='pbe'"))
                             .unwrap();
@@ -4448,16 +4441,14 @@ mod tests {
                         reference_spin_fd_fallback_reason(&pbe),
                         if name == "spin-fd-free" {
                             Some(G4D_FALLBACK)
-                        } else if mask != 7 {
-                            Some(G4B_FALLBACK)
                         } else {
                             None
                         }
                     );
                 }
                 if name == "spin-fd-free" {
-                    let pbe_text = text.replace("functional='lda-pw'", "functional='pbe'")
-                        + "[performance]\nrefscf_spin_fd_moment='on'\nrefscf_spin_stiffness='on'\nrefscf_history_conditioning='on'\n";
+                    // L1/G4D remains the default fallback for free-moment PBE.
+                    let pbe_text = text.replace("functional='lda-pw'", "functional='pbe'");
                     fs::write(&input, pbe_text).unwrap();
                     let dest = dir.join("pbe-free-legacy");
                     execute(&input, Some(&dest)).unwrap();
@@ -4472,7 +4463,7 @@ mod tests {
                     assert_eq!(result["scf"]["driver"], "legacy");
                     assert!(result.get("reference_scf").is_none());
                 }
-                text.push_str("[performance]\nrefscf_spin_fd_moment='on'\nrefscf_spin_stiffness='on'\nrefscf_history_conditioning='on'\n");
+                // Exercise adopted defaults, without an explicit switch override.
                 fs::write(&input, text).unwrap();
             }
             let dest = dir.join(name);

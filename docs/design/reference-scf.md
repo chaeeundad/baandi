@@ -3519,28 +3519,28 @@ are explicitly inactive on this entry.
 
 ### G4 continuation review and acceptance status (2026-11-25)
 
-**Scalar FD and fixed collinear sectors are qualified; collinear FD moment policies are routed to legacy.**
+**R6a: scalar FD, fixed collinear sectors and collinear FD moment policies are enabled by default; free-moment PBE retains the L1/G4D legacy fallback.**
 
 | Policy | Reference-driver status |
 | --- | --- |
 | Scalar FD (including Si2) | Qualified and enabled |
 | Fixed collinear sector | Qualified and enabled |
-| Collinear FD, fixed moment | Routed to legacy; G4B pending |
-| Collinear FD, free moment | Routed to legacy; G4B pending |
+| Collinear FD, fixed moment | Qualified and enabled (R6a) |
+| Collinear FD, free moment | Qualified and enabled for LDA-PW; PBE routes to legacy (L1/G4D) |
 
-`BAANDI_REFSCF_SPIN_FD_MOMENT=on` (or
-`[performance] refscf_spin_fd_moment='on'`) enables the two unqualified
-policies for G4B development only; its default is off. Default fallback is
-recorded as `reference driver: collinear Fermi-Dirac not yet qualified, G4B`
-in the result and switch manifest. No acceptance bound is relaxed.
-The passing ignored `g4_synthetic_matrix` covers the 24 qualified comparisons.
-The separate ignored `g4b_moment_acceptance` retains all 24 moment-policy
-comparisons and is expected to fail until G4B qualifies them.
-The approved stopping estimator and the Broyden singular-history rejection
-remain unchanged. In particular, the tests retain the 5e-9 Ha standard,
-1e-10 Ha tight, 1e-4 mu_B moment, 1e-4 Ha chemical-potential and 1e-4 electron
-weighted-occupation bounds. Passing the estimator alone is not evidence that
-these delivered-error bounds hold.
+R6a enables `REFSCF_SPIN_FD_MOMENT`, `REFSCF_SPIN_STIFFNESS` and
+`REFSCF_HISTORY_CONDITIONING` by default and removes L2/G4B fallback routing.
+Evidence: the G4B three-switch combination passes 48/48 synthetic comparisons;
+dev08 gen15 bcc Fe (PBE+NLCC, 4x4x4, fixed moment 4.4 mu_B) is VERIFIED in
+75.8 s, while legacy and the strict oracle did not finish within 45 min
+(orchestrator-supplied evidence, not a completed strict-oracle comparison).
+ADR 0045 is accepted. Explicit off values remain A/B controls and do not
+change routing. Free-moment PBE remains unqualified under L1/G4D.
+The ignored `g4_synthetic_matrix` and `g4b_moment_acceptance` retain all 48
+comparisons and the unchanged 5e-9 Ha standard, 1e-10 Ha tight, 1e-4 mu_B
+moment, 1e-4 Ha chemical-potential and 1e-4 electron weighted-occupation bounds.
+Earlier default-off diagnoses below are historical; they do not describe
+R6a defaults. Passing the estimator alone is not delivered-error evidence.
 
 Review corrections to the interrupted implementation:
 
@@ -3721,7 +3721,7 @@ occupation-root tolerance/definition fix is justified.
 
 ### G4B candidate contracts
 
-Two independent switches are appended to the registry, both default off:
+Two independent switches were introduced default off (both default on since R6a):
 `REFSCF_SPIN_STIFFNESS` and `REFSCF_HISTORY_CONDITIONING`. They apply only to
 `Policy::SpinFermiDirac`; scalar FD, fixed sectors and closed-shell reference
 drivers ignore both. The existing development-routing switch is separate.
@@ -3755,7 +3755,7 @@ candidate, never its fresh-map output. The history metric itself is unchanged.
 The existing `dr2_ry` and verification `coulomb_error_ha` fields carry the
 augmented estimator when stiffness is selected; opt-in traces separate all
 three Coulomb terms from `stiffness_ha`.
-History conditioning follows proposed ADR 0045: repeatedly remove the oldest
+History conditioning follows ADR 0045 (accepted by R6a): repeatedly remove the oldest
 pair until rcond > sqrt(p*epsilon), with every removal's pre-drop condition
 recorded. Nonfinite/backend errors still reject. The off branch retains the
 original ring/cache, numerical singularity rejection and arithmetic. Candidate
@@ -3925,11 +3925,12 @@ command exit records and the machine-readable summary are under ignored
 
 The scope is one synthetic spin system plus scalar Si2 FD, simulated ranks,
 pure Rust on Mac. Real MPI/MKL and multi-material qualification on dev08
-remain the orchestrator's gate. Defaults remain off; ADR 0045 is proposed.
+remain the orchestrator's gate. R6a adopts the defaults with the dev08 fixed-moment
+Fe evidence recorded above; ADR 0045 is accepted.
 Dashboard/registry, performance ledger and generated README evidence are
 outside this ticket's explicit owned files and are left for the orchestrator.
 
-### Routing handoff and ownership boundary
+### Historical G4B routing handoff and ownership boundary
 
 The measured combination requires the CLI predicate in
 `crates/dft-cli/src/run.rs::reference_spin_fd_fallback` to require all three
@@ -3940,7 +3941,8 @@ CLI tests, not `src/run.rs`. A concrete unified patch, including a focused
 input, is prepared at `target/tmp/g4b/routing.patch`. An explicit ownership
 extension was requested; this out-of-scope patch has not been applied or
 claimed as tested. Until it is applied, the existing development selector
-alone still bypasses legacy routing. All three flags remain default off.
+alone still bypassed legacy routing. All three flags were default off at that
+handoff; R6a removes the subsequently introduced L2 predicate entirely.
 
 
 Verification actually executed: `cargo check --workspace --tests` exits 0;

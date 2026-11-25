@@ -575,6 +575,11 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             config.density_operations()?.len(),
             prepared.grid.dims()
         ));
+        warnings.push(if prepared.grid.overridden() {
+            format!("symmetry.fft_grid: using explicit dimensions {:?} exactly; every density operation permutes this grid", prepared.grid.dims())
+        } else {
+            format!("symmetry.fft_grid: automatic dimensions {:?} selected for alias-free density support {:?}, FFT-friendly factors 2/3/5, and all density translations/rotations", prepared.grid.dims(), prepared.grid.required_dims())
+        });
         warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} mesh-preserving spatial operations; tolerance={} Bohr; magnetic spin swap/time reversal disabled without proof",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),config.symmetry.tolerance_bohr));
     }
     let mut counts = Vec::new();

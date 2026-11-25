@@ -331,6 +331,19 @@ impl FftGridSpec {
     pub fn required_dims(&self) -> [usize; 3] {
         self.required
     }
+    /// Construct an automatically selected grid with additional constraints
+    /// (for example crystal symmetry), retaining automatic provenance.
+    /// Dimensions undergo the same alias-free checks as an explicit grid.
+    pub fn automatic_with_dims(
+        basis: &PlaneWaveBasis,
+        density: &PlaneWaveBasis,
+        dims: [usize; 3],
+    ) -> Result<Self, BasisError> {
+        let mut grid = Self::new(basis, density, Some(dims))?;
+        grid.overridden = false;
+        Ok(grid)
+    }
+    /// True for user-specified dimensions, false for automatic selection.
     pub fn overridden(&self) -> bool {
         self.overridden
     }

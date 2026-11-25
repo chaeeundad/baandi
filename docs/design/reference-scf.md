@@ -3750,8 +3750,14 @@ multiplicities, normalized weights and time reversal are unchanged. The CLI
 reuses its cached preparation through `from_prepared`, which checks the exact
 geometry, full mesh, tolerance and time-reversal setting. The reference wrapper
 retains the geometry and rejects reuse after an atom/cell change. Explicit FFT
-grids must preserve the selected density group; automatic grids use the same
-`compatible_fft_grid` routine as legacy. `crystal_density_group` selects the
+grids must preserve the selected density group and are used exactly, without
+FFT-friendly rounding. `Config::prepare` owns this selection for both CLI
+drivers; the direct reference API independently validates its supplied grid.
+Automatic grids retain the existing `compatible_fft_grid` choice, selecting
+2/3/5-smooth dimensions that preserve density translations and rotations.
+Preflight records why the automatic dimensions were selected. The CLI result
+`basis.fft_grid_overridden` is true only for user-specified dimensions, not
+automatic symmetry padding. `crystal_density_group` selects the
 full crystal group; otherwise the mesh-preserving unitary subgroup is used.
 Antiunitary partners contribute only to k weights, never to the scalar density
 projector. Collinear magnetization is a scalar; spatial operations do not swap
@@ -3768,8 +3774,11 @@ indices reject instead of being aliased. Coefficients outside the sphere are
 zeroed, as in the serial projector. Ownership is the existing full-grid FFT
 stick partition. A deterministic plan is built once per run: each destination
 requests each needed source coefficient once, sorted by global FFT index within
-each source rank. Every map packs all channels into **one** equal-block
-all-to-all for symmetry, including self blocks and empty owners. FFT transpose
+each source rank. Each projection packs all channels into **one** equal-block
+all-to-all for symmetry, including self blocks and empty owners. Each map now
+performs two projections: the physical projection and an invariance diagnostic
+on a reusable scratch copy. The diagnostic adds a second symmetry exchange;
+it never replaces the physical density with the twice-projected result. FFT transpose
 collectives are separate and unchanged. No full-valued density gather is added.
 The phase/accumulation order is density-basis order then operation order,
 independent of rank count; receive order never controls a floating-point sum.
@@ -3787,11 +3796,23 @@ magnetization constraint or change to any convergence threshold.
 
 `Run.symmetry` / `results.json.reference_scf.symmetry` records density group
 order, irreducible k count, channel count and chronological map residuals.
-Each residual is `sqrt(Omega sum_G,spin |rho - P rho|^2)`, in electrons/Bohr^(3/2),
-using forward-normalized coefficients and Parseval. It includes discarded
-out-of-sphere components, requires only a scalar reduction and is a diagnostic,
-not a convergence gate. Rows identify the SCF iteration and verification phase;
-first-step redo produces another row with the same iteration. Startup checks
+With `rho` denoting the irreducible-k band sum before projection, each row has:
+
+- `pre_projection_norm`: `||rho - P rho||`, in electrons/Bohr^(3/2). The existing
+  `residual_norm` remains an alias for this value for compatibility.
+- `pre_projection_relative_norm`: `||rho - P rho|| / ||rho||`, dimensionless
+  (zero for zero density). This can remain nonzero at SCF convergence because
+  the irreducible-k sum need not itself be invariant.
+- `post_projection_invariance_norm`: `||P(P rho) - P rho||`, in
+  electrons/Bohr^(3/2), expected at rounding for the invariant projected density.
+
+Norms use `sqrt(Omega sum_G,spin |rho(G)|^2)` with forward-normalized coefficients
+and Parseval, including discarded out-of-sphere components in the pre-projection
+difference and denominator. The diagnostic uses a scratch copy of `P rho` and
+a batched reduction of the three squared norms. Physical density, energy,
+mixing, stopping criteria and verification are unchanged. These are projection
+diagnostics, not convergence gates. Rows identify the SCF iteration and verification
+phase; first-step redo produces another row with the same iteration. Startup checks
 are excluded. Off-path records omit the JSON block.
 
 G5 delivery records the same operations in the force model identity.
@@ -4040,3 +4061,41 @@ dft-physics dft-engine dft-cli` exits 0: build/test/fmt/clippy all pass, 59
 binaries, 632 passed, 0 failed, 167 ignored. The sandbox still denies the
 non-gating `ps` load probe; cache tests now pass outside the checkout.
 No stopping rules or tolerances were changed. Changes remain uncommitted.
+### G6B grid and diagnostic regression
+
+The explicit-grid replacement was in `Config::prepare`: after validating an
+explicit grid it unconditionally called the automatic chooser. That rounded
+28^3 to 32^3 because 28 is not 2/3/5-smooth. Selection now branches on input
+provenance before invoking that chooser. Automatic dimensions retain their
+previous selection and numerical mappings, while their override flag is false.
+The reference driver's direct prepared API already honored compatible explicit
+grids and retains its independent validation.
+
+Local synthetic diamond regression (1 Ha cutoff, shifted 2^3 mesh, three maps):
+pre-projection relative norms are 0.3414538869678375, 0.2510191207624144 and
+0.2418444925004731; post-projection invariance norms are respectively
+5.16519e-17, 4.08951e-17 and 2.49180e-17 electrons/Bohr^(3/2).
+The automatic-grid final energy is unchanged at -0.08240083504027451 Ha;
+the before/after density-bit FNV fingerprint is `4a2263a7c90dba78`.
+These are internal synthetic checks, not Si.pz-vbc or QE reference results.
+The direct API regression also checks explicit 28^3 and rejects 25^3 with
+three simulated ranks. CLI coverage checks both drivers, mesh/crystal density
+groups and Gamma/shifted meshes at the 30 Ry diamond grid-selection boundary;
+actual output tests use a lower-cutoff synthetic potential.
+
+Reproduce with `cargo test -p dft-cli --test grid_symmetry` and
+`cargo test -p dft-engine --test refscf symmetry -- --nocapture`.
+The added diagnostic uses one preallocated local reciprocal scratch vector per
+channel and one extra projector application per map; native MPI timing is not
+measured here. README evidence generation and dashboard/session registries
+remain outside this ticket's owned files.
+
+G6B final local gates exited 0: workspace check with tests, CLI tests (167
+passed, 45 ignored), engine symmetry tests (3 passed, 2 ignored), formatting,
+and Clippy for CLI/engine/basis with warnings denied. Full `scripts/check.sh`
+passed build/test/fmt/clippy: 100 binaries, 992 passed, 0 failed, 217 ignored.
+The full gate used `CARGO_NET_OFFLINE=true CHECK_SCCACHE=0 CHECK_TEST_JOBS=2
+BAANDI_TEST_TMP=/private/tmp/g6b-tests`; its optional sandbox-denied `ps` probe
+did not prevent verification. README generation made no tracked changes and
+all 9 freshness checks passed. Logs and the before/after automatic-grid
+fingerprints are retained locally under `target/tmp/g6b-validation/`.

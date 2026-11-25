@@ -5802,6 +5802,10 @@ fn nlcc_real_mpi_legacy_comparison() {
 // gradients and XC retain exclusively owned slabs and reciprocal sticks.
 #[test]
 fn pbe_distributed_gradients_start_and_variational_potential() {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     use dft_engine::{
         Functional, ScfOptions, SpeciesPotential,
         refstart::{self, StartInput},
@@ -5857,6 +5861,7 @@ fn pbe_distributed_gradients_start_and_variational_potential() {
         );
         for ranks in [1, 3, 8] {
             let errors = dft_mpi::simulate(ranks, |comm| {
+                let _screen_scope = screening.enter();
                 let mut max_gradient = 0.0_f64;
                 let mut max_potential = 0.0_f64;
                 let mut state = refstart::start(
@@ -6141,6 +6146,9 @@ impl<K: Collective> Collective for PbeNoGather<'_, K> {
 
 #[test]
 fn pbe_negative_mixed_density_fails_collectively() {
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _scope = screening.enter();
     use dft_engine::{Functional, GammaReal, ScfOptions, SpeciesPotential, refstart::StartInput};
     let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "PBE");
     let cell =
@@ -6162,6 +6170,7 @@ fn pbe_negative_mixed_density_fails_collectively() {
         ..Default::default()
     };
     dft_mpi::simulate(3, |comm| {
+        let _scope = screening.enter();
         let result = dft_engine::refscf::driver::run_with(
             StartInput {
                 cell: &cell,
@@ -6648,6 +6657,9 @@ fn pbe_nlcc_delivered_nonlocal() {
 
 #[test]
 fn pbe_nlcc_negative_total_start_fails_collectively() {
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _scope = screening.enter();
     use dft_engine::{
         Functional, ScfOptions, ScfProblem, SpeciesPotential, StartDensity, refstart::StartInput,
     };
@@ -6680,6 +6692,7 @@ fn pbe_nlcc_negative_total_start_fails_collectively() {
     eprintln!("G2B_NLCC rejected total minimum={minimum:e} e/Bohr^3");
     for ranks in [1, 3, 8] {
         dft_mpi::simulate(ranks, |comm| {
+            let _scope = screening.enter();
             let result = dft_engine::refstart::start(
                 StartInput {
                     cell: &cell,
@@ -7186,6 +7199,10 @@ fn g4_fixture_profile(
     thresholds: &[f64],
     profile: Profile,
 ) -> Vec<String> {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     use dft_engine::{
         Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
         collinear::{CollinearProblem, SpinSector},
@@ -7343,6 +7360,7 @@ fn g4_fixture_profile(
     for &threshold in thresholds {
         for &rank in ranks {
             let results = dft_mpi::simulate(rank, |comm| {
+                let _screen_scope = screening.enter();
                 let trace_dir = std::env::var_os("G4B_TRACE_DIR");
                 let mut trace = electronic::Trace::default();
                 let result = electronic::run_with_trace(

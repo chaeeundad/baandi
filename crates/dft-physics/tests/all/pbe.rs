@@ -154,6 +154,9 @@ fn variational_grid_translation_and_uniform() {
 }
 #[test]
 fn density_policy() {
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _scope = screening.enter();
     let cell =
         Cell::from_user_rows_bohr([[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]).unwrap();
     let mut fft = FftPlan3d::new([4; 3]).unwrap();

@@ -94,6 +94,10 @@ impl<K: Collective> Collective for NoGather<'_, K> {
 
 #[test]
 fn spin_pbe_matches_serial_with_core_and_empty_owners() {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.7, 5., 0.], [0.3, 0.2, 9.]]).unwrap();
     for dims in [[4, 6, 5], [5, 3, 7]] {
         let mut seed = 1301_u64;
@@ -110,6 +114,7 @@ fn spin_pbe_matches_serial_with_core_and_empty_owners() {
             let core = with_core.then_some(&core);
             for ranks in [1, 3, 8] {
                 let errors = dft_mpi::simulate(ranks, |rank| {
+                    let _screen_scope = screening.enter();
                     let comm = NoGather(rank);
                     let mut fields = Slabs::new(dims, &comm);
                     let offsets = fields.offsets();
@@ -197,6 +202,9 @@ fn spin_pbe_matches_serial_with_core_and_empty_owners() {
 
 #[test]
 fn spin_pbe_screening_polarization_and_collective_rejection() {
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _scope = screening.enter();
     let dims = [3, 4, 2];
     let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 6., 0.], [0., 0.1, 7.]]).unwrap();
     for channels in [[0., 0.], [4e-11, 5e-11], [0.03, 0.], [0., 0.03]] {
@@ -207,6 +215,7 @@ fn spin_pbe_screening_polarization_and_collective_rejection() {
             .evaluate(&density, &mut reference)
             .unwrap();
         dft_mpi::simulate(8, |rank| {
+            let _scope = screening.enter();
             let comm = NoGather(rank);
             let mut fields = Slabs::new(dims, &comm);
             let offsets = fields.offsets();

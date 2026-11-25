@@ -443,6 +443,7 @@ impl Config {
         &self,
         selection: crate::driver_select::Selection,
     ) -> Result<ScfPath, ConfigError> {
+        selection.validate(self)?;
         let invalid = |m: String| ConfigError::Invalid(m);
         let s = self.scf.as_ref();
         if let Some(s) = s {
@@ -1277,6 +1278,7 @@ impl Config {
     }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        crate::driver_select::preliminary(self).validate(self)?;
         self.validate_reference_scope()?;
         if let Some(s) = &self.scf {
             if !matches!(s.driver.as_deref(), None | Some("legacy" | "reference")) {

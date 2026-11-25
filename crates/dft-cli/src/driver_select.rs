@@ -58,6 +58,46 @@ impl Selection {
     pub(crate) fn reference_mixing(self) -> bool {
         self.reference() || matches!(self.reason, Some(G4B_FALLBACK | G4D_FALLBACK))
     }
+    /// A reference selection with an eligibility reason is a rejected explicit
+    /// request, never permission to execute a different driver.
+    pub fn validate(self, config: &Config) -> Result<(), crate::config::ConfigError> {
+        if self.reference()
+            && self.source == Source::Input
+            && let Some(reason) = self.reason
+        {
+            let mut keys = legacy_keys(config);
+            if spin_fd(config) {
+                keys.extend(["spin.mode", "occupations.mode"]);
+                if config.xc.functional.engine() == dft_engine::Functional::Pbe {
+                    keys.push("xc.functional");
+                }
+            }
+            if l4(config, Mode::Classic, Command::Run, &[]) {
+                keys.push("relax.mode");
+            }
+            if l5(config, Mode::Classic, Command::Run, &[]) {
+                keys.push("relax.start_extrapolation");
+            }
+            if config.compat.reference() {
+                keys.push("compat.mode");
+            }
+            if config.xc.pw92_prefactor.as_deref() == Some("original") {
+                keys.push("xc.pw92_prefactor");
+            }
+            if reason == ATOMIC_DATA {
+                keys.extend(["PP_RHOATOM", "PP_PSWFC"]);
+            }
+            return Err(crate::config::ConfigError::Invalid(format!(
+                "explicit reference driver request cannot be honored: {reason}; legacy-only keys/features: {}; remove the conflicting controls or explicitly select scf.driver = \"legacy\"",
+                if keys.is_empty() {
+                    reason.to_string()
+                } else {
+                    keys.join(", ")
+                }
+            )));
+        }
+        Ok(())
+    }
     pub fn json(self) -> Value {
         json!({"driver":self.driver,"driver_reason":self.reason,"driver_source":self.source})
     }
@@ -176,29 +216,71 @@ fn l8(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
     command == Command::Session
 }
 fn l9(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    c.xc.density_floor.is_some()
-        || c.scf.as_ref().is_some_and(|s| {
-            matches!(s.mixing.as_deref(), Some("linear" | "kerker-pulay"))
-                || s.mixing_q0_inverse_bohr.is_some()
-                || s.mixing_metric.is_some()
-                || s.spectral_guard.is_some()
-                || s.locking.is_some()
-                || s.preconditioner.is_some()
-                || s.davidson_capacity_per_band.is_some()
-                || s.start_density.as_deref() == Some("uniform")
-                || s.start_wavefunctions
-                    .as_deref()
-                    .is_some_and(|v| v != "atomic")
-                || s.energy_tolerance_ha.is_some()
-                || s.density_residual_tolerance.is_some()
-                || s.eigen_tolerance.is_some()
-                || s.standard_stall_guard.is_some()
-                || s.standard_density_forcing.is_some()
-                // "off" is the reference behaviour; only an explicit legacy ladder is legacy-only.
-                || s.cutoff_ladder.as_deref() == Some("on")
-                || s.cutoff_ladder_fraction.is_some()
-        })
+    !legacy_keys(c).is_empty()
 }
+/// Keep the eligibility predicate and diagnostic key inventory together.
+fn legacy_keys(c: &Config) -> Vec<&'static str> {
+    let mut keys = Vec::new();
+    if c.xc.density_floor.is_some() {
+        keys.push("xc.density_floor");
+    }
+    if let Some(s) = &c.scf {
+        for (present, key) in [
+            (
+                matches!(s.mixing.as_deref(), Some("linear" | "kerker-pulay")),
+                "scf.mixing",
+            ),
+            (
+                s.mixing_q0_inverse_bohr.is_some(),
+                "scf.mixing_q0_inverse_bohr",
+            ),
+            (s.mixing_metric.is_some(), "scf.mixing_metric"),
+            (s.spectral_guard.is_some(), "scf.spectral_guard"),
+            (s.locking.is_some(), "scf.locking"),
+            (s.preconditioner.is_some(), "scf.preconditioner"),
+            (
+                s.davidson_capacity_per_band.is_some(),
+                "scf.davidson_capacity_per_band",
+            ),
+            (
+                s.start_density.as_deref() == Some("uniform"),
+                "scf.start_density",
+            ),
+            (
+                s.start_wavefunctions
+                    .as_deref()
+                    .is_some_and(|v| v != "atomic"),
+                "scf.start_wavefunctions",
+            ),
+            (s.energy_tolerance_ha.is_some(), "scf.energy_tolerance_ha"),
+            (
+                s.density_residual_tolerance.is_some(),
+                "scf.density_residual_tolerance",
+            ),
+            (s.eigen_tolerance.is_some(), "scf.eigen_tolerance"),
+            (s.standard_stall_guard.is_some(), "scf.standard_stall_guard"),
+            (
+                s.standard_density_forcing.is_some(),
+                "scf.standard_density_forcing",
+            ),
+            // "off" is reference behaviour; only an explicit ladder is legacy-only.
+            (
+                s.cutoff_ladder.as_deref() == Some("on"),
+                "scf.cutoff_ladder",
+            ),
+            (
+                s.cutoff_ladder_fraction.is_some(),
+                "scf.cutoff_ladder_fraction",
+            ),
+        ] {
+            if present {
+                keys.push(key);
+            }
+        }
+    }
+    keys
+}
+
 fn l10(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
     c.compat.reference() || c.xc.pw92_prefactor.as_deref() == Some("original")
 }
@@ -255,7 +337,9 @@ pub fn select(
             .iter()
             .find(|(predicate, _)| predicate(config, mode, command, upfs))
         {
-            selection.driver = Driver::LegacyStandard;
+            if selection.source != Source::Input {
+                selection.driver = Driver::LegacyStandard;
+            }
             selection.reason = Some(reason);
         }
         if spin_fd(config) {

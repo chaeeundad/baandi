@@ -1,6 +1,6 @@
 # ADR 0046: XC small and negative densities
 
-- Status: proposed; opt-in experiment, not a production default.
+- Status: accepted; default on (R1B-ROUTING-AND-SCREEN, 2026-11-25).
 - Task: G4E-VACUUM-DENSITY.
 - Date: 2026-11-25.
 
@@ -27,11 +27,12 @@ potential integrals are diagnostic. Without NLCC the same rules apply with c=0.
 The optional historical density-floor model is a separate functional; this ADR
 neither silently replaces it nor qualifies its combination with screening.
 
-## Proposed common rule
+## Accepted common rule
 
 `BAANDI_XC_SCREEN_NEGATIVE=on` (registry key `xc_screen_negative`) selects an
 XC-only projection q_s(n_s)=n_s for n_s>t and zero otherwise, t=1e-10 Bohr^-3.
-The default is off and retains historical scientific behavior.
+The default is on. `BAANDI_XC_SCREEN_NEGATIVE=off` retains historical
+rejection/continuation behavior for regression checks and rollback.
 
 The threshold is an absolute density scale, not a relative threshold or a
 material-dependent tolerance. It preserves the adapters' established numerical
@@ -47,7 +48,7 @@ Per channel and XC evaluation, record the count of n_s<=t, integral of |n_s|
 over these points (electrons), signed total charge used by the gate, and the
 minimum input with its global C-order grid index. With core, the denominator
 is total valence electrons in engine calls. Reject if a channel's screened
-charge exceeds 1e-4 of that total. This is an explicit proposed model-error
+charge exceeds 1e-4 of that total. This is an explicit model-error
 budget (0.01% per channel), not an energy-accuracy guarantee or a proof of
 valence infeasibility: a large core truncation error can also fail it. For an
 empty system, nonzero screened charge fails. The same gate applies at start,
@@ -94,7 +95,8 @@ screening budget or emit records.
 
 Synthetic tests and real run results must be reported separately. Simulated
 ranks exercise production collectives without establishing real MPI execution
-on dev08. No QE source was read and no QE comparison is claimed.
+on dev08. No QE source was read. The original local experiments made no QE comparison;
+the subsequent dev08 adoption evidence is recorded below.
 
 ## Local evidence and remaining integration boundary
 
@@ -121,7 +123,8 @@ stage labels and iteration association require caller hooks in the reference
 loops and legacy session/collinear drivers, outside this ticket's OWNED_FILES;
 these hooks have been requested, not silently added. Run-keyed diagnostics are
 available through `xc::screening_records()` and serialized as `xc_screening` in
-CLI output. This stage-label limitation prevents full ticket acceptance.
+CLI output. This stage-label limitation remains an integration follow-up; default adoption
+does not claim it is resolved.
 
 Final Mac gates: workspace check, physics tests (108 passed, 18 ignored),
 reference SCF tests (82 passed, 24 ignored), fmt and targeted clippy passed.
@@ -133,3 +136,75 @@ also exited 0, despite a `nice` priority warning; the repeat disabled that
 priority adjustment explicitly. No numerical gate failure remains. Positive-density scalar LDA-PZ/PW/PBE SCFs preserve every checked
 energy/density bit in both drivers; positive spin LDA-PW/PBE core fields also
 preserve energy, potential and both integrals exactly.
+
+
+## Default adoption: dev08 gen14 (R1B)
+
+The user-supplied dev08 record `/data/sig-dft/gen14/RESULT.md` establishes the
+README PBE Gamma case: Si2, PBE override on Si.pz-vbc, 30 Ry wavefunction cutoff,
+25^3 FFT grid, 8 bands. With screening off, a Broyden map transiently produces
+-5.6e-6 Bohr^-3 at one atom-site grid point and the reference driver rejects it.
+With screening on, the run converges in 7 iterations and is VERIFIED; 2 points
+are screened across the run, with integrated screened charge <=1e-7 electrons.
+E_reference - E_legacy = -6.5e-11 Ha; the difference from QE is unchanged from
+the existing README value. This is the supplied remote evidence, not a new
+local QE run or a new independent QE reference value.
+
+Adopt the existing general density threshold and charge gate as the default;
+no material-specific cutoff or tolerance changes. The off switch remains
+available. Positive densities above the threshold retain their arithmetic;
+local reference/oracle identity checks are required for this default change.
+The hard-mask, force/stress, and diagnostic stage-label limitations above stand.
+
+### Local R1B baseline check
+
+On macOS/aarch64 with the pure-Rust release build, the three strict-oracle
+cases (Gamma, k222s, k222) reproduce `baseline-oracle.json` exactly in energy
+and density hash. With the new default, reference k222s and k222 also reproduce
+`baseline-reference.json` exactly. Reference Gamma does not: E changes from
+-7.295530466369128 to -7.295530466374794 Ha (delta -5.666578317686799e-12 Ha),
+and the density SHA-256 changes from
+`35295c543cfde3e7303c2edfa97a47d4d6999f52607750f355b8145c88e471d7` to
+`a0c76c8c7741125ad2cf59dee1534a0e4c29bc306002e6de22e56b92c99573e2`.
+This is a signed-density trajectory: evaluation index 5 has minimum
+-8.4477852131698e-5 Bohr^-3 at grid index 0, one screened point and
+1.4603566607452055e-6 electrons screened. All other evaluations screen zero
+points. Explicit `threads=1` reproduces the same difference;
+`BAANDI_XC_SCREEN_NEGATIVE=off` restores the old Gamma energy and density hash
+exactly. The architect approved one screening rule for LDA and GGA alike, without a
+signed-density exception. In particular, the default replaces the reference
+scalar LDA map's historical evaluation at |n| with ADR 0046 screening. The
+Gamma energy difference is an intentional policy change, not a relaxation of
+the 1e-12 Ha regression tolerance. Only the Gamma entry of
+`docs/performance/baseline-reference.json` is re-recorded; k222s/k222 and
+`baseline-oracle.json` remain unchanged. Screening off reproduces the old
+Gamma baseline exactly in energy and density hash.
+
+The Gamma entry was recorded with the pure-Rust release build using
+`python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf <UPF>
+--cases gamma --threads 1 --repeats 3 --record <temporary-record.json>`;
+only `cases.gamma` was copied into the baseline. The recording command exits 5
+against the old baseline, as expected for the measured policy change.
+The external Si.pz-vbc.UPF SHA-256 is
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+These are local arithmetic checks, not speed-adoption evidence or new QE
+measurements. The parent baseline's provenance describes the untouched cases;
+this paragraph records the replacement Gamma provenance.
+
+The approved source-local test migrations pin the old negative-density
+rejection contract to `xc_screen_negative=off` and make the spin/FD fallback
+fixture's driver request implicit. They change no production code.
+
+After those migrations, `cargo check --workspace --tests` and
+`cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings`
+exit 0. `CHECK_NICE=0 CHECK_SCCACHE=0
+BAANDI_TEST_TMP=/private/tmp/r1b-approved-gates scripts/check.sh` exits 0:
+108 binaries, 1024 passed, 0 failed, 224 ignored; build/test/fmt/clippy all pass.
+The sandbox denies the informational `ps` probe, without preventing any gate.
+The explicit routing/corpus/reference_identity targets pass (8 + 1 + 1 tests).
+The benchmark command with `--cases gamma,k222s,k222 --require-identical`
+exits 0 against the updated reference baseline; adding
+`BAANDI_REFERENCE_STRICT=on` and `--baseline docs/performance/baseline-oracle.json`
+also exits 0. Every case has zero energy difference and identical density SHA-256.
+The Gamma-only `BAANDI_XC_SCREEN_NEGATIVE=off` check against the saved original
+baseline exits 0. No oracle or non-Gamma baseline entry was changed.

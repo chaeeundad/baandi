@@ -362,6 +362,9 @@ fn combined_density_rules_and_zero_spin_reduction() {
             );
         }
     }
+    let _scope = dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")])
+        .unwrap()
+        .enter();
     let negative = Array3::from_elem(dims, -0.1);
     for f in [Functional::LdaPz, Functional::LdaPw, Functional::Pbe] {
         assert!(

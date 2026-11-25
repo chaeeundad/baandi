@@ -66,6 +66,10 @@ fn compare(
     opts: ScfOptions,
     points: &[KPoint],
 ) {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     let species = [SpeciesPotential {
         label: "Xx",
         potential: pp,
@@ -102,6 +106,7 @@ fn compare(
     let old_s = dft_engine::stress::frozen_stress(&old).unwrap();
     for ranks in [1, 3, 8] {
         let results = dft_mpi::simulate(ranks, |comm| {
+            let _screen_scope = screening.enter();
             let mut run = k_driver::run_with(
                 StartInput {
                     cell,
@@ -127,7 +132,9 @@ fn compare(
             .unwrap();
             let force = dft_engine::forces(&view).unwrap();
             let stress = dft_engine::stress::frozen_stress(&view).unwrap();
-            let config = RunConfig::from_pairs(&[("force_band_first", "on")]).unwrap();
+            let config =
+                RunConfig::from_pairs(&[("xc_screen_negative", "off"), ("force_band_first", "on")])
+                    .unwrap();
             let _scope = config.enter();
             let fast = dft_engine::forces(&view).unwrap();
             assert!(delta(force.values.iter().flatten(), fast.values.iter().flatten()) < 1e-12);
@@ -375,6 +382,10 @@ fn silicon_displaced_and_skew() {
 
 #[test]
 fn certificate_opt_out_rejection_and_reference_finite_difference() {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
     let species = [SpeciesPotential {
         label: "Xx",
@@ -455,7 +466,11 @@ fn certificate_opt_out_rejection_and_reference_finite_difference() {
         .is_err()
     );
     {
-        let config = RunConfig::from_pairs(&[("refscf_verify_energy", "on")]).unwrap();
+        let config = RunConfig::from_pairs(&[
+            ("xc_screen_negative", "off"),
+            ("refscf_verify_energy", "on"),
+        ])
+        .unwrap();
         let _scope = config.enter();
         let mut energy_verified = k_driver::run(input(), profile, &points).unwrap();
         let view = delivered::force_state(input(), &mut energy_verified.outcome).unwrap();
@@ -493,6 +508,10 @@ fn certificate_opt_out_rejection_and_reference_finite_difference() {
 
 #[test]
 fn distributed_ionic_seed_matches_cold_delivery() {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
     let species = [SpeciesPotential {
         label: "Xx",
@@ -513,6 +532,7 @@ fn distributed_ionic_seed_matches_cold_delivery() {
     }];
     for ranks in [1, 3, 8] {
         dft_mpi::simulate(ranks, |comm| {
+            let _screen_scope = screening.enter();
             let input = || StartInput {
                 cell: &cell,
                 atoms: &old_atoms,
@@ -621,6 +641,10 @@ fn lazy_delivery_materializes_once_and_preserves_derivatives() {
 
 #[test]
 fn distributed_k_ionic_seed_matches_cold_delivery() {
+    // Historical fixture contract; screening has separate charge/mask tests.
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
     let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
     let species = [SpeciesPotential {
         label: "Xx",
@@ -648,6 +672,7 @@ fn distributed_k_ionic_seed_matches_cold_delivery() {
     let profile = Profile::from_standard_ha(opts.standard.unwrap().threshold_ha).unwrap();
     for ranks in [1, 3, 8] {
         dft_mpi::simulate(ranks, |comm| {
+            let _screen_scope = screening.enter();
             let input = || StartInput {
                 cell: &cell,
                 atoms: &old,
@@ -985,6 +1010,11 @@ mod frozen_strain {
         pulay: bool,
         points: &[KPoint],
     ) {
+        // Historical fixture contract; screening has separate charge/mask tests.
+        let screening =
+            dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")])
+                .unwrap();
+        let _screen_scope = screening.enter();
         opts.gamma_real = if gamma { GammaReal::On } else { GammaReal::Off };
         freeze(reference, &mut opts, points);
         let cell = deform(

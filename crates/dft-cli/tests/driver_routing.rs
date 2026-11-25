@@ -91,6 +91,7 @@ fn corpus_precedence_and_fallback_matrix() {
                 (None, None, Source::Default),
                 (Some("on"), None, Source::Env),
                 (None, Some("reference"), Source::Input),
+                (Some("off"), Some("reference"), Source::Input),
                 (Some("on"), Some("legacy"), Source::Input),
             ] {
                 let _scope = RunConfig::resolve_with(
@@ -123,7 +124,7 @@ fn corpus_precedence_and_fallback_matrix() {
                 let fallback = expected["reference_reason"].as_str().map(reason);
                 let driver = if strict {
                     Driver::StrictOracle
-                } else if wants_reference && fallback.is_none() {
+                } else if wants_reference && (fallback.is_none() || source == Source::Input) {
                     Driver::Reference
                 } else {
                     Driver::LegacyStandard
@@ -148,6 +149,27 @@ fn corpus_precedence_and_fallback_matrix() {
                     if strict { Source::Env } else { source },
                     "{name}"
                 );
+                if !strict
+                    && wants_reference
+                    && source == Source::Input
+                    && let Some(fallback) = fallback
+                {
+                    let error = selection.validate(&config).unwrap_err().to_string();
+                    assert!(
+                        error.contains("explicit reference driver"),
+                        "{name}: {error}"
+                    );
+                    assert!(error.contains(fallback), "{name}: {error}");
+                    assert!(
+                        dft_cli::run::options_for(&config, selection).is_err(),
+                        "{name}"
+                    );
+                    if route::preliminary(&config).reason.is_some() {
+                        assert!(config.validate().is_err(), "{name}");
+                    }
+                    count += 1;
+                    continue;
+                }
                 // Invalid input stays invalid; choosing a fallback never repairs it.
                 if !strict && let Some(fragment) = expected["parse_error"].as_str() {
                     assert!(
@@ -255,6 +277,8 @@ fn cli_records_executed_driver_and_strict_precedence() {
             for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("BAANDI_")) {
                 cmd.env_remove(key);
             }
+            // This coarse synthetic fixture tests routing, not the XC charge gate.
+            cmd.env("BAANDI_XC_SCREEN_NEGATIVE", "off");
             cmd.args([
                 "run",
                 input_path.to_str().unwrap(),
@@ -321,14 +345,9 @@ fn command_boundaries_and_input_switch_provenance() {
     }
     for command in [Command::Checkpoint, Command::Restart] {
         let selection = route::select(&config, Mode::Classic, command, &[&pp]);
-        assert_eq!(selection.driver, Driver::LegacyStandard);
+        assert_eq!(selection.driver, Driver::Reference);
         assert_eq!(selection.reason, Some(route::CHECKPOINT));
-        assert!(
-            dft_cli::run::options_for(&config, selection)
-                .unwrap()
-                .standard
-                .is_some()
-        );
+        assert!(dft_cli::run::options_for(&config, selection).is_err());
     }
     let selection = route::select(
         &config,
@@ -446,9 +465,13 @@ fn checkpoint_restart_and_explain_record_selection() {
 
 #[test]
 fn preexisting_spin_fd_fallback_mixer_defaults_are_preserved() {
-    let _scope = RunConfig::from_pairs(&[("reference_scf", "on")])
-        .unwrap()
-        .enter();
+    // Fallback compatibility is an implicit/environment request contract.
+    let _scope = RunConfig::resolve_with(
+        |key| (key == "BAANDI_REFERENCE_SCF").then(|| "on".into()),
+        &[],
+    )
+    .unwrap()
+    .enter();
     for text in [
         include_str!("fixtures/routing/l01-free-moment-pbe-fd.toml"),
         include_str!("fixtures/routing/l02-moment-fd.toml"),
@@ -472,4 +495,96 @@ fn preexisting_spin_fd_fallback_mixer_defaults_are_preserved() {
             }
         ));
     }
+}
+
+#[test]
+fn explicit_reference_legacy_keys_reject_before_mixer_validation() {
+    let _scope = RunConfig::resolve_with(|_| None, &[]).unwrap().enter();
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routing/explicit-reference");
+    for entry in fs::read_dir(root).unwrap() {
+        let path = entry.unwrap().path();
+        let text = fs::read_to_string(&path).unwrap();
+        let config = Config::parse_unvalidated(&text).unwrap();
+        let selected = route::preliminary(&config);
+        assert_eq!(selected.driver, Driver::Reference, "{}", path.display());
+        assert_eq!(selected.source, Source::Input);
+        let error = Config::parse(&text).unwrap_err().to_string();
+        assert!(error.contains(route::LEGACY_INPUT), "{error}");
+        // Every explicitly supplied legacy control must be named, including
+        // multiple controls in one input. Common controls are not conflicts.
+        let doc: toml::Value = toml::from_str(&text).unwrap();
+        for table in ["scf", "xc"] {
+            for key in doc[table].as_table().unwrap().keys() {
+                if !matches!(key.as_str(), "driver" | "max_iterations" | "functional") {
+                    assert!(error.contains(&format!("{table}.{key}")), "{error}");
+                }
+            }
+        }
+        // An implicit request may still fall back, with the original mixer.
+        for env in [None, Some("on")] {
+            let _scope = RunConfig::resolve_with(
+                |key| {
+                    (key == "BAANDI_REFERENCE_SCF")
+                        .then_some(env)
+                        .flatten()
+                        .map(Into::into)
+                },
+                &[],
+            )
+            .unwrap()
+            .enter();
+            let implicit =
+                Config::parse_unvalidated(&text.replace("driver = \"reference\"", "")).unwrap();
+            assert_eq!(route::preliminary(&implicit).driver, Driver::LegacyStandard);
+        }
+    }
+}
+
+#[test]
+fn explain_prints_selection_before_validation_errors() {
+    let dir = std::env::temp_dir().join(format!("r1b-explain-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let base = include_str!("fixtures/routing/explicit-reference/l09-linear.toml");
+    for (name, text, fragment) in [
+        ("conflict", base.to_string(), "scf.mixing"),
+        (
+            "multiple",
+            base.replace(
+                "mixing = \"linear\"",
+                "mixing = \"broyden\"\nenergy_tolerance_ha = 1e-8\neigen_tolerance = 1e-9",
+            ),
+            "scf.energy_tolerance_ha, scf.eigen_tolerance",
+        ),
+        (
+            "preflight",
+            base.replace("mixing = \"linear\"", "mixing = \"broyden\""),
+            "synthetic-atomic.upf",
+        ),
+    ] {
+        let input = dir.join(format!("{name}.toml"));
+        let log = dir.join(format!("{name}.log"));
+        fs::write(&input, text).unwrap();
+        let output = fs::File::create(&log).unwrap();
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+        for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("BAANDI_")) {
+            command.env_remove(key);
+        }
+        let status = command
+            .arg("explain")
+            .arg(&input)
+            .stdout(output.try_clone().unwrap())
+            .stderr(output)
+            .status()
+            .unwrap();
+        assert!(!status.success());
+        let text = fs::read_to_string(log).unwrap();
+        assert!(text.starts_with("driver: reference (input, "), "{text}");
+        assert!(
+            text.lines().skip(1).collect::<String>().contains(fragment),
+            "{text}"
+        );
+        assert!(!text.contains("unknown mixer"), "{text}");
+    }
+    fs::remove_dir_all(dir).unwrap();
 }

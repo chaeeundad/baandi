@@ -1,0 +1,21 @@
+[system]
+name = "R0 routing Si2"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,4.0,4.0],[4.0,0.0,4.0],[4.0,4.0,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "synthetic-atomic.upf"
+[basis]
+ecutwfc_ry = 3.0
+kpoints = [[0.0,0.0,0.0]]
+[xc]
+functional = "pbe"
+density_floor = 1e-12
+[scf]
+driver = "reference"
+max_iterations = 100

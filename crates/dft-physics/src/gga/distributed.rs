@@ -186,3 +186,244 @@ pub fn evaluate<K: Collective, F: Fields<K>>(
     )?;
     Ok(XcSlab { potential, energy })
 }
+
+/// Owned polarized PBE response. Integrals are LOCAL (Ha); the caller reduces
+/// them with its energy ledger. The core integral is diagnostic, not band DC.
+pub struct SpinXcSlab {
+    pub potentials: [Vec<f64>; 2],
+    pub energy: f64,
+    pub valence_potential_integral: f64,
+    pub core_potential_integral: f64,
+}
+
+/// Run-owned polarized PBE adapter. All adapter scratch and response storage
+/// are retained across maps. The existing Fields transform API and xcx library
+/// return owned vectors; their boundary allocations remain, outside H/orbitals.
+pub struct SpinPbe {
+    exchange: Functional,
+    correlation: Functional,
+    dims: [usize; 3],
+    indices: Vec<usize>,
+    multipliers: [Vec<C>; 3],
+    rho: Vec<f64>,
+    sigma: Vec<f64>,
+    channel: Vec<f64>,
+    gradients: [[Vec<f64>; 3]; 2],
+    flux: Vec<f64>,
+    derivative_g: Vec<C>,
+    weight: f64,
+    response: SpinXcSlab,
+}
+impl SpinPbe {
+    /// Bind the workspace to one cell and owned FFT layout for the entire run.
+    pub fn new<K: Collective, F: Fields<K>>(fields: &F, cell: &Cell) -> Result<Self, PhysicsError> {
+        let dims = fields.dims();
+        if dims.contains(&0) {
+            return Err(PhysicsError::Shape);
+        }
+        let len = fields.plane_points();
+        let indices = fields.reciprocal_indices().to_vec();
+        let b = cell.reciprocal_columns_inverse_bohr();
+        Ok(Self {
+            exchange: Functional::new(FunctionalId::GgaXPbe, Spin::Polarized)
+                .map_err(|e| PhysicsError::Xc(e.to_string()))?,
+            correlation: Functional::new(FunctionalId::GgaCPbe, Spin::Polarized)
+                .map_err(|e| PhysicsError::Xc(e.to_string()))?,
+            multipliers: std::array::from_fn(|axis| {
+                indices
+                    .iter()
+                    .map(|&g| multiplier(dims, g, b, axis))
+                    .collect()
+            }),
+            derivative_g: vec![C::default(); indices.len()],
+            dims,
+            indices,
+            rho: vec![0.; 2 * len],
+            sigma: vec![0.; 3 * len],
+            channel: vec![0.; len],
+            gradients: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.; len])),
+            flux: vec![0.; len],
+            weight: cell.volume_bohr3() / dims.iter().product::<usize>() as f64,
+            response: SpinXcSlab {
+                potentials: std::array::from_fn(|_| vec![0.; len]),
+                energy: 0.,
+                valence_potential_integral: 0.,
+                core_potential_integral: 0.,
+            },
+        })
+    }
+
+    /// Differentiate the unscreened combined channels n_s+c/2, as serial SpinXc
+    /// does. A signed core is permitted, but each combined channel must be finite
+    /// and nonnegative. Only total density <= the serial spin threshold screens
+    /// local library inputs; no clipping or per-channel vacuum floor is applied.
+    pub fn evaluate<K: Collective, F: Fields<K>>(
+        &mut self,
+        fields: &mut F,
+        comm: &K,
+        density: [&[f64]; 2],
+        core: Option<&[f64]>,
+    ) -> Result<&SpinXcSlab, F::Error> {
+        let len = self.channel.len();
+        agree(
+            comm,
+            fields.dims() != self.dims
+                || fields.reciprocal_indices() != self.indices
+                || fields.plane_points() != len
+                || density.iter().any(|n| n.len() != len)
+                || core.is_some_and(|c| c.len() != len || c.iter().any(|v| !v.is_finite())),
+            "distributed spin PBE field/core shape mismatch",
+        )?;
+        let mut bad = false;
+        for (s, n) in density.iter().enumerate() {
+            for (i, &n) in n.iter().enumerate() {
+                let total = n + core.map_or(0., |c| 0.5 * c[i]);
+                bad |= !total.is_finite() || total < 0.;
+                self.rho[2 * i + s] = total;
+            }
+        }
+        agree(
+            comm,
+            bad,
+            "distributed spin PBE requires finite nonnegative combined channels",
+        )?;
+        for s in 0..2 {
+            for (i, v) in self.channel.iter_mut().enumerate() {
+                *v = self.rho[2 * i + s];
+            }
+            // Forward the actual combined samples, matching serial rounding and
+            // avoiding any cached-core/valence Fourier cancellation at vacuum.
+            let coeff = fields.forward(comm, &self.channel)?;
+            for axis in 0..3 {
+                for ((d, n), g) in self
+                    .derivative_g
+                    .iter_mut()
+                    .zip(&coeff)
+                    .zip(&self.multipliers[axis])
+                {
+                    *d = n * g;
+                }
+                self.gradients[s][axis].copy_from_slice(&fields.inverse(comm, &self.derivative_g)?);
+            }
+        }
+        self.sigma.fill(0.);
+        for axis in 0..3 {
+            for i in 0..len {
+                let u = self.gradients[0][axis][i];
+                let d = self.gradients[1][axis][i];
+                self.sigma[3 * i] += u * u;
+                self.sigma[3 * i + 1] += u * d;
+                self.sigma[3 * i + 2] += d * d;
+            }
+        }
+        for i in 0..len {
+            if self.rho[2 * i] + self.rho[2 * i + 1] <= crate::xc::DENSITY_THRESHOLD {
+                self.rho[2 * i..2 * i + 2].fill(0.);
+                self.sigma[3 * i..3 * i + 3].fill(0.);
+            }
+        }
+        let local = (|| -> Result<_, PhysicsError> {
+            if len == 0 {
+                return Ok(None);
+            }
+            let input = XcInput::gga(&self.rho, &self.sigma);
+            let x = self
+                .exchange
+                .eval(len, &input)
+                .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+            let c = self
+                .correlation
+                .eval(len, &input)
+                .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+            if x.exc
+                .iter()
+                .chain(&c.exc)
+                .chain(&x.vrho)
+                .chain(&c.vrho)
+                .chain(&x.vsigma)
+                .chain(&c.vsigma)
+                .any(|v| !v.is_finite())
+            {
+                return Err(PhysicsError::Unrepresentable);
+            }
+            Ok(Some((x, c)))
+        })();
+        agree(
+            comm,
+            local.is_err(),
+            "distributed spin PBE library evaluation failed on a rank",
+        )?;
+        let local = local?;
+        self.response.energy = local.as_ref().map_or(0., |(x, c)| {
+            self.weight
+                * (0..len)
+                    .map(|i| (self.rho[2 * i] + self.rho[2 * i + 1]) * (x.exc[i] + c.exc[i]))
+                    .sum::<f64>()
+        });
+        for s in 0..2 {
+            if let Some((x, c)) = &local {
+                for i in 0..len {
+                    self.response.potentials[s][i] = x.vrho[2 * i + s] + c.vrho[2 * i + s];
+                }
+            }
+            for axis in 0..3 {
+                if let Some((x, c)) = &local {
+                    for i in 0..len {
+                        self.flux[i] = 2.
+                            * (x.vsigma[3 * i + 2 * s] + c.vsigma[3 * i + 2 * s])
+                            * self.gradients[s][axis][i]
+                            + (x.vsigma[3 * i + 1] + c.vsigma[3 * i + 1])
+                                * self.gradients[1 - s][axis][i];
+                    }
+                }
+                let coeff = fields.forward(comm, &self.flux)?;
+                for ((d, n), g) in self
+                    .derivative_g
+                    .iter_mut()
+                    .zip(&coeff)
+                    .zip(&self.multipliers[axis])
+                {
+                    *d = n * g;
+                }
+                // Match serial's axis-by-axis subtraction, including empty owners.
+                let derivative = fields.inverse(comm, &self.derivative_g)?;
+                for (v, d) in self.response.potentials[s].iter_mut().zip(derivative) {
+                    *v -= d;
+                }
+            }
+        }
+        self.response.valence_potential_integral = self.weight
+            * (0..2)
+                .map(|s| {
+                    density[s]
+                        .iter()
+                        .zip(&self.response.potentials[s])
+                        .map(|(n, v)| n * v)
+                        .sum::<f64>()
+                })
+                .sum::<f64>();
+        self.response.core_potential_integral = core.map_or(0., |core| {
+            self.weight
+                * core
+                    .iter()
+                    .zip(&self.response.potentials[0])
+                    .zip(&self.response.potentials[1])
+                    .map(|((&c, &u), &d)| 0.5 * c * (u + d))
+                    .sum::<f64>()
+        });
+        agree(
+            comm,
+            !self.response.energy.is_finite()
+                || !self.response.valence_potential_integral.is_finite()
+                || !self.response.core_potential_integral.is_finite()
+                || self
+                    .response
+                    .potentials
+                    .iter()
+                    .flatten()
+                    .any(|v| !v.is_finite()),
+            "nonfinite distributed spin PBE response on a rank",
+        )?;
+        Ok(&self.response)
+    }
+}

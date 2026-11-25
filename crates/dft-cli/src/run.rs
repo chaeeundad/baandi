@@ -139,15 +139,32 @@ pub fn reference_requested(config: &Config) -> bool {
 
 const G4B_FALLBACK: &str = "reference driver: collinear Fermi-Dirac not yet qualified, G4B";
 
+const G4D_FALLBACK: &str =
+    "reference driver: free-moment collinear FD with PBE not yet qualified, G4D";
+
 fn reference_spin_fd_fallback(config: &Config) -> bool {
+    reference_spin_fd_fallback_reason(config).is_some()
+}
+
+fn reference_spin_fd_fallback_reason(config: &Config) -> Option<&'static str> {
     use dft_numerics::switches::{Id, RunConfig};
     if !reference_requested(config)
         || !config.collinear()
         || !matches!(config.finite_temperature(), Ok(Some(_)))
     {
-        return false;
+        return None;
     }
     let rc = RunConfig::current();
+    // Qualification boundary takes precedence over every G4B switch.
+    if config.xc.functional.engine() == dft_engine::Functional::Pbe
+        && matches!(
+            config.finite_constraint(),
+            dft_physics::occupations::Constraint::Total
+        )
+    {
+        rc.note_path(Id::REFSCF_SPIN_FD_MOMENT, "legacy", Some(G4D_FALLBACK));
+        return Some(G4D_FALLBACK);
+    }
     let enabled = rc.on(Id::REFSCF_SPIN_FD_MOMENT)
         && rc.on(Id::REFSCF_SPIN_STIFFNESS)
         && rc.on(Id::REFSCF_HISTORY_CONDITIONING);
@@ -156,7 +173,7 @@ fn reference_spin_fd_fallback(config: &Config) -> bool {
         if enabled { "reference" } else { "legacy" },
         if enabled { None } else { Some(G4B_FALLBACK) },
     );
-    !enabled
+    (!enabled).then_some(G4B_FALLBACK)
 }
 
 /// Independent profile resolution: no legacy session tuning or ladder reads.
@@ -230,10 +247,10 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
     let profile = reference_profile(config)?;
     let s = config.scf.as_ref();
     let finite = config.finite_temperature().map_err(|e| error(1, e))?;
-    if config.collinear() && config.xc.functional.engine() != dft_engine::Functional::LdaPw {
+    if config.collinear() && config.xc.functional.engine() == dft_engine::Functional::LdaPz {
         return Err(error(
             1,
-            "reference spin XC requires lda-pw: polarized lda-pz is unavailable in legacy; distributed PBE has no two-channel evaluator",
+            "reference spin XC requires lda-pw or pbe: polarized lda-pz is unavailable in legacy",
         ));
     }
     let points = config.resolved_points().map_err(|e| error(1, e))?;
@@ -1635,11 +1652,11 @@ fn execute_mode_inner(
     };
     if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
         let mut record = driver_record("Fermi-Dirac occupations");
-        if reference_spin_fd_fallback(&config) {
+        if let Some(reason) = reference_spin_fd_fallback_reason(&config) {
             record["scf"] = options_json(&opts);
             record["scf"]["driver"] = json!("legacy");
-            record["reference_driver_fallback_reason"] = json!(G4B_FALLBACK);
-            record["execution"]["reference_driver_fallback_reason"] = json!(G4B_FALLBACK);
+            record["reference_driver_fallback_reason"] = json!(reason);
+            record["execution"]["reference_driver_fallback_reason"] = json!(reason);
         }
         return finite_run::execute(
             &config,
@@ -3117,7 +3134,7 @@ fn reference_electronic_run(
         "timings":{"setup_s":r.setup_s,"engine_total_s":r.total_s},
         "reference_scf":{"schema":"reference-spin-fd-1","iterations":rows,"verification_calls":calls(&r.verification_calls),
             "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>()},
-        "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ and distributed spin PBE unavailable"]});
+        "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ unavailable; free-moment collinear FD with PBE routes to legacy pending G4D"]});
     if let Some(report) = &r.symmetry {
         result["reference_scf"]["symmetry"] = reference_symmetry_json(report);
     }
@@ -4391,6 +4408,36 @@ mod tests {
                     .unwrap();
                     let _guard = scope.enter();
                     assert_eq!(reference_spin_fd_fallback(&route_config), mask != 7);
+                    let pbe =
+                        Config::parse(&text.replace("functional='lda-pw'", "functional='pbe'"))
+                            .unwrap();
+                    assert_eq!(
+                        reference_spin_fd_fallback_reason(&pbe),
+                        if name == "spin-fd-free" {
+                            Some(G4D_FALLBACK)
+                        } else if mask != 7 {
+                            Some(G4B_FALLBACK)
+                        } else {
+                            None
+                        }
+                    );
+                }
+                if name == "spin-fd-free" {
+                    let pbe_text = text.replace("functional='lda-pw'", "functional='pbe'")
+                        + "[performance]\nrefscf_spin_fd_moment='on'\nrefscf_spin_stiffness='on'\nrefscf_history_conditioning='on'\n";
+                    fs::write(&input, pbe_text).unwrap();
+                    let dest = dir.join("pbe-free-legacy");
+                    execute(&input, Some(&dest)).unwrap();
+                    let result: Value =
+                        serde_json::from_slice(&fs::read(dest.join("results.json")).unwrap())
+                            .unwrap();
+                    assert_eq!(result["reference_driver_fallback_reason"], G4D_FALLBACK);
+                    assert_eq!(
+                        result["execution"]["reference_driver_fallback_reason"],
+                        G4D_FALLBACK
+                    );
+                    assert_eq!(result["scf"]["driver"], "legacy");
+                    assert!(result.get("reference_scf").is_none());
                 }
                 text.push_str("[performance]\nrefscf_spin_fd_moment='on'\nrefscf_spin_stiffness='on'\nrefscf_history_conditioning='on'\n");
                 fs::write(&input, text).unwrap();

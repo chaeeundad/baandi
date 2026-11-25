@@ -12,10 +12,12 @@ use dft_physics::{
 use dft_solvers::{ref_davidson, ref_davidson_complex};
 
 /// The local LDA adapter owns spectral scratch even though LDA needs no
-/// derivatives. Construct it once, never once per SCF map or verification.
+/// derivatives. It also supplies G4B's local curvature proxy for PBE. Both
+/// it and the separate distributed PBE scratch are constructed once per run.
 pub(super) struct Workspace {
     pub symmetry: Option<super::symmetry::Workspace>,
     spin: Option<SpinFields>,
+    pbe: Option<dft_physics::gga::distributed::SpinPbe>,
 }
 struct SpinFields {
     xc: SpinXc,
@@ -31,6 +33,7 @@ impl Workspace {
         comm: &K,
         cell: &Cell,
         spin: bool,
+        functional: Functional,
     ) -> Result<Self, ScfError> {
         let local = (|| -> Result<_, ScfError> {
             let len = state.density.len();
@@ -56,8 +59,22 @@ impl Workspace {
                 "reference spin XC setup failed on a rank",
             ));
         }
+        if !spin || functional != Functional::Pbe {
+            return Ok(Self {
+                spin: local?,
+                pbe: None,
+                symmetry: None,
+            });
+        }
+        let pbe = dft_physics::gga::distributed::SpinPbe::new::<K, _>(&state.fields, cell);
+        if sum(comm, &[f64::from(pbe.is_err())])?[0] != 0. {
+            return Err(ScfError::InvalidInput(
+                "reference spin PBE setup failed on a rank",
+            ));
+        }
         Ok(Self {
             spin: local?,
+            pbe: Some(pbe?),
             symmetry: None,
         })
     }
@@ -176,7 +193,14 @@ fn fields<K: Collective>(
     let total: Vec<_> = (0..density[0].len())
         .map(|i| density.iter().map(|n| n[i]).sum::<f64>())
         .collect();
-    let scalar = super::map::fields(&mut state.common, comm, cell, functional, &total)?;
+    // The scalar XC is discarded for spin; use the existing Hartree assembly
+    // without paying for a second, unpolarized PBE gradient/divergence.
+    let scalar_functional = if density.len() == 2 && functional == Functional::Pbe {
+        Functional::LdaPw
+    } else {
+        functional
+    };
+    let scalar = super::map::fields(&mut state.common, comm, cell, scalar_functional, &total)?;
     if density.len() == 1 {
         return Ok(Fields {
             hxc: vec![scalar.hxc],
@@ -185,6 +209,42 @@ fn fields<K: Collective>(
             xc: scalar.xc,
             xc_integral: scalar.xc_integral,
             nlcc: scalar.nlcc,
+        });
+    }
+    if let Some(pbe) = &mut workspace.pbe {
+        let core = state.common.core_density.as_deref();
+        let out = pbe.evaluate(
+            &mut state.common.fields,
+            comm,
+            [&density[0], &density[1]],
+            core,
+        )?;
+        let dv = cell.volume_bohr3() / state.grid.dims().iter().product::<usize>() as f64;
+        let values = sum(
+            comm,
+            &[
+                out.energy,
+                out.valence_potential_integral,
+                out.core_potential_integral,
+                dv * core.map_or(0., |c| c.iter().sum::<f64>()),
+            ],
+        )?;
+        let potentials = out
+            .potentials
+            .iter()
+            .map(|v| v.iter().zip(&scalar.vh).map(|(x, h)| x + h).collect())
+            .collect();
+        return Ok(Fields {
+            hxc: potentials,
+            vh: scalar.vh,
+            hartree: scalar.hartree,
+            xc: values[0],
+            xc_integral: values[1],
+            nlcc: core.map(|_| crate::energy::CoreXcLedger {
+                core_electrons: values[3],
+                core_potential_integral_ha: values[2],
+                valence_potential_integral_ha: values[1],
+            }),
         });
     }
     // LDA is point-local. Evaluate the existing polarized adapter on owned
@@ -588,6 +648,7 @@ mod g4b_kernel_tests {
         let dims = [2; 3];
         for core in [0., 0.02] {
             let mut work = Workspace {
+                pbe: None,
                 spin: Some(SpinFields {
                     xc: SpinXc::new(SpinFunctional::LdaPw, &cell, dims).unwrap(),
                     response: SpinXcResponse::new(dims),

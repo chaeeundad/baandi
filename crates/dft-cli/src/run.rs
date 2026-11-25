@@ -2940,6 +2940,7 @@ fn execute_mode_inner(
             "name":r.name, "wall_s":r.wall_s, "calls":r.calls, "rank":r.rank, "boundary":r.boundary
         })).collect::<Vec<_>>());
     }
+    add_xc_screening_json(&mut result);
     let result_path = out.join("results.json");
     let serialize_clock = launch::clock();
     if !reference_symmetry_record.is_null() {
@@ -3225,6 +3226,7 @@ fn reference_electronic_run(
             .collect::<Vec<_>>(),
         r.converged,
     );
+    add_xc_screening_json(&mut result);
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         converged: r.converged,
@@ -4955,5 +4957,23 @@ mod tests {
         );
         assert_eq!(parallel_model(8, 12, true, None), ("mpi_stick_rows", None));
         assert_eq!(parallel_model(8, 12, false, None), ("mpi_row_block", None));
+    }
+}
+
+/// Serialize run-local XC field diagnostics only at the output boundary.
+fn add_xc_screening_json(result: &mut serde_json::Value) {
+    if dft_physics::xc::screen_negative() {
+        result["xc_screening"] = json!({
+            "schema": "xc-screening-1",
+            "density_threshold_bohr_minus3": dft_physics::xc::DENSITY_THRESHOLD,
+            "maximum_screened_charge_fraction_per_channel": dft_physics::xc::SCREENED_CHARGE_FRACTION,
+            "scope": "XC field evaluations, including input/output audits; global C-order grid indices",
+            "records": dft_physics::xc::screening_records().iter().enumerate().map(|(i, r)| json!({
+                "evaluation_index": i, "stage": r.stage, "channel": r.channel,
+                "screened_points": r.points, "screened_absolute_charge_electrons": r.charge_electrons,
+                "gate_total_electrons": r.total_electrons, "minimum_density_bohr_minus3": r.minimum_bohr3,
+                "minimum_grid_index": r.minimum_grid_index
+            })).collect::<Vec<_>>()
+        });
     }
 }

@@ -2718,6 +2718,17 @@ internal oracles, not a physical Si128 SCF or MPI/MKL speed evidence.
 
 ## NLCC
 
+**Vacuum densities.** Proposed [ADR 0046](../decisions/0046-xc-small-and-negative-density.md)
+adds default-off `XC_SCREEN_NEGATIVE`: XC alone evaluates an auxiliary field
+that is zero for combined channel density <=1e-10 Bohr^-3, with a per-channel
+screened-charge budget of 1e-4 of total valence electrons. Physical valence and
+core arrays remain signed and unchanged. PBE differentiates this auxiliary
+field and masks the complete potential after divergence; the derivative is
+valid away from mask crossings, not at the hard cutoff. Start, map and fresh
+verification use the same model. Screening counts, integrated absolute charge
+and minimum/global grid index are diagnostics, not an energy-error certificate.
+The inventory and qualification limits are in the ADR.
+
 G1-NLCC extends the implemented Start/Driver envelope above to norm-conserving
 LDA-PZ and modified LDA-PW datasets with nonlinear core correction. Earlier
 statements in those sections that NLCC rejects are superseded by this section.

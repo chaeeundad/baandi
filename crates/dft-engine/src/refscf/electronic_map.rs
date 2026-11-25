@@ -200,7 +200,12 @@ fn fields<K: Collective>(
     } else {
         functional
     };
+    // This scalar XC is discarded for spin. Only the actual channel XC may
+    // consume the screening budget or publish its field audit.
+    let scalar_scope = (density.len() == 2 && dft_physics::xc::screen_negative())
+        .then(|| dft_physics::xc::screening_scope(dft_physics::xc::screening_stage(), true, None));
     let scalar = super::map::fields(&mut state.common, comm, cell, scalar_functional, &total)?;
+    drop(scalar_scope);
     if density.len() == 1 {
         return Ok(Fields {
             hxc: vec![scalar.hxc],
@@ -211,6 +216,38 @@ fn fields<K: Collective>(
             nlcc: scalar.nlcc,
         });
     }
+    let screening = dft_physics::xc::screen_negative();
+    if screening {
+        let dv = cell.volume_bohr3() / state.grid.dims().iter().product::<usize>() as f64;
+        for (s, n) in density.iter().enumerate() {
+            let combined: Vec<_> = n
+                .iter()
+                .enumerate()
+                .map(|(i, n)| {
+                    n + state
+                        .common
+                        .core_density
+                        .as_ref()
+                        .map_or(0., |c| 0.5 * c[i])
+                })
+                .collect();
+            dft_physics::gga::distributed::audit(
+                &state.common.fields,
+                comm,
+                &combined,
+                dv,
+                if s == 0 { "up" } else { "down" },
+                Some(state.electrons),
+            )?;
+        }
+    }
+    let _scope = screening.then(|| {
+        dft_physics::xc::screening_scope(
+            dft_physics::xc::screening_stage(),
+            true,
+            Some(state.electrons),
+        )
+    });
     if let Some(pbe) = &mut workspace.pbe {
         let core = state.common.core_density.as_deref();
         let out = pbe.evaluate(

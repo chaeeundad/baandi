@@ -207,6 +207,14 @@ impl SpinXc {
             return Err(PhysicsError::Shape);
         }
         let len = self.rho.len() / 2;
+        let screening = xc::screen_negative();
+        let _scope = (screening && !xc::screening_prechecked()).then(|| {
+            xc::screening_scope(
+                xc::screening_stage(),
+                false,
+                Some(self.weight * density.iter().map(|n| n.sum()).sum::<f64>()),
+            )
+        });
         for (s, channel) in density.iter().enumerate() {
             if channel.shape() != self.flux.shape()
                 || out.potentials[s].shape() != self.flux.shape()
@@ -224,18 +232,21 @@ impl SpinXc {
             } else {
                 channel
             };
+            xc::audit_density(
+                combined,
+                self.weight * len as f64,
+                if s == 0 { "up" } else { "down" },
+                0.,
+            )?;
             for (i, &n) in combined.iter().enumerate() {
-                if !n.is_finite() || n < 0.0 {
-                    return Err(if core.is_some() {
-                        PhysicsError::Xc(format!(
-                            "NLCC combined spin density {n:e} Bohr^-3 is not finite/nonnegative; resolve density-grid truncation or valence feasibility without clipping core"
-                        ))
-                    } else {
-                        PhysicsError::Density(n)
-                    });
-                }
-                self.rho[2 * i + s] = n;
+                self.rho[2 * i + s] = if screening {
+                    xc::screened_argument(n)
+                } else {
+                    n
+                };
             }
+            let projected = screening.then(|| combined.mapv(xc::screened_argument));
+            let combined = projected.as_ref().unwrap_or(combined);
             if self.kind == SpinFunctional::Pbe {
                 for a in 0..3 {
                     self.spectral
@@ -297,6 +308,15 @@ impl SpinXc {
                     self.spectral
                         .derivative(&self.flux, a, &mut self.derivative)?;
                     out.potentials[s] -= &self.derivative;
+                }
+            }
+        }
+        if screening {
+            for s in 0..2 {
+                for (i, v) in out.potentials[s].iter_mut().enumerate() {
+                    if self.rho[2 * i + s] == 0. {
+                        *v = 0.;
+                    }
                 }
             }
         }
@@ -446,9 +466,15 @@ pub fn unpolarized_pw(n: &Array3<f64>, volume: f64) -> Result<xc::XcGrid, Physic
     if n.is_empty() {
         return Err(PhysicsError::Shape);
     }
+    xc::audit_density(n, volume, "total", -xc::NEGATIVE_ROUNDOFF)?;
     let mut rho = Vec::with_capacity(n.len());
+    let screening = xc::screen_negative();
     for &v in n {
-        let v = xc::checked_density(v)?;
+        let v = if screening {
+            xc::screened_argument(v)
+        } else {
+            xc::checked_density(v)?
+        };
         rho.push(if v <= xc::DENSITY_THRESHOLD { 0.0 } else { v });
     }
     let eval = |id| {

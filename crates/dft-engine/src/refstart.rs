@@ -157,6 +157,9 @@ impl<K: Collective> dft_physics::gga::distributed::Fields<K> for StartFields {
     fn reciprocal_indices(&self) -> &[usize] {
         self.reciprocal_indices()
     }
+    fn real_indices(&self) -> Option<Vec<usize>> {
+        Some(self.plane_offsets())
+    }
     fn plane_points(&self) -> usize {
         self.fft.plane_points()
     }
@@ -696,7 +699,29 @@ fn start_inner<K: Collective>(
     drop(vh_hat);
     // Prolongation is not clipped or rescaled. Signed Fourier roundoff uses
     // the same absolute-density LDA evaluation as a reference SCF map.
-    let xc = if o.functional == Functional::Pbe {
+    let _xc_scope = dft_physics::xc::screening_scope("start", false, None);
+    let screening = dft_physics::xc::screen_negative();
+    let screened_total = screening.then(|| {
+        density
+            .iter()
+            .enumerate()
+            .map(|(i, n)| n + core_density.as_ref().map_or(0., |c| c[i]))
+            .collect::<Vec<_>>()
+    });
+    if let Some(total) = &screened_total {
+        dft_physics::gga::distributed::audit(
+            &fields,
+            comm,
+            total,
+            cell.volume_bohr3() / dims.iter().product::<usize>() as f64,
+            "total",
+            Some(electrons),
+        )?;
+    }
+    let _local_scope = dft_physics::xc::screening_scope("start", screening, Some(electrons));
+    let xc = if o.functional != Functional::Pbe && screening {
+        local_xc(o.functional, screened_total.as_ref().unwrap())
+    } else if o.functional == Functional::Pbe {
         if let Some(core) = &mut pbe_core {
             core.evaluate(
                 &mut fields,
@@ -727,12 +752,19 @@ fn start_inner<K: Collective>(
     } else {
         local_xc(o.functional, &density)
     };
-    agree(comm, f64::from(xc.is_err()), "reference start: XC failed")?;
+    dft_physics::xc::agree_error(
+        comm,
+        xc.as_ref()
+            .err()
+            .map(|e| format!("reference start: XC failed: {e}")),
+    )?;
     let xc = xc?;
     for ((v, &ion), &x) in potential.iter_mut().zip(&ionic).zip(&xc) {
         *v = ion + (*v + x);
     }
     drop(xc);
+    drop(_local_scope);
+    drop(_xc_scope);
     setup.record("initial_potential", clock);
     let clock = Instant::now();
     let mut map = crate::grid_dist::PlaneMap::new(

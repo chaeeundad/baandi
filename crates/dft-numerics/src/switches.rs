@@ -624,6 +624,8 @@ table! {
         "G4B candidate: add absolute local LDA-PW spin curvature residual energy for collinear FD only";
     REFSCF_HISTORY_CONDITIONING: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4B candidate: oldest-first history pruning at rcond <= sqrt(p*epsilon), collinear FD only; proposed ADR 0045";
+    XC_SCREEN_NEGATIVE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4E: screen XC-only small/signed vacuum densities with a screened-charge budget; proposed ADR 0046";
 }
 
 struct Resolved {

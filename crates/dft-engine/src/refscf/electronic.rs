@@ -591,6 +591,7 @@ pub(super) async fn run_continuation<K: Collective>(
         let mut redo = false;
         let mut reported_columns = 0;
         let (step, y, f, dr2) = loop {
+            let xc_stage = dft_physics::xc::screening_scope("map", false, Some(electrons));
             let step = map::evaluate(
                 &mut workspace,
                 &mut states,
@@ -613,6 +614,8 @@ pub(super) async fn run_continuation<K: Collective>(
             } else {
                 0.
             };
+            // Restore thread-local diagnostics before any yielded boundary.
+            drop(xc_stage);
             let dr2 = if stiffness {
                 base_dr2 + 2. * stiffness_ha
             } else {
@@ -689,6 +692,8 @@ pub(super) async fn run_continuation<K: Collective>(
             if let Some(s) = &mut workspace.symmetry {
                 s.verification = true;
             }
+            let _xc_stage =
+                dft_physics::xc::screening_scope("verification", false, Some(electrons));
             let fresh = map::evaluate(
                 &mut workspace,
                 &mut states,

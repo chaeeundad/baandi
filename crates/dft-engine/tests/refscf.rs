@@ -8961,3 +8961,174 @@ fn g4e_positive_density_driver_bits() {
         }
     }
 }
+
+// Synthetic isolated open shell with Fourier-truncated NLCC; no external UPF.
+// Release command: cargo test --release -p dft-engine --test refscf g4f_vacuum_fd -- --include-ignored --nocapture
+#[test]
+#[ignore = "isolated FD atom matrix in release"]
+fn g4f_vacuum_fd_fixed() {
+    g4f_vacuum_fd_case(false);
+}
+
+#[test]
+#[ignore = "isolated FD atom matrix in release"]
+fn g4f_vacuum_fd_free() {
+    g4f_vacuum_fd_case(true);
+}
+
+fn g4f_vacuum_fd_case(free: bool) {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+        refscf::electronic::{self, Policy},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    use dft_numerics::switches::RunConfig;
+    use dft_physics::occupations::Constraint;
+    let size = 12.;
+    let cell = Cell::from_user_rows_bohr([[size, 0., 0.], [0., size, 0.], [0., 0., size]]).unwrap();
+    let atoms = [Atom::new("Xx", [0., 0., 0.])];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let pp = g4f_potential();
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let sector = SpinSector {
+        n_up: 1,
+        n_down: 0,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: Some(1.0),
+    };
+    let options = ScfOptions {
+        functional: if free {
+            Functional::LdaPw
+        } else {
+            Functional::Pbe
+        },
+        allow_functional_override: true,
+        cutoff_hartree: 2.6,
+        bands: Some(12),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Uniform,
+        max_iterations: 400,
+        mixing: dft_engine::Mixing::Linear { beta: 1.0 },
+        residual_eigen_schedule: false,
+        initial_eigen_tolerance: 1e-11,
+        eigen_tolerance: 1e-11,
+        density_tolerance: 1e-10,
+        energy_tolerance: 1e-11,
+        ..ScfOptions::strict_reference()
+    };
+    let config = RunConfig::from_pairs(&[("xc_screen_negative", "on")]).unwrap();
+    let _s = config.enter();
+    let constraint = if free {
+        Constraint::Total
+    } else {
+        Constraint::FixedMoment(0.9999999)
+    };
+    let legacy = CollinearProblem::new_fermi_dirac(
+        &cell,
+        &atoms,
+        &potentials,
+        options.clone(),
+        &points,
+        sector.clone(),
+        0.005,
+        constraint,
+        12,
+    )
+    .unwrap()
+    .run()
+    .unwrap();
+    assert!(legacy.converged);
+    let oracle = legacy.thermodynamics.unwrap().free_energy_ha;
+    let oracle_moment = legacy.moment_mu_b;
+    let options = ScfOptions {
+        standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+        verification: dft_engine::Verification::FixedPoint,
+        ..options
+    };
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let _s = config.enter();
+            dft_physics::xc::clear_screening_records();
+            let r = electronic::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &points,
+                Policy::SpinFermiDirac {
+                    sector: sector.clone(),
+                    theta_ha: 0.005,
+                    constraint,
+                    band_cap: 12,
+                },
+                comm,
+            )
+            .unwrap();
+            assert!(r.converged && r.verification.as_ref().unwrap().passed());
+            let delta = (r.thermodynamics.free_energy_ha - oracle).abs();
+            assert!(delta < 5e-9, "{delta:e} Ha");
+            assert!((r.moment_mu_b - oracle_moment).abs() < 1e-4);
+            assert!((r.channel_electrons.iter().sum::<f64>() - 1.).abs() < 1e-10);
+            assert!(
+                dft_physics::xc::screening_records()
+                    .iter()
+                    .any(|r| r.points > 0 && r.minimum_bohr3 < 0.)
+            );
+            if comm.rank() == 0 {
+                eprintln!(
+                    "G4F free={free} P={ranks} F={:.17e} Ha legacy_delta={delta:e} Ha moment={} mu_B",
+                    r.thermodynamics.free_energy_ha, r.moment_mu_b
+                );
+            }
+        });
+    }
+}
+
+// A short-range 10 Ha Gaussian well localizes the open shell while leaving
+// the -1/r tail unchanged. Its vacuum slabs expose the erroneous local budget.
+fn g4f_potential() -> dft_upf::Pseudopotential {
+    let with_core = true;
+    let base = common::potential_with_atomic_start(1., 1., true, 401, "PBE");
+    let r = base.mesh().r();
+    let array = |v: &[f64]| {
+        v.iter()
+            .map(|v| format!("{v:.17e}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let sample = |f: &dyn Fn(f64) -> f64| array(&r.iter().map(|&r| f(r)).collect::<Vec<_>>());
+    let mut beta = String::new();
+    for (j, l) in [0, 0, 1].into_iter().enumerate() {
+        let i = j + 1;
+        beta.push_str(&format!("<PP_BETA.{i} index=\"{i}\" angular_momentum=\"{l}\" cutoff_radius=\"12\" cutoff_radius_index=\"401\">{}</PP_BETA.{i}>", sample(&|r| r.powi(l+1)*(-r*r/i as f64).exp())));
+    }
+    let core = if with_core {
+        format!(
+            "<PP_NLCC>{}</PP_NLCC>",
+            sample(&|r| (0.5 / PI).powf(1.5) * (-0.5 * r * r).exp())
+        )
+    } else {
+        String::new()
+    };
+    dft_upf::parse_upf(&format!(r#"<UPF version="2.0.1"><PP_INFO>SYNTHETIC G4F localized Gaussian ion</PP_INFO>
+<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx" pseudo_type="NC" relativistic="scalar" is_ultrasoft="F" is_paw="F" is_coulomb="F" has_so="F" has_wfc="F" has_gipaw="F" core_correction="{}" functional="PBE" z_valence="1" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="1" l_max_rho="0" l_local="-1" mesh_size="401" number_of_wfc="2" number_of_proj="3"/>
+<PP_MESH mesh="401"><PP_R>{}</PP_R><PP_RAB>{}</PP_RAB></PP_MESH>
+<PP_LOCAL>{}</PP_LOCAL><PP_NONLOCAL>{beta}<PP_DIJ>2 0.4 0 0.4 4 0 0 0 6</PP_DIJ></PP_NONLOCAL>
+<PP_RHOATOM>{}</PP_RHOATOM>{core}<PP_PSWFC>
+<PP_CHI.1 l="0" label="s" occupation="1">{}</PP_CHI.1><PP_CHI.2 l="1" label="p" occupation="0">{}</PP_CHI.2>
+</PP_PSWFC></UPF>"#, if with_core {"T"} else {"F"}, array(r), array(base.mesh().rab()),
+        array(&base.local_hartree().iter().zip(r).map(|(v,r)|2.*(v - 10. * (-r*r).exp())).collect::<Vec<_>>()),
+        sample(&|r|4.*PI*r*r*(1./PI).powf(1.5)*(-r*r).exp()),
+        sample(&|r|r*(-0.6*r*r).exp()), sample(&|r|r*r*(-0.5*r*r).exp()))).unwrap()
+}

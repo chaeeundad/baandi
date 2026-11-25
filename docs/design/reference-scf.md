@@ -3740,9 +3740,20 @@ The same existing polarized LDA-PW evaluator supplies potentials. Because its
 public adapter exposes first derivatives only, the candidate uses two point-local
 potential evaluations at fixed n with relative displacement cbrt(f64 epsilon).
 This balances central-difference truncation and cancellation without a fitted
-material scale. At polarization endpoints it uses the feasible one-sided span;
-zero total density contributes zero, with the evaluator's existing vacuum
-screening unchanged. Spin-neutral NLCC is included before differentiation.
+material scale. Spin-neutral NLCC is included before differentiation. With
+ADR 0046 screening on, the input XC mask is frozen: screened channels stay
+zero in both probes and have zero response; fully screened points contribute
+zero stiffness. Active channels alone respond to the fixed-valence-n spin
+direction (the projected XC charge need not stay constant). A probe approaching
+the threshold is restricted to half the active channel's distance from it;
+if rounding would land on the threshold, that endpoint uses zero displacement.
+The denominator is the actual, possibly one-sided spin span. This avoids
+negative probes and mask crossings without changing the usual central step.
+The main XC evaluation already checked the global screened-charge budget;
+derivative scratch is not audited again with a rank-local volume or denominator.
+With screening off, the historical feasible polarization-endpoint span remains.
+Failures identify the stage, failing rank, both combined-channel minima and
+global C-order grid indices, and that rank's reason on every rank.
 Scratch channels and finite-difference buffers are constructed once. No new
 XC library, fitted coefficient, or parameterization is introduced. This has
 not been timed on dev08. A separate energy second-difference test checks the

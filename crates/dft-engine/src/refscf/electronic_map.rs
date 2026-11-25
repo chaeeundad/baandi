@@ -26,6 +26,7 @@ struct SpinFields {
     core: Option<Array3<f64>>,
     kernel_difference: Vec<f64>,
     kernel_span: Vec<f64>,
+    kernel_indices: Vec<usize>,
 }
 impl Workspace {
     pub fn new<K: Collective>(
@@ -46,6 +47,7 @@ impl Workspace {
                 response: SpinXcResponse::new(dims),
                 kernel_difference: vec![0.; len],
                 kernel_span: vec![0.; len],
+                kernel_indices: state.fields.plane_offsets(),
                 channels: std::array::from_fn(|_| Array3::zeros(dims)),
                 core: state
                     .core_density
@@ -81,7 +83,11 @@ impl Workspace {
     /// Positive residual measure 1/2 integral |d²e_xc/dm²| d_m², Ha.
     /// Finite differences of the existing polarized LDA-PW potentials hold n
     /// fixed. h/n=cbrt(epsilon) balances second-order truncation and roundoff.
-    /// At full polarization use the feasible one-sided span, never negative rho.
+    /// Freeze the ADR 0046 mask of the already-audited combined input. A
+    /// screened channel stays zero in both probes (zero response); fully
+    /// screened points have zero span. Restrict active probes to half the
+    /// distance to the threshold when needed, retaining a one-sided span.
+    /// Off retains the historical feasible polarization-endpoint span.
     pub fn spin_stiffness<K: Collective>(
         &mut self,
         comm: &K,
@@ -93,16 +99,56 @@ impl Workspace {
             let Some(spin) = self.spin.as_mut() else {
                 return Ok(0.);
             };
+            let screening = dft_physics::xc::screen_negative();
+            // Main XC has audited this input with the GLOBAL charge budget.
+            // Probes are derivative scratch, not new densities to audit using
+            // the local adapter's artificial [len,1,1] grid and volume.
+            let _scope =
+                dft_physics::xc::screening_scope(dft_physics::xc::screening_stage(), true, None);
             for sign in [-1., 1.] {
                 for (i, (&up, &down)) in input[0].iter().zip(&input[1]).enumerate() {
                     let core = spin.core.as_ref().map_or(0., |c| c.as_slice().unwrap()[i]);
-                    let u = up + 0.5 * core;
-                    let d = down + 0.5 * core;
+                    let mut u = up + 0.5 * core;
+                    let mut d = down + 0.5 * core;
+                    if !u.is_finite() || !d.is_finite() {
+                        return Err(numerical("nonfinite combined input density").into());
+                    }
+                    if !screening && (u < 0. || d < 0.) {
+                        return Err(
+                            numerical("negative combined input density (screening off)").into()
+                        );
+                    }
+                    if screening {
+                        u = dft_physics::xc::screened_argument(u);
+                        d = dft_physics::xc::screened_argument(d);
+                    }
                     let n = u + d;
                     let h = n * f64::EPSILON.cbrt();
-                    let shift = (sign * h).max(-2. * u).min(2. * d);
-                    spin.channels[0].as_slice_mut().unwrap()[i] = u + 0.5 * shift;
-                    spin.channels[1].as_slice_mut().unwrap()[i] = d - 0.5 * shift;
+                    let shift = if screening {
+                        let t = dft_physics::xc::DENSITY_THRESHOLD;
+                        let lo = if u > 0. { -(u - t) } else { -h };
+                        let hi = if d > 0. { d - t } else { h };
+                        let shift = (sign * h).max(lo).min(hi);
+                        // Adjacent representable values can round a midpoint
+                        // onto t. Use the unperturbed endpoint in that direction.
+                        if (u > 0. && u + 0.5 * shift <= t) || (d > 0. && d - 0.5 * shift <= t) {
+                            0.
+                        } else {
+                            shift
+                        }
+                    } else {
+                        (sign * h).max(-2. * u).min(2. * d)
+                    };
+                    spin.channels[0].as_slice_mut().unwrap()[i] = if screening && u == 0. {
+                        0.
+                    } else {
+                        u + 0.5 * shift
+                    };
+                    spin.channels[1].as_slice_mut().unwrap()[i] = if screening && d == 0. {
+                        0.
+                    } else {
+                        d - 0.5 * shift
+                    };
                     if sign < 0. {
                         spin.kernel_span[i] = -shift;
                     } else {
@@ -131,10 +177,66 @@ impl Workspace {
                     energy += 0.5 * kernel.abs() * dm * dm;
                 }
             }
+            if !energy.is_finite() || !(dv * energy).is_finite() {
+                return Err(numerical("nonfinite spin stiffness contribution").into());
+            }
             Ok(dv * energy)
         })();
         if sum(comm, &[f64::from(local.is_err())])?[0] != 0. {
-            return Err(numerical("spin stiffness evaluator failed on a rank").into());
+            // Error-only communication: every rank receives the first failing
+            // rank's actual reason and GLOBAL C-order indices, even empty owners.
+            for rank in 0..comm.size() {
+                let mut failed = [f64::from(comm.rank() == rank && local.is_err())];
+                comm.bcast_f64(&mut failed, rank).map_err(numerical)?;
+                if failed[0] == 0. {
+                    continue;
+                }
+                let message = if comm.rank() == rank {
+                    let mut detail = String::new();
+                    if let Some(spin) = &self.spin {
+                        use std::fmt::Write;
+                        for (s, name) in ["up", "down"].into_iter().enumerate() {
+                            let mut minimum = (f64::INFINITY, usize::MAX);
+                            for (i, &n) in input[s].iter().enumerate() {
+                                let n = n + spin
+                                    .core
+                                    .as_ref()
+                                    .map_or(0., |c| 0.5 * c.as_slice().unwrap()[i]);
+                                let index = spin.kernel_indices[i];
+                                if !n.is_finite()
+                                    || n < minimum.0
+                                    || (n == minimum.0 && index < minimum.1)
+                                {
+                                    minimum = (n, index);
+                                }
+                            }
+                            write!(
+                                detail,
+                                "; channel {name} minimum {:.17e} Bohr^-3 at grid point {}",
+                                minimum.0, minimum.1
+                            )
+                            .unwrap();
+                        }
+                    }
+                    format!(
+                        "{}: spin stiffness rank {rank}{detail}; rank-local reason: {}",
+                        dft_physics::xc::screening_stage(),
+                        local.as_ref().unwrap_err()
+                    )
+                } else {
+                    String::new()
+                };
+                let mut len = [message.len() as f64];
+                comm.bcast_f64(&mut len, rank).map_err(numerical)?;
+                let mut bytes = vec![0.; len[0] as usize];
+                for (b, v) in bytes.iter_mut().zip(message.bytes()) {
+                    *b = f64::from(v);
+                }
+                comm.bcast_f64(&mut bytes, rank).map_err(numerical)?;
+                let message = String::from_utf8(bytes.into_iter().map(|b| b as u8).collect())
+                    .map_err(numerical)?;
+                return Err(numerical(message).into());
+            }
         }
         let energy = sum(comm, &[local?])?[0];
         if !energy.is_finite() {
@@ -693,6 +795,7 @@ mod g4b_kernel_tests {
                     core: Some(Array3::from_elem(dims, core)),
                     kernel_difference: vec![0.; 8],
                     kernel_span: vec![0.; 8],
+                    kernel_indices: (0..8).collect(),
                 }),
                 symmetry: None,
             };
@@ -733,6 +836,126 @@ mod g4b_kernel_tests {
                     0.
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod g4f_stiffness_tests {
+    use super::*;
+    use crate::refscf::metric::Serial;
+    use dft_numerics::switches::RunConfig;
+
+    fn workspace() -> Workspace {
+        let cell = Cell::from_user_rows_bohr([[2., 0., 0.], [0., 2., 0.], [0., 0., 2.]]).unwrap();
+        Workspace {
+            pbe: None,
+            symmetry: None,
+            spin: Some(SpinFields {
+                xc: SpinXc::new(SpinFunctional::LdaPw, &cell, [2; 3]).unwrap(),
+                response: SpinXcResponse::new([2; 3]),
+                channels: std::array::from_fn(|_| Array3::zeros([2; 3])),
+                core: Some(Array3::from_elem([2; 3], 0.02)),
+                kernel_difference: vec![0.; 8],
+                kernel_span: vec![0.; 8],
+                kernel_indices: (17..25).collect(),
+            }),
+        }
+    }
+
+    #[test]
+    fn g4f_frozen_mask_and_unscreened_bits() {
+        let config = RunConfig::from_pairs(&[("xc_screen_negative", "on")]).unwrap();
+        let _scope = config.enter();
+        let mut work = workspace();
+        let t = dft_physics::xc::DENSITY_THRESHOLD;
+        // Cancel the core exactly at vacuum samples, including negative input.
+        for u in [-0.03, -0.01, -0.01 + 0.5 * t] {
+            let input = vec![vec![u; 8], vec![-0.02; 8]];
+            let output = vec![vec![u + 1e-5; 8], vec![-0.02; 8]];
+            assert_eq!(
+                work.spin_stiffness(&Serial, &input, &output, 1.).unwrap(),
+                0.
+            );
+        }
+        work.spin.as_mut().unwrap().core = None;
+        for down in [-1e-14, 0., t, f64::from_bits(t.to_bits() + 1), 1.01 * t] {
+            let input = vec![vec![0.04; 8], vec![down; 8]];
+            let output = vec![vec![0.04 + 1e-5; 8], vec![down; 8]];
+            let value = work.spin_stiffness(&Serial, &input, &output, 1.).unwrap();
+            assert!(value.is_finite() && value > 0.);
+            let spin = work.spin.as_ref().unwrap();
+            for &probe in &spin.channels[1] {
+                if down <= t {
+                    assert_eq!(probe, 0.);
+                } else {
+                    assert!(probe > t, "probe crossed the frozen mask");
+                }
+            }
+        }
+        assert!(
+            dft_physics::xc::screening_records().is_empty(),
+            "probes must not publish density audits"
+        );
+        // A screened channel contributes no potential derivative. Check the
+        // surviving channel's curvature against an independent energy stencil.
+        let input = vec![vec![0.04; 8], vec![0.; 8]];
+        let dm = 1e-5;
+        let output = vec![vec![0.04 + dm / 2.; 8], vec![-dm / 2.; 8]];
+        let measured = work.spin_stiffness(&Serial, &input, &output, 1.).unwrap();
+        let spin = work.spin.as_mut().unwrap();
+        let mut energy = |m: f64| {
+            spin.channels[0].fill(0.04 + m / 2.);
+            spin.channels[1].fill(0.);
+            spin.xc
+                .evaluate(&spin.channels, &mut spin.response)
+                .unwrap();
+            spin.response.energy_ha
+        };
+        let h = 4e-6;
+        let curvature = (energy(h) + energy(-h) - 2. * energy(0.)) / (h * h);
+        let expected = 0.5 * curvature.abs() * dm * dm;
+        assert!((measured / expected - 1.).abs() < 1e-5);
+        let input = vec![vec![0.04; 8], vec![0.02; 8]];
+        let output = vec![vec![0.04001; 8], vec![0.01999; 8]];
+        let on = work.spin_stiffness(&Serial, &input, &output, 1.).unwrap();
+        let off = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+        let _scope = off.enter();
+        let off = work.spin_stiffness(&Serial, &input, &output, 1.).unwrap();
+        assert_eq!(on.to_bits(), off.to_bits());
+    }
+
+    #[test]
+    fn g4f_rank_local_error_reaches_empty_owner_with_stage_and_global_index() {
+        for stage in ["start", "map", "verification"] {
+            dft_mpi::simulate(3, |comm| {
+                let config = RunConfig::from_pairs(&[("xc_screen_negative", "on")]).unwrap();
+                let _scope = config.enter();
+                let _stage = dft_physics::xc::screening_scope(stage, false, None);
+                let mut work = workspace();
+                let mut input = vec![vec![0.04; 8], vec![0.02; 8]];
+                if comm.rank() == 1 {
+                    input[1][3] = f64::NAN;
+                }
+                if comm.rank() == 2 {
+                    work.spin = None;
+                    input = vec![vec![], vec![]];
+                }
+                let error = work
+                    .spin_stiffness(comm, &input, &input, 1.)
+                    .unwrap_err()
+                    .to_string();
+                for expected in [
+                    stage,
+                    "rank 1",
+                    "channel down minimum NaN",
+                    "grid point 20",
+                    "rank-local reason",
+                    "nonfinite combined input density",
+                ] {
+                    assert!(error.contains(expected), "{error}");
+                }
+            });
         }
     }
 }

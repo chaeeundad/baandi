@@ -1,0 +1,4 @@
+Decisions:
+1. Approved: the two-line crates/dft-cli/src/run_config.rs test update to use REFSCF_LADDER_RATIO.
+2. Preserve the strict oracle's default arithmetic exactly (user decision D2: the oracle moves whole and stays identical). Keep the legacy cutoff ladder code path that the strict oracle uses by default, at its fixed default parameters, without its switches (hard-code the former defaults in the oracle, no switch reads). Delete only the non-default branches and the experiment variants. The strict-oracle bench (BAANDI_REFERENCE_STRICT=on against baseline-oracle.json) must be bit-identical again; do not change any baseline.
+Then finish: full check, both bench identities, README checks, exact before/after counts (lines, tests, binaries, switches). Report in English; leave changes uncommitted.

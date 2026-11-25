@@ -63,6 +63,44 @@ impl Metric {
         );
         Ok(metric)
     }
+    /// ONEPATH-3 metric on stacked charge/magnetization coefficients, in Ry.
+    /// The uniform spin mode has the longest-wavelength full-sphere weight.
+    pub fn spin<K: Collective>(
+        comm: &K,
+        volume: f64,
+        g2: &[f64],
+        smooth: &[bool],
+        max_batch: usize,
+    ) -> Result<Self, Error> {
+        let mut metric = Self::new(volume, g2, smooth, comm.size(), max_batch)?;
+        let local = g2
+            .iter()
+            .zip(smooth)
+            .filter(|(g, low)| **g > 0. && **low)
+            .map(|(g, _)| *g)
+            .fold(f64::MAX, f64::min);
+        let mut minima = vec![0.; comm.size()];
+        comm.allgatherv_f64(&[local], &vec![1; comm.size()], &mut minima)
+            .map_err(numerical)?;
+        let minimum = minima.into_iter().fold(f64::MAX, f64::min);
+        if minimum == f64::MAX {
+            return Err(invalid("spin metric requires a nonzero G"));
+        }
+        let spin: Vec<_> = metric
+            .weights
+            .iter()
+            .zip(g2)
+            .map(|(&w, &g)| {
+                if g == 0. {
+                    4. * PI * volume / minimum
+                } else {
+                    w
+                }
+            })
+            .collect();
+        metric.weights.extend(spin);
+        Ok(metric)
+    }
     /// Immutable geometry identity for the mixer's exact Gram cache. A new
     /// metric invalidates it even when the vector lengths happen to agree.
     pub(super) fn identity(&self) -> u64 {

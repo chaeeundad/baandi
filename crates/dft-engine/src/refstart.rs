@@ -375,7 +375,7 @@ pub(crate) fn start_prolonged<K: Collective>(
     let cache = (share || partitions).then(|| PlanCache::with_partition_cache(share, partitions));
     let _plans = cache.as_ref().map(PlanCache::enter);
     let timed = TimedCollective::new(comm);
-    let mut state = start_inner(input, &timed, seed, false)?;
+    let mut state = start_inner(input, &timed, seed, false, false)?;
     state.setup.total_s = clock.elapsed().as_secs_f64();
     state.setup.collective_s = timed.seconds();
     Ok(state)
@@ -385,6 +385,7 @@ fn start_inner<K: Collective>(
     comm: &K,
     seed: Option<crate::refscf::ladder::Seed>,
     fields_only: bool,
+    general_occupations: bool,
 ) -> Result<StartState, ScfError> {
     let mut setup = crate::refscf::record::SetupTimings::default();
     let clock = Instant::now();
@@ -442,7 +443,7 @@ fn start_inner<K: Collective>(
         || electrons <= 0.
         || (electrons - electrons.round()).abs() > 1e-10
         || electrons > usize::MAX as f64
-        || !(electrons.round() as usize).is_multiple_of(2)
+        || (!general_occupations && !(electrons.round() as usize).is_multiple_of(2))
     {
         return Err(ScfError::InvalidInput(
             "reference start: positive even electron count required",
@@ -1810,6 +1811,23 @@ pub fn start_kpoints<K: Collective>(
     points: &[dft_geometry::kpoints::KPoint],
     comm: &K,
 ) -> Result<KStartState, ScfError> {
+    start_kpoints_inner(input, points, comm, false)
+}
+/// Spin/FD entry: the caller has validated the sector and explicit band count.
+/// The existing fixed unpolarized entry retains its even-electron restriction.
+pub(crate) fn start_electronic<K: Collective>(
+    input: StartInput<'_>,
+    points: &[dft_geometry::kpoints::KPoint],
+    comm: &K,
+) -> Result<KStartState, ScfError> {
+    start_kpoints_inner(input, points, comm, true)
+}
+fn start_kpoints_inner<K: Collective>(
+    input: StartInput<'_>,
+    points: &[dft_geometry::kpoints::KPoint],
+    comm: &K,
+    general_occupations: bool,
+) -> Result<KStartState, ScfError> {
     use dft_numerics::linalg::{ComplexMatrix as Matrix, GemmWorkspace, MatrixOp, hermitian_eigh};
     dft_geometry::kpoints::validate(points).map_err(err)?;
     let o = input.options;
@@ -1819,6 +1837,14 @@ pub fn start_kpoints<K: Collective>(
         .iter()
         .map(|p| o.basis(cell, p.fractional, 1.))
         .collect::<Result<_, _>>()?;
+    if general_occupations
+        && o.bands
+            .is_none_or(|n| n == 0 || bases.iter().any(|b| n > b.vectors().len()))
+    {
+        return Err(ScfError::InvalidInput(
+            "reference spin/FD start requires an explicit band count within every k basis",
+        ));
+    }
     let gamma = o.basis(cell, [0.; 3], 1.)?;
     let mut dims = FftGridSpec::new(&gamma, &db, o.grid_override)?.dims();
     for b in &bases {
@@ -1842,6 +1868,7 @@ pub fn start_kpoints<K: Collective>(
         &timed,
         None,
         true,
+        general_occupations,
     )?;
     common.setup.total_s = common_clock.elapsed().as_secs_f64();
     common.setup.collective_s = timed.seconds();

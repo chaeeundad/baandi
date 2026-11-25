@@ -909,7 +909,7 @@ fn solve_map<K: Collective>(
     timings.energy += step.timings.energy;
     Ok(step)
 }
-fn gather_orbitals<K: Collective>(
+pub(super) fn gather_orbitals<K: Collective>(
     block: &refstart::KBlock,
     comm: &K,
     x: &ComplexMatrix,

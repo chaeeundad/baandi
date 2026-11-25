@@ -3120,3 +3120,196 @@ Evidence logs and fingerprint streams are under the ignored
 Native MPI, MKL and dev08 speed measurements remain unperformed. No performance
 default changed. README generation, dashboard/session registry and the
 performance ledger remain outside this ticket's approved ownership.
+
+## Spin and Fermi-Dirac
+
+G4 adds the independent `refscf::electronic::{run,run_with}` entry. Its policy
+is scalar Fermi–Dirac, fixed collinear sector, or collinear Fermi–Dirac with a
+common chemical potential or fixed moment. Gamma uses complex orbitals for
+these policies, as required by ONEPATH-3. Existing fixed unpolarized Gamma
+and k entry points retain their arithmetic and even-electron restriction.
+
+Stage 1 solves every retained band at every k before calling the existing
+`occupations::FermiDirac` number/entropy solver. Every retained FD band is
+mandatory in reference Davidson, including numerically zero tails. Density,
+kinetic, nonlocal, band energy and the residual-square guard all use the
+same occupation times normalized k weight exactly once. The explicit FD cap
+is prepared before construction (CLI default 32, identical to legacy).
+Positive theta, interior sector capacities, number/moment residuals and the
+legacy top-band coverage limits are enforced without clipping occupations.
+Internal energy E, positive TS and Mermin F=E-TS are separate records.
+
+Stage 2 uses separate channel/k operators, orbitals and kept HX entries.
+Hartree sees total valence charge; XC sees both channels and half the immutable
+NLCC core in each. Only LDA-PW has an available legacy polarized LDA evaluator.
+Polarized LDA-PZ is absent in legacy and rejects explicitly. Distributed PBE
+currently has no two-channel evaluator and also rejects; scalar FD PBE uses
+the existing distributed GGA. No new XC parameterization is introduced.
+
+Broyden receives one stacked (n,m) vector and one shared history. Both nonzero
+blocks use the existing half-sphere Coulomb metric; the magnetization zero
+mode adds 4*pi*Omega/G_min^2 in Ry, exactly twice ONEPATH-3's E_0. Fixed-sector
+and fixed-moment zero modes are imposed from their constraints; free moment
+is never projected away. The estimator is the sum of charge, spin and uniform
+spin terms. The standard occupation-weighted residual-square guard and number
+conditions also apply. Fixed sectors require each nonempty channel's sampled
+indirect gap, including on verification. Empty channels have no gap gate.
+
+Verification repeats the entire map at the candidate output, including fresh
+chemical potentials and occupations. It uses the next reference ratchet and
+ONEPATH-3 Coulomb/guard judgment. A failed check preserves the original
+candidate and Broyden history; only an ordinary update advances the run.
+Delivery contains the candidate's own densities, eigenpairs, occupations,
+chemical potentials, entropy and total/absolute magnetization. Verification
+results never replace it. Energy-only verification, failed-map reuse, RMM and
+cutoff ladder currently reject; predictor gates and deferred energy audits
+are explicitly inactive on this entry.
+
+### G4 continuation review and acceptance status (2026-11-25)
+
+**Scalar FD and fixed collinear sectors are qualified; collinear FD moment policies are routed to legacy.**
+
+| Policy | Reference-driver status |
+| --- | --- |
+| Scalar FD (including Si2) | Qualified and enabled |
+| Fixed collinear sector | Qualified and enabled |
+| Collinear FD, fixed moment | Routed to legacy; G4B pending |
+| Collinear FD, free moment | Routed to legacy; G4B pending |
+
+`BAANDI_REFSCF_SPIN_FD_MOMENT=on` (or
+`[performance] refscf_spin_fd_moment='on'`) enables the two unqualified
+policies for G4B development only; its default is off. Default fallback is
+recorded as `reference driver: collinear Fermi-Dirac not yet qualified, G4B`
+in the result and switch manifest. No acceptance bound is relaxed.
+The passing ignored `g4_synthetic_matrix` covers the 24 qualified comparisons.
+The separate ignored `g4b_moment_acceptance` retains all 24 moment-policy
+comparisons and is expected to fail until G4B qualifies them.
+The approved stopping estimator and the Broyden singular-history rejection
+remain unchanged. In particular, the tests retain the 5e-9 Ha standard,
+1e-10 Ha tight, 1e-4 mu_B moment, 1e-4 Ha chemical-potential and 1e-4 electron
+weighted-occupation bounds. Passing the estimator alone is not evidence that
+these delivered-error bounds hold.
+
+Review corrections to the interrupted implementation:
+
+- Require every mandatory FD/gap-edge Ritz flag to converge before accepting
+  an inner call; the fixed driver's allowance for pending buffer roots cannot
+  apply to mandatory roots. Six calls still bound retries.
+- Prepare the polarized XC adapter, its spectral scratch, channel arrays and
+  immutable core once per owned slab; reuse them across ordinary and fresh
+  verification maps. Empty slab owners join the reductions.
+- Write the CLI run-completion/binary-identity manifest, which was missing
+  from the early-return branch. Tests check spin/k/band array sizes, weighted
+  charge, common/per-spin chemical potentials, fixed moments and E-TS=F.
+- Test verification delivery independence (density, orbitals, eigenvalues,
+  occupations, chemical potential and free energy are unchanged by a passing
+  verification), and reject noncollinear/Gaussian/MP/cold requests.
+
+The synthetic fixture is a one-electron, nonlocal Gaussian atom in the skew
+cell `[[5,0,0],[0.2,5,0],[0,0.1,5]]` Bohr at `[0.13,0.21,0.32]`, 2.5 Ha
+cutoff. FD uses theta=0.01 Ha and 12 bands; fixed spin uses 4 bands and sector
+(1,0). The free-moment seed is 0.3 mu_B; the constrained FD moment is 0.3 mu_B.
+Both Gamma and an unshifted 2x2x2 mesh run at simulated ranks 1/3/8 and
+thresholds 1e-8/1e-12 Ry. The reference profile is the production default
+(beta=0.7, history=8), with verification on. The strict legacy oracle uses
+eigen/density tolerances 1e-10 and energy tolerance 1e-11 Ha. Its free-moment
+case uses an explicitly configured full linear step: legacy Pulay oscillated,
+and beta=0.2 linear mixing failed positivity because its mean correction
+imposes the new channel count on a damped density. No legacy code changed.
+
+Each numeric entry below is the maximum over both k lists and all three ranks.
+Fixed-spin F is E (TS=0).
+
+| Policy | Standard | Tight | Max standard abs(delta M) (mu_B) | Max standard abs(delta mu) (Ha) |
+| --- | --- | --- | ---: | ---: |
+| Scalar FD | PASS, abs(delta F)=4.5800058190e-11 Ha | PASS, 6.6752159356e-15 Ha | 0 | 8.5941571258e-7 |
+| Fixed spin | PASS, abs(delta E)=1.9797810613e-10 Ha | PASS, 1.6253665081e-13 Ha | 1.9984014443e-15 | not applicable |
+| Fixed-moment FD | Energy PASS, abs(delta F)=6.4546469558e-10 Ha; occupation FAIL | PASS, 1.6063539388e-14 Ha | 5.3623772089e-14 | 3.4210860895e-6 |
+| Free-moment FD | FAIL, abs(delta F)=1.1167172215e-8 Ha | FAIL, singular histories | 3.3922507799e-4 | 2.1352597911e-4 |
+
+Of the 48 comparisons, 33 pass all gates and 15 fail. Scalar FD and fixed
+spin pass all 24 comparisons. Fixed-moment FD passes its energy, moment and
+chemical-potential bounds, but all three standard mesh runs miss the weighted
+occupation bound (maximum 1.4082986520e-4 electrons against 1e-4); its other
+nine comparisons pass. All 12 free-moment comparisons fail acceptance.
+Gamma standard passes its single verification
+but misses the energy, moment and chemical-potential bounds. Mesh standard
+meets the energy class (maximum 2.4829952330e-9 Ha) but misses the moment
+and weighted-occupation bounds (maximum 3.3922507799e-4 electrons).
+Tight free-moment runs reject at mixing iteration 10 (Gamma) or 13
+(mesh), with history condition numbers about 1.54e16 and 8.86e14. Replacing
+these errors by silent regularization would contradict the existing Broyden
+contract. The interrupted beta=0.5/history=4 test profile also missed the
+standard mesh moment bound (1.9081328586e-4 mu_B); it is not a default fix.
+The failing default-profile regression is retained and collects errors across
+the full matrix, rather than terminating at the first inaccurate result.
+
+Si2 with the external Si.pz-vbc.UPF (SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`), 4 Ha
+cutoff, 8 bands and theta=1e-4 Ha passes all 12 Gamma/mesh/rank/threshold
+comparisons. Maximum free-energy differences from strict legacy FD are
+3.2998670463e-10 Ha standard and 4.9737991503e-14 Ha tight; differences from
+strict integer occupations are 3.2995650656e-10 and 4.7073456244e-14 Ha.
+The UPF remains external.
+
+Closed-shell Gamma is byte-identical to the archived ticket-base commit
+`d235143fcf96d2e18771af4b965c77d60343cfa5`, whose crate sources were checked
+against Git blob hashes. Full scientific-history/orbital fingerprints at
+ranks 1/3/8 have respectively 100801/100763/100729 bytes and the same SHA-256
+values recorded in the G3 table above. This is a base comparison, not only
+an in-process dispatch comparison.
+
+Reproduction (`g4b_moment_acceptance` intentionally fails):
+
+```sh
+cargo test --release -p dft-engine --test refscf g4_synthetic_matrix -- --ignored --nocapture
+cargo test --release -p dft-engine --test refscf g4b_moment_acceptance -- --ignored --nocapture
+DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf g4_si_gap -- --ignored --nocapture
+cargo test --release -p dft-engine --test refscf g4_free_moment_tight_short_history -- --ignored --nocapture
+G3_GAMMA_DUMP_DIR=/existing/output/directory cargo test --release -p dft-engine --test refscf g3_gamma_base_fingerprint -- --nocapture
+```
+
+Raw logs and fingerprint streams are in ignored `target/tmp/g4-validation/`.
+All five ticket TEST_COMMANDS exit 0: workspace check, solver tests (194
+passed, 25 ignored), reference tests (78 passed, 19 ignored), CLI reference
+tests (15 passed, 9 ignored), and format/Clippy with warnings denied. The full
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g4-spin-fd CHECK_TEST_JOBS=2
+scripts/check.sh` exits 0: build/test/fmt/Clippy pass, with 977 passing tests
+across 97 binaries (209 ignored in that invocation). The later standalone
+reference test invocation also compiles the added ignored short-history
+diagnostic. The sandbox denies the optional `ps` load probe; no gate is
+skipped. External scratch is used for cache tests that reject checkout paths.
+Before the architect routing decision, the release
+`g4_ --include-ignored --test-threads=1` run, with the Si
+UPF environment set, exits 101: five test functions pass and the synthetic
+acceptance matrix fails. Regular gates exclude that documented long test,
+so their success does not establish G4 acceptance.
+The short-history command is a diagnostic, not a substitute for acceptance.
+It passes all six free-moment Gamma/mesh/rank comparisons at 1e-12 Ry with
+beta=0.5/history=4: maximum abs(delta F)=1.2207179712e-12 Ha,
+abs(delta M)=1.5505818965e-6 mu_B, abs(delta mu)=2.2515379179e-6 Ha and
+weighted occupation difference=1.5505818992e-6 electrons. This separates the
+map's ability to reach the legacy solution from qualification of the default
+stop and history policies; it does not remove their recorded failures.
+Resolution requires a reviewed collinear-FD stopping/verification policy and
+a reviewed singular-history recovery policy, followed by the unchanged gates.
+No QE source was read, no QE run was performed, and simulated ranks establish
+no real-MPI, MKL or speed claim. Dashboard/registry, README evidence generation
+and performance ledgers are outside this ticket's explicit owned files.
+
+
+After the architect routing decision, the release `g4_ --include-ignored
+--nocapture` run with the external Si UPF exits 0: all six test functions pass.
+This includes the 24 qualified synthetic comparisons, 12 Si2 comparisons,
+and the short-history diagnostic; it excludes `g4b_moment_acceptance`.
+CLI regression coverage checks default legacy routing and the exact recorded
+reason for both free and fixed moments, then enables the registry switch and
+checks reference records. Fixed-sector and scalar FD routing remain enabled.
+
+The post-routing full `scripts/check.sh` run exits 0 (build, test, fmt,
+Clippy): 977 passed, 0 failed and 211 ignored across 97 binaries. The
+standalone reference suite has 78 passed and 20 ignored, including the new
+G4B acceptance test. Sandbox `ps`/priority diagnostics do not skip any gate.
+All five ticket TEST_COMMANDS were rerun after routing changes and exit 0.
+Post-decision logs and exit codes are saved under
+`target/tmp/g4-validation/architect-*`.

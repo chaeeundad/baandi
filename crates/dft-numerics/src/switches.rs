@@ -615,6 +615,9 @@ table! {
     REFSCF_MEMORY_TRIM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-MEM: release dead start/map/delivery arrays and return band-sized Davidson storage; identical arithmetic; pending dev08";
 
+    REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4B: enable unqualified reference collinear Fermi-Dirac moment policies for development";
+
 }
 
 struct Resolved {

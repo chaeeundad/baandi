@@ -121,7 +121,7 @@ pub fn sha256(bytes: &[u8]) -> String {
 /// `BAANDI_REFERENCE_STRICT=on` (ADR 0043, single path complete since
 /// ONEPATH-4). The path fields are set explicitly from `Config::scf_path`.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
-    if reference_requested(config) {
+    if reference_requested(config) && !reference_spin_fd_fallback(config) {
         return reference_options(config);
     }
     options_with_reference(
@@ -135,6 +135,26 @@ pub fn reference_requested(config: &Config) -> bool {
             .scf
             .as_ref()
             .is_some_and(|s| s.driver.as_deref() == Some("reference"))
+}
+
+const G4B_FALLBACK: &str = "reference driver: collinear Fermi-Dirac not yet qualified, G4B";
+
+fn reference_spin_fd_fallback(config: &Config) -> bool {
+    use dft_numerics::switches::{Id, RunConfig};
+    if !reference_requested(config)
+        || !config.collinear()
+        || !matches!(config.finite_temperature(), Ok(Some(_)))
+    {
+        return false;
+    }
+    let rc = RunConfig::current();
+    let enabled = rc.on(Id::REFSCF_SPIN_FD_MOMENT);
+    rc.note_path(
+        Id::REFSCF_SPIN_FD_MOMENT,
+        if enabled { "reference" } else { "legacy" },
+        if enabled { None } else { Some(G4B_FALLBACK) },
+    );
+    !enabled
 }
 
 /// Independent profile resolution: no legacy session tuning or ladder reads.
@@ -168,15 +188,11 @@ pub fn reference_profile(
 fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
     let profile = reference_profile(config)?;
     let s = config.scf.as_ref();
-    if config.collinear()
-        || config
-            .finite_temperature()
-            .map_err(|e| error(1, e))?
-            .is_some()
-    {
+    let finite = config.finite_temperature().map_err(|e| error(1, e))?;
+    if config.collinear() && config.xc.functional.engine() != dft_engine::Functional::LdaPw {
         return Err(error(
             1,
-            "reference SCF: collinear spin and Fermi-Dirac occupations require G4; fixed unpolarized occupations only",
+            "reference spin XC requires lda-pw: polarized lda-pz is unavailable in legacy; distributed PBE has no two-channel evaluator",
         ));
     }
     if config.symmetry.mode != crate::config::SymmetryMode::Off
@@ -208,7 +224,9 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
             == crate::config::DensityGroup::Crystal,
         start_density: dft_engine::StartDensity::Atomic,
         start_wavefunctions: dft_engine::StartWavefunctions::Atomic,
-        gamma_real: if points.len() == 1
+        gamma_real: if !config.collinear()
+            && finite.is_none()
+            && points.len() == 1
             && points[0].fractional == [0.; 3]
             && s.and_then(|s| s.gamma_real.as_deref()) != Some("off")
         {
@@ -1368,7 +1386,7 @@ fn execute_mode_inner(
     // CLI binary; a thread scope for in-process callers with other values).
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     launch::elapsed("run_config", config_clock);
-    let reference = reference_requested(&config);
+    let reference = reference_requested(&config) && !reference_spin_fd_fallback(&config);
     let input_digest =
         reference.then(|| phase(true, &mut setup_seconds, "input_hash", || sha256(&bytes)));
     // Phase 0 only: no storage or additional clock reads when profiling is off.
@@ -1533,6 +1551,27 @@ fn execute_mode_inner(
                 .z_valence()
         })
         .sum();
+    if reference
+        && (config.collinear()
+            || config
+                .finite_temperature()
+                .map_err(|e| error(1, e))?
+                .is_some())
+    {
+        return reference_electronic_run(
+            &config,
+            &prepared,
+            &opts,
+            &atoms,
+            &refs,
+            &points,
+            &out,
+            electron_target,
+            preflight,
+            species,
+            &bytes,
+        );
+    }
     // Collinear spin and Fermi-Dirac drivers: the standard path with the
     // verification since ONEPATH-3 (strict only behind BAANDI_REFERENCE_STRICT),
     // complex solver, never distributed (the real-Gamma path excludes both), so
@@ -1564,7 +1603,13 @@ fn execute_mode_inner(
         v
     };
     if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
-        let record = driver_record("Fermi-Dirac occupations");
+        let mut record = driver_record("Fermi-Dirac occupations");
+        if reference_spin_fd_fallback(&config) {
+            record["scf"] = options_json(&opts);
+            record["scf"]["driver"] = json!("legacy");
+            record["reference_driver_fallback_reason"] = json!(G4B_FALLBACK);
+            record["execution"]["reference_driver_fallback_reason"] = json!(G4B_FALLBACK);
+        }
         return finite_run::execute(
             &config,
             &prepared,
@@ -2800,6 +2845,241 @@ fn reference_peak_rss() -> Result<Vec<Option<u64>>, RunError> {
         .collect())
 }
 
+/// I/O for the additive reference spin/k/band result. Numerical work stays in
+/// refscf::electronic; neither legacy spin nor finite-T drivers are constructed.
+#[allow(clippy::too_many_arguments)]
+fn reference_electronic_run(
+    config: &Config,
+    prepared: &crate::config::PreparedInput,
+    opts: &ScfOptions,
+    atoms: &[Atom],
+    potentials: &[SpeciesPotential<'_>],
+    points: &[dft_geometry::kpoints::KPoint],
+    out: &Path,
+    electrons: f64,
+    preflight: crate::config::preflight::Report,
+    species: Vec<Value>,
+    input_bytes: &[u8],
+) -> Result<RunReport, RunError> {
+    use dft_engine::refscf::electronic::{self, Policy};
+    let theta = config.finite_temperature().map_err(|e| error(1, e))?;
+    let sector = config.spin_sector(electrons).map_err(|e| error(1, e))?;
+    let cap = config
+        .occupations
+        .as_ref()
+        .and_then(|o| o.band_cap)
+        .unwrap_or(32);
+    let policy = match (sector.clone(), theta) {
+        (None, Some(theta_ha)) => Policy::FermiDirac {
+            theta_ha,
+            band_cap: cap,
+        },
+        (Some(sector), None) => Policy::FixedSpin(sector),
+        (Some(sector), Some(theta_ha)) => Policy::SpinFermiDirac {
+            sector,
+            theta_ha,
+            constraint: config.finite_constraint(),
+            band_cap: cap,
+        },
+        _ => return Err(error(1, "reference electronic policy missing")),
+    };
+    if config
+        .output
+        .as_ref()
+        .and_then(|o| o.volumetric.as_ref())
+        .is_some()
+    {
+        return Err(error(
+            1,
+            "reference spin/FD writes total/channel density cubes; optional orbital/potential volumetric outputs are unavailable",
+        ));
+    }
+    let profile = reference_profile(config)?;
+    let r = electronic::run(
+        dft_engine::refstart::StartInput {
+            cell: &prepared.cell,
+            atoms,
+            potentials,
+            options: opts,
+        },
+        profile,
+        points,
+        policy,
+    )
+    .map_err(engine_error)?;
+    let mut total = r.density[0].clone();
+    if r.density.len() == 2 {
+        total += &r.density[1];
+    }
+    let cube_atoms: Option<Vec<_>> = atoms
+        .iter()
+        .map(|a| {
+            let p = potentials
+                .iter()
+                .find(|p| p.label == a.species)
+                .unwrap()
+                .potential;
+            volumetric_out::atomic_number(p.element())
+                .ok()
+                .map(|atomic_number| volumetric_out::OutputAtom {
+                    atomic_number,
+                    valence_charge: p.z_valence(),
+                    position_bohr: prepared
+                        .cell
+                        .fractional_to_cartesian_bohr(a.fractional_position),
+                })
+        })
+        .collect();
+    let cube = |name: &str, density: &dft_physics::data::Array3<f64>| -> Result<(), RunError> {
+        volumetric_out::write_cube(
+            std::io::BufWriter::new(fs::File::create(out.join(format!("{name}.cube")))?),
+            &prepared.cell,
+            cube_atoms.as_deref().unwrap_or(&[]),
+            density,
+            &format!("Reference {name}; electrons/Bohr^3"),
+        )
+        .map_err(|e| error(5, e))
+    };
+    cube("density-total", &total)?;
+    if r.density.len() == 2 {
+        cube("density-up", &r.density[0])?;
+        cube("density-down", &r.density[1])?;
+        cube("magnetization", &(&r.density[0] - &r.density[1]))?;
+    }
+    let bytes: Vec<_> = total.iter().flat_map(|v| v.to_le_bytes()).collect();
+    fs::write(out.join("density.bin"), &bytes)?;
+    write_json(
+        &out.join("density.json"),
+        &json!({"fft_grid":total.shape(),
+        "lattice_columns_bohr":prepared.cell.lattice_columns_bohr(),"units":"electrons/Bohr^3",
+        "ordering":"C_z_fastest","dtype":"f64","endianness":"little","sha256":sha256(&bytes)}),
+    )?;
+    let calls = |calls: &[(usize, usize, dft_engine::refscf::record::SolveRecord)]| -> Vec<Value> {
+        calls
+            .iter()
+            .map(|(s, k, c)| {
+                let mut v = reference_solve_json(c);
+                v["spin_index"] = json!(s);
+                v["k_index"] = json!(k);
+                v
+            })
+            .collect()
+    };
+    let rows: Vec<_> = r.history.iter().map(|h| json!({"iteration":h.iteration,
+        "dr2_ry":h.dr2_ry,"dr2_ha":h.dr2_ry/2.,"ethr_ry":h.ethr_ry,
+        "first_iteration_redo":h.first_iteration_redo,"internal_energy_ha":h.energy_ha,
+        "entropy_term_ha":h.entropy_term_ha,"free_energy_ha":h.free_energy_ha,
+        "moment_mu_b":h.moment_mu_b,"residual_guard_ha":h.residual_guard_ha,
+        "mixing":{"fraction":h.mixing_fraction,"history_used":h.mixing.occupancy,"condition":h.mixing.condition},"calls":calls(&h.calls)})).collect();
+    let eigenvalues: Vec<_> = r
+        .blocks
+        .iter()
+        .flatten()
+        .flat_map(|b| b.eigenvalues_ha.iter().copied())
+        .collect();
+    let occupations: Vec<_> = r
+        .blocks
+        .iter()
+        .flatten()
+        .flat_map(|b| b.occupations.iter().copied())
+        .collect();
+    let residuals: Vec<_> = r
+        .blocks
+        .iter()
+        .flatten()
+        .flat_map(|b| b.residuals_ha.iter().copied())
+        .collect();
+    let chemical = r.occupations.map(|e| {
+        e.roots.map(|r| {
+            r.map(|r| json!({"mu_ha":r.mu_ha,"bracket_ha":r.bracket_ha,"iterations":r.iterations}))
+        })
+    });
+    let shape = [
+        r.density.len(),
+        points.len(),
+        r.blocks[0][0].occupations.len(),
+    ];
+    let constraint = if theta.is_some() {
+        match config.finite_constraint() {
+            dft_physics::occupations::Constraint::Total => json!({"kind":"none"}),
+            dft_physics::occupations::Constraint::FixedMoment(m) => {
+                json!({"kind":"fixed_total_moment","electron_difference":m})
+            }
+        }
+    } else {
+        json!({"kind":"fixed_sector","channel_electrons":sector.as_ref().map(|s| [s.n_up,s.n_down])})
+    };
+    let path = config.scf_path().map_err(|e| error(1, e))?;
+    let (model, _) = parallel_model(crate::parallel::size(), 1, true, None);
+    let mut result = json!({"schema_version":2,"output_profile":"reference_spin_fd_v1",
+        "scf":options_json(opts),"preflight":preflight,"species":species,"xc":opts.functional.name(),
+        "input_sha256":sha256(input_bytes),"gamma_real_used":false,"gamma_real_fallback_reason":"spin/FD uses complex Davidson",
+        "tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT")},
+        "spin":{"mode":if sector.is_some(){"collinear"}else{"unpolarized"},"axis_cartesian":sector.as_ref().map(|s|s.axis_cartesian),
+            "channel_order":if sector.is_some(){vec!["up","down"]}else{vec!["total"]},
+            "channel_capacity_electrons":if sector.is_some(){vec![1,1]}else{vec![2]},
+            "constraint":constraint,"moment_mu_b":r.moment_mu_b,"absolute_moment_mu_b":r.absolute_moment_mu_b,
+            "channel_electrons":r.channel_electrons},
+        "occupations":{"policy":if theta.is_some(){"fermi_dirac"}else{"fixed_insulator"},"shape":shape,
+            "values":occupations,"weights_excluded":true,"theta_ha":theta,"chemical_potential":chemical,
+            "chemical_potential_kind":if theta.is_none(){"not_unique_fixed_insulator"}else if matches!(config.finite_constraint(),dft_physics::occupations::Constraint::FixedMoment(_)){"per_spin"}else{"common"},
+            "number_residual":r.occupations.map(|e|e.electron_residual),"moment_residual":r.occupations.and_then(|e|e.moment_residual),
+            "edge_max_fraction":r.occupations.map(|e|e.edge_max_fraction),"edge_electrons":r.occupations.map(|e|e.edge_electrons)},
+        "thermodynamics":{"internal_energy_ha":r.thermodynamics.internal_energy_ha,"entropy_term_ha":r.thermodynamics.entropy_term_ha,
+            "entropy_over_kb":r.occupations.map_or(0.,|e|e.entropy_over_kb),"free_energy_ha":r.thermodynamics.free_energy_ha,
+            "variational_quantity":if theta.is_some(){"free_energy"}else{"internal_energy"}},
+        "energies":energy_json(&r.energy),"energy_audit":{"free_energy_band_ha":r.energy.band_form-r.thermodynamics.entropy_term_ha,
+            "free_energy_direct_ha":r.thermodynamics.free_energy_ha},
+        "band_data":{"shape":shape,"ordering":"spin_k_band","eigenvalues_ha":eigenvalues,"residuals_ha":residuals,
+            "k_points":points.iter().map(|k|json!({"fractional":k.fractional,"weight":k.weight})).collect::<Vec<_>>()},
+        "density":{"channel_values":r.density.iter().map(|n|n.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>()},
+        "convergence":{"converged":r.converged,"iterations":r.history.len()},"verified":false,
+        "single_path":single_path_json(&path,opts),
+        "execution":execution_json(config,&path,opts,Solver { gamma_real_used:false,gamma_real_fallback_reason:Some("spin/FD"),parallel_model:model }),
+        "parallel":{"model":model,"ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"k_concurrency":1,"g_vectors":"distributed"},
+        "timings":{"setup_s":r.setup_s,"engine_total_s":r.total_s},
+        "reference_scf":{"schema":"reference-spin-fd-1","iterations":rows,"verification_calls":calls(&r.verification_calls),
+            "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>()},
+        "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ and distributed spin PBE unavailable"]});
+    result["scf"]["driver"] = json!("reference");
+    result["execution"]["effective_solver"] = json!("reference_complex_davidson");
+    let run_config = dft_numerics::switches::RunConfig::current();
+    result["scf"]["switches"] = switches_json();
+    result["run"] = run_block(
+        run_config,
+        if r.converged {
+            "converged"
+        } else {
+            "not_converged"
+        },
+    );
+    driver_standard_json(
+        &mut result,
+        Some(dft_engine::StandardProfile {
+            threshold_ha: profile.threshold_ry / 2.,
+        }),
+        r.verification.as_ref(),
+        &r.history
+            .iter()
+            .map(|h| Some(h.dr2_ry / 2.))
+            .collect::<Vec<_>>(),
+        r.converged,
+    );
+    write_json(&out.join("results.json"), &result)?;
+    Ok(RunReport {
+        converged: r.converged,
+        console: format!(
+            "Reference spin/FD: E={:.16e} Ha; -TS={:.16e} Ha; F={:.16e} Ha; M={:.12e} mu_B; iterations={}; converged={}\n",
+            r.thermodynamics.internal_energy_ha,
+            -r.thermodynamics.entropy_term_ha,
+            r.thermodynamics.free_energy_ha,
+            r.moment_mu_b,
+            r.history.len(),
+            r.converged
+        ),
+    })
+}
+
 /// ONEPATH-3: standard-path records of the collinear and Fermi-Dirac drivers
 /// (profile, threshold, verification attempts and wall) and the standard
 /// preconditions of forces and stress, as on the closed-shell path.
@@ -3864,14 +4144,18 @@ mod tests {
             reference_options(&config).unwrap().gamma_real,
             dft_engine::GammaReal::Off
         );
-        for suffix in [
-            "[spin]\nmode='collinear'\n",
-            "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\n",
-            "[symmetry]\nmode='auto'\n",
-        ] {
+        for suffix in ["[spin]\nmode='collinear'\n", "[symmetry]\nmode='auto'\n"] {
             let config = Config::parse_unvalidated(&format!("{base}{suffix}")).unwrap();
             let failure = reference_options(&config).unwrap_err();
-            assert!(failure.cause.contains("G4") || failure.cause.contains("G6"));
+            assert!(failure.cause.contains("spin XC") || failure.cause.contains("G6"));
+        }
+        for suffix in [
+            "[spin]\nmode='noncollinear'\n",
+            "[occupations]\nmode='gaussian'\nsmearing_ha=0.01\n",
+            "[occupations]\nmode='methfessel_paxton'\nsmearing_ha=0.01\n",
+            "[occupations]\nmode='cold'\nsmearing_ha=0.01\n",
+        ] {
+            assert!(Config::parse(&format!("{base}{suffix}")).is_err());
         }
         let input = dir.join("input.toml");
         fs::write(&input, base).unwrap();
@@ -3887,6 +4171,129 @@ mod tests {
         for row in rows {
             for call in row["calls"].as_array().unwrap() {
                 assert!(call["k_index"].as_u64().is_some_and(|k| k < 4));
+            }
+        }
+        // G4 routes through the distributed reference map, with explicit axes.
+        for (name, spin, finite) in [
+            ("fd", false, true),
+            ("fixed-spin", true, false),
+            ("spin-fd", true, true),
+            ("spin-fd-free", true, true),
+            ("spin-fd-moment", true, true),
+        ] {
+            let mut text = base.to_string();
+            if spin {
+                text = text.replace(
+                    "kshift=[0.5,0.5,0.5]",
+                    "kshift=[0.5,0.5,0.5]\nktime_reversal=false",
+                );
+                text = text.replace(
+                    "functional='lda-pz'",
+                    "functional='lda-pw'\nallow_functional_override=true",
+                );
+                text.push_str(match name {
+                    "spin-fd-free" => "[spin]\nmode='collinear'\n",
+                    "spin-fd-moment" => "[spin]\nmode='collinear'\ntotal_moment=0.3\n",
+                    _ => "[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
+                });
+            }
+            if finite {
+                text.push_str("[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=12\n");
+            }
+            fs::write(&input, &text).unwrap();
+            if spin && finite {
+                let dest = dir.join(format!("{name}-legacy"));
+                execute(&input, Some(&dest)).unwrap();
+                let result: Value =
+                    serde_json::from_slice(&fs::read(dest.join("results.json")).unwrap()).unwrap();
+                assert_eq!(result["reference_driver_fallback_reason"], G4B_FALLBACK);
+                assert_eq!(result["scf"]["driver"], "legacy");
+                assert!(result.get("reference_scf").is_none());
+                text.push_str("[performance]\nrefscf_spin_fd_moment='on'\n");
+                fs::write(&input, text).unwrap();
+            }
+            let dest = dir.join(name);
+            execute(&input, Some(&dest)).unwrap();
+            let result: Value =
+                serde_json::from_slice(&fs::read(dest.join("results.json")).unwrap()).unwrap();
+            assert_eq!(result["scf"]["driver"], "reference");
+            assert_eq!(result["reference_scf"]["schema"], "reference-spin-fd-1");
+            assert_eq!(result["band_data"]["shape"][0], if spin { 2 } else { 1 });
+            assert_eq!(result["band_data"]["shape"][1], if spin { 8 } else { 4 });
+            assert_eq!(result["verified"], false);
+            assert_eq!(result["run"]["completed"], true);
+            let ns = if spin { 2 } else { 1 };
+            let nk = if spin { 8 } else { 4 };
+            let nb = result["band_data"]["shape"][2].as_u64().unwrap() as usize;
+            let values = result["occupations"]["values"].as_array().unwrap();
+            assert_eq!(values.len(), ns * nk * nb);
+            assert_eq!(
+                result["band_data"]["eigenvalues_ha"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                values.len()
+            );
+            let charge: f64 = values
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    f.as_f64().unwrap()
+                        * result["band_data"]["k_points"][(i / nb) % nk]["weight"]
+                            .as_f64()
+                            .unwrap()
+                })
+                .sum();
+            assert!((charge - 2.).abs() < 1e-10);
+            if finite {
+                assert!(
+                    result["occupations"]["chemical_potential"][0]["mu_ha"]
+                        .as_f64()
+                        .unwrap()
+                        .is_finite()
+                );
+                if spin && name != "spin-fd-free" {
+                    assert!(
+                        result["occupations"]["chemical_potential"][1]["mu_ha"]
+                            .as_f64()
+                            .unwrap()
+                            .is_finite()
+                    );
+                    let target = if name == "spin-fd-moment" { 0.3 } else { 0. };
+                    assert!(
+                        (result["spin"]["moment_mu_b"].as_f64().unwrap() - target).abs() < 1e-10
+                    );
+                }
+            }
+            assert_eq!(
+                result["execution"]["effective_solver"],
+                "reference_complex_davidson"
+            );
+            assert!(dest.join("density-total.cube").exists());
+            if spin {
+                assert!(dest.join("magnetization.cube").exists());
+            }
+            let e = result["thermodynamics"]["internal_energy_ha"]
+                .as_f64()
+                .unwrap();
+            let ts = result["thermodynamics"]["entropy_term_ha"]
+                .as_f64()
+                .unwrap();
+            let f = result["thermodynamics"]["free_energy_ha"].as_f64().unwrap();
+            assert_eq!((e - ts).to_bits(), f.to_bits());
+            for row in result["reference_scf"]["iterations"].as_array().unwrap() {
+                for call in row["calls"].as_array().unwrap() {
+                    assert!(call["spin_index"].as_u64().is_some_and(|s| s < if spin {
+                        2
+                    } else {
+                        1
+                    }));
+                    assert!(
+                        call["k_index"]
+                            .as_u64()
+                            .is_some_and(|k| k < if spin { 8 } else { 4 })
+                    );
+                }
             }
         }
         fs::remove_dir_all(dir).unwrap();

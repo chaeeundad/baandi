@@ -397,6 +397,7 @@ impl Context {
         settings: &Settings,
     ) -> Result<Evaluated, RunError> {
         let reference = self.selection.reference();
+        let mut reference_derivatives = None;
         let (state, n_at, provenance, start_fallback, start_clipped_fraction) = if reference {
             if predicted.is_some() || atomic {
                 return Err(error(
@@ -419,28 +420,37 @@ impl Context {
             };
             let fallback = (warm.is_some() && seed.is_none())
                 .then(|| "reference restart has no orbital seed; fresh atomic start".to_string());
-            let mut run = dft_engine::refscf::delivered::run(
-                dft_engine::refstart::StartInput {
-                    cell: &self.cell,
-                    atoms: &atoms,
-                    potentials: &refs,
-                    options: &self.opts,
-                },
+            let mut request = dft_engine::refscf::api::Request::new(
                 crate::run::reference_profile(&self.config)?,
-                &points,
-                seed,
-            )
-            .map_err(|e| error(4, e))?;
-            dft_engine::refscf::delivered::force_state(
+                points,
+            );
+            request.seed = seed;
+            request.derivatives.forces = true;
+            request.derivatives.deferred = true;
+            let mut delivery = dft_engine::refscf::api::solve(
                 dft_engine::refstart::StartInput {
                     cell: &self.cell,
                     atoms: &atoms,
                     potentials: &refs,
                     options: &self.opts,
                 },
-                &mut run.outcome,
+                request,
             )
             .map_err(|e| error(4, e))?;
+            let mut run = delivery.run.into_scalar().map_err(|e| error(4, e))?;
+            delivery
+                .derivatives
+                .prepare(
+                    dft_engine::refstart::StartInput {
+                        cell: &self.cell,
+                        atoms: &atoms,
+                        potentials: &refs,
+                        options: &self.opts,
+                    },
+                    &mut run.outcome,
+                )
+                .map_err(|e| error(4, e))?;
+            reference_derivatives = Some(delivery.derivatives);
             (run.outcome.result, None, provenance, fallback, None)
         } else {
             let atomic_here = atomic && warm.is_some();
@@ -543,16 +553,35 @@ impl Context {
                     .filter(|o| !o.antiunitary)
                     .collect()
             });
-        let forces = dft_engine::forces(&dft_engine::ForceState {
-            cell: &self.cell,
-            atoms: &self.atoms(),
-            potentials: &self.refs(),
-            options: &self.opts,
-            electronic: dft_engine::ElectronicState::Fixed(&state),
-            density_floor: self.config.xc.density_floor,
-            symmetry: &ops,
-        })
-        .map_err(|e| error(4, e))?;
+        let forces = if let Some(derivatives) = &mut reference_derivatives {
+            derivatives
+                .evaluate_forces_with_operations(
+                    dft_engine::refstart::StartInput {
+                        cell: &self.cell,
+                        atoms: &self.atoms(),
+                        potentials: &self.refs(),
+                        options: &self.opts,
+                    },
+                    &state,
+                    &ops,
+                )
+                .map_err(|e| error(4, e))?;
+            derivatives
+                .forces
+                .take()
+                .expect("requested reference forces")
+        } else {
+            dft_engine::forces(&dft_engine::ForceState {
+                cell: &self.cell,
+                atoms: &self.atoms(),
+                potentials: &self.refs(),
+                options: &self.opts,
+                electronic: dft_engine::ElectronicState::Fixed(&state),
+                density_floor: self.config.xc.density_floor,
+                symmetry: &ops,
+            })
+            .map_err(|e| error(4, e))?
+        };
         let mut projected: Vec<_> = forces.values.iter().flatten().copied().collect();
         settings.project(&mut projected);
         let mut pulay_assessment = None;
@@ -621,27 +650,18 @@ impl Context {
             verification: verification_summary(&state, &self.opts),
         };
         if reference && settings.warm_start {
-            let atoms = self.atoms();
-            let refs = self.refs();
-            let input = dft_engine::refstart::StartInput {
-                cell: &self.cell,
-                atoms: &atoms,
-                potentials: &refs,
-                options: &self.opts,
-            };
-            let density: Vec<_> = state.density.iter().copied().collect();
-            let seed = if let Some(comm) = dft_engine::parallel::SharedComm::active() {
-                dft_engine::refscf::delivered::ionic_seed(input, &state, &density, &comm)
-            } else {
-                dft_engine::refscf::delivered::ionic_seed(
-                    input,
+            *self.reference_seed.borrow_mut() = Some(
+                dft_engine::refscf::api::ionic_seed(
+                    dft_engine::refstart::StartInput {
+                        cell: &self.cell,
+                        atoms: &self.atoms(),
+                        potentials: &self.refs(),
+                        options: &self.opts,
+                    },
                     &state,
-                    &density,
-                    &dft_engine::refscf::metric::Serial,
                 )
-            }
-            .map_err(|e| error(4, e))?;
-            *self.reference_seed.borrow_mut() = Some(seed);
+                .map_err(|e| error(4, e))?,
+            );
         }
         Ok((frame, state.density.iter().copied().collect(), n_at))
     }

@@ -1863,6 +1863,7 @@ fn execute_mode_inner(
     } else {
         None
     };
+    let mut reference_derivatives = None;
     let mut reference_symmetry_record = Value::Null;
     let mut reference_return = None;
     let mut reference_setup = Value::Null;
@@ -1919,11 +1920,17 @@ fn execute_mode_inner(
                 options: &opts,
             };
             let profile = reference_profile(&config)?;
-            let result = if let Some(symmetry) = &reference_symmetry {
-                dft_engine::refscf::k_driver::run_prepared(input, profile, symmetry)
-            } else {
-                dft_engine::refscf::k_driver::run(input, profile, &points)
+            let mut request = dft_engine::refscf::api::Request::new(profile, points.clone());
+            request.symmetry = reference_symmetry;
+            request.derivatives = dft_engine::refscf::api::Derivatives {
+                forces: config.output.as_ref().is_some_and(|o| o.forces),
+                stress: config.wants_stress(),
+                deferred: true,
             };
+            let result = dft_engine::refscf::api::solve(input, request).and_then(|delivery| {
+                reference_derivatives = Some(delivery.derivatives);
+                delivery.run.into_scalar()
+            });
             result.map(|run| {
                 reference_symmetry_record = run.symmetry.as_ref().map_or(Value::Null, reference_symmetry_json);
                 reference_return = Some(Instant::now());
@@ -2072,19 +2079,18 @@ fn execute_mode_inner(
     };
     launch::elapsed("scf_driver", scf_clock);
     launch::mark("scf_return");
-    if reference && config.output.as_ref().is_some_and(|o| o.forces || o.stress) {
-        let input = dft_engine::refstart::StartInput {
-            cell: &prepared.cell,
-            atoms: &atoms,
-            potentials: &refs,
-            options: &opts,
-        };
-        if let Some(symmetry) = &reference_symmetry {
-            dft_engine::refscf::delivered::force_state_prepared(input, &mut outcome, symmetry)
-        } else {
-            dft_engine::refscf::delivered::force_state(input, &mut outcome)
-        }
-        .map_err(engine_error)?;
+    if let Some(derivatives) = &mut reference_derivatives {
+        derivatives
+            .prepare(
+                dft_engine::refstart::StartInput {
+                    cell: &prepared.cell,
+                    atoms: &atoms,
+                    potentials: &refs,
+                    options: &opts,
+                },
+                &mut outcome,
+            )
+            .map_err(engine_error)?;
     }
     let r = outcome.result;
     // RUN-CONFIG: what the computation consulted (result writers below read
@@ -2774,15 +2780,31 @@ fn execute_mode_inner(
             })
         },
     )?;
-    if let Some(force) = requested_forces(
-        &config,
-        &prepared.cell,
-        &atoms,
-        &refs,
-        &opts,
-        dft_engine::ElectronicState::Fixed(&r),
-        density_floor,
-    )? {
+    let force = if let Some(derivatives) = &mut reference_derivatives {
+        derivatives
+            .evaluate_forces(
+                dft_engine::refstart::StartInput {
+                    cell: &prepared.cell,
+                    atoms: &atoms,
+                    potentials: &refs,
+                    options: &opts,
+                },
+                &r,
+            )
+            .map_err(engine_error)?;
+        derivatives.forces.take()
+    } else {
+        requested_forces(
+            &config,
+            &prepared.cell,
+            &atoms,
+            &refs,
+            &opts,
+            dft_engine::ElectronicState::Fixed(&r),
+            density_floor,
+        )?
+    };
+    if let Some(force) = force {
         console.push_str(&force_table(&force));
         result["forces"] = force_json(&force);
         if reference {
@@ -2804,15 +2826,31 @@ fn execute_mode_inner(
                 "state":"converged step's own state (ADR 0043 V4); forces use the same formulas as the strict path"});
         }
     }
-    if let Some(stress) = requested_stress(
-        &config,
-        &prepared.cell,
-        &atoms,
-        &refs,
-        &opts,
-        dft_engine::ElectronicState::Fixed(&r),
-        density_floor,
-    )? {
+    let stress = if let Some(derivatives) = &mut reference_derivatives {
+        derivatives
+            .evaluate_stress(
+                dft_engine::refstart::StartInput {
+                    cell: &prepared.cell,
+                    atoms: &atoms,
+                    potentials: &refs,
+                    options: &opts,
+                },
+                &r,
+            )
+            .map_err(engine_error)?;
+        derivatives.stress.take()
+    } else {
+        requested_stress(
+            &config,
+            &prepared.cell,
+            &atoms,
+            &refs,
+            &opts,
+            dft_engine::ElectronicState::Fixed(&r),
+            density_floor,
+        )?
+    };
+    if let Some(stress) = stress {
         console.push_str(&stress_table(&stress));
         result["stress"] = stress_json(&stress);
         if reference {
@@ -3051,7 +3089,7 @@ fn reference_electronic_run(
     species: Vec<Value>,
     input_bytes: &[u8],
 ) -> Result<RunReport, RunError> {
-    use dft_engine::refscf::electronic::{self, Policy};
+    use dft_engine::refscf::electronic::Policy;
     let theta = config.finite_temperature().map_err(|e| error(1, e))?;
     let sector = config.spin_sector(electrons).map_err(|e| error(1, e))?;
     let cap = config
@@ -3092,12 +3130,12 @@ fn reference_electronic_run(
         potentials,
         options: opts,
     };
-    let r = if let Some(symmetry) = &symmetry {
-        electronic::run_prepared(input, profile, symmetry, policy)
-    } else {
-        electronic::run(input, profile, points, policy)
-    }
-    .map_err(engine_error)?;
+    let mut request = dft_engine::refscf::api::Request::new(profile, points.to_vec());
+    request.symmetry = symmetry;
+    request.policy = Some(policy);
+    let r = dft_engine::refscf::api::solve(input, request)
+        .and_then(|delivery| delivery.run.into_electronic())
+        .map_err(engine_error)?;
     let mut total = r.density[0].clone();
     if r.density.len() == 2 {
         total += &r.density[1];

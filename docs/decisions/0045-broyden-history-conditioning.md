@@ -65,3 +65,56 @@ REFSCF_HISTORY_CONDITIONING by default and removes the L2 routing predicate.
 Explicit off values remain available for A/B diagnostics without changing
 driver selection. Free-moment FD with PBE remains on legacy under L1/G4D.
 Local rank simulation is not real-MPI or MKL validation.
+
+
+## G4F stiffness screening correction
+
+The local LDA-PW stiffness proxy follows ADR 0046 on the combined valence plus
+half-core channels. Freeze the accepted XC mask for both finite-difference
+probes: screened channels have zero response and fully screened points have
+zero stiffness. Shorten a probe near the threshold to keep the mask fixed,
+using its actual span (possibly one-sided); do not introduce a density floor.
+The globally audited input is not subjected to a second rank-local charge gate
+on derivative scratch. Above the threshold with unchanged probe spans, and
+with screening off, the original arithmetic is retained. This corrects the
+stiffness evaluator only; no convergence threshold or screening budget changes.
+See the stiffness paragraph in `docs/design/reference-scf.md` for the step rule.
+
+Local regression fixture: synthetic one-electron ion in a 12 Bohr cubic box,
+2.6 Ha wavefunction cutoff, Gaussian NLCC and a short-range Gaussian well,
+12 bands, FD theta=0.005 Ha. The fixed moment is 0.9999999 mu_B (strictly
+inside the finite-chemical-potential domain). The original evaluator passes
+one rank but fails at three simulated ranks with the reported generic
+stiffness error; the main XC charge gate has passed. With the correction,
+fixed-moment PBE and free-moment LDA-PW converge and verify at simulated ranks
+1/3/8. Maximum free-energy differences from converged strict legacy runs are
+1.6056489471338864e-11 and 1.1717293801893902e-11 Ha, respectively, below the
+unchanged 5e-9 Ha standard class. The free variant starts fully polarized to
+compare the same stationary spin branch; a partial seed reached different
+stationary solutions in the two drivers and is not an accuracy oracle.
+
+Reproduce with `cargo test --release -p dft-engine --test refscf g4f_vacuum_fd
+-- --include-ignored --nocapture`. Both tests are ignored in the debug gate.
+`cargo test --release -p dft-engine --lib g4f -- --nocapture` covers frozen
+masks, threshold-adjacent positive probes, zero vacuum response, an independent
+energy-curvature stencil, unscreened on/off bits, and collective errors from
+one rank to an empty owner for start/map/verification. The 48 existing G4
+synthetic fingerprints are byte-identical before and after this correction.
+These are local synthetic checks, not a dev08 O rerun, real MPI validation,
+a QE comparison, or a performance claim.
+
+The unfiltered release `g4` command also runs two unrelated tests that already
+fail on the baseline checkout: `g4_si_gap` requires the external `DFT_SI_UPF`,
+and `g4d_free_moment_pbe_acceptance` rejects the unqualified legacy free-moment
+PBE no-core case. Neither is hidden or relaxed by this correction; they are
+separate from the passing G4F regressions and unchanged G4 synthetic matrix.
+
+Final local gates: `cargo check --workspace --tests`, the debug `refscf`
+suite (84 passed, 26 ignored), and targeted fmt/clippy all exit 0.
+`CHECK_NICE=0 CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g4f-gates
+scripts/check.sh fast dft-engine dft-physics` exits 0: build/test/fmt/clippy
+pass, 45 binaries, 462 passed, 129 ignored. Its informational `ps` probe is
+denied by the sandbox. Excluding only the two baseline failures named above,
+the release G4 suite passes all 12 tests. README generation and freshness
+checks pass with no generated changes; reporting JSON and new README evidence
+are outside this ticket's owned files. Changes are left uncommitted for review.

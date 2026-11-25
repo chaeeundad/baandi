@@ -65,7 +65,7 @@ fn kinetic(n: usize, coupling: f64, threads: usize) -> (Operator, Vec<f64>) {
     )
 }
 
-fn solve(op: &Operator, diag: &[f64], ritz: bool, b5: bool) -> RealEigenSolution {
+fn solve(op: &Operator, diag: &[f64], ritz: bool) -> RealEigenSolution {
     let s = RealDavidson {
         bands: 16,
         tolerance: if ritz { 1e-10 } else { 1e-9 },
@@ -88,7 +88,6 @@ fn solve(op: &Operator, diag: &[f64], ritz: bool, b5: bool) -> RealEigenSolution
         &mut None,
         DavidsonPreconditioner::Default,
         ResearchOptions {
-            b5,
             ..ResearchOptions::default()
         },
     )
@@ -102,13 +101,10 @@ fn b5_keeps_roots_certificates_and_thread_identity() {
         let (op1, diag) = kinetic(220, coupling, 1);
         let (op4, _) = kinetic(220, coupling, 4);
         for ritz in [false, true] {
-            let base = solve(&op1, &diag, ritz, false);
-            let fast = solve(&op1, &diag, ritz, true);
-            assert_eq!(fast, solve(&op4, &diag, ritz, true), "thread identity");
-            let near = |a: usize, b: usize| a.abs_diff(b) * 10 <= a;
-            assert!(near(base.iterations, fast.iterations));
-            assert!(near(base.operator_applications, fast.operator_applications));
-            for (a, b) in base.eigenvalues.iter().zip(&fast.eigenvalues) {
+            let exact = dft_numerics::real::symmetric_eigh(&op1.a).unwrap().0;
+            let fast = solve(&op1, &diag, ritz);
+            assert_eq!(fast, solve(&op4, &diag, ritz), "thread identity");
+            for (a, b) in exact.iter().zip(&fast.eigenvalues) {
                 assert!((a - b).abs() <= 1e-10, "{a} vs {b}");
             }
             assert!(fast.converged.iter().all(|&c| c));

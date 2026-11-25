@@ -563,7 +563,6 @@ fn serial_lean(
             &mut None,
             DavidsonPreconditioner::Default,
             ResearchOptions {
-                lean: true,
                 ..ResearchOptions::from_env()
             },
         )
@@ -638,7 +637,6 @@ fn rank_decisions_match_the_serial_lean_solver() {
                 &mut None,
                 DavidsonPreconditioner::Default,
                 ResearchOptions {
-                    lean: true,
                     ..ResearchOptions::from_env()
                 },
             )

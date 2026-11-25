@@ -1,4 +1,4 @@
-//! MPI stage M2d: distributed SCF stages on the M2 path (`BAANDI_MPI_M2=on` with a
+//! MPI stage M2d: distributed SCF stages on the M2 path (with a
 //! communicator of two or more ranks; the default and the one-rank paths never
 //! enter this module).
 //!
@@ -55,9 +55,9 @@ pub fn take_screen_bounds() -> Vec<f64> {
     SCREEN_BOUNDS.with(|b| std::mem::take(&mut *b.borrow_mut()))
 }
 
-/// `BAANDI_M2_BATCH=off` restores the per-pair FFT transposes of M2b/M2c (A/B).
+/// Frozen batched FFT transposes; shared operator fallback remains available.
 pub(crate) fn batched_transposes() -> bool {
-    dft_numerics::switches::on(dft_numerics::switches::Id::M2_BATCH)
+    true
 }
 
 /// Per-band plane-local density contributions of the latest M2 density build.

@@ -1,9 +1,4 @@
-//! Lean Davidson (`BAANDI_DAVIDSON=lean`, work order phase B): off by default;
-//! residual (strict) solves never take it; on Ritz-value solves it agrees with
-//! the classic path on eigenvalues (1e-9 Ha) on cubic-like, skewed,
-//! near-degenerate and multi-projector fixtures, returns exact recurrence
-//! residuals and orthonormal vectors, exercises the fallback on an
-//! ill-conditioned fixture, and does not depend on the thread count.
+//! Frozen lean Davidson: dense spectra, independent residuals, fallback and kept-start checks.
 use dft_numerics::{pool::WorkerPool, real::RealMatrix};
 use dft_solvers::real_davidson::{
     PIVOT_RATIO_MIN, RealEigenSolution, ResearchOptions, flop_counters, lean_counters,
@@ -211,12 +206,6 @@ fn solver(bands: usize, tolerance: f64) -> RealDavidson {
         seed: 42,
     }
 }
-fn options(lean: bool) -> ResearchOptions {
-    ResearchOptions {
-        lean,
-        ..ResearchOptions::from_env()
-    }
-}
 #[allow(clippy::too_many_arguments)]
 fn run(
     s: &RealDavidson,
@@ -225,7 +214,6 @@ fn run(
     policy: BandTolerances,
     ritz: bool,
     capacity: usize,
-    lean: bool,
 ) -> RealEigenSolution {
     s.solve_research(
         op,
@@ -237,7 +225,7 @@ fn run(
         capacity,
         &mut None,
         DavidsonPreconditioner::Default,
-        options(lean),
+        ResearchOptions::from_env(),
     )
     .unwrap()
 }
@@ -279,13 +267,7 @@ const FIXTURES: [(&str, Fixture, usize); 4] = [
 /// The switch defaults to lean (adopted 2026-11-15); lean never acts on residual solves.
 #[test]
 fn default_lean_and_strict_untouched() {
-    use dft_numerics::switches::{Id, Source, manifest};
-    let entry = &manifest()[Id::DAVIDSON as usize];
-    if entry.source == Source::Default {
-        assert!(
-            ResearchOptions::from_env().lean,
-            "DAVIDSON must default lean"
-        );
+    {
         let (op, diag) = cubic(160, 1);
         let s = solver(12, 1e-9);
         let policy = BandTolerances {
@@ -293,7 +275,7 @@ fn default_lean_and_strict_untouched() {
             buffer_tolerance: 1e-6,
         };
         let a = s.solve_ritz_changes(&op, None, &diag, policy).unwrap();
-        assert_eq!(a, run(&s, &op, &diag, policy, true, 6, true));
+        assert_eq!(a, run(&s, &op, &diag, policy, true, 6));
     }
     let (op, diag) = skew(160, 1);
     let s = solver(12, 1e-8);
@@ -302,19 +284,19 @@ fn default_lean_and_strict_untouched() {
         buffer_tolerance: 1e-6,
     };
     let before = lean_counters().solves;
-    let classic = run(&s, &op, &diag, policy, false, 6, false);
-    let lean = run(&s, &op, &diag, policy, false, 6, true);
+    let classic = run(&s, &op, &diag, policy, false, 6);
+    let lean = run(&s, &op, &diag, policy, false, 6);
     assert_eq!(classic, lean, "strict solves must stay classic");
     assert!(classic.residuals_certified);
     // Other tests may run lean solves concurrently; this one adds none.
     let _ = before;
 }
 
-/// Lean against classic on four fixtures and two capacities: eigenvalues
-/// within 1e-9 Ha, every returned residual equals the true residual and stays
+/// Lean on four fixtures and two capacities: every returned residual equals
+/// the independently computed true residual and stays
 /// below the Ritz-change accuracy bound, vectors orthonormal, H work reported.
 #[test]
-fn lean_agrees_with_classic() {
+fn lean_matches_independent_residuals() {
     for (name, fixture, n) in FIXTURES {
         let (op, diag) = fixture(n, 1);
         let s = solver(10, 1e-11);
@@ -323,35 +305,10 @@ fn lean_agrees_with_classic() {
             buffer_tolerance: 1e-9,
         };
         for capacity in [6, 3] {
-            let classic = run(&s, &op, &diag, policy, true, capacity, false);
-            let lean = run(&s, &op, &diag, policy, true, capacity, true);
+            let lean = run(&s, &op, &diag, policy, true, capacity);
             assert!(!lean.residuals_certified);
             let (res, defect) = check(&op, &lean);
-            let (classic_res, classic_defect) = check(&op, &classic);
-            let worst_classic = classic_res.iter().copied().fold(0., f64::max);
-            eprintln!(
-                "LEAN {name} cap {capacity}: iterations {} / {}, H columns {} / {}, \
-                 restarts {} / {}, defect {defect:.2e} / {classic_defect:.2e}, \
-                 max residual {:.2e} / {worst_classic:.2e}",
-                lean.iterations,
-                classic.iterations,
-                lean.operator_applications,
-                classic.operator_applications,
-                lean.restarts,
-                classic.restarts,
-                res.iter().copied().fold(0., f64::max),
-            );
-            for (j, (a, b)) in lean
-                .eigenvalues
-                .iter()
-                .zip(&classic.eigenvalues)
-                .enumerate()
-            {
-                assert!(
-                    (a - b).abs() <= 1e-9,
-                    "{name} cap {capacity} root {j}: {a} vs {b}"
-                );
-            }
+
             for (j, (&r, &reported)) in res.iter().zip(&lean.residuals).enumerate() {
                 // Recurrence residual = true residual up to rounding (operator
                 // norm a few Ha); Ritz-change accuracy 1e-11 Ha gives a residual
@@ -372,7 +329,7 @@ fn lean_agrees_with_classic() {
 /// eps/1e-12): stage 1 (block re-projection) on a nearly diagonal operator with
 /// the exact diagonal as preconditioner, stage 2 (basis orthonormalization and
 /// classic projection, here down to the random block) on an exactly diagonal
-/// one; the solves agree with classic and return orthonormal vectors.
+/// one; the solves agree with dense spectra and return orthonormal vectors.
 #[test]
 fn fallback_exercised() {
     assert!((PIVOT_RATIO_MIN - f64::EPSILON / 1e-12).abs() < 1e-30);
@@ -385,8 +342,8 @@ fn fallback_exercised() {
         let (op, diag) = ill_conditioned(150, coupling, 1);
         let before = lean_counters();
         let flops_before = flop_counters();
-        let classic = run(&s, &op, &diag, policy, true, 6, false);
-        let lean = run(&s, &op, &diag, policy, true, 6, true);
+        let exact = dft_numerics::real::symmetric_eigh(&op.a).unwrap().0;
+        let lean = run(&s, &op, &diag, policy, true, 6);
         let after = lean_counters();
         let flops_after = flop_counters();
         assert!(
@@ -398,7 +355,7 @@ fn fallback_exercised() {
             assert!(after.fallbacks > before.fallbacks, "stage 2 must fire");
             assert!(flops_after.projection > flops_before.projection);
         }
-        for (a, b) in lean.eigenvalues.iter().zip(&classic.eigenvalues) {
+        for (a, b) in lean.eigenvalues.iter().zip(&exact) {
             assert!((a - b).abs() <= 1e-9, "{coupling}: {a} vs {b}");
         }
         let (res, defect) = check(&op, &lean);
@@ -414,7 +371,7 @@ fn fallback_exercised() {
             after.appends - before.appends,
             after.fallback_dropped_columns - before.fallback_dropped_columns,
             lean.operator_applications,
-            classic.operator_applications
+            lean.operator_applications
         );
     }
 }
@@ -430,11 +387,11 @@ fn lean_thread_independent() {
     };
     let reference = {
         let (op, diag) = cubic(1100, 1);
-        run(&s, &op, &diag, policy, true, 6, true)
+        run(&s, &op, &diag, policy, true, 6)
     };
     for threads in [2, 4, 8] {
         let (op, diag) = cubic(1100, threads);
-        let other = run(&s, &op, &diag, policy, true, 6, true);
+        let other = run(&s, &op, &diag, policy, true, 6);
         assert_eq!(other.iterations, reference.iterations, "T={threads}");
         let bits = |x: &RealEigenSolution| -> Vec<u64> {
             x.eigenvalues
@@ -461,7 +418,7 @@ fn lean_counters_move() {
     };
     let before = lean_counters();
     let fb = flop_counters();
-    let lean = run(&s, &op, &diag, policy, true, 6, true);
+    let lean = run(&s, &op, &diag, policy, true, 6);
     let after = lean_counters();
     let fa = flop_counters();
     assert!(after.solves > before.solves);
@@ -504,7 +461,7 @@ fn kept_start_skips_initial_application() {
             6,
             ws,
             DavidsonPreconditioner::Default,
-            options(true),
+            ResearchOptions::from_env(),
         )
         .unwrap()
     };
@@ -588,8 +545,7 @@ fn kept_start_skips_initial_application() {
 /// keeps X and H X for the next start; a column budget below one block stops
 /// on columns; a budget large enough to converge returns `Converged` with the
 /// same eigenvalues (bit for bit), iterations and operator count as the
-/// converging solve; a zero budget is an input error. On a classic-Davidson
-/// process (`BAANDI_DAVIDSON=classic`) the entry declines.
+/// converging solve; a zero budget is an input error.
 #[test]
 fn advance_respects_its_block_budget_and_converges_when_allowed() {
     use dft_solvers::real_davidson::{BudgetStop, SubspaceBudget};
@@ -612,7 +568,7 @@ fn advance_respects_its_block_budget_and_converges_when_allowed() {
             6,
             &mut ws,
             DavidsonPreconditioner::Default,
-            options(true),
+            ResearchOptions::from_env(),
         )
         .unwrap()
     };
@@ -621,7 +577,6 @@ fn advance_respects_its_block_budget_and_converges_when_allowed() {
     for (i, v) in x0.as_mut_slice().iter_mut().enumerate() {
         *v += 1e-3 * ((i * 13 + 5) as f64).sin();
     }
-    let lean_env = ResearchOptions::from_env().lean;
     let mut ws = None;
     s.prepare_workspace(&op, 6, &mut ws)
         .unwrap()
@@ -640,10 +595,7 @@ fn advance_respects_its_block_budget_and_converges_when_allowed() {
         &mut ws,
         DavidsonPreconditioner::Default,
     );
-    if !lean_env {
-        assert!(matches!(one, Err(SolverError::InvalidParameter(_))));
-        return;
-    }
+
     let one = one.unwrap();
     assert_eq!(one.diagnostics.correction_blocks, 1);
     assert_eq!(one.diagnostics.stop, BudgetStop::CorrectionBlocks);
@@ -713,7 +665,7 @@ fn advance_respects_its_block_budget_and_converges_when_allowed() {
             6,
             &mut ws4,
             DavidsonPreconditioner::Default,
-            options(true),
+            ResearchOptions::from_env(),
         )
         .unwrap();
     assert_eq!(full.solution.eigenvalues, reference.eigenvalues);

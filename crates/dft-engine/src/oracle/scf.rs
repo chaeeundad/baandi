@@ -176,7 +176,7 @@ fn ordered_solves_at<T: Send, R: Send>(
     Ok(results)
 }
 
-// BREAKTHROUGH-4 (`BAANDI_EWALD_CACHE=on`, default off): constructions on the
+// BREAKTHROUGH-4 (frozen cache): constructions on the
 // same thread with bit-equal lattice, charges and fractional positions reuse
 // the Ewald energy (the cutoff-ladder coarse problem after the full-cutoff
 // one). The energy is a pure function of exactly these inputs and the default
@@ -189,7 +189,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 /// (hits, computed) Ewald energies of problem constructions since process
-/// start (hits only with `BAANDI_EWALD_CACHE=on`).
+/// start (hits on eligible repeated constructions).
 pub fn ewald_cache_counters() -> [u64; 2] {
     use std::sync::atomic::Ordering::Relaxed;
     [
@@ -197,7 +197,7 @@ pub fn ewald_cache_counters() -> [u64; 2] {
         EWALD_CACHE_COUNTS[1].load(Relaxed),
     ]
 }
-/// Override `BAANDI_EWALD_CACHE` for constructions on the calling thread
+/// Test override of the frozen Ewald cache for constructions on the calling thread
 /// (tests); `None` restores the environment.
 pub fn set_ewald_cache_override(on: Option<bool>) {
     EWALD_CACHE_OVERRIDE.with(|o| o.set(on));
@@ -352,9 +352,7 @@ fn ewald_energy(
 ) -> Result<ewald::EwaldEnergy, ScfError> {
     use dft_numerics::switches::RunCounter;
     use std::sync::atomic::Ordering::Relaxed;
-    let on = EWALD_CACHE_OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| run.on(dft_numerics::switches::Id::EWALD_CACHE));
+    let on = EWALD_CACHE_OVERRIDE.with(|o| o.get()).unwrap_or(true);
     if !on {
         EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
         run.count(RunCounter::EwaldComputed, 1);
@@ -1218,7 +1216,7 @@ impl ScfProblem {
     }
 
     /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): static eligibility of the owned
-    /// density loop (replicated): both owned switches and `BAANDI_M2_MIX`, the
+    /// density loop (replicated): both owned switches and the distributed mixer, the
     /// M2 path, the distributed grid path, the standard profile, one k state,
     /// plain Pulay without a Hartree metric, no symmetry, no snapshot capture,
     /// no replay capture. A requested but ineligible loop is counted.
@@ -2700,7 +2698,7 @@ impl ScfProblem {
     /// (`BAANDI_STOP_METRIC`) are resolved again from it; sessions enter it as
     /// their thread scope while they initialize and step, so code that still
     /// reads the legacy accessors sees it too. Construction-only switches
-    /// (`BAANDI_EWALD_CACHE`, the Ewald and ionic schemes) keep the values the
+    /// (the Ewald cache and ionic schemes) keep the values the
     /// construction used: to construct under `run`, enter `run.enter()` first.
     pub fn set_run_config(&mut self, run: dft_numerics::switches::RunConfig) {
         self.run = run;

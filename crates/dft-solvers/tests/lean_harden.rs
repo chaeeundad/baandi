@@ -275,7 +275,6 @@ fn serial_conditioned_and_scaled_partial_starts_have_exact_spectrum() {
             &mut None,
             dft_solvers::DavidsonPreconditioner::Default,
             dft_solvers::real_davidson::ResearchOptions {
-                lean: true,
                 ..dft_solvers::real_davidson::ResearchOptions::from_env()
             },
         )

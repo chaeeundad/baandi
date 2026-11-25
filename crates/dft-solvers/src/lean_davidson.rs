@@ -1,4 +1,4 @@
-//! Lean Davidson of the serial real Gamma path (`BAANDI_DAVIDSON=lean`, work
+//! Lean Davidson of the serial real Gamma path (frozen lean algebra, work
 //! order beat-QE 2026-11-14 phase B; default `classic`). Acts on Ritz-value
 //! (standard-profile) solves only; residual (strict) solves and the
 //! certificate keep the classic path. Derived from the study notes
@@ -95,228 +95,8 @@ pub(crate) struct LeanScratch {
     l: Vec<f64>,
     sel_values: Vec<f64>,
     sel_norms: Vec<f64>,
-    /// R1-b (`BAANDI_RESTART_KEEP`): history and scratch of the kept
-    /// directions, allocated at the first solve with the switch on.
-    keep: Option<Box<KeepScratch>>,
 }
 
-/// R1-b history-preserving restart (ticket BREAKTHROUGH-1-RESTART,
-/// docs/design/restart-keep.md). The history holds the basis coefficients D of
-/// the latest Ritz vectors Y = V D of the unconverged roots (the previous
-/// iteration's selected roots, or the columns of X right after a contraction
-/// or a Ritz-basis fallback rotation). At a contraction with Ritz coefficients
-/// C (X = V C, C^T S C = I) the kept directions are
-///   A = C^T S D,  G = D - C A,  P = V G,  H P = (H V) G,
-/// formed by the same rotation as X (no H application; the X component is
-/// removed twice in coefficient space). Candidates are taken greedily in
-/// ascending root order; a candidate is kept when |P| > DEPENDENCE_TOLERANCE
-/// |Y| (the classic rank floor on a unit input) and its squared pivot against
-/// the directions kept before it over |P|^2 is at least `PIVOT_RATIO_MIN` (the
-/// pivot rule of every lean append); the kept columns are S-orthonormalized in
-/// coefficient space (G L^{-T}). The caller then factors the true overlap of
-/// [X | P] with the same pivot rule and falls back to X alone on a failure. All of this is small replicated arithmetic in
-/// a fixed order (identical on every rank, independent of the thread count).
-pub(crate) struct KeepScratch {
-    /// Basis columns the history coefficients refer to (a prefix of the basis).
-    hist_m: usize,
-    /// The history is expressed in the current basis.
-    valid: bool,
-    /// Roots of the history columns, ascending.
-    roots: Vec<usize>,
-    /// History coefficients, compact hist_m x roots.len().
-    hist: Vec<f64>,
-    /// Per-candidate columns D, S D, S G (m each) and C^T S D (bands).
-    d: Vec<f64>,
-    sd: Vec<f64>,
-    a: Vec<f64>,
-    /// S G of the kept columns, compact m x kept.
-    sg: Vec<f64>,
-    /// Cholesky factor of the kept columns' Gram G^T S G, kept x kept.
-    l: Vec<f64>,
-}
-impl KeepScratch {
-    fn new(cap: usize, bands: usize) -> Self {
-        Self {
-            hist_m: 0,
-            valid: false,
-            roots: Vec::with_capacity(bands),
-            hist: vec![0.; cap * bands],
-            d: vec![0.; cap],
-            sd: vec![0.; cap],
-            a: vec![0.; bands],
-            sg: vec![0.; cap * bands],
-            l: vec![0.; bands * bands],
-        }
-    }
-}
-impl LeanScratch {
-    /// Make the R1-b scratch available (first use only).
-    pub(crate) fn keep_prepare(&mut self, bands: usize) {
-        if self.keep.as_ref().is_none_or(|k| k.a.len() != bands) {
-            self.keep = Some(Box::new(KeepScratch::new(self.cap, bands)));
-        }
-        if let Some(k) = self.keep.as_mut() {
-            k.valid = false;
-        }
-    }
-    /// Forget the history (the basis changed in a way it does not follow).
-    pub(crate) fn keep_invalidate(&mut self) {
-        if let Some(k) = self.keep.as_mut() {
-            k.valid = false;
-        }
-    }
-    /// The history becomes the selected Ritz coefficients of this iteration
-    /// (`self.c`, compact m x roots.len(), from `ritz_coefficients` with
-    /// `Some(roots)`).
-    pub(crate) fn keep_record(&mut self, m: usize, roots: &[usize]) {
-        let Some(k) = self.keep.as_mut() else {
-            return;
-        };
-        let len = m * roots.len();
-        k.hist[..len].copy_from_slice(&self.c.as_slice()[..len]);
-        k.roots.clear();
-        k.roots.extend_from_slice(roots);
-        k.hist_m = m;
-        k.valid = true;
-    }
-    /// The history becomes basis columns: root j is column j (right after a
-    /// contraction, whose basis starts with X, or a Ritz-basis rotation).
-    pub(crate) fn keep_identity(&mut self, m: usize, roots: &[usize]) {
-        let Some(k) = self.keep.as_mut() else {
-            return;
-        };
-        k.roots.clear();
-        k.roots.extend(roots.iter().copied().filter(|&j| j < m));
-        let len = m * k.roots.len();
-        k.hist[..len].fill(0.);
-        for (slot, &j) in k.roots.iter().enumerate() {
-            k.hist[slot * m + j] = 1.;
-        }
-        k.hist_m = m;
-        k.valid = true;
-    }
-    /// At a contraction of the m-column basis (S[:m, :m] in `self.s`, C =
-    /// `self.c` compact m x bands): append up to `limit` kept direction
-    /// coefficient columns G to `self.c` (compact m x (bands + kept)) for the
-    /// roots in `roots` (ascending) that the history holds. Returns (kept,
-    /// candidates dropped by the pivot rule).
-    pub(crate) fn keep_directions(
-        &mut self,
-        m: usize,
-        bands: usize,
-        roots: &[usize],
-        limit: usize,
-    ) -> Result<(usize, usize), SolverError> {
-        let cap = self.cap;
-        let Some(k) = self.keep.as_mut() else {
-            return Ok((0, 0));
-        };
-        if !k.valid || limit == 0 || k.hist_m > m || bands + limit > cap {
-            return Ok((0, 0));
-        }
-        let hm = k.hist_m;
-        let (s, c) = (&self.s, &mut self.c);
-        c.reshape_within_storage(m, bands + limit)?;
-        let mut kept = 0;
-        let mut dropped = 0;
-        for &root in roots {
-            if kept == limit {
-                break;
-            }
-            let Ok(slot) = k.roots.binary_search(&root) else {
-                continue;
-            };
-            // D (zero below the history prefix), S D and |Y|^2 = D^T S D.
-            let d = &mut k.d[..m];
-            d[..hm].copy_from_slice(&k.hist[slot * hm..(slot + 1) * hm]);
-            d[hm..].fill(0.);
-            let sd = &mut k.sd[..m];
-            for (i, x) in sd.iter_mut().enumerate() {
-                *x = (0..hm).map(|l| s[(i, l)] * d[l]).sum();
-            }
-            let length: f64 = d.iter().zip(sd.iter()).map(|(a, b)| a * b).sum();
-            // G = D - C A with A = C^T S D, twice (the second pass removes
-            // the rounding left in the X component; written as column
-            // bands + kept of c), then S G.
-            let col = bands + kept;
-            let (head, tail) = c.as_mut_slice().split_at_mut(col * m);
-            let g = &mut tail[..m];
-            g.copy_from_slice(d);
-            let sg = &mut k.sg[kept * m..(kept + 1) * m];
-            for pass in 0..2 {
-                let source: &[f64] = if pass == 0 { sd } else { sg };
-                for (b, a) in k.a.iter_mut().enumerate() {
-                    *a = head[b * m..(b + 1) * m]
-                        .iter()
-                        .zip(source)
-                        .map(|(x, y)| x * y)
-                        .sum();
-                }
-                for (b, &a) in k.a.iter().enumerate() {
-                    for (x, &cc) in g.iter_mut().zip(&head[b * m..(b + 1) * m]) {
-                        *x -= cc * a;
-                    }
-                }
-                for (i, x) in sg.iter_mut().enumerate() {
-                    *x = (0..m).map(|l| s[(i, l)] * g[l]).sum();
-                }
-            }
-            // |P|^2 and the new row of the Cholesky factor of G^T S G.
-            let sg = &k.sg[..(kept + 1) * m];
-            let norm2 = g
-                .iter()
-                .zip(&sg[kept * m..])
-                .map(|(a, b)| a * b)
-                .sum::<f64>();
-            let mut pivot = norm2;
-            let lw = bands;
-            for p in 0..kept {
-                let gp = &head[(bands + p) * m..(bands + p + 1) * m];
-                let mut x: f64 = gp.iter().zip(&sg[kept * m..]).map(|(a, b)| a * b).sum();
-                for q in 0..p {
-                    x -= k.l[kept + q * lw] * k.l[p + q * lw];
-                }
-                let x = x / k.l[p + p * lw];
-                k.l[kept + p * lw] = x;
-                pivot -= x * x;
-            }
-            // Rank floor of a unit input (|Y| = 1 in the S norm) and the pivot
-            // rule against the directions kept before.
-            let ratio = pivot / norm2;
-            if !(norm2.is_finite()
-                && norm2.sqrt() > DEPENDENCE_TOLERANCE * length.sqrt()
-                && ratio >= PIVOT_RATIO_MIN)
-            {
-                dropped += 1;
-                continue;
-            }
-            k.l[kept + kept * lw] = pivot.sqrt();
-            kept += 1;
-        }
-        // S-orthonormalize the kept columns: G <- G L^{-T}, column by column.
-        let lw = bands;
-        let data = c.as_mut_slice();
-        for q in 0..kept {
-            let (done, rest) = data.split_at_mut((bands + q) * m);
-            let gq = &mut rest[..m];
-            for p in 0..q {
-                let lqp = k.l[q + p * lw];
-                for (x, &y) in gq
-                    .iter_mut()
-                    .zip(&done[(bands + p) * m..(bands + p + 1) * m])
-                {
-                    *x -= lqp * y;
-                }
-            }
-            let inv = 1. / k.l[q + q * lw];
-            for x in gq.iter_mut() {
-                *x *= inv;
-            }
-        }
-        c.reshape_within_storage(m, bands + kept)?;
-        Ok((kept, dropped))
-    }
-}
 impl LeanScratch {
     pub(crate) fn new(cap: usize, bands: usize) -> Result<Self, SolverError> {
         let panel = FACTOR_PANEL.min(cap.max(1));
@@ -337,135 +117,7 @@ impl LeanScratch {
             l: vec![0.; panel * panel],
             sel_values: vec![0.; bands],
             sel_norms: vec![0.; bands],
-            keep: None,
         })
-    }
-}
-
-/// C3a (`BAANDI_LEAN_PROJ_CACHE=on`; ledger C3a, review F10): projector
-/// products P^T V of the basis columns, kept beside V and H V. The operator
-/// leaves P^T Y of its latest block application available
-/// (`RealLinearOperator::copy_last_projections`); every apply of basis columns
-/// copies them in (start, appended corrections, a rebuild), a contraction
-/// rotates them with the same coefficients as V (P^T (V C) = (P^T V) C) and the
-/// return forms P^T X = (P^T V) C for the caller's nonlocal energy, a product
-/// of order n_proj x m x bands instead of n x n_proj x bands. Any basis change
-/// the cache does not follow (the stage-2 fallback rotation) invalidates it,
-/// and an invalid cache is only made valid again by a fresh apply of the whole
-/// basis; the return then reports no projections. Products go through the
-/// fixed-panel GEMM workspace, so they do not depend on the thread count.
-/// The solve's arithmetic is untouched (the cache is only read at the return).
-pub(crate) struct ProjCache {
-    count: usize,
-    /// P^T V, count x capacity (column j belongs to basis column j).
-    pv: RealMatrix,
-    /// P^T X of the latest return (and contraction scratch), count x bands.
-    pub(crate) pc: RealMatrix,
-    cols: usize,
-    valid: bool,
-}
-impl ProjCache {
-    /// The cache of this solve (allocated on the first use or a shape change),
-    /// emptied; `None` when the operator exposes no projector products.
-    fn activate<'a>(
-        slot: &'a mut Option<ProjCache>,
-        op: &dyn RealLinearOperator,
-        capacity: usize,
-        bands: usize,
-    ) -> Result<Option<&'a mut ProjCache>, SolverError> {
-        let count = op.projector_count();
-        if count == 0 {
-            return Ok(None);
-        }
-        if slot
-            .as_ref()
-            .is_none_or(|c| c.count != count || c.pv.cols() != capacity || c.pc.cols() != bands)
-        {
-            *slot = Some(ProjCache {
-                count,
-                pv: RealMatrix::zeros(count, capacity)?,
-                pc: RealMatrix::zeros(count, bands)?,
-                cols: 0,
-                valid: false,
-            });
-        }
-        let cache = slot.as_mut().unwrap();
-        cache.cols = 0;
-        cache.valid = false;
-        Ok(Some(cache))
-    }
-    /// Basis columns `first..first + k` were just applied by `op` (a block of
-    /// exactly those columns). `first == 0` restarts the cache.
-    fn load(&mut self, op: &dyn RealLinearOperator, first: usize, k: usize) {
-        if first == 0 {
-            self.cols = 0;
-            self.valid = true;
-        }
-        let range = first * self.count..(first + k) * self.count;
-        self.valid = self.valid
-            && first == self.cols
-            && range.end <= self.pv.as_slice().len()
-            && op.copy_last_projections(k, &mut self.pv.as_mut_slice()[range]);
-        self.cols = first + k;
-        if self.valid {
-            lean_add(LeanCount::ProjCacheColumns, k);
-        }
-    }
-    fn covers(&self, m: usize) -> bool {
-        self.valid && self.cols == m
-    }
-    /// pc = (P^T V)[:, :m] C with C m x bands (column-major, leading dimension m).
-    fn rotate(
-        &mut self,
-        gemm: &mut RealGemmWorkspace,
-        c: &[f64],
-        m: usize,
-        bands: usize,
-    ) -> Result<(), SolverError> {
-        let count = self.count;
-        flops_add(FlopSite::Small, count, m, bands);
-        gemm.multiply_slices_into(
-            GemmSite::Other,
-            &self.pv.as_slice()[..count * m],
-            count,
-            m,
-            count,
-            RealOp::Identity,
-            c,
-            bands,
-            m,
-            self.pc.as_mut().subcols_mut(0, bands),
-        )?;
-        Ok(())
-    }
-    /// The basis became V C (contraction to `bands` columns).
-    fn contract(
-        &mut self,
-        gemm: &mut RealGemmWorkspace,
-        c: &[f64],
-        m: usize,
-        bands: usize,
-    ) -> Result<(), SolverError> {
-        if !self.covers(m) {
-            self.valid = false;
-            return Ok(());
-        }
-        self.rotate(gemm, c, m, bands)?;
-        let len = self.count * bands;
-        self.pv.as_mut_slice()[..len].copy_from_slice(&self.pc.as_slice()[..len]);
-        self.cols = bands;
-        Ok(())
-    }
-}
-/// `ProjCache::load` on an optional cache.
-fn proj_load(
-    cache: &mut Option<&mut ProjCache>,
-    op: &dyn RealLinearOperator,
-    first: usize,
-    k: usize,
-) {
-    if let Some(c) = cache.as_mut() {
-        c.load(op, first, k);
     }
 }
 
@@ -1223,7 +875,6 @@ fn factor_fresh(
     applications: &mut usize,
     work: &mut crate::work_accounting::Trace,
     timers: Timers,
-    proj: &mut Option<&mut ProjCache>,
 ) -> Result<bool, SolverError> {
     let m = basis.cols();
     let t = timers.start();
@@ -1237,14 +888,14 @@ fn factor_fresh(
     }
     lean_add(LeanCount::Rebuilds, 1);
     // R1-b: the rebuilt basis is not followed by the history.
-    lean.keep_invalidate();
+
     scratch.reshape_within_storage(basis.rows(), m)?;
     scratch.as_mut_slice().copy_from_slice(basis.as_slice());
     let t = timers.start();
     projection.run_into(scratch, None, gemm, basis)?;
     timers.stop(t, Stage::Orthonormalize);
     apply_into(op, basis, applications, work, products, timers)?;
-    proj_load(proj, op, 0, basis.cols());
+
     lean_add(LeanCount::RebuildColumns, basis.cols());
     let m = basis.cols();
     overlap_border(gemm, basis, 0, m, &mut lean.s)?;
@@ -1334,35 +985,18 @@ pub(super) fn solve_with_intent(
         lean,
         kept,
         pool,
-        lean_proj,
-        returned_projections,
         ..
     } = workspace;
     let lean = lean.as_mut().unwrap();
     // R1-b: previous directions kept at a contraction (0 = the plain restart).
-    let keep_r = options.restart_keep.directions(bands);
-    if keep_r > 0 {
-        lean.keep_prepare(bands);
-    }
     // C3a: projector products of the basis columns (switch and operator support).
-    let mut proj = if options.lean_proj_cache {
-        ProjCache::activate(lean_proj, op, capacity, bands)?
-    } else {
-        None
-    };
-    *returned_projections = false;
     let pool = pool.clone();
-    projection.narrow = options.narrow_proj;
     let timers = Timers::new(options.stage_timers);
     lean_add(LeanCount::Solves, 1);
-    if options.b5 && b5_scratch.is_none() {
+    if b5_scratch.is_none() {
         *b5_scratch = Some(crate::bordered::Bordered::new(capacity));
     }
-    let mut b5 = if options.b5 {
-        b5_scratch.as_mut()
-    } else {
-        None
-    };
+    let mut b5 = { b5_scratch.as_mut() };
     if let Some(b) = b5.as_mut() {
         b.invalidate();
     }
@@ -1412,15 +1046,6 @@ pub(super) fn solve_with_intent(
             .copy_from_slice(k.products.as_slice());
         lean_add(LeanCount::KeptColumns, bands);
         // C3a: the kept P^T X belongs to the kept X (same operator).
-        if let Some(c) = proj.as_mut() {
-            let len = c.count * bands;
-            c.cols = bands;
-            c.valid = k.projection_count == c.count && k.projections.len() == len;
-            if c.valid {
-                c.pv.as_mut_slice()[..len].copy_from_slice(&k.projections);
-                lean_add(LeanCount::ProjCacheKeptLoads, 1);
-            }
-        }
     } else if let Some(x) = initial {
         if x.rows() != n || x.cols() > capacity {
             return Err(LinalgError::Dimension.into());
@@ -1468,7 +1093,6 @@ pub(super) fn solve_with_intent(
     residuals.fill(0.);
     if !from_kept {
         apply_into(op, basis, &mut applications, &mut work, products, timers)?;
-        proj_load(&mut proj, op, 0, basis.cols());
     }
     // Columns whose H_r / A border is formed, and columns of S and T.
     let mut prefix = 0;
@@ -1495,7 +1119,6 @@ pub(super) fn solve_with_intent(
                 &mut applications,
                 &mut work,
                 timers,
-                &mut proj,
             )?;
             factored = basis.cols();
             prefix = 0;
@@ -1503,14 +1126,7 @@ pub(super) fn solve_with_intent(
         let m = basis.cols();
         max_basis_dimension = max_basis_dimension.max(m);
         let t = timers.start();
-        reduced_matrix_into(
-            basis,
-            products,
-            prefix,
-            gemm,
-            reduced,
-            options.narrow_reduced,
-        )?;
+        reduced_matrix_into(basis, products, prefix, gemm, reduced)?;
 
         timers.stop(t, Stage::Reduced);
         let t = timers.start();
@@ -1523,13 +1139,7 @@ pub(super) fn solve_with_intent(
             Some(b) if old_prefix + 1 == m && b.order == old_prefix && b.streak < MAX_STREAK => {
                 let _bordered_lane =
                     lane_profile::span(lane_profile::Op::Bordered, m, old_prefix, m, 0);
-                let done = b.update(
-                    gemm,
-                    &lean.a,
-                    &mut values[..m],
-                    coefficients,
-                    options.b5_parallel.then_some(&*pool),
-                )?;
+                let done = b.update(gemm, &lean.a, &mut values[..m], coefficients)?;
                 if !done {
                     b5_add(B5Count::Declined);
                 }
@@ -1581,9 +1191,8 @@ pub(super) fn solve_with_intent(
             vectors.reshape_within_storage(n, bands)?;
             rotated_products.reshape_within_storage(n, bands)?;
             residual_block.reshape_within_storage(n, bands)?;
-            let hx_formed = ritz_and_residuals(
+            ritz_and_residuals(
                 FlopSite::Return,
-                options.ritz_fused,
                 gemm,
                 basis,
                 products,
@@ -1609,8 +1218,7 @@ pub(super) fn solve_with_intent(
                     ));
                 }
                 apply_into(op, basis, &mut applications, &mut work, products, timers)?;
-                proj_load(&mut proj, op, 0, bands);
-                lean.keep_invalidate();
+
                 (factored, prefix) = (0, 0);
                 previous.fill(f64::NAN);
                 if iteration == solver.max_iterations {
@@ -1634,36 +1242,15 @@ pub(super) fn solve_with_intent(
             }
             lean_add(LeanCount::Returns, 1);
             // C3a: P^T X = (P^T V) C for the caller's nonlocal energy.
-            let proj_ready = match proj.as_mut() {
-                Some(c) if c.covers(m) => {
-                    let t = timers.start();
-                    c.rotate(gemm, &lean.c.as_slice()[..m * bands], m, bands)?;
-                    timers.stop(t, Stage::Rotate);
-                    lean_add(LeanCount::ProjCacheReturns, 1);
-                    true
-                }
-                Some(_) => {
-                    lean_add(LeanCount::ProjCacheMisses, 1);
-                    false
-                }
-                None => false,
-            };
-            *returned_projections = proj_ready;
             // REUSE-PSI: keep X and H X (the return rotation) for the next solve.
-            if let Some(k) = kept.as_mut().filter(|k| k.store && hx_formed) {
+            if let Some(k) = kept.as_mut().filter(|k| k.store) {
                 k.vectors.as_mut_slice().copy_from_slice(vectors.as_slice());
                 k.products
                     .as_mut_slice()
                     .copy_from_slice(rotated_products.as_slice());
                 k.valid = true;
                 // C3a: and P^T X with them (allocated once per shape).
-                k.projection_count = 0;
-                if let Some(c) = proj.as_ref().filter(|_| proj_ready) {
-                    let len = c.count * bands;
-                    k.projections.resize(len, 0.);
-                    k.projections.copy_from_slice(&c.pc.as_slice()[..len]);
-                    k.projection_count = c.count;
-                }
+
                 lean_add(LeanCount::KeptStored, 1);
             }
             work.returned();
@@ -1728,16 +1315,11 @@ pub(super) fn solve_with_intent(
         timers.stop(t, Stage::Eigen);
         // Whether the basis becomes the Ritz basis of the bands in this iteration.
         let contracted = m + k > capacity;
-        if keep_r > 0 && !contracted {
-            // R1-b history: this iteration's selected Ritz coefficients.
-            lean.keep_record(m, selected);
-        }
         vectors.reshape_within_storage(n, k)?;
         rotated_products.reshape_within_storage(n, k)?;
         residual_block.reshape_within_storage(n, k)?;
         ritz_and_residuals(
             FlopSite::RitzLoop,
-            options.ritz_fused || options.ritz_fused_loop,
             gemm,
             basis,
             products,
@@ -1781,14 +1363,9 @@ pub(super) fn solve_with_intent(
             ritz_coefficients(gemm, lean, coefficients, m, bands, None)?;
             // R1-b: kept direction coefficients appended to C (room is left
             // for this iteration's correction block).
-            let (kept, dropped) = if keep_r > 0 {
-                lean.keep_directions(m, bands, selected, keep_r.min(capacity - bands - k))?
-            } else {
-                (0, 0)
-            };
-            lean_add(LeanCount::KeepDropped, dropped);
+
             timers.stop(t, Stage::Eigen);
-            let cols = bands + kept;
+            let cols = bands;
             vectors.reshape_within_storage(n, cols)?;
             rotated_products.reshape_within_storage(n, cols)?;
             let t = timers.start();
@@ -1802,61 +1379,22 @@ pub(super) fn solve_with_intent(
                 vectors.as_mut_slice(),
                 rotated_products.as_mut_slice(),
             )?;
-            if let Some(c) = proj.as_mut() {
-                if kept == 0 {
-                    c.contract(gemm, &lean.c.as_slice()[..m * bands], m, bands)?;
-                } else {
-                    // The cache holds bands columns of P^T X only.
-                    c.valid = false;
-                }
-            }
+
             timers.stop(t, Stage::Rotate);
             std::mem::swap(basis, vectors);
             std::mem::swap(products, rotated_products);
-            let mut plain = kept == 0;
-            if !plain {
-                // Factor X, then the kept directions (pivot rule); any failure
-                // falls back to the plain restart from X alone.
-                let t = timers.start();
-                overlap_border(gemm, basis, 0, cols, &mut lean.s)?;
-                timers.stop(t, Stage::Orthonormalize);
-                let t = timers.start();
-                let (x_ok, _) = extend_factor(gemm, lean, 0, bands)?;
-                let p_ok = x_ok && {
-                    let (ok, ratio) = extend_factor(gemm, lean, bands, cols)?;
-                    lean_pivot(ratio);
-                    ok
-                };
-                timers.stop(t, Stage::Eigen);
-                if p_ok {
-                    lean_add(LeanCount::KeepContractions, 1);
-                    lean_add(LeanCount::KeptDirections, kept);
-                } else {
-                    lean_add(LeanCount::KeepFallbacks, 1);
-                    basis.reshape_within_storage(n, bands)?;
-                    products.reshape_within_storage(n, bands)?;
-                    plain = !x_ok;
-                }
-            }
-            let rebuilt = plain
-                && factor_fresh(
-                    op,
-                    gemm,
-                    projection,
-                    basis,
-                    products,
-                    vectors,
-                    lean,
-                    &mut applications,
-                    &mut work,
-                    timers,
-                    &mut proj,
-                )?;
-            if keep_r > 0 && !rebuilt {
-                // The history of the next iteration: the columns of X (a
-                // rebuild has invalidated it).
-                lean.keep_identity(bands, selected);
-            }
+            let _rebuilt = factor_fresh(
+                op,
+                gemm,
+                projection,
+                basis,
+                products,
+                vectors,
+                lean,
+                &mut applications,
+                &mut work,
+                timers,
+            )?;
             prefix = 0;
         }
         let m = basis.cols();
@@ -1890,7 +1428,6 @@ pub(super) fn solve_with_intent(
         timers.stop(t, Stage::Eigen);
         lean_add(LeanCount::Appends, 1);
         lean_pivot(ratio);
-        {}
         let mut appended = ok;
         if !ok {
             // Stage 1: re-project only this block against V and test again.
@@ -1941,10 +1478,8 @@ pub(super) fn solve_with_intent(
                 std::mem::swap(products, rotated_products);
                 // C3a: this m-column rotation is not followed (rare; measured
                 // fallback rate 0): the cache stays invalid until a full apply.
-                if let Some(c) = proj.as_mut() {
-                    c.valid = false;
-                }
-                let rebuilt = factor_fresh(
+
+                let _rebuilt = factor_fresh(
                     op,
                     gemm,
                     projection,
@@ -1955,12 +1490,7 @@ pub(super) fn solve_with_intent(
                     &mut applications,
                     &mut work,
                     timers,
-                    &mut proj,
                 )?;
-                if keep_r > 0 && !rebuilt {
-                    // R1-b: the basis is the full Ritz basis; root j is column j.
-                    lean.keep_identity(m, selected);
-                }
             }
             prefix = 0;
             let m = basis.cols();
@@ -2006,7 +1536,7 @@ pub(super) fn solve_with_intent(
             extra_products,
             timers,
         )?;
-        proj_load(&mut proj, op, first, k);
+
         append_into(products, extra_products)?;
         factored = basis.cols();
         lean_add(LeanCount::AppendedColumns, k);

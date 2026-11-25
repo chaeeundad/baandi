@@ -1,84 +1,9 @@
-//! Research switches and process-wide counters of the serial real Davidson.
-//!
-//! * Stage timers (`BAANDI_DAVIDSON_STAGES=on`, default off): wall time per
-//!   Davidson iteration bucketed by correction width, and the dense-algebra
-//!   stages. Clock reads and relaxed atomic adds only; no I/O, no allocation.
-//!   When off, no clock is read. Timers never influence the arithmetic.
-//! * B1 (`BAANDI_B1=standard|strict|on`, default off): Ritz vectors, H images and
-//!   residual vectors only for the roots selected for correction in narrow
-//!   iterations (proposal B1, ledger row B1-SELECTED-ROOTS). `standard` acts on
-//!   Ritz-change solves only, `strict` on residual solves only, `on` on both.
-//!   `BAANDI_B1_SKETCH=count` replaces the dense strict sketch by a CountSketch.
-//!   R11b fixes the narrow gate, sketch margin (0.5) and automatic row rule.
-//! * B5 (`BAANDI_B5=on`, default off): when exactly one column was appended,
-//!   the reduced eigenproblem is updated from the previous decomposition by the
-//!   secular equation (module `bordered`), with a full solve on any doubt and
-//!   after `bordered::MAX_STREAK` updates in a row.
-//!
-//! * Algebra-stream switches (`BAANDI_RITZ_FUSED`, `BAANDI_NARROW_PROJ`,
-//!   `BAANDI_NARROW_REDUCED`, `BAANDI_B5=par`; default off): counters in
-//!   [`algebra_counters`] show how often each one acted.
-//!
-//! * Lean Davidson (`BAANDI_DAVIDSON=lean`, default classic): Ritz-value
-//!   solves through `real_davidson::lean` (work order beat-QE phase B);
-//!   counters in [`lean_counters`], GEMM flops by site for both paths in
-//!   [`flop_counters`].
-//!
-//! The counters are cumulative for the process (all solves, all threads) and are
-//! read once at the reporting boundary through [`stage_seconds`] and
-//! [`b1_counters`].
+//! Frozen legacy Davidson arithmetic and diagnostic controls.
+//! Strict solves use B1 CountSketch and serial B5 bordered updates; Ritz-change
+//! solves use lean algebra. Fused/narrow alternatives and restart-history/cache
+//! experiments are retired. Stage timers and process counters remain diagnostic.
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
-
-/// B1 selected-root products mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum B1Mode {
-    /// Every iteration rotates all bands (the default path, bit-identical).
-    #[default]
-    Off,
-    /// Ritz-change (standard-profile) solves only; exact flags, no sketch.
-    Standard,
-    /// Residual (strict-profile) solves only; sketched flags, explicit
-    /// residuals for every root that is not clearly converged.
-    Strict,
-    /// Both.
-    On,
-}
-impl B1Mode {
-    pub fn from_env() -> Self {
-        match dft_numerics::switches::choice(dft_numerics::switches::Id::B1) {
-            "standard" => Self::Standard,
-            "strict" => Self::Strict,
-            "off" => Self::Off,
-            // Default ON with the count sketch since the adoption rule (dev08
-            // B1-PART-B: work identical to off in all 240 runs, si32 strict -4.2 / -2.0
-            // percent at T=1 / T=8, si32 standard -1.7 / -0.8; si16 strict +1.1 / +0.9
-            // percent is unresolved at 4 and 3 of 10 seeds). `BAANDI_B1=off` disables.
-            _ => Self::On,
-        }
-    }
-    /// Whether the mode acts on a solve with this convergence semantics.
-    pub fn acts_on(self, ritz: bool) -> bool {
-        match self {
-            Self::Off => false,
-            Self::Standard => ritz,
-            Self::Strict => !ritz,
-            Self::On => true,
-        }
-    }
-}
-
-/// Form of the B1 strict sketch (`BAANDI_B1_SKETCH`, default `dense`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SketchKind {
-    /// Dense sign matrix, entries +-1/sqrt(s) (proposal B1): s N multiply-adds
-    /// per sketched column.
-    #[default]
-    Dense,
-    /// CountSketch (one +-1 per coordinate in a seeded bucket): N adds per
-    /// sketched column; same variance bound of ||S x||^2.
-    Count,
-}
 
 /// Frozen B1 strict sketch margin (R11b).
 pub const B1_DEFAULT_MARGIN: f64 = 0.5;
@@ -91,145 +16,20 @@ pub const B1_DEFAULT_MARGIN: f64 = 0.5;
 /// any margin. A statistical rule, independent of the material.
 const B1_SKETCH_SIGMAS: f64 = 8.0;
 
-/// Options of the research entry point `RealDavidson::solve_research`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Diagnostic controls of the frozen legacy solver. Arithmetic is fixed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ResearchOptions {
-    pub b1: B1Mode,
-    pub sketch: SketchKind,
-    /// B5 bordered update of the reduced eigenproblem (`BAANDI_B5=on`).
-    pub b5: bool,
     pub stage_timers: bool,
-    /// B5 bordered update with the column-parallel coefficient product and
-    /// root-parallel secular solve (`BAANDI_B5=par`; implies `b5`).
-    pub b5_parallel: bool,
-    /// RITZ-FUSED (`BAANDI_RITZ_FUSED=on`): Ritz vectors and residual vectors
-    /// in one pass over V and HV; H X is formed only for a contraction restart.
-    /// Bit-identical to the default path.
-    pub ritz_fused: bool,
-    /// PERCORE-KERNELS (`BAANDI_RITZ_FUSED=loop`): the fused one-pass Ritz and
-    /// residual kernel only at the lean solver's selected-root residuals (the
-    /// loop site, whose H X_s is never used again); the return keeps the pair
-    /// rotation, so REUSE-PSI keeps X and H X. Bit-identical.
-    pub ritz_fused_loop: bool,
-    /// NARROW-PROJ (`BAANDI_NARROW_PROJ=on`): blocks of at most
-    /// `real_davidson::NARROW_WIDTH` columns are projected against the basis by
-    /// streaming dot products and one fused update pass (rounding class).
-    pub narrow_proj: bool,
-    /// NARROW-REDUCED (`BAANDI_NARROW_REDUCED=on`): the border of the reduced
-    /// matrix for at most `NARROW_WIDTH` new columns by the same streaming dot
-    /// kernel (rounding class).
-    pub narrow_reduced: bool,
-    /// Lean Davidson (`BAANDI_DAVIDSON=lean`, work order phase B; default
-    /// classic): Ritz-value (standard) solves form residuals of the unconverged
-    /// roots only, all-band Ritz vectors only at return and contraction, append
-    /// unit-norm corrections without projection and solve the generalized
-    /// reduced problem by Cholesky reduction (module `real_davidson::lean`).
-    /// Residual (strict) solves always take the classic path.
-    pub lean: bool,
-    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on`, default off): the lean solver keeps
-    /// P^T V of its basis columns (operators that expose projector products)
-    /// and leaves P^T X of the returned vectors in the workspace
-    /// (`RealDavidsonWorkspace::returned_projections`). The solve itself is
-    /// unchanged bit for bit; only the caller's use of the projections is a
-    /// rounding-class change.
-    pub lean_proj_cache: bool,
-    /// BREAKTHROUGH-1-RESTART R1-b (`BAANDI_RESTART_KEEP`, default off): previous
-    /// directions kept at a lean contraction restart (`RestartKeep`).
-    pub restart_keep: RestartKeep,
-}
-
-/// R1-b history-preserving restart (`BAANDI_RESTART_KEEP=off|1|2|4|8|b/8|b/4|b/2`,
-/// docs/design/restart-keep.md): the most previous directions a lean
-/// contraction restart keeps beside the Ritz vectors. A count, or a fraction of
-/// the band count (at least one); no material or system rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RestartKeep {
-    /// The plain restart (X and H X only), bit for bit.
-    #[default]
-    Off,
-    /// At most this many directions.
-    Count(usize),
-    /// At most bands / divisor directions (at least one).
-    Fraction(usize),
-}
-impl RestartKeep {
-    /// The switch value of this process.
-    pub fn from_env() -> Self {
-        Self::parse(dft_numerics::switches::choice(
-            dft_numerics::switches::Id::RESTART_KEEP,
-        ))
-    }
-    /// Parse a switch value (`off` and unknown values give `Off`).
-    pub fn parse(value: &str) -> Self {
-        match value {
-            "b/8" => Self::Fraction(8),
-            "b/4" => Self::Fraction(4),
-            "b/2" => Self::Fraction(2),
-            v => match v.parse::<usize>() {
-                Ok(c) if c > 0 => Self::Count(c),
-                _ => Self::Off,
-            },
-        }
-    }
-    /// The most directions kept for `bands` bands (0 when off).
-    pub fn directions(self, bands: usize) -> usize {
-        match self {
-            Self::Off => 0,
-            Self::Count(c) => c,
-            Self::Fraction(d) => (bands / d.max(1)).max(1),
-        }
-    }
-}
-impl Default for ResearchOptions {
-    /// Every research switch off (B1 off, margin 0.5, automatic rows).
-    fn default() -> Self {
-        Self {
-            b1: B1Mode::default(),
-            sketch: SketchKind::default(),
-            b5: false,
-            stage_timers: false,
-            b5_parallel: false,
-            ritz_fused: false,
-            ritz_fused_loop: false,
-            narrow_proj: false,
-            narrow_reduced: false,
-            lean: false,
-            lean_proj_cache: false,
-            restart_keep: RestartKeep::Off,
-        }
-    }
 }
 impl ResearchOptions {
-    /// Fixed eight-sigma rule at margin 0.5: 128 sketch rows, capped by the caller.
+    /// Fixed eight-sigma rule at margin 0.5, capped by the caller.
     pub fn b1_sketch_rows(&self) -> usize {
         let z = B1_SKETCH_SIGMAS / (1. - B1_DEFAULT_MARGIN);
         (0.5 * z * z).ceil() as usize
     }
-    /// `BAANDI_B1` and `BAANDI_DAVIDSON_STAGES=on`, read once per solve.
     pub fn from_env() -> Self {
         Self {
-            b1: B1Mode::from_env(),
-            sketch: match dft_numerics::switches::choice(dft_numerics::switches::Id::B1_SKETCH) {
-                "dense" => SketchKind::Dense,
-                _ => SketchKind::Count,
-            },
-            // B5 default ON since the adoption rule (dev08 B5-PART-C: 160 runs, zero
-            // violations, mechanism fires on 53 percent of strict Davidson eigenproblems,
-            // si32 strict T=1 -0.77 percent 10/10 seeds, nothing regresses);
-            // `BAANDI_B5=off` disables, `par` threads the update.
-            b5: dft_numerics::switches::choice(dft_numerics::switches::Id::B5) != "off",
-            b5_parallel: dft_numerics::switches::choice(dft_numerics::switches::Id::B5) == "par",
-            ritz_fused: dft_numerics::switches::on(dft_numerics::switches::Id::RITZ_FUSED),
-            ritz_fused_loop: dft_numerics::switches::choice(dft_numerics::switches::Id::RITZ_FUSED)
-                == "loop",
-            narrow_proj: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_PROJ),
-            narrow_reduced: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_REDUCED),
             stage_timers: dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES),
-            lean: dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON) == "lean",
-            lean_proj_cache: dft_numerics::switches::on(
-                dft_numerics::switches::Id::LEAN_PROJ_CACHE,
-            ),
-            restart_keep: RestartKeep::from_env(),
         }
     }
 }
@@ -511,7 +311,7 @@ pub fn b5_counters() -> B5Counters {
     }
 }
 
-/// Cumulative algebra-stream counters (all zero when the switches are off).
+/// Historical algebra-stream counters (all zero after retirement).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AlgebraCounters {
     /// Iterations whose Ritz vectors and residuals came from the fused pass.
@@ -525,28 +325,9 @@ pub struct AlgebraCounters {
     /// Bordered updates whose coefficient product ran column-parallel.
     pub b5_parallel: u64,
 }
-static ALGEBRA_COUNTS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum AlgebraCount {
-    Fused = 0,
-    DeferredHx = 1,
-    NarrowProjection = 2,
-    NarrowReduced = 3,
-    B5Parallel = 4,
-}
-#[inline]
-pub(crate) fn algebra_add(counter: AlgebraCount) {
-    ALGEBRA_COUNTS[counter as usize].fetch_add(1, Relaxed);
-}
+/// Retired alternatives retain zero-valued diagnostic schema fields.
 pub fn algebra_counters() -> AlgebraCounters {
-    let g = |c: AlgebraCount| ALGEBRA_COUNTS[c as usize].load(Relaxed);
-    AlgebraCounters {
-        fused_iterations: g(AlgebraCount::Fused),
-        deferred_hx: g(AlgebraCount::DeferredHx),
-        narrow_projections: g(AlgebraCount::NarrowProjection),
-        narrow_reduced: g(AlgebraCount::NarrowReduced),
-        b5_parallel: g(AlgebraCount::B5Parallel),
-    }
+    AlgebraCounters::default()
 }
 
 /// GEMM sites of the serial real Davidson for the work counters (flops are
@@ -685,7 +466,7 @@ pub struct LeanCounters {
     pub kept_declined: u64,
     pub kept_stored: u64,
     pub kept_columns: u64,
-    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on`): returns that left P^T X in the
+    /// Retired projector-cache diagnostics: returns that left P^T X in the
     /// workspace, returns whose projection cache was incomplete (the caller
     /// computes P^T X directly), kept starts that also took the kept P^T X,
     /// and projector-product columns copied from the operator after applies.
@@ -696,7 +477,7 @@ pub struct LeanCounters {
     /// Retired fused-border counters (always zero), retained for CLI reporting.
     pub fused_borders: u64,
     pub fused_wasted_columns: u64,
-    /// R1-b (`BAANDI_RESTART_KEEP`): contractions that kept at least one
+    /// Retired restart-history diagnostics: contractions that kept at least one
     /// previous direction, directions kept, candidates dropped by the pivot
     /// rule in coefficient space, and contractions whose new basis failed the
     /// factor test and fell back to X alone.

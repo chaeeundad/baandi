@@ -389,7 +389,7 @@ pub(crate) fn capture_entry(e: Entry<'_>) -> Option<Capture> {
             sw_lean = "on",
             sw_lazy = "off",
             sw_psi = "off",
-            sw_dav = dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),
+            sw_dav = "lean",
         );
         // ISSUE-18: the operator fingerprint (separate field, appended).
         head.push_str(&operator_field());

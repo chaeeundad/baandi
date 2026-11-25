@@ -34,10 +34,6 @@ pub enum Kind {
         default: Option<f64>,
         valid: fn(f64) -> bool,
     },
-    /// `BAANDI_ORTHO`: unset gives the DGKS ratio 0.1, `dgks` the classical
-    /// 1/sqrt(2), `dgks:<r>` with r in [1e-3, 1] that ratio; any other value
-    /// (`off` included) gives `None`, two orthogonalization passes always.
-    Ortho,
     /// Overrides an input-file value; unset keeps the file value. A value that
     /// fails `valid` is an input error at the call site (no fallback).
     Override { valid: fn(&str) -> bool },
@@ -67,8 +63,6 @@ pub enum Source {
     /// The variable was set but not accepted; the call site falls back to the
     /// default value.
     InvalidToDefault,
-    /// `BAANDI_ORTHO` only: an unrecognized value selects two passes always.
-    InvalidToOff,
     /// Override and path switches: the call site reports an input error.
     InvalidToError,
 }
@@ -79,7 +73,6 @@ impl Source {
             Self::Env => "env",
             Self::Input => "input",
             Self::InvalidToDefault => "invalid -> default",
-            Self::InvalidToOff => "invalid -> off",
             Self::InvalidToError => "invalid -> error",
         }
     }
@@ -120,9 +113,6 @@ const ON_OFF: &[&str] = &["on", "off"];
 fn ladder_ratio_valid(v: f64) -> bool {
     v.is_finite() && (1.0..=1e6).contains(&v)
 }
-fn eigen_factor_valid(v: f64) -> bool {
-    v.is_finite() && (1e-3..=1.0).contains(&v)
-}
 
 fn relax_extrapolation_valid(v: &str) -> bool {
     matches!(v, "none" | "first_order" | "second_order")
@@ -147,12 +137,10 @@ macro_rules! table {
 }
 
 table! {
-    ORTHO: Kind::Ortho, "dgks:0.1", "off, dgks, dgks:<ratio in [1e-3, 1]>",
-        "DGKS second-pass rule of the Davidson orthogonalization (value = ratio, null = two passes)";
+
     // Engine (dft-engine).
 
-    EIGEN_FACTOR: Kind::Number { default: Some(0.1), valid: eigen_factor_valid }, "0.1", "number in [1e-3, 1]",
-        "eigen tolerance = factor x density residual";
+
 
     NL_ENERGY: Kind::Choice { allowed: &["fast", "exact"], default: "fast" }, "fast", "fast, exact",
         "nonlocal energy from blocked projections (exact: band-by-band operator)";
@@ -162,10 +150,8 @@ table! {
     STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold";
 
-    MPI_M2: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "MPI stick-row (M2) path; off selects the M1 row-block path";
-    M2_BATCH: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "batched FFT transposes of the M2 path";
+
+
 
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
     M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -174,8 +160,7 @@ table! {
     M2_FFT: Kind::Choice { allowed: &["rust", "mkl"], default: "rust" }, "rust", "rust, mkl",
         "1D kernels of the M2 distributed FFT (mkl: MKL DFTI batch lanes on MKL builds, rounding class; pure builds stay rustfft)";
 
-    M2_CAPACITY: Kind::Choice { allowed: &["auto", "off"], default: "auto" }, "auto", "auto, off",
-        "MPI runs with four or more ranks use 3 Davidson basis columns per band when scf.davidson_capacity_per_band is not set (auto), else the default 6 (off)";
+
     STAGE_TIMERS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "F21: MPI stage and collective counters measure wall time (on, the earlier behaviour) or run count-only (off: calls and collective payload bytes counted, no clock read, stage seconds 0)";
     // MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md); default off.
@@ -210,46 +195,33 @@ table! {
     // Replicated grid stages outside the solve (ticket MPI-REMAINING, docs/performance/mpi-remaining.md); default off.
     M2_GRID: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "M2-GRID: on the M2 path (2+ ranks, LDA PZ/PW, no core density, density floor or symmetry) the full-grid stages outside the solve run on a slab-decomposed full-grid FFT (owned real-space planes, owned sticks, two transposes per transform): the input density's Hartree FFT pair, the LDA XC and the effective potential on the planes with one allgatherv of the effective potential and the partial sums; the energy audit's output-density Hartree FFT and grid sums on the planes with one allgatherv of partial sums; the stop-rule Coulomb estimate from the kept owned coefficients; every sum in a canonical plane/stick order, so results do not depend on the rank count; rounding class against the replicated path";
-    M2_MIX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "M2-GRID: on the M2 path (2+ ranks) plain Pulay mixing (no Hartree metric, no Kerker) keeps its window of input densities, residuals and differences on the rank's block of fixed 4096-point chunks only: the newest difference, its Gram row and the right-hand side on the block with one allgatherv of per-chunk partial sums added in chunk order (rank-count independent), the replicated small eigenproblem, the update and the two charge corrections on the block, one allgatherv of the new density; exact checkpoints reject the mixer (opaque state); rounding class against the replicated mixer";
+
     M2_LOCAL_FIELDS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "M2-OWNED (default on since 2026-11-18, dev08 si32/si64 np=8 wall -2.5 to -6.0 %; declines automatically for active-boundary consumers): with M2_GRID on the M2 standard path, the effective potential stays on the producing ranks' slab planes (the planes the distributed H apply multiplies; redistributed by one alltoall only when the slab and operator plane axes differ) and is fed to the distributed operator and its kept-start potential change (delta V) without the full-grid allgatherv; the complex Hamiltonian's full potential is gathered only for a consumer that needs it (cold atomic start, complex or M1 fallback), tagged with an epoch so a stale potential is rejected; bit-identical to M2_GRID alone";
     M2_LOCAL_DENSITY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "M2-OWNED (default on since 2026-11-18, dev08 si32/si64 np=8 wall -2.5 to -6.0 %; declines automatically for active-boundary consumers): with M2_LOCAL_FIELDS and M2_MIX on, the output density stays on the owned slab planes through the energy audit, the stop rule, the session metrics (residual, charge, minimum: canonical per-plane sums), the distributed Pulay mixer (window on the owned planes) and the next potential; the full density is gathered only for a consumer that needs it (delivered result, checkpoint, ladder hand-off, declined map); rounding class against M2_MIX alone (per-plane instead of per-chunk canonical sums)";
     // Solvers (dft-solvers).
 
-    B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
-        "on, off, standard, strict", "B1 selected-root Davidson iterations";
-    B1_SKETCH: Kind::Choice { allowed: &["count", "dense"], default: "count" }, "count", "count, dense",
-        "B1 residual sketch";
 
-    B5: Kind::Choice { allowed: &["on", "off", "par"], default: "on" }, "on", "on, off, par",
-        "bordered reduced eigenproblem update (par: threaded)";
 
-    RITZ_FUSED: Kind::Choice { allowed: &["on", "off", "loop"], default: "off" }, "off", "on, off, loop",
-        "fused Ritz rotation (loop: only the selected-root residuals inside the lean Davidson iteration, where H X is not kept; the return keeps the pair rotation that REUSE-PSI needs; PERCORE-KERNELS)";
-    NARROW_PROJ: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "narrow-iteration projection kernel";
-    NARROW_REDUCED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "narrow-iteration reduced-matrix kernel";
+
+
+
+
+
+
     DAVIDSON_STAGES: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "Davidson stage timers";
 
-    DAVIDSON: Kind::Choice { allowed: &["classic", "lean"], default: "lean" }, "lean", "classic, lean",
-        "serial real Gamma Davidson of Ritz-value (standard) solves: classic (orthonormal basis, Ritz vectors of all bands in wide iterations) or lean (work order phase B: residuals of unconverged roots only, all-band Ritz vectors at return and contraction, unit-norm corrections without projection and a generalized reduced problem by Cholesky reduction; one orthonormalization when a pivot ratio of the basis overlap falls below eps/1e-12; rounding class)";
-    LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
+
+
     // Per-core kernels (ticket PERCORE-KERNELS, docs/performance/percore-kernels-2026-11-17.md); default off.
 
     DAVIDSON_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "Bounded per-call Davidson lane trace with shapes and rank/map labels; diagnostic only.";
 
     // History-preserving restart (ticket BREAKTHROUGH-1-RESTART, docs/design/restart-keep.md); default off.
-    RESTART_KEEP: Kind::Choice {
-        allowed: &["off", "1", "2", "4", "8", "b/8", "b/4", "b/2"],
-        default: "off",
-    }, "off", "off, 1, 2, 4, 8, b/8, b/4, b/2",
-        "BREAKTHROUGH-1-RESTART R1-b: at a contraction restart of the lean Davidson (serial lean path and the distributed lean algebra) keep, besides the Ritz vectors X and H X, up to r previous Ritz vectors of the unconverged roots with their X component removed (P = Y - X A, H P = (H V)(D - C A): no new H application); r is a count or a fraction of the band count (b/4 = bands / 4, at least 1), limited by the room left for the next correction block; directions whose squared sine to span(X and the kept directions) falls below the pivot rule eps/1e-12 are dropped, and the restart falls back to X alone when the factor of the new basis fails the pivot rule; off = the plain restart (bit-identical)";
+
     // Physics (dft-physics).
 
     NONLOCAL_BLOCK: Kind::Choice { allowed: &["auto", "on", "off"], default: "auto" }, "auto", "auto, on, off",
@@ -296,8 +268,7 @@ table! {
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
 
-    EWALD_CACHE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "BREAKTHROUGH-4: problem construction reuses the Ewald energy of the previous construction on the same thread when the lattice, the ion charges and the fractional positions are bit-equal (the cutoff-ladder coarse problem after the full-cutoff one); bit-identical (the same pure function of the same inputs)";
+
     EWALD_FAST: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "INIT-EWALD-FAST: balanced Ewald scheme (dft-physics ewald::Scheme::Balanced): splitting parameter from the real/reciprocal cost balance for the cell volume and ion count, cutoffs from rigorous tail bounds (truncation <= min(tolerance (sum |Z|)^2 / Omega^(1/3), tolerance * N) Ha), ion pairs i <= j and the reciprocal half space with per-ion phase tables; energy, forces and stress share the parameters; rounding class (different truncation and summation, error vs a tight reference far below 1e-12 Ha/atom); off = reference scheme (eta sqrt(pi)/Omega^(1/3), bit-identical to the previous evaluator)";
     IONIC_FAST: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -444,10 +415,7 @@ fn resolve_input(switch: &Switch, text: &str) -> Result<Value, String> {
             .filter(|x| valid(*x))
             .map(|x| Value::Number(Some(x)))
             .ok_or_else(bad),
-        Kind::Ortho => match resolve(switch, Some(OsStr::new(text))) {
-            (v, Source::Env) => Ok(v),
-            _ => Err(bad()),
-        },
+
         Kind::Override { valid } => valid(text)
             .then(|| Value::Raw(Some(text.to_string())))
             .ok_or_else(bad),
@@ -489,26 +457,7 @@ pub fn resolve(switch: &Switch, raw: Option<&OsStr>) -> (Value, Source) {
             },
             _ => (Value::Number(default), invalid_default),
         },
-        Kind::Ortho => match text {
-            Some(Some(v)) => {
-                if v == "dgks" {
-                    return (
-                        Value::Number(Some(std::f64::consts::FRAC_1_SQRT_2)),
-                        Source::Env,
-                    );
-                }
-                let ratio = v
-                    .strip_prefix("dgks:")
-                    .and_then(|r| r.parse::<f64>().ok())
-                    .filter(|r| (1e-3..=1.0).contains(r));
-                match ratio {
-                    Some(r) => (Value::Number(Some(r)), Source::Env),
-                    None if v == "off" => (Value::Number(None), Source::Env),
-                    None => (Value::Number(None), Source::InvalidToOff),
-                }
-            }
-            _ => (Value::Number(Some(0.1)), invalid_default),
-        },
+
         Kind::Override { valid } => match text {
             Some(Some(v)) => (
                 Value::Raw(Some(v.to_string())),
@@ -1593,8 +1542,7 @@ pub fn on(id: Id) -> bool {
     choice(id) == "on"
 }
 
-/// Effective value of a number switch (`BAANDI_ORTHO`: DGKS ratio, `None` =
-/// two passes always).
+/// Effective value of a number switch.
 pub fn number(id: Id) -> Option<f64> {
     RunConfig::current().number(id)
 }
@@ -1652,25 +1600,12 @@ mod tests {
         );
         // Default-off flags: only "on" is on.
         assert_eq!(
-            eval(Id::RITZ_FUSED, Some("1")),
+            eval(Id::PACK_FIXED, Some("1")),
             (Value::Choice("off"), InvalidToDefault)
         );
-        assert_eq!(eval(Id::B5, Some("par")), (Value::Choice("par"), Env));
+
         assert_eq!(eval(Id::NL_ENERGY, Some("exact")).0, Value::Choice("exact"));
 
-        assert_eq!(
-            eval(Id::ORTHO, Some("dgks")).0,
-            Value::Number(Some(std::f64::consts::FRAC_1_SQRT_2))
-        );
-        assert_eq!(
-            eval(Id::ORTHO, Some("dgks:0.5")),
-            (Value::Number(Some(0.5)), Env)
-        );
-        assert_eq!(eval(Id::ORTHO, Some("off")), (Value::Number(None), Env));
-        assert_eq!(
-            eval(Id::ORTHO, Some("dgks:2")),
-            (Value::Number(None), InvalidToOff)
-        );
         assert_eq!(eval(Id::PSEUDO_DIR, Some("relative")).1, InvalidToError);
         assert_eq!(eval(Id::DGEMM_TIMERS, Some("")).0, Value::Present(true));
     }
@@ -1739,13 +1674,13 @@ mod tests {
 
     #[test]
     fn run_config_precedence_env_over_input_over_default() {
-        let input = [perf("m2_grid", "off"), perf("eigen_factor", "0.05")];
+        let input = [perf("m2_grid", "off"), perf("refscf_ladder_ratio", "4")];
         let c = RunConfig::resolve_with(env_of(&[("BAANDI_M2_GRID", "on")]), &input).unwrap();
         assert_eq!(c.choice(Id::M2_GRID), "on");
         assert_eq!(c.source(Id::M2_GRID), Source::Env);
-        assert_eq!(c.number(Id::EIGEN_FACTOR), Some(0.05));
-        assert_eq!(c.source(Id::EIGEN_FACTOR), Source::Input);
-        assert_eq!(c.text(Id::EIGEN_FACTOR), Some("0.05"));
+        assert_eq!(c.number(Id::REFSCF_LADDER_RATIO), Some(4.));
+        assert_eq!(c.source(Id::REFSCF_LADDER_RATIO), Source::Input);
+        assert_eq!(c.text(Id::REFSCF_LADDER_RATIO), Some("4"));
         assert_eq!(c.choice(Id::M2_DGEMM), "on");
         assert_eq!(c.source(Id::M2_DGEMM), Source::Default);
         // Legacy environment semantics are unchanged even with an input value.
@@ -1756,7 +1691,7 @@ mod tests {
         let e = &m[Id::M2_GRID as usize];
         assert_eq!(e.requested.as_deref(), Some("yes"));
         assert!(e.consulted);
-        assert!(!m[Id::B5 as usize].consulted);
+        assert!(!m[Id::PACK_FIXED as usize].consulted);
     }
 
     #[test]
@@ -1771,12 +1706,11 @@ mod tests {
         let c = RunConfig::from_input(&[
             (Table::Profile, "phase_profile".into(), "on".into()),
             (Table::Profile, "dgemm_timers".into(), "on".into()),
-            perf("ortho", "dgks:0.5"),
         ])
         .unwrap();
         assert!(c.on(Id::PHASE_PROFILE));
         assert!(c.present(Id::DGEMM_TIMERS));
-        assert_eq!(c.number(Id::ORTHO), Some(0.5));
+
         let off = RunConfig::from_pairs(&[("dgemm_timers", "off")]).unwrap();
         assert!(!off.present(Id::DGEMM_TIMERS));
     }

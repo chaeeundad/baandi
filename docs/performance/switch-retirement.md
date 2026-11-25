@@ -425,3 +425,105 @@ results. Local synthetic fixtures include simulated ranks; real MPI/MKL executio
 and broader dev08 RG-ORC evidence are not claimed. Baseline JSON, goldens, README
 figures and non-owned artifact/dashboard files remain unchanged. Changes are
 uncommitted for review.
+
+## R11b part 2: remaining oracle arithmetic controls (2026-11-25)
+
+Base: `6885f8c75c5426aa341a36c51b0a6bfac9eeccda`. The user extended ownership
+to CLI run/configuration and engine parallel dispatch, resolving the Part 1
+blocker above. All sixteen remaining controls are retired. CLI JSON fields retain
+the former default as a constant where present; retired controls are absent from
+the switch manifest and input configuration. Only `REFERENCE_STRICT` selects the
+oracle. Shared kernels and reference controls remain registered.
+
+The following is the pre-change `git grep Id::NAME` reader audit (exact ID
+boundaries; declarations excluded). Test readers are included. Paths are relative
+to the repository root.
+
+| Removed switch | Frozen default | Former readers |
+| --- | --- | --- |
+| `EIGEN_FACTOR` | 0.1 | `crates/dft-cli/src/run_config.rs`, `crates/dft-engine/src/oracle/session.rs`, `crates/dft-numerics/src/switches.rs`, `crates/dft-numerics/tests/all/switches.rs` |
+| `MPI_M2` | on | `crates/dft-cli/src/run.rs`, `crates/dft-engine/src/parallel.rs`, `crates/dft-numerics/tests/all/switches.rs` |
+| `M2_BATCH` | on | `crates/dft-cli/src/run.rs`, `crates/dft-engine/src/oracle/m2.rs`, `crates/dft-numerics/tests/all/switches.rs` |
+| `M2_CAPACITY` | auto (3 bands at >=4 ranks; otherwise 6) | `crates/dft-cli/src/run.rs`, `crates/dft-engine/tests/m2_entry_cost.rs`, `crates/dft-numerics/tests/all/switches.rs` |
+| `M2_MIX` | on | `crates/dft-cli/src/run.rs`, `crates/dft-engine/src/oracle/mix_dist.rs`, `crates/dft-numerics/tests/all/switches.rs` |
+| `B1` | on | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `B1_SKETCH` | count | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `B5` | on (serial) | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/src/switches.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `RITZ_FUSED` | off | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/src/switches.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `NARROW_PROJ` | off | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `NARROW_REDUCED` | off | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `ORTHO` | DGKS 0.1 | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/src/switches.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/real_davidson.rs` |
+| `DAVIDSON` | lean for Ritz-change; orthonormal for strict | `crates/dft-cli/src/run.rs`, `crates/dft-engine/src/oracle/snapshot.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs`, `crates/dft-solvers/tests/lean_davidson.rs` |
+| `LEAN_PROJ_CACHE` | off | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `RESTART_KEEP` | off | `crates/dft-cli/src/run.rs`, `crates/dft-numerics/tests/all/switches.rs`, `crates/dft-solvers/src/davidson_stages.rs` |
+| `EWALD_CACHE` | on | `crates/dft-cli/src/run.rs`, `crates/dft-engine/src/oracle/scf.rs`, `crates/dft-engine/tests/all/run_config.rs`, `crates/dft-numerics/tests/all/switches.rs` |
+
+Deleted alternative implementations include dense B1 sketches, parallel B5
+bordered updates, fused/deferred Ritz residual paths, narrow projection/reduced
+paths, classic Ritz-change Davidson selection, lean projector caching and restart
+history. Strict residual certification, serial bordered updates and their dense
+fallback, CountSketch, lean Ritz-change algebra, and numerical fallback test hooks
+remain. Generic numerics kernels and shared distributed tuning helpers remain.
+`ResearchOptions` now contains diagnostics only. Retired branch-only test targets
+retain empty harness files because their explicit Cargo manifest entries are
+outside ownership. Surviving tests use independent dense spectra, residuals, Gram
+checks and thread/simulated-rank identity without changing tolerances or goldens.
+
+### Part 2 validation
+
+Both release baseline comparisons pass all three cases (`gamma,k222s,k222`), with
+zero energy difference in Ha and bit-identical density. An additional exact
+comparison passes all seven recorded fields for all six case/path pairs: energy
+bits, density SHA-256, SCF iterations, operator applications, Davidson iterations,
+certificate applications and certificate iterations. Energies and iteration counts
+are exactly those in the Part 1 table above. Evidence is in `/tmp/r11b-part2/`
+(`oracle-final.json`, `reference-final.json` and command logs). These local checks
+are regression evidence, not performance measurements or new QE results.
+
+Commands use the same UPF, cases and baselines as Part 1, with evidence output
+paths under `/tmp/r11b-part2/`. Full verification results and source counts follow.
+
+Part 2 source counts (all tracked `.rs` files, physical lines and literal
+`#[test]` attributes, compared with the base commit): **192,409 → 189,411
+lines** (−2,998); **1,158 → 1,143 test attributes** (−15). Registry entries:
+**75 → 59** (−16); cumulative R11b retirement: 121 → 59 (−62).
+
+The full check passes **920 tests, 0 failed, 212 ignored, 103 binaries**;
+all six gates pass (build, test, fmt, clippy, production check/clippy).
+`oracle_identity` and `reference_identity` each pass their unchanged golden test.
+The workspace test compilation, engine no-default-features compilation, and
+solver/numerics/MKL feature compilation pass. MKL is type-checked only because
+`MKLROOT` is unset. README generation is unchanged; all nine freshness tests pass.
+The sandbox denies the script's optional `ps` load probe; verification continues.
+The initial full check exposed obsolete configuration assertions and unsuitable
+new dense comparisons for loosely converged buffer bands. Those branch-comparison
+tests were retired; existing independent residual and orthogonality checks remain,
+and no tolerance or golden was relaxed.
+
+Reproduction (all final commands exit 0):
+
+```sh
+cargo check --workspace --tests
+cargo check -p dft-engine --no-default-features
+cargo check -p dft-solvers -p dft-numerics -p dft-mkl --tests --features dft-numerics/mkl
+CHECK_SCCACHE=0 CHECK_NICE=0 BAANDI_TEST_TMP=/tmp/r11b-part2 scripts/check.sh
+cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --test oracle_identity --test reference_identity
+cargo build --release -p dft-cli
+BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 1 --baseline docs/performance/baseline-oracle.json --require-identical --record /tmp/r11b-part2/oracle-final.json
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 1 --baseline docs/performance/baseline-reference.json --require-identical --record /tmp/r11b-part2/reference-final.json
+python3 -I scripts/make_readme_figures.py
+python3 -I scripts/tests/test_readme_figures.py
+git diff --check
+```
+
+Shared distributed Hamiltonian batching kernels remain because `refstart` and
+`refscf/kept_hx` also use that Hamiltonian. The oracle always requests the default
+batching. Diagnostic-only switches remain; they do not select arithmetic.
+No real MPI/MKL execution, broader dev08 RG-ORC evidence or speed improvement is
+claimed. Baselines, goldens, generated README figures and non-owned dashboard
+artifacts remain unchanged. All changes are uncommitted for review.
+
+The final caller audit also removes the two physics expectation-from-cached-
+projection methods and their branch-only test; neither had a reference/default
+caller after removal of the lean projector cache.

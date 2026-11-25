@@ -69,10 +69,7 @@ fn table_defaults_match_accessors_with_environment_unset() {
                 assert_eq!(s.default.parse::<f64>().ok(), default, "{}", s.name);
                 default.map_or("none".into(), |x| format!("{x:e}"))
             }
-            Kind::Ortho => {
-                assert_eq!(s.default, "dgks:0.1");
-                format!("{:e}", 0.1)
-            }
+
             Kind::Override { .. } | Kind::Path => "unset".into(),
             Kind::Presence => "false".into(),
         };
@@ -92,10 +89,6 @@ fn table_defaults_match_accessors_with_environment_unset() {
 fn legacy_defaults_are_unchanged() {
     let on = |id: Id| switches::resolve(switches::switch(id), None).0 == Value::Choice("on");
     for id in [
-        Id::MPI_M2,
-        Id::M2_BATCH,
-        Id::B1,
-        Id::B5,
         Id::M2_DGEMM,
         Id::MKL_DGEMM,
         Id::MKL_EVD,
@@ -106,25 +99,16 @@ fn legacy_defaults_are_unchanged() {
     }
     for id in [
         Id::ENERGY_IDENTITY,
-        Id::RITZ_FUSED,
-        Id::NARROW_PROJ,
-        Id::NARROW_REDUCED,
+        Id::PACK_FIXED,
         Id::DAVIDSON_STAGES,
         Id::REFERENCE_STRICT,
-        Id::LEAN_PROJ_CACHE,
         Id::DAVIDSON_PROFILE,
-        Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
     assert_eq!(
         switches::table_of(Id::DAVIDSON_PROFILE),
         switches::Table::Profile
-    );
-
-    assert_eq!(
-        switches::resolve(switches::switch(Id::M2_CAPACITY), None).0,
-        Value::Choice("auto")
     );
 
     assert_eq!(
@@ -141,7 +125,7 @@ fn legacy_defaults_are_unchanged() {
     );
     let value = |id: Id| switches::resolve(switches::switch(id), None).0;
     assert_eq!(value(Id::NL_ENERGY), Value::Choice("fast"));
-    assert_eq!(value(Id::B1_SKETCH), Value::Choice("count"));
+
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(
         value(Id::PURE_GEMM),
@@ -160,12 +144,10 @@ fn legacy_defaults_are_unchanged() {
             "grid"
         })
     );
-    assert_eq!(value(Id::DAVIDSON), Value::Choice("lean"));
+
     assert_eq!(value(Id::NONLOCAL_BLOCK), Value::Choice("auto"));
 
-    assert_eq!(value(Id::ORTHO), Value::Number(Some(0.1)));
-
-    assert_eq!(value(Id::EIGEN_FACTOR), Value::Number(Some(0.1)));
+    assert_eq!(value(Id::REFSCF_LADDER_RATIO), Value::Number(Some(100.0)));
 
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
@@ -180,7 +162,7 @@ fn legacy_defaults_are_unchanged() {
     // MPI-REMAINING grid switches stay opt-in until dev08.
 
     // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
-    assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
+
     // BREAKTHROUGH-3 bounded subspace SCF stays off (rejected at stage 1, ledger BT3-*).
     // BREAKTHROUGH-0-INSTRUMENT measurement switches stay off (results unchanged either way).
     assert_eq!(value(Id::PHASE_PROFILE), Value::Choice("off"));
@@ -188,7 +170,6 @@ fn legacy_defaults_are_unchanged() {
     // BREAKTHROUGH-4-OTHER-AND-INIT: wait probe and the three removal switches
     // stay off until dev08 (all bit-identical; the probe changes timing only).
     assert_eq!(value(Id::PHASE_WAIT), Value::Choice("off"));
-    assert_eq!(value(Id::EWALD_CACHE), Value::Choice("on"));
 
     // ISSUE-20: lazy serial operator of M2 states, on since dev08 (si64 -1.22 %, bit-identical).
 
@@ -198,7 +179,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LAZY_RESULT), Value::Choice("on"));
     // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
     assert_eq!(value(Id::M2_GRID), Value::Choice("on"));
-    assert_eq!(value(Id::M2_MIX), Value::Choice("on"));
+
     // INIT-EWALD-FAST / INIT-IONIC-FAST: rounding-class init schemes, on since 2026-11-18 (independent reference: the default Ewald sum is 1.794e-9 Ha low at si64).
     assert_eq!(value(Id::EWALD_FAST), Value::Choice("on"));
     assert_eq!(value(Id::IONIC_FAST), Value::Choice("on"));
@@ -216,7 +197,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::COLLECTIVE_TRACE), Value::Choice("off"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 75);
+    assert_eq!(TABLE.len(), 59);
 }
 
 #[test]

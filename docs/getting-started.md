@@ -2,7 +2,13 @@
 
 Moved here from the project README (rewritten as a project overview on 2026-11-03) and refreshed to the current code. Project overview: [README](../README.md).
 
-Current capabilities: CPU plane-wave Kohn-Sham DFT, spin-unpolarized, norm-conserving, insulating LDA-PZ, Bloch k points (Gamma, Monkhorst-Pack grids, explicit weighted lists; time-reversal reduction only), units and arithmetic expressions in the input (`"30 Ry"`, `"1/4"`). Si has been compared with Quantum ESPRESSO 7.6 at Gamma and on three k grids ([validation](validation.md) R3 to R6). Out of scope for now: CUDA, Metal, MPI, PAW, ultrasoft pseudopotentials, PBE, forces, stress, smearing, spin (see [AGENTS.md](../AGENTS.md) and [p7-plan](p7-plan.md)). Evidence covers one cell and one pseudopotential, not general material accuracy.
+Current routing and limits: [ADR 0047](decisions/0047-reference-driver-single-path.md)
+and [CLI](cli.md). The production reference driver supports NC LDA-PZ/LDA-PW/PBE,
+Gamma and complex k points, NLCC, eligible collinear/FD models, symmetry,
+derivatives, unpolarized fixed-occupation relaxation, and runtime/checkpoint v2.
+Free-moment PBE remains unqualified and routes to StrictOracle. Optional MPI is
+implemented; GPU, PAW/USPP, hybrids and SOC remain outside the current path.
+The stored Si/QE comparisons are scoped evidence, not general material accuracy.
 
 ## Build and check
 
@@ -44,7 +50,8 @@ cargo run --offline --release -p dft-cli -- run examples/si_lda.toml --output-di
 ```
 
 [si_lda.toml](../examples/si_lda.toml) is the minimal input. `validate` and `grid`
-check configuration and basis/grid settings without opening the UPF.
+check configuration and basis/grid settings; full validation/preflight reads
+the supplied UPF to validate physical inputs.
 No UPF file is distributed: supply a supported pseudopotential yourself and
 check its license. The Si file used for validation has unverified provenance
 and an unknown license; its user-approved use was for internal validation only,
@@ -55,13 +62,13 @@ Relative UPF paths resolve against the input directory. Output defaults to
 `results/` relative to the working directory; `--output-dir` overrides it.
 The CLI writes `results.json` (energies, convergence history and provenance),
 `density.bin` (little-endian f64 density) and `density.json` (metadata/checksum).
-Existing output files are overwritten. Only certified convergence with successful
-writes returns 0; budget exhaustion writes the final state and returns 3.
+Existing output files are overwritten. Converged execution with successful
+writes returns 0 (verification is on by default); budget exhaustion writes the final state and returns 3.
 See [CLI documentation](cli.md) for controls, units and all exit codes.
 
 ## Reproduce the comparisons
 
-QE runs are executed remotely on dev08 through the dft5090 session, using the
+QE runs are executed remotely on dev08 through the master session, using the
 [reference protocol](reference-environment.md); do not install or run QE
 locally. The [reference bundles and tooling guide](../tests/reference/README.md)
 define the required inputs, hashes, provenance and comparison gates.

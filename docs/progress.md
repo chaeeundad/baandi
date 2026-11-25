@@ -1,8 +1,33 @@
 # Progress log
 
-## Current status — 2026-11-05 (P12A reconciliation)
+## Stage R documentation — 2026-11-25 (R12-DOCS)
 
-This is the current status list; the dated log below is history and must not be
+Current production contract: [ADR 0047](decisions/0047-reference-driver-single-path.md).
+Reference is the only production driver, with explicit StrictOracle and G4D
+free-moment PBE fallback. CLI/user/crate guides now describe runtime/stepper,
+checkpoint v2, removed keys and switch policy. README is unchanged; its
+[correction list](roadmap/readme-corrections.md) awaits D6 approval.
+
+Evidence availability matters: the supplied plan ends at gen21, gen27's
+start-fallback text mismatch comes from the ticket, and gen22–gen28 RESULT files
+were unavailable locally. R11b is ticketed but not implemented at this checkout's
+base `27d91ece`; ADR 0047 distinguishes accepted policy from landed code.
+The master registry records this delegated run; artifacts/dashboard publication
+is outside R12 ownership. This log is not a process-liveness registry.
+
+R12 local verification (documentation changes only): README generator and nine
+freshness tests exit 0; README and generated figures are byte-unchanged. Local
+Markdown target checks and `git diff --check` exit 0. Full
+`CHECK_NICE=0 CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/r12-docs-gates scripts/check.sh`
+exits **1**: build, tests (103 binaries, 954 passed, 0 failed, 217 ignored),
+Clippy and both no-default-feature production gates pass; fmt fails at the
+pre-existing unchanged `crates/dft-engine/tests/all/pbe.rs:9`. That Rust file is
+outside R12 ownership. The sandbox also denies the informational `ps` probe.
+No new SCF/QE/performance measurements or committed changes are claimed.
+
+## Historical status — 2026-11-05 (P12A reconciliation)
+
+This is a historical status list; the dated log below is history and must not be
 read as a live task registry. Source checkout `b5d515a`; evidence detail and
 unverifiable claims: [evidence map](validation/evidence-map.md).
 

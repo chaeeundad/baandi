@@ -1,5 +1,11 @@
 # Variable-cell relaxation
 
+R7 ports this workflow to the production reference driver, including frozen
+Miller/FFT support and `IonicSeed::in_cell`. See
+[ADR 0047](../decisions/0047-reference-driver-single-path.md) for routing and
+dev08 gen19 agreement (lattice 6.3e-8 Bohr, pressure 2.3e-9 Ha/Bohr^3 versus
+the legacy run). Those differences do not establish cutoff convergence.
+
 `dft-cli relax input.toml --output-dir relaxed` accepts these additional settings:
 
 ```toml
@@ -117,13 +123,16 @@ by V_old/V_new. This preserves quadrature charge without interpolation. Ordered
 species, full parsed potentials, XC, sampling, occupations, frozen reference,
 symmetry and grid must still match. Changed support rejects this transfer.
 Shape, finite/XC-feasible density and relative charge <=1e-8 are checked before
-initialization. This transfers no mixer, orbitals or certificate. Provenance is
+initialization. Reference transfer also carries compatible orbital seeds, with potential/cache
+invalidation and fresh SCF history. The oracle retains density-only transfer. Provenance is
 `warm_transfer`, never an exact electronic continuation.
 
 `--resume` restores a checksum-protected, float-bit optimizer restart containing
 q, initial/reference cells, grid, optimizer memory, accepted frames, next density,
 move count and any final rebuilt result. Same-build/input/PP identity is required.
-The independent continuation test compares output files byte for byte. This is
+The historical legacy continuation test compares output files byte for byte.
+Reference optimizer restart does not persist the orbital seed and records a
+fresh-start fallback; it has no corresponding bitwise continuation guarantee. This is
 cell optimizer continuation, not an ESLE or BAANDICP electronic checkpoint.
 
 ## Outputs and limits

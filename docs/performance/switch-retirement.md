@@ -1,5 +1,13 @@
 # Reference-path switch retirement (R11a)
 
+R12 status: [ADR 0047](../decisions/0047-reference-driver-single-path.md) records
+the accepted D3 policy. The table below is the **R11a source-commit inventory**,
+not the current switch manifest. R10c subsequently removed `REFERENCE_SCF` and
+legacy standard controls. At R12 base `27d91ece`, R11b is ticketed but not merged;
+its oracle/shared entries marked “Keep for R11b” must not be reported as removed.
+Use `crates/dft-numerics/src/switches.rs` for actual accepted names. Recreate
+retired experimental branches from git; D3 requires no rollback waiting period.
+
 Source/recreation commit: `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1`. User decision D3 supersedes the two-generation sunset suggestion and the standing rollback policy. This is code retirement, not a new performance claim.
 
 The inventory below covers the entire pre-change manifest, including legacy-only entries, so shared-kernel and indirect oracle readers cannot disappear from the audit. Reader locations are **pre-change** source locations; repeated reads in one file are grouped. All readers were searched in the checkout; `Id::NAME` alone misses bare imports, and string pins in tests were searched separately. Historical ledger rows remain unchanged.

@@ -1,6 +1,6 @@
 # Fixed-sector collinear spin (MF03 / P13B)
 
-The engine supports collinear valence-only NC SCF with `lda-pw` (Slater exchange
+The engine supports collinear NC SCF, including optional NLCC, with `lda-pw` (Slater exchange
 plus standard Perdew–Wang 1992 correlation) and `pbe` through xcx 0.3.1.
 Both functionals also support unpolarized calculations. Existing `lda-pz` remains
 unpolarized only; requesting it with collinear spin returns:
@@ -28,13 +28,13 @@ n_down = 2
 # Alternatively replace both counts with: total_moment = 1.0
 axis = "z"             # x, y, z; default z
 # Alternatively: axis_cartesian = [0.0, 0.0, 1.0] (unit vector)
-initial_moment_seed = 1.0  # provenance only; initialization uses uniform fixed counts
+initial_moment_seed = 1.0  # does not change the fixed electron sector
 
 [basis]
 # Existing cutoff/mesh entries go here.
 kgrid = [2, 2, 2]
 kshift = [0.5, 0.5, 0.5]
-ktime_reversal = false   # required for collinear meshes; no symmetry reduction
+ktime_reversal = false   # no magnetic time-reversal reduction
 ```
 
 The example sector presupposes five valence electrons; it is not a material
@@ -42,19 +42,16 @@ input or a pseudopotential recommendation. The axis is a labeling convention in
 this SOC-free model. `M=N_up-N_down` is reported in conventional spin-polarization
 mu_B, not signed electron angular magnetic moment. Seeds are recorded but do not
 change the sector or model identity. Omitted `[spin]` or `mode="unpolarized"`
-without additional spin keys follows the legacy scalar path.
+without additional spin keys follows the unpolarized reference path.
 
 ## Calculation and certificate
 
-`dft_engine::collinear::CollinearProblem` is an additive API. It accepts a
-`SpinSector`, `ScfOptions`, and a full k quadrature. The caller must not submit a
-symmetry-reduced quadrature; the CLI explicitly rejects time reversal reduction.
-All common solver controls use the established eigensolver implementation. New
-SCF density, gradient, FFT, potential, orbital-copy, nonlocal-projection and
-history storage is reserved at setup and reused. The two spin channels use the
-same solver and the existing Linear, Pulay or KerkerPulay mixers. A single
-feasibility fraction applies to both channel proposals; no output density or
-magnetization is clipped or rescaled after diagonalization.
+The production entry point is `dft_engine::refscf::api`, which dispatches to
+`refscf::electronic` for spin/FD. The two density channels use the reference
+Broyden/plain update (beta 0.7/history 8 by default) and the distributed complex
+solver. `CollinearProblem` is a feature-gated strict-oracle compatibility API.
+Opt-in identity-spin spatial symmetry is supported; magnetic spin swaps and
+magnetic time reversal are not inferred.
 
 The Hartree field uses total density. XC uses the two valence channels and
 three GGA invariants `(sigma_uu,sigma_ud,sigma_dd)`. xcx returns energy per
@@ -63,21 +60,16 @@ uses `2*e_sigma_uu*grad(n_up) + e_sigma_ud*grad(n_down)` (one cross factor).
 Direct and band-sum energy audits subtract the potential integrated against
 valence output density, and include Hartree, XC and Ewald once.
 
-**Default path (ONEPATH-3, user decision 2026-11-16).** A `dft-cli run` of a
-collinear input (fixed sector or Fermi-Dirac) uses the single standard path
-with the fixed-point verification, like an unpolarized run: it stops when the
-collinear Coulomb estimate `E_H[d_n] + E_H[d_m] + E_0[d_m]` (charge and
-magnetization residuals in the same Coulomb metric, plus a uniform-moment term)
-and the residual guard over both channels fall below
-`scf.standard_threshold_ha` (default 5e-9 Ha), then repeats the whole map once
-at the delivered densities and requires the same estimate, the channel/moment
-sums and (fixed sector) the channel gaps to pass. The delivered state is the
-stop step's own; the strict certificate described below is the reference path
-(`BAANDI_REFERENCE_STRICT=on`). Design, estimator and limits:
-[onepath3-spin-metals](../design/onepath3-spin-metals.md); measured agreement
-with the strict reference: ledger row ONEPATH-3. With `n_up = n_down` the
-standard collinear run reproduces the unpolarized standard run (same SCF count,
-energy difference about 1e-15 Ha on the synthetic fixtures).
+**Default path (Stage R).** Fixed-sector LDA-PW/PBE and qualified FD inputs use
+Reference with independent fixed-point verification, threshold 5e-9 Ha by default.
+Free-moment collinear FD PBE remains unqualified (G4D) and routes to StrictOracle.
+`BAANDI_REFERENCE_STRICT=on` explicitly selects that oracle with precedence;
+there is no automatic retry after a numerical failure. Current spin metric,
+stiffness, number/moment and verification contracts are in
+[reference SCF](../design/reference-scf.md#spin-and-fermi-dirac) and
+[ADR 0047](../decisions/0047-reference-driver-single-path.md).
+The strict certificate described next belongs to the oracle, not the production
+reference driver's estimator. Its tolerances are not accepted legacy TOML keys.
 
 Strict reference: convergence requires raw total-density and magnetization residuals, energy,
 number/moment conservation and strict eigen residuals in both channels. A fresh
@@ -90,15 +82,11 @@ orbitals, density and energy all refer to the same state; fresh-map metrics are
 reported separately. Budget exhaustion returns a retained unconverged state and
 CLI exit 3. It never fabricates a passed certificate.
 
-Start wavefunctions (ONEPATH-3B, ADR 0042 amendment): with the default
-`scf.start_wavefunctions = "atomic"` and species that carry `PP_PSWFC`, a fixed
-sector starts each channel from the atomic subspace (Rayleigh-Ritz in that
-channel's Hamiltonian), as the unpolarized run does; `results.json` records
-`atomic_start`. Fermi-Dirac runs keep the free-electron start
-(`fallback_reason = "Fermi-Dirac occupations"`). A zero-moment run then needs the
-same number of SCF steps as the unpolarized complex-path run; its wall is about
-twice that run (two channel solves per step). Real Gamma and the cutoff ladder
-remain closed-shell only.
+Reference initialization uses atomic charge/orbitals when available. Missing
+atomic data use the documented neutral uniform/deterministic kinetic completion,
+with executed start provenance. Explicit start values accept only `"atomic"`;
+`"uniform"`/random starts are not current CLI options. Gamma-real and the
+reference cutoff ladder remain restricted to their supported scalar models.
 
 The architect approved xcx result-vector allocations at density-field evaluation
 boundaries, outside orbital, k and Hamiltonian inner loops. Output-state energy
@@ -108,17 +96,12 @@ unchanged. No fully allocation-free solver claim or performance gain is made.
 
 ## Output and deliberately unavailable combinations
 
-Collinear runs write `results.json` with `schema_version=2` and profile
-`collinear_fixed_v1`; unpolarized output remains schema 1 without a new spin
-block. The spin block follows `spin.proposal.json`; `state_contracts` follows
-`results-state.proposal.json` including fixed occupations, zero entropy, E=F and
-unavailable forces/stress. `proposal_status="proposed"` is retained because it is
-a constant in that frozen extension schema, not a claim that the engine emitted
-no result. Model/basis/state digests use the versioned binary record encoding
-`baandi-mf03-record-v1` (sorted named fields, type tags, length-prefixed UTF-8,
-little-endian integers/f64, normalized signed zero). Records accompany digests;
-initial seeds and actual converged state are separate from model identity. These
-are result identifiers, not support for MF07/08 warm/exact spin restart.
+Reference collinear/FD runs write schema version 2,
+`output_profile="reference_spin_fd_v1"` and `reference_scf.schema="reference-spin-fd-1"`.
+They retain spin/k/band axes, occupations and E/TS/F data as applicable, plus
+routing and verification. The older `collinear_fixed_v1` profile and
+`baandi-mf03-record-v1` identifiers describe oracle/historical evidence.
+Spin/FD output currently lacks the scalar driver's map-boundary clocks.
 
 Band arrays are spin-major, then input k order, then band; capacity is `[1,1]`.
 The total moment, both raw density residuals, measured channel electron counts,
@@ -135,14 +118,17 @@ atoms and JSON retains the structure and omission flag. `density.bin` and
 `density.json` additionally retain the documented legacy total-density binary
 layout. No spin information is inferred from that total-density file.
 
-Spin-aware symmetry, smearing, noncollinear/SOC, NLCC, U, forces/stress, runtime
-control/telemetry, spin restart and spin band/DOS/legacy volumetric postprocessing
-are not supplied here. Explicit requests for unsupported CLI combinations reject
-with a key, reason and remedy. Classic collinear SCF still writes its standard
-channel cubes. Real-material comparisons require separately matched, licensed
-pseudopotentials and a requested reference run; none is claimed by this ticket.
+Reference spin/FD supports NLCC, eligible spatial symmetry, verified forces/stress,
+observe/agent runtime and exact checkpoint v2. See [CLI](../cli.md) and
+[checkpoint limits](../checkpoint-format.md). Free-moment PBE still uses the
+G4D oracle, whose spin runtime/restart restrictions remain. CLI spin/FD relaxation,
+spin band/DOS postprocessing, noncollinear/SOC and U remain unsupported.
+Unsupported outputs reject rather than fabricating data.
 
-## Reproduction and evidence
+## Historical P13B reproduction and evidence
+
+The measurements below retain their original oracle/legacy implementation and
+are not a new Stage R material qualification. Current evidence is indexed in ADR 0047.
 
 ```sh
 scripts/check.sh

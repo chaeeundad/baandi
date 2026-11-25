@@ -1,5 +1,26 @@
 # Current architecture
 
+## Production SCF after Stage R
+
+[ADR 0047](decisions/0047-reference-driver-single-path.md) is the current contract.
+CLI, Python and MCP drive `refscf::api::{solve, stepper}`; `refstart` prepares the
+model, Gamma/complex-k/electronic maps perform SCF, and independent verification
+precedes verified delivery. `refscf::runtime` controls safe points; the CLI owns
+checkpoint-v2 serialization. Shared data live in `model/`; the feature-gated
+`oracle/` retains strict reference APIs and the sole G4D fallback.
+
+Production includes NC LDA/PBE, NLCC, eligible spin/FD, spatial symmetry,
+derivatives, relaxation and NSCF, with the limits in [CLI](cli.md). Threads and
+optional MPI are implemented. Numerical code still has no JSON or transport I/O.
+Use `ownership.toml` and current Cargo manifests for dependency edges.
+
+## Historical baseline architecture
+
+The remainder records the initial scalar implementation and its API/dependency
+snapshot. Its ScfProblem flow, Pulay mixing, serial-only and missing-feature
+statements are historical, not instructions for current production integration.
+The current module/ownership guide is [dft-engine/AGENTS.md](../crates/dft-engine/AGENTS.md).
+
 The workspace implements a CPU, full-complex Bloch-sampled (Gamma and Monkhorst-Pack
 k points, time-reversal reduction only), spin-unpolarized, insulating
 norm-conserving LDA-PZ SCF. [Physics conventions](physics-conventions.md)

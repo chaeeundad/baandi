@@ -1,6 +1,14 @@
 # Stage R plan: make the reference driver the only production SCF path
 
-Status: draft by a Claude planning agent (2026-11-25), adopted by the orchestrator as the plan for stage R. Decisions D1-D6 (section 6) are pending with the user. ADR 0046 is taken by G4E (XC small/negative density), so the single-path ADR is 0047.
+Status: **completed except G4D** — production routing and documentation outcome
+recorded in [ADR 0047](../decisions/0047-reference-driver-single-path.md), with
+[README corrections awaiting approval](readme-corrections.md). Decisions D1–D6
+were accepted on 2026-11-25 (section 7). Sections 0–6 retain the original plan
+and historical source locations, not current usage instructions. Integration
+qualification: this R12 checkout (`27d91ece`) includes R11b's ticket but not its
+implementation, and section 8's supplied evidence ends at gen21. Do not read this
+status as a verified R11b or gen22–gen28 completion claim; see ADR 0047's evidence
+availability table and open items. Optional R10d trimming was not adopted here.
 
 ## 0. What I found that changes the plan
 
@@ -474,3 +482,5 @@ The legacy engine and solver groups (about 100 switches) are classes (a) and (b)
 - gen15 bcc Fe: reference VERIFIED in 75.8 s; legacy and strict oracle did not finish in 45 min (no agreement claim).
 Evidence: dev08 /data/sig-dft/gen14, gen15, gen19 RESULT.md.
 - gen20/gen21: R10A changed the strict si8 Gamma oracle (explicit cutoff_ladder = "off" was ignored; dev08 bisect /data/sig-dft/bisect20); fixed at ab77ec10, RG-ORC five cases bit-identical to gen19 again (MPI8 and np1, forces/stress). R8c observe run bit-identical to plain. Moment FD defaults: bcc Fe bit-identical to gen15; O atom FD fixed moment (PBE+NLCC, vacuum) converged and VERIFIED after G4F (legacy/oracle stop at the growth limit). Evidence: /data/sig-dft/gen20, gen21 RESULT.md.
+
+R12 evidence index: [ADR 0047](../decisions/0047-reference-driver-single-path.md#evidence-gen14gen28) records gen14–gen28 coverage, unavailable RESULT contents, and the gen27 start-reason discrepancy supplied by the R12 ticket. No new numerical runs are implied.

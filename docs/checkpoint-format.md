@@ -1,13 +1,198 @@
-# Checkpoint format v1 (P11C)
+# Checkpoint and restart: v2 reference, v1 legacy/oracle
 
-The CLI owns serialization; `dft-engine::checkpoint` owns pure state types shared
-with ESLE. No serde, file access, checksum, or checkpoint allocation is added to
-SCF iteration code. This implements the three distinct capabilities in ADR 0016
-and ADR 0028, rather than inferring continuation from an exported density.
+The production reference driver uses **checkpoint v2**. The CLI owns serialization;
+`dft-engine::refscf::checkpoint` owns explicit in-memory state. No serde, file I/O
+or checkpoint allocation is added to ordinary SCF maps. v1 is retained for the
+strict oracle and historical artifacts; it cannot resume a reference trajectory.
+Routing and scope: [ADR 0047](decisions/0047-reference-driver-single-path.md).
+
+## Commands and outputs
+
+```sh
+# Capture a nonterminal safe point after iteration 3 (including recovery/mixing).
+dft-cli checkpoint input.toml boundary.cp --iteration 3 --kind exact
+# Resume and finish; result.cp is a ResultExport container, NOT a results directory.
+dft-cli restart input.toml boundary.cp result.cp
+# Export a fresh calculation's evaluated result without a resumable boundary.
+dft-cli checkpoint input.toml evaluated.cp --kind result
+# Inspect either version without executing SCF.
+dft-cli status boundary.cp
+dft-cli explain result.cp
+```
+
+Each write also creates `<output>.results.json` with routing metadata, not a full
+`run` result. The container's export summary has energy bits (Ha), convergence,
+iteration/verification counts and density/orbital hashes. Neither the companion
+nor `ResultExport` supplies normal density cubes, band arrays or a restartable
+state. `run --output-dir DIR` is the normal scientific-output command.
+
+Existing container and companion destinations are not overwritten. An exact
+capture must be nonterminal and safe; result export preserves a nonconverged
+outcome and restart then returns failure. v2 rejects `--kind warm` and `--warm`.
+Use the same input bytes, UPFs, executable, backend, platform, threads, MPI ranks
+and partition for exact restart; even an input comment change rejects.
+
+## Reference checkpoint v2 (R8b)
+
+`checkpoint` selects v2 when routing selects the reference driver. `restart`
+selects its decoder from the checked container version: v1 always uses the
+legacy session, while v2 requires the reference driver. There is no conversion
+of a v1 continuation into a reference trajectory. There is no legacy standard
+route; strict precedence and the G4D oracle exception are described in [ADR 0047](decisions/0047-reference-driver-single-path.md).
+
+```sh
+dft-cli checkpoint input.toml state.cp --iteration 3 --kind exact
+dft-cli restart input.toml state.cp result.cp
+dft-cli checkpoint input.toml uninterrupted.cp --kind result
+```
+
+The `BAANDICP` envelope described below, little-endian header/payload lengths, whole-file
+SHA-256, 512 MiB total limit, 32 MiB header limit, and atomic no-clobber publication
+apply. A **single container holds rank-indexed sections**. The header has
+`schema_version: 2`, `kind`, `identity`, `iteration`, `states`, and `result`.
+Each `states` entry is `{offset, count}`, both in **bytes**, relative to the
+binary payload. Its array index is the rank. Sections are contiguous, nonempty,
+and cover the entire payload. Unknown/duplicate header fields, unknown versions,
+overflows, gaps, overlaps, trailing bytes, and bad checksums reject. The v1
+reader remains separate and rejects v2.
+
+The identity contains SHA-256 hashes of the actual input bytes, ordered UPF
+bytes, and running executable, plus platform, thread count, and rank count.
+The engine additionally matches the effective run configuration, options,
+profile, cell/atoms, grid, local row layout, and immutable ionic data. Exact
+restart requires the same rank count and partition, not merely the same global
+density. Identity is supplied by a trusted host to the in-memory engine API;
+the CLI computes it itself. Even an input comment change changes input identity.
+A checksum detects corruption, not malicious rewriting or authenticity.
+
+### Safe-point exchange and payload
+
+`Stepper::checkpoint(identity, rank)` polls the suspended continuation solely
+to visit its explicit state. It executes **zero SCF maps**. Capture is legal
+after initialization (iteration 0) or a nonterminal report with `safe_point`
+true. Candidate boundaries awaiting verification, first-map retry boundaries,
+failed runs, and delivered terminal results reject. The CLI advances to the
+safe point of the requested iteration, including its verification/recovery if
+needed; it never publishes a terminal result as a resumable checkpoint.
+
+`Stepper::restore` initializes a fresh stepper, rebuilding immutable basis,
+FFT, operator, and solver workspaces, then installs the saved state before the
+next map. Completed maps are never replayed. The suspended future is not copied
+or serialized. Ordinary stepping creates no checkpoint arrays, serialization,
+file I/O, or additional heap allocations. Encoding/cloning/gathering happens
+only on an explicit checkpoint request. All ranks participate in lockstep;
+rank 0 alone publishes the gathered file, and publication failure is agreed
+before the command returns. Packing six bytes into an exactly representable
+f64 integer permits byte transport through the existing collective interface;
+there is no arithmetic reduction of payload values.
+
+The binary schema is the typed traversal in `refscf/checkpoint.rs`, with the
+field visits at the driver safe points and serialization helpers in
+`broyden.rs`, `kept_hx.rs`, `k_kept.rs`, `map.rs`, and `k_map.rs`:
+
+- Integers and boolean/option tags occupy unsigned little-endian 64-bit words;
+  booleans/tags accept only 0 or 1. f64 values retain their raw IEEE-754 bits.
+  Vectors have a u64 element count followed by their typed elements. Strings
+  have a u64 byte length and UTF-8 bytes. Fixed arrays omit a length. Matrices
+  carry rows and columns followed by column-major elements; complex values
+  store real then imaginary components. Durations store seconds and nanoseconds.
+- Both next-input density planes (electrons/Bohr^3) and reciprocal coefficients
+  (electrons/Bohr^3) are stored in their owned order. Neither is reconstructed
+  from the other by an FFT. Broyden stores previous input/residual, every
+  difference-history slot in slot order, iteration/retention counters, and its
+  incremental Gram cache. The cache is rebound to the rebuilt metric identity.
+- Gamma ORC orbitals and complex spin/k orbitals, kept X/HX, owned potentials,
+  potential epochs, and retained real-space pair slabs are saved exactly.
+  Cache identities are rebound to the rebuilt fixed operators. The next map
+  installs its complete potential before applying H; restoration establishes
+  the old epoch without recomputing HX or changing the cache-hit decision.
+- The ethr ratchet (Ry), previous dr2 (Ry), completed iteration, ordinary and
+  verification histories, predictor state, first stopping iteration and cached
+  fields are retained. Failed-verification reuse was removed in R11a; its reserved
+  pending-map slot must be empty, and a nonempty retired slot rejects. Historical
+  diagnostic NaN placeholders are preserved; live density, orbitals, mixer,
+  and cache arrays are shape/finite checked. No normalization or clipping is
+  performed during import. Start options/configuration and immutable model
+  checks retain the deterministic atomic-start contract.
+
+Wall-clock fields and allocator/cache high-water diagnostics are not part of
+the numerical identity guarantee. Stored historical timings retain their
+original process origin; new wall measurements start in the restored process.
+Numerical comparison is against an uninterrupted run with the **same rank
+count**, not between different rank counts.
+
+### Result inspection and scope
+
+A v2 `ResultExport` has no continuation sections. It contains evaluated energy
+bits (Ha), convergence, iteration and verification-attempt counts, and SHA-256
+hashes of delivered density and orbitals. This is an inspection summary, not a
+warm start or a replacement for normal scientific output files. Hash order is
+spin/channel, grid order for density, and spin/k/column-major real-imaginary
+order for orbitals, using little-endian binary64 bytes. A nonconverged export
+remains nonconverged, and `restart` returns a failure status after publishing it.
+
+Exact v2 supports fixed-cutoff Gamma, complex k, and electronic spin/FD
+steppers; prepared-symmetry report state is retained. Capture after a runtime
+policy mutation rejects because v2 does not persist its runtime audit. Gamma coarse-ladder or
+external seeded continuations, external electronic trace sinks, warm imports,
+and terminal exact captures currently reject explicitly. No cross-build,
+cross-backend, changed-thread, changed-rank, or changed-model promise is made.
+The existing v1 warm/result behavior remains available only through the
+legacy/oracle format and its compatibility checks.
+
+R8b evidence is recorded separately in
+`tests/reference/checkpoint/reference-v2-results.json`; the historical v1
+`results.json` is unchanged. Full identity matrices are intentionally ignored
+in the fast debug gate; reproduce them with:
+
+```sh
+cargo test --release -p dft-engine --test refscf_checkpoint -- --include-ignored --nocapture
+cargo test --release -p dft-cli --test checkpoint_v2 -- --include-ignored --nocapture
+```
+
+The rank 1/3/8 matrix uses the deterministic collective simulator. It establishes
+same-rank continuation identity, not a dev08 MPI performance measurement or a
+new Quantum ESPRESSO reference.
+
+## Byte layout
+
+All offsets are byte offsets. A file contains exactly:
+
+| Offset | Size | Content |
+| --- | --- | --- |
+| 0 | 8 | ASCII `BAANDICP` |
+| 8 | 8 | Unsigned little-endian JSON header length H |
+| 16 | 8 | Unsigned little-endian binary section length B |
+| 24 | H | UTF-8 JSON object, no trailing non-whitespace content |
+| 24 + H | B | Version-specific binary payload: v1 binary64 arrays; v2 rank-indexed typed sections |
+| 24 + H + B | 32 | Raw SHA-256 digest of all preceding bytes |
+
+Readers require file length `56 + H + B` with checked arithmetic. The initial
+adapter limits the complete file to 512 MiB and its header to 32 MiB. There are no
+external payload paths. Truncation, trailing bytes, wrong magic, unsupported
+schema, checksum errors, invalid live numerical arrays, array offset/length errors and unknown
+or duplicate JSON fields reject. No migrations are implemented.
+
+Publication writes a same-directory exclusive temporary file, fsyncs it, then
+creates an atomic **no-clobber hard link** at the destination and fsyncs the
+directory. Finally it removes the temporary name. A filesystem without hard-link
+support fails explicitly. A crash can leave a temporary file but cannot publish
+a partially written destination. A directory-sync error may leave a complete
+published file while returning an error; callers should inspect it before retry.
+A checksum detects corruption, not malicious alteration or source authenticity.
+
+## Legacy/oracle v1 reference
+
+The following is the historical v1 contract, not a production reference recipe.
+Use `BAANDI_REFERENCE_STRICT=on` for oracle checkpoint creation/restart; v1 decoding
+never converts state into v2. Old standard-profile artifacts may fail current
+option/identity checks; readability does not imply restart compatibility.
+The historical warm-start and runtime-audit capabilities below are not v2 features.
 
 ## Commands
 
 ```sh
+export BAANDI_REFERENCE_STRICT=on
 # Stop after three completed iterations (including mixing).
 dft-cli checkpoint input.toml boundary.cp --iteration 3 --kind exact
 # Rebuild the same immutable problem, restore, finish, and export the result.
@@ -26,33 +211,6 @@ an evaluated outcome and preserves its actual convergence flag. It cannot be
 used for restart. Restart writes an unconverged result on budget exhaustion, but
 returns a failure exit status. All numerical work uses the existing fixed-point
 certificate; deserialization never sets a live session to Converged.
-
-## Byte layout
-
-All offsets are byte offsets. A file contains exactly:
-
-| Offset | Size | Content |
-| --- | --- | --- |
-| 0 | 8 | ASCII `BAANDICP` |
-| 8 | 8 | Unsigned little-endian JSON header length H |
-| 16 | 8 | Unsigned little-endian binary section length B |
-| 24 | H | UTF-8 JSON object, no trailing non-whitespace content |
-| 24 + H | B | Contiguous little-endian IEEE-754 binary64 arrays |
-| 24 + H + B | 32 | Raw SHA-256 digest of all preceding bytes |
-
-Readers require file length `56 + H + B` with checked arithmetic. The initial
-adapter limits the complete file to 512 MiB and its header to 32 MiB. There are no
-external payload paths. Truncation, trailing bytes, wrong magic, unsupported
-schema, checksum errors, nonfinite floats, array offset/length errors and unknown
-or duplicate JSON fields reject. No migrations are implemented.
-
-Publication writes a same-directory exclusive temporary file, fsyncs it, then
-creates an atomic **no-clobber hard link** at the destination and fsyncs the
-directory. Finally it removes the temporary name. A filesystem without hard-link
-support fails explicitly. A crash can leave a temporary file but cannot publish
-a partially written destination. A directory-sync error may leave a complete
-published file while returning an error; callers should inspect it before retry.
-A checksum detects corruption, not malicious alteration or source authenticity.
 
 ## JSON and array conventions
 
@@ -208,126 +366,3 @@ starts, paused runtime policy/audit restoration, consumed autonomy, named
 compatibility failures, corrupted files and an independent byte-layout check.
 These are engine self-equivalence tests, not new QE results or performance
 measurements. Stored evidence is in `tests/reference/checkpoint/`.
-
-## Reference checkpoint v2 (R8b)
-
-`checkpoint` selects v2 when routing selects the reference driver. `restart`
-selects its decoder from the checked container version: v1 always uses the
-legacy session, while v2 requires the reference driver. There is no conversion
-of a v1 continuation into a reference trajectory. The L6 fallback predicate is
-removed; the other routing predicates and strict-oracle precedence remain.
-
-```sh
-dft-cli checkpoint input.toml state.cp --iteration 3 --kind exact
-dft-cli restart input.toml state.cp result.cp
-dft-cli checkpoint input.toml uninterrupted.cp --kind result
-```
-
-The same `BAANDICP` envelope, little-endian header/payload lengths, whole-file
-SHA-256, 512 MiB total limit, 32 MiB header limit, and atomic no-clobber publication
-apply. A **single container holds rank-indexed sections**. The header has
-`schema_version: 2`, `kind`, `identity`, `iteration`, `states`, and `result`.
-Each `states` entry is `{offset, count}`, both in **bytes**, relative to the
-binary payload. Its array index is the rank. Sections are contiguous, nonempty,
-and cover the entire payload. Unknown/duplicate header fields, unknown versions,
-overflows, gaps, overlaps, trailing bytes, and bad checksums reject. The v1
-reader remains separate and rejects v2.
-
-The identity contains SHA-256 hashes of the actual input bytes, ordered UPF
-bytes, and running executable, plus platform, thread count, and rank count.
-The engine additionally matches the effective run configuration, options,
-profile, cell/atoms, grid, local row layout, and immutable ionic data. Exact
-restart requires the same rank count and partition, not merely the same global
-density. Identity is supplied by a trusted host to the in-memory engine API;
-the CLI computes it itself. Even an input comment change changes input identity.
-A checksum detects corruption, not malicious rewriting or authenticity.
-
-### Safe-point exchange and payload
-
-`Stepper::checkpoint(identity, rank)` polls the suspended continuation solely
-to visit its explicit state. It executes **zero SCF maps**. Capture is legal
-after initialization (iteration 0) or a nonterminal report with `safe_point`
-true. Candidate boundaries awaiting verification, first-map retry boundaries,
-failed runs, and delivered terminal results reject. The CLI advances to the
-safe point of the requested iteration, including its verification/recovery if
-needed; it never publishes a terminal result as a resumable checkpoint.
-
-`Stepper::restore` initializes a fresh stepper, rebuilding immutable basis,
-FFT, operator, and solver workspaces, then installs the saved state before the
-next map. Completed maps are never replayed. The suspended future is not copied
-or serialized. Ordinary stepping creates no checkpoint arrays, serialization,
-file I/O, or additional heap allocations. Encoding/cloning/gathering happens
-only on an explicit checkpoint request. All ranks participate in lockstep;
-rank 0 alone publishes the gathered file, and publication failure is agreed
-before the command returns. Packing six bytes into an exactly representable
-f64 integer permits byte transport through the existing collective interface;
-there is no arithmetic reduction of payload values.
-
-The binary schema is the typed traversal in `refscf/checkpoint.rs`, with the
-field visits at the driver safe points and serialization helpers in
-`broyden.rs`, `kept_hx.rs`, `k_kept.rs`, `map.rs`, and `k_map.rs`:
-
-- Integers and boolean/option tags occupy unsigned little-endian 64-bit words;
-  booleans/tags accept only 0 or 1. f64 values retain their raw IEEE-754 bits.
-  Vectors have a u64 element count followed by their typed elements. Strings
-  have a u64 byte length and UTF-8 bytes. Fixed arrays omit a length. Matrices
-  carry rows and columns followed by column-major elements; complex values
-  store real then imaginary components. Durations store seconds and nanoseconds.
-- Both next-input density planes (electrons/Bohr^3) and reciprocal coefficients
-  (electrons/Bohr^3) are stored in their owned order. Neither is reconstructed
-  from the other by an FFT. Broyden stores previous input/residual, every
-  difference-history slot in slot order, iteration/retention counters, and its
-  incremental Gram cache. The cache is rebound to the rebuilt metric identity.
-- Gamma ORC orbitals and complex spin/k orbitals, kept X/HX, owned potentials,
-  potential epochs, and retained real-space pair slabs are saved exactly.
-  Cache identities are rebound to the rebuilt fixed operators. The next map
-  installs its complete potential before applying H; restoration establishes
-  the old epoch without recomputing HX or changing the cache-hit decision.
-- The ethr ratchet (Ry), previous dr2 (Ry), completed iteration, ordinary and
-  verification histories, predictor state, first stopping iteration, cached
-  fields, and any reused failed-verification map are retained. Historical
-  diagnostic NaN placeholders are preserved; live density, orbitals, mixer,
-  and cache arrays are shape/finite checked. No normalization or clipping is
-  performed during import. Start options/configuration and immutable model
-  checks retain the deterministic atomic-start contract.
-- A retained Gamma map omits the already-consumed solver-internal accounting
-  object. Its numerical eigenpairs/HX and the driver's extracted solve records
-  are preserved. Reusing a failed verification therefore still performs zero
-  new H columns; it does not rerun an eigensolve to manufacture bookkeeping.
-
-Wall-clock fields and allocator/cache high-water diagnostics are not part of
-the numerical identity guarantee. Stored historical timings retain their
-original process origin; new wall measurements start in the restored process.
-Numerical comparison is against an uninterrupted run with the **same rank
-count**, not between different rank counts.
-
-### Result inspection and scope
-
-A v2 `ResultExport` has no continuation sections. It contains evaluated energy
-bits (Ha), convergence, iteration and verification-attempt counts, and SHA-256
-hashes of delivered density and orbitals. This is an inspection summary, not a
-warm start or a replacement for normal scientific output files. Hash order is
-spin/channel, grid order for density, and spin/k/column-major real-imaginary
-order for orbitals, using little-endian binary64 bytes. A nonconverged export
-remains nonconverged, and `restart` returns a failure status after publishing it.
-
-Exact v2 supports fixed-cutoff Gamma, complex k, and electronic spin/FD
-steppers; prepared-symmetry report state is retained. Gamma coarse-ladder or
-external seeded continuations, external electronic trace sinks, warm imports,
-and terminal exact captures currently reject explicitly. No cross-build,
-cross-backend, changed-thread, changed-rank, or changed-model promise is made.
-The existing v1 warm/result behavior remains available on the legacy path.
-
-R8b evidence is recorded separately in
-`tests/reference/checkpoint/reference-v2-results.json`; the historical v1
-`results.json` is unchanged. Full identity matrices are intentionally ignored
-in the fast debug gate; reproduce them with:
-
-```sh
-cargo test --release -p dft-engine --test refscf_checkpoint -- --include-ignored --nocapture
-cargo test --release -p dft-cli --test checkpoint_v2 -- --include-ignored --nocapture
-```
-
-The rank 1/3/8 matrix uses the deterministic collective simulator. It establishes
-same-rank continuation identity, not a dev08 MPI performance measurement or a
-new Quantum ESPRESSO reference.

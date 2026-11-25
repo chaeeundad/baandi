@@ -1,9 +1,13 @@
 # Fixed-cell atomic relaxation
 
-`dft-cli relax input.toml --output-dir relaxed` uses complete, certified P20A
-forces to move atoms while retaining the input cell. This initial driver supports
+Current routing: [ADR 0047](../decisions/0047-reference-driver-single-path.md).
+Production ionic and variable-cell steps use the reference driver; strict is an
+explicit oracle. The optimizer and its restart are separate from checkpoint v2.
+
+`dft-cli relax input.toml --output-dir relaxed` uses complete P20A
+forces from verified reference states (or strict-certified oracle states) to move atoms while retaining the input cell. This initial driver supports
 unpolarized, fixed insulating occupations, Gamma or the existing k meshes,
-LDA/PBE, NC nonlocal projectors, optional NLCC/density floor and auto symmetry.
+LDA/PBE, NC nonlocal projectors, optional NLCC and auto symmetry.
 Collinear and finite-temperature drivers reject explicitly. For cell modes, see
 [variable-cell relaxation](cell-relaxation.md). The ordinary `run` path is unchanged.
 
@@ -45,7 +49,8 @@ from its verified state, and the stress cutoff scans are verified standard runs
 provisional), while the ions mode keeps 5e-9 Ha. Tighten `standard_threshold_ha` to resolve a
 small ionic energy threshold or tight force tolerance (for example 5e-11 Ha, or
 5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically.
-The spectral guard remains available. No tolerances are automatically loosened.
+Legacy `spectral_guard` and `xc.density_floor` input keys were removed in R10c.
+No tolerances are automatically loosened.
 
 ## Optimizers and symmetry
 
@@ -76,17 +81,20 @@ the group rejects before SCF; use symmetry off or an invariant set of constraint
 
 ## Density transfer, failure and restart
 
-Every accepted structure starts a new SCF. `warm_start=true` passes the previous
-evaluated density, with no orbitals, mixer, iteration history or certificate.
-The engine compares independently retained model descriptions, allowing only
-ordered atom positions to differ. Cell, ordered species, full parsed PP content,
-cutoff, XC, density floor, grid, sampling/weights, occupations and symmetry must
-match. Shape, C-contiguous array order, finiteness, XC negative-roundoff allowance and relative charge
-error <=1e-8 are checked before initialization. Density is not renormalized or
-silently projected. A change of detected symmetry may require a fresh retry.
-Frame provenance is `warm_transfer`, never exact SCF replay; `warm_start=false`
-uses fresh SCFs throughout. The additive engine entry point is
-`ScfSession::initialize_density_transfer(source_problem, initial_density)`.
+Every accepted structure starts a new reference SCF through `refscf::api`.
+Within a live calculation, `warm_start=true` retains an `IonicSeed` (density and
+compatible orbitals) from the preceding delivery, rebuilding potentials and
+clearing SCF history; it is not exact electronic replay. Model, basis, grid,
+charge and symmetry compatibility are checked. Cell transfer uses
+`IonicSeed::in_cell` with the frozen reference support. `warm_start=false` uses
+fresh atomic starts. StrictOracle retains its legacy density-transfer API.
+
+The optimizer restart currently does **not** persist the reference orbital seed.
+After process restart the reference route records
+`reference restart has no orbital seed; fresh atomic start`. Historical bytewise
+optimizer-resume evidence applies to its original legacy path; do not infer
+bit-identical reference continuation from it. Exact electronic continuation is
+separately provided by [checkpoint v2](../checkpoint-format.md), not `relax --resume`.
 
 Optional start extrapolation (C3, ions mode with `warm_start=true`):
 `start_extrapolation = "none"` (default, the transfer above), `"first_order"` or
@@ -97,8 +105,9 @@ order) or its least-squares extrapolation along the last three ionic steps
 (second order). Negative samples of the prediction are clipped and the charge
 restored (`start_clipped_fraction` per frame); without atomic charges the plain
 density is used (`start_fallback`). Provenance is `extrapolated_first_order` or
-`extrapolated_second_order`; certificates and forces are unchanged. The history
-is stored in restart.json, so a same-build resume is exact. Every frame records
+`extrapolated_second_order`; certificates and forces are unchanged. The predictor history
+is stored in restart.json; this does not persist the reference orbital seed or
+guarantee identical subsequent reference SCF trajectories. Every frame records
 `scf_h_vectors`. Evidence and dev08 request:
 `docs/performance/requests/c3-ionic-extrapolation.md`.
 
@@ -127,8 +136,9 @@ Use the same input bytes, UPFs, executable, architecture and OS. Resume rejects
 identity/shape/checksum changes and does not silently change optimization limits.
 It regenerates derived outputs from the last committed optimizer boundary,
 avoiding duplicate trajectory frames after interrupted output publication.
-Same-build ionic continuation is bit-identical in the tested case; each later
-SCF still uses warm transfer, not exact electronic continuation. Initial-SCF
+The historical legacy same-build ionic continuation test is bit-identical;
+reference resume has the missing-orbital-seed limitation above. Each later SCF
+is a new solve, not exact electronic continuation. Initial-SCF
 failure produces only `results.json`, since no resumable good boundary exists.
 A finished failed/unconverged run is not silently restarted with a new budget.
 

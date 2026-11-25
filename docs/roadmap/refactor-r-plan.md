@@ -463,3 +463,10 @@ The legacy engine and solver groups (about 100 switches) are classes (a) and (b)
 - D4: legacy-only input keys are removed outright after R10 (no migration messages: there are no existing users). They become ordinary unknown-key errors.
 - D5: approved as recommended (decide port or retire of RELAX_EXTRAPOLATION from the attempts ledger).
 - D6: approved as recommended (report README factual corrections first, edit after approval).
+
+## 8. Evidence log
+
+- gen14 (d81ef8af, R2 default flip): RG-ACC at the default, all 8 cases within 5e-9 Ha of the strict oracle and VERIFIED; si8 forces 8.2e-6 Ha/bohr, stress 1.1e-9; 3-step relax at 5e-13 within gates. RG-QE: 5 of 6 README cases unchanged (<= 4e-10 Ha/atom); PBE Gamma failed on a transient negative density (fixed by R1B screening default).
+- gen19 (22531ab1: R1B, R4b, R7b, R8a, R8b): R8a si128 MPI8 energy bits, density hash, maps, iterations and H columns identical to 5d787b70 (verify off and on), wall 1.021x / 1.005x single samples, inside the precise-campaign range; bands/dos default both stages reference with all writers; PBE Gamma README case VERIFIED, E - E_QE +1.6983e-6 Ha/atom (README +1.6982e-6); O atom triplet PBE+NLCC converged and VERIFIED in 9 iterations with screening (legacy/oracle did not converge in 200); Si variable-cell relax default vs legacy final lattice 6.3e-8 bohr, pressure 2.3e-9 Ha/bohr^3; si32 checkpoint at map 5 + restart bit-identical to the uninterrupted run. Note for R12 docs: `restart` writes an export container, not a results directory.
+- gen15 bcc Fe: reference VERIFIED in 75.8 s; legacy and strict oracle did not finish in 45 min (no agreement claim).
+Evidence: dev08 /data/sig-dft/gen14, gen15, gen19 RESULT.md.

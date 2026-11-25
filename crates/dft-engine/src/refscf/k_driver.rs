@@ -39,8 +39,38 @@ pub fn run_with<K: Collective>(
     points: &[KPoint],
     comm: &K,
 ) -> Result<Run, ScfError> {
+    run_inner(input, profile, points, comm, None)
+}
+/// Run the verified irreducible list and weights from legacy preparation.
+pub fn run_prepared(
+    input: StartInput<'_>,
+    profile: Profile,
+    prepared: &super::symmetry::Prepared,
+) -> Result<Run, ScfError> {
+    if let Some(comm) = crate::parallel::SharedComm::active() {
+        run_prepared_with(input, profile, prepared, &comm)
+    } else {
+        run_prepared_with(input, profile, prepared, &Serial)
+    }
+}
+pub fn run_prepared_with<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    prepared: &super::symmetry::Prepared,
+    comm: &K,
+) -> Result<Run, ScfError> {
+    run_inner(input, profile, prepared.points(), comm, Some(prepared))
+}
+fn run_inner<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    points: &[KPoint],
+    comm: &K,
+    prepared: Option<&super::symmetry::Prepared>,
+) -> Result<Run, ScfError> {
     kpoints::validate(points).map_err(numerical)?;
-    if points.len() == 1
+    if prepared.is_none()
+        && points.len() == 1
         && points[0].fractional == [0.; 3]
         && input.options.gamma_real == crate::GammaReal::On
     {
@@ -78,15 +108,22 @@ pub fn run_with<K: Collective>(
     let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
     let profile = profile.validate()?;
     let o = input.options;
-    if o.standard.is_none() || o.crystal_density_group || o.max_iterations == 0 {
+    if o.standard.is_none()
+        || (o.crystal_density_group && prepared.is_none())
+        || o.max_iterations == 0
+    {
         return Err(ScfError::InvalidInput(
-            "reference k SCF requires standard class, no symmetry (G6), and positive iteration budget",
+            "reference k SCF requires standard class, prepared symmetry when requested, and positive iteration budget",
         ));
     }
     let mut options = o.clone();
     options.standard = Some(StandardProfile {
         threshold_ha: profile.threshold_ry / 2.,
     });
+    if let Some(p) = prepared {
+        p.validate(&input, points)?;
+        options.grid_override = Some(p.grid(&input)?);
+    }
     let cell = input.cell;
     let mut state = refstart::start_kpoints(
         StartInput {
@@ -96,6 +133,15 @@ pub fn run_with<K: Collective>(
         points,
         comm,
     )?;
+    let mut symmetry = prepared
+        .map(|p| {
+            super::symmetry::Workspace::new(&input, p, state.grid.dims(), &state.fields, 1, comm)
+        })
+        .transpose()?;
+    if let Some(s) = &mut symmetry {
+        let initial = [state.density.clone()];
+        s.check_start(&mut state.fields, comm, &initial)?;
+    }
     let mut setup = std::mem::take(&mut state.setup);
     let prep_comm = refstart::TimedCollective::new(comm);
     let clock = Instant::now();
@@ -199,6 +245,10 @@ pub fn run_with<K: Collective>(
     let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
     let mut kept = super::k_kept::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
     for iteration in 1..=o.max_iterations {
+        if let Some(s) = &mut symmetry {
+            s.iteration = iteration;
+            s.verification = false;
+        }
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
         let reused_from = pending.as_ref().map(|(_, _, source)| *source);
@@ -245,6 +295,7 @@ pub fn run_with<K: Collective>(
                     &mut field_cache,
                     lean,
                     &mut kept,
+                    &mut symmetry,
                 )?;
                 map_s += clock.elapsed().as_secs_f64();
                 step
@@ -342,6 +393,9 @@ pub fn run_with<K: Collective>(
             }
             kept.preserve_input(true);
             let mut cold = super::k_kept::KeptHx::new(false);
+            if let Some(s) = &mut symmetry {
+                s.verification = true;
+            }
             let check = solve_map(
                 &mut state,
                 comm,
@@ -363,6 +417,7 @@ pub fn run_with<K: Collective>(
                 } else {
                     &mut cold
                 },
+                &mut symmetry,
             )?;
             kept.preserve_input(false);
             let current_calls = &verification_calls[first_call..];
@@ -758,7 +813,7 @@ pub fn run_with<K: Collective>(
             output.record("complex_orbital_gather", phase);
             output.collective_s = delivery_comm.seconds();
             let phase = Instant::now();
-            let identity = crate::force_identity::ModelDescription::new(
+            let mut identity = crate::force_identity::ModelDescription::new(
                 cell,
                 input.atoms,
                 input.potentials,
@@ -766,6 +821,9 @@ pub fn run_with<K: Collective>(
                 dims,
                 points.to_vec(),
             );
+            if let Some(p) = prepared {
+                identity.symmetry = p.operations(o.crystal_density_group).to_vec();
+            }
             let result = ScfResult {
                 atomic_start: AtomicStartReport {
                     atomic_orbitals: state.memory.atomic_columns,
@@ -773,7 +831,7 @@ pub fn run_with<K: Collective>(
                     ..Default::default()
                 },
                 compat_mode: options.compat_mode,
-                crystal_density_group: false,
+                crystal_density_group: o.crystal_density_group,
                 standard_stall_guard: false,
                 standard_density_forcing: false,
                 pw92_prefactor: options.pw92_prefactor,
@@ -826,6 +884,7 @@ pub fn run_with<K: Collective>(
             output.total_s = clock.elapsed().as_secs_f64();
             let qe_clock = Vec::new();
             return Ok(Run {
+                symmetry: symmetry.map(|s| s.report),
                 verification_k_call_indices,
                 memory_breakdown: memory_scope.report(comm)?,
                 kept_hx: kept.report(comm)?,
@@ -884,6 +943,7 @@ fn solve_map<K: Collective>(
     cache: &mut Option<(Vec<f64>, super::map::Fields)>,
     lean: bool,
     kept: &mut super::k_kept::KeptHx,
+    symmetry: &mut Option<super::symmetry::Workspace>,
 ) -> Result<map::Map, ScfError> {
     let step = map::evaluate(
         state,
@@ -898,6 +958,7 @@ fn solve_map<K: Collective>(
         cache,
         lean,
         kept,
+        symmetry,
     )?;
     for (index, k) in step.solve.per_k.iter().enumerate() {
         indices.extend(std::iter::repeat_n(index, k.calls.len()));

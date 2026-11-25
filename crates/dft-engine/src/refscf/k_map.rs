@@ -61,6 +61,7 @@ pub(super) fn evaluate<K: Collective>(
     cache: &mut Option<(Vec<f64>, Fields)>,
     lean: bool,
     kept: &mut super::k_kept::KeptHx,
+    symmetry: &mut Option<super::symmetry::Workspace>,
 ) -> Result<Map, ScfError> {
     let mut timings = PhaseTimings::default();
     let clock = Instant::now();
@@ -201,6 +202,11 @@ pub(super) fn evaluate<K: Collective>(
         });
         vectors.push(solve.eigenvectors);
         products.push(solve.hx.unwrap());
+    }
+    if let Some(s) = symmetry {
+        let clock = Instant::now();
+        s.apply(&mut state.fields, comm, std::slice::from_mut(&mut density))?;
+        timings.density += clock.elapsed();
     }
     let clock = Instant::now();
     let dv = cell.volume_bohr3() / points as f64;

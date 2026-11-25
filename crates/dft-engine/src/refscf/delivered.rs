@@ -2,14 +2,18 @@
 //! kernels consume replicated complex orbitals, materialized once on delivery.
 use crate::{ElectronicState, ForceState, ScfError, ScfOutcome, refstart::StartInput};
 
-fn validate_model(input: &StartInput<'_>, result: &crate::ScfResult) -> Result<(), ScfError> {
+fn validate_model(
+    input: &StartInput<'_>,
+    result: &crate::ScfResult,
+    operations: &[dft_geometry::symmetry::SymmetryOperation],
+) -> Result<(), ScfError> {
     use crate::force_identity::{ModelDescription, OccupationIdentity};
     let dims = result
         .density
         .shape()
         .try_into()
         .map_err(|_| ScfError::InvalidInput("reference delivery: density shape"))?;
-    let model = ModelDescription::new(
+    let mut model = ModelDescription::new(
         input.cell,
         input.atoms,
         input.potentials,
@@ -17,6 +21,7 @@ fn validate_model(input: &StartInput<'_>, result: &crate::ScfResult) -> Result<(
         dims,
         result.k_points.iter().map(|k| k.point).collect(),
     );
+    model.symmetry = operations.to_vec();
     let blocks = if result.gamma_real_used {
         1
     } else {
@@ -41,13 +46,38 @@ pub fn force_state<'a>(
     input: StartInput<'a>,
     outcome: &'a mut ScfOutcome,
 ) -> Result<ForceState<'a>, ScfError> {
+    force_state_with_operations(input, outcome, &[])
+}
+/// Same model identity and derivative projector as the legacy symmetry path.
+pub fn force_state_prepared<'a>(
+    input: StartInput<'a>,
+    outcome: &'a mut ScfOutcome,
+    prepared: &'a super::symmetry::Prepared,
+) -> Result<ForceState<'a>, ScfError> {
+    prepared.validate(
+        &input,
+        &outcome
+            .result
+            .k_points
+            .iter()
+            .map(|k| k.point)
+            .collect::<Vec<_>>(),
+    )?;
+    let operations = prepared.operations(input.options.crystal_density_group);
+    force_state_with_operations(input, outcome, operations)
+}
+fn force_state_with_operations<'a>(
+    input: StartInput<'a>,
+    outcome: &'a mut ScfOutcome,
+    operations: &'a [dft_geometry::symmetry::SymmetryOperation],
+) -> Result<ForceState<'a>, ScfError> {
     if !outcome.converged {
         return Err(ScfError::InvalidInput(
             "reference derivatives require a converged delivery",
         ));
     }
     let r = &mut outcome.result;
-    validate_model(&input, r)?;
+    validate_model(&input, r, operations)?;
     let verified = r.verification.as_ref().is_some_and(|v| v.passed());
     let opted_out =
         input.options.verification == crate::Verification::Off && r.verification.is_none();
@@ -66,12 +96,13 @@ pub fn force_state<'a>(
         options: input.options,
         electronic: ElectronicState::Fixed(r),
         density_floor: None,
-        symmetry: &[],
+        symmetry: operations,
     })
 }
 
 /// Stress shares the force model, occupations and verification contract.
 pub use force_state as stress_state;
+pub use force_state_prepared as stress_state_prepared;
 
 /// Export a real-Gamma ionic warm start in the existing owned ladder format.
 /// Replicated delivery arrays are read locally; no orbital collective is added.
@@ -86,7 +117,7 @@ pub fn gamma_seed<K: dft_mpi::Collective>(
     use dft_numerics::{Fft3d, RealMatrix};
     use dft_physics::data::{Array3, Complex64, FftPlan3d};
     use dft_solvers::distributed_fft::position_owners;
-    validate_model(&input, result)?;
+    validate_model(&input, result, &[])?;
     if !result.orbitals_delivered()
         || result.k_points.len() != 1
         || result.k_points[0].point.fractional != [0.; 3]

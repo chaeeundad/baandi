@@ -109,6 +109,7 @@ pub struct Iteration {
     pub calls: Vec<(usize, usize, SolveRecord)>,
 }
 pub struct Run {
+    pub symmetry: Option<super::symmetry::Report>,
     pub converged: bool,
     pub density: Vec<Array3<f64>>,
     pub blocks: Vec<Vec<BandBlock>>,
@@ -145,13 +146,59 @@ pub fn run_with<K: Collective>(
     policy: Policy,
     comm: &K,
 ) -> Result<Run, ScfError> {
+    run_inner(input, profile, points, policy, comm, None)
+}
+pub fn run_prepared(
+    input: StartInput<'_>,
+    profile: Profile,
+    prepared: &super::symmetry::Prepared,
+    policy: Policy,
+) -> Result<Run, ScfError> {
+    if let Some(comm) = crate::parallel::SharedComm::active() {
+        run_prepared_with(input, profile, prepared, policy, &comm)
+    } else {
+        run_prepared_with(input, profile, prepared, policy, &Serial)
+    }
+}
+pub fn run_prepared_with<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    prepared: &super::symmetry::Prepared,
+    policy: Policy,
+    comm: &K,
+) -> Result<Run, ScfError> {
+    run_inner(
+        input,
+        profile,
+        prepared.points(),
+        policy,
+        comm,
+        Some(prepared),
+    )
+}
+fn run_inner<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    points: &[KPoint],
+    policy: Policy,
+    comm: &K,
+    prepared: Option<&super::symmetry::Prepared>,
+) -> Result<Run, ScfError> {
+    if policy.channels() == 2 && prepared.is_some_and(|p| p.time_reversal) {
+        return Err(ScfError::InvalidInput(
+            "symmetry: collinear preparation must disable time reversal",
+        ));
+    }
     let clock = Instant::now();
     let profile = profile.validate()?;
     let opts = input.options;
     let config = RunConfig::current();
-    if opts.standard.is_none() || opts.max_iterations == 0 || opts.crystal_density_group {
+    if opts.standard.is_none()
+        || opts.max_iterations == 0
+        || (opts.crystal_density_group && prepared.is_none())
+    {
         return Err(ScfError::InvalidInput(
-            "reference spin/FD requires standard profile, positive budget, no crystal symmetry",
+            "reference spin/FD requires standard profile, positive budget, prepared symmetry when requested",
         ));
     }
     if config.on(Id::REFSCF_RMM)
@@ -236,6 +283,10 @@ pub fn run_with<K: Collective>(
         _ => 0.,
     };
     options.bands = Some(bands);
+    if let Some(p) = prepared {
+        p.validate(&input, points)?;
+        options.grid_override = Some(p.grid(&input)?);
+    }
     let mut states = (0..policy.channels())
         .map(|_| {
             refstart::start_electronic(
@@ -267,6 +318,21 @@ pub fn run_with<K: Collective>(
             }
         })
         .collect();
+    let mut symmetry = prepared
+        .map(|p| {
+            super::symmetry::Workspace::new(
+                &input,
+                p,
+                dims,
+                &states[0].fields,
+                policy.channels(),
+                comm,
+            )
+        })
+        .transpose()?;
+    if let Some(s) = &mut symmetry {
+        s.check_start(&mut states[0].fields, comm, &n)?;
+    }
     let mut plan = DensityPlan::with_fft(
         comm,
         input.cell,
@@ -290,6 +356,7 @@ pub fn run_with<K: Collective>(
         .collect();
     let mut x = transform(&mut plan, comm, &n, &policy, electrons, volume)?;
     let mut workspace = map::Workspace::new(&states[0], comm, input.cell, policy.channels() == 2)?;
+    workspace.symmetry = symmetry;
     let setup_s = clock.elapsed().as_secs_f64();
     let mut history = Vec::new();
     let mut verification =
@@ -300,6 +367,10 @@ pub fn run_with<K: Collective>(
     let guard = config.on(Id::STANDARD_RESIDUAL_GUARD);
     let diagnostic = config.on(Id::DAVIDSON_STAGES);
     for iteration in 1..=opts.max_iterations {
+        if let Some(s) = &mut workspace.symmetry {
+            s.iteration = iteration;
+            s.verification = false;
+        }
         if iteration > 1 {
             ethr = next_ethr_ry(
                 if iteration == 2 { 1e-2 } else { ethr },
@@ -358,6 +429,9 @@ pub fn run_with<K: Collective>(
                 cache.preserve_input(true);
             }
             let tolerance = next_ethr_ry(ethr, dr2, electrons);
+            if let Some(s) = &mut workspace.symmetry {
+                s.verification = true;
+            }
             let fresh = map::evaluate(
                 &mut workspace,
                 &mut states,
@@ -517,6 +591,7 @@ pub fn run_with<K: Collective>(
                 blocks.push(delivered);
             }
             return Ok(Run {
+                symmetry: workspace.symmetry.map(|s| s.report),
                 converged: passed,
                 density: densities,
                 blocks,

@@ -14,6 +14,7 @@ use dft_solvers::{ref_davidson, ref_davidson_complex};
 /// The local LDA adapter owns spectral scratch even though LDA needs no
 /// derivatives. Construct it once, never once per SCF map or verification.
 pub(super) struct Workspace {
+    pub symmetry: Option<super::symmetry::Workspace>,
     spin: Option<SpinFields>,
 }
 struct SpinFields {
@@ -51,7 +52,10 @@ impl Workspace {
                 "reference spin XC setup failed on a rank",
             ));
         }
-        Ok(Self { spin: local? })
+        Ok(Self {
+            spin: local?,
+            symmetry: None,
+        })
     }
 }
 
@@ -393,6 +397,9 @@ pub(super) fn evaluate<K: Collective>(
                 *a += b;
             }
         }
+    }
+    if let Some(s) = &mut workspace.symmetry {
+        s.apply(&mut states[0].fields, comm, &mut density)?;
     }
     let total: Vec<_> = (0..density[0].len())
         .map(|i| density.iter().map(|n| n[i]).sum::<f64>())

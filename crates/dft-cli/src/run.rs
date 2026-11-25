@@ -121,59 +121,60 @@ pub fn sha256(bytes: &[u8]) -> String {
 /// `BAANDI_REFERENCE_STRICT=on` (ADR 0043, single path complete since
 /// ONEPATH-4). The path fields are set explicitly from `Config::scf_path`.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
-    if reference_requested(config) && !reference_spin_fd_fallback(config) {
-        return reference_options(config);
+    options_for(config, crate::driver_select::preliminary(config))
+}
+pub fn options_for(
+    config: &Config,
+    selection: crate::driver_select::Selection,
+) -> Result<ScfOptions, RunError> {
+    let path = config
+        .scf_path_selected(selection)
+        .map_err(|e| error(1, e))?;
+    if selection.reference() {
+        reference_options(config)
+    } else {
+        let mut options = legacy_options(config, path)?;
+        // The pre-R1 G4B/G4D fallbacks already ran legacy with these mixer
+        // defaults. Preserve their arithmetic while removing raw switch reads.
+        // Newly supported legacy-only inputs use the legacy mixer unchanged.
+        if selection.reference_mixing()
+            && let Some(s) = &config.scf
+            && matches!(s.mixing.as_deref(), None | Some("pulay"))
+            && s.mixing_q0_inverse_bohr.is_none()
+        {
+            let profile = dft_engine::refscf::profile::Profile {
+                beta: s.mixing_beta.unwrap_or(0.7),
+                history: s.mixing_history.unwrap_or(8),
+                ..Default::default()
+            }
+            .validate()
+            .map_err(|e| error(1, e))?;
+            // legacy_options already applies the class-dependent beta rule,
+            // which also ran after the old reference mixing adapter.
+            if let dft_engine::Mixing::Pulay { beta, .. } = options.mixing {
+                options.mixing = dft_engine::Mixing::Pulay {
+                    beta,
+                    history: profile.history,
+                };
+            }
+        }
+        Ok(options)
     }
-    options_with_reference(
-        config,
-        dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT),
-    )
 }
 pub fn reference_requested(config: &Config) -> bool {
-    dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
-        || config
-            .scf
-            .as_ref()
-            .is_some_and(|s| s.driver.as_deref() == Some("reference"))
+    crate::driver_select::preliminary(config).reference()
 }
-
-const G4B_FALLBACK: &str = "reference driver: collinear Fermi-Dirac not yet qualified, G4B";
-
-const G4D_FALLBACK: &str =
-    "reference driver: free-moment collinear FD with PBE not yet qualified, G4D";
-
+#[cfg(test)]
+use crate::driver_select::{G4B_FALLBACK, G4D_FALLBACK};
+#[cfg(test)]
 fn reference_spin_fd_fallback(config: &Config) -> bool {
     reference_spin_fd_fallback_reason(config).is_some()
 }
-
+#[cfg(test)]
 fn reference_spin_fd_fallback_reason(config: &Config) -> Option<&'static str> {
-    use dft_numerics::switches::{Id, RunConfig};
-    if !reference_requested(config)
-        || !config.collinear()
-        || !matches!(config.finite_temperature(), Ok(Some(_)))
-    {
-        return None;
-    }
-    let rc = RunConfig::current();
-    // Qualification boundary takes precedence over every G4B switch.
-    if config.xc.functional.engine() == dft_engine::Functional::Pbe
-        && matches!(
-            config.finite_constraint(),
-            dft_physics::occupations::Constraint::Total
-        )
-    {
-        rc.note_path(Id::REFSCF_SPIN_FD_MOMENT, "legacy", Some(G4D_FALLBACK));
-        return Some(G4D_FALLBACK);
-    }
-    let enabled = rc.on(Id::REFSCF_SPIN_FD_MOMENT)
-        && rc.on(Id::REFSCF_SPIN_STIFFNESS)
-        && rc.on(Id::REFSCF_HISTORY_CONDITIONING);
-    rc.note_path(
-        Id::REFSCF_SPIN_FD_MOMENT,
-        if enabled { "reference" } else { "legacy" },
-        if enabled { None } else { Some(G4B_FALLBACK) },
-    );
-    (!enabled).then_some(G4B_FALLBACK)
+    crate::driver_select::preliminary(config)
+        .reason
+        .filter(|r| matches!(*r, G4B_FALLBACK | G4D_FALLBACK))
 }
 
 /// Independent profile resolution: no legacy session tuning or ladder reads.
@@ -336,6 +337,9 @@ pub fn options_with_reference(
     let path = config
         .scf_path_with(reference_strict)
         .map_err(|e| error(1, e.to_string()))?;
+    legacy_options(config, path)
+}
+fn legacy_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOptions, RunError> {
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
             dft_engine::CompatMode::Reference
@@ -620,7 +624,7 @@ pub(crate) fn execution_json(
             "verify":scf.and_then(|s| s.verify.as_deref()),
             "gamma_real":scf.and_then(|s| s.gamma_real.as_deref()).unwrap_or("auto"),
             "threads":scf.and_then(|s| s.threads),
-            "reference_strict":switches::on(Id::REFERENCE_STRICT),
+            "reference_strict":crate::driver_select::requested(config).strict(),
         },
         "effective_profile":if o.standard.is_some() { "standard" } else { "strict" },
         "path_status":path.status,
@@ -1505,7 +1509,20 @@ fn execute_mode_inner(
     // CLI binary; a thread scope for in-process callers with other values).
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     launch::elapsed("run_config", config_clock);
-    let reference = reference_requested(&config) && !reference_spin_fd_fallback(&config);
+    let routing_mode = if mode.agent {
+        crate::driver_select::Mode::Agent
+    } else if mode.observe {
+        crate::driver_select::Mode::Observe
+    } else {
+        crate::driver_select::Mode::Classic
+    };
+    let selection = crate::driver_select::select(
+        &config,
+        routing_mode,
+        crate::driver_select::Command::Run,
+        &[],
+    );
+    let reference = selection.reference();
     let input_digest =
         reference.then(|| phase(true, &mut setup_seconds, "input_hash", || sha256(&bytes)));
     // Phase 0 only: no storage or additional clock reads when profiling is off.
@@ -1565,8 +1582,7 @@ fn execute_mode_inner(
     if reference && (mode.observe || mode.agent) {
         return Err(error(1, "reference SCF supports Classic execution only"));
     }
-    let opts = options(&config)?;
-    let scf_path = config.scf_path().map_err(|e| error(1, e.to_string()))?;
+    let opts = options_for(&config, selection)?;
     let mut potentials = Vec::new();
     let mut species = Vec::new();
     let mut inputs = vec![fs::canonicalize(input)?];
@@ -1618,6 +1634,19 @@ fn execute_mode_inner(
         inputs.push(path);
         potentials.push((name.clone(), p));
     }
+    let upfs: Vec<_> = potentials.iter().map(|(_, p)| p).collect();
+    let selection = crate::driver_select::select(
+        &config,
+        routing_mode,
+        crate::driver_select::Command::Run,
+        &upfs,
+    );
+    selection.announce();
+    let scf_path = config
+        .scf_path_selected(selection)
+        .map_err(|e| error(1, e))?;
+    let reference = selection.reference();
+    let opts = options_for(&config, selection)?;
     launch::elapsed("upf_read_parse_hash", upf_clock);
     let xc_message = format!(
         "XC: {}; allow_functional_override={}; override_applied={}",
@@ -1719,13 +1748,13 @@ fn execute_mode_inner(
             v["parallel"] = json!({"model":model,"replicated_reason":replicated,
                 "ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"distributed_solves":0});
         }
+        v["scf"] = options_json(&opts);
+        selection.record(&mut v);
         v
     };
     if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
         let mut record = driver_record("Fermi-Dirac occupations");
-        if let Some(reason) = reference_spin_fd_fallback_reason(&config) {
-            record["scf"] = options_json(&opts);
-            record["scf"]["driver"] = json!("legacy");
+        if let Some(reason) = selection.reason.filter(|_| !selection.strict()) {
             record["reference_driver_fallback_reason"] = json!(reason);
             record["execution"]["reference_driver_fallback_reason"] = json!(reason);
         }
@@ -2018,6 +2047,7 @@ fn execute_mode_inner(
                     run_config.freeze_consulted();
                     note_switch_paths(run_config);
                     failure["scf"] = options_json(&opts);
+                    selection.record(&mut failure);
                     failure["run"] = run_block(
                         run_config,
                         if matches!(e, ScfError::Diverged { .. }) {
@@ -2164,7 +2194,7 @@ fn execute_mode_inner(
         "threading":{"threads":opts.threads.max(1),"threads_requested":opts.threads,"threads_used":opts.threads.max(1),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1),"backend":"persistent Rayon pool shared by k points and fixed inner pieces; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
-    result["scf"]["driver"] = json!(if reference { "reference" } else { "legacy" });
+    selection.record(&mut result);
     if let Some((stopped, reason)) = &reference_status {
         result["convergence"]["work"]["davidson_stages"] = phase(
             reference,
@@ -3208,7 +3238,13 @@ fn reference_electronic_run(
     if let Some(metadata) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = metadata;
     }
-    result["scf"]["driver"] = json!("reference");
+    crate::driver_select::select(
+        config,
+        crate::driver_select::Mode::Classic,
+        crate::driver_select::Command::Run,
+        &potentials.iter().map(|p| p.potential).collect::<Vec<_>>(),
+    )
+    .record(&mut result);
     result["execution"]["effective_solver"] = json!("reference_complex_davidson");
     let run_config = dft_numerics::switches::RunConfig::current();
     result["scf"]["switches"] = switches_json();
@@ -3414,7 +3450,14 @@ fn requested_forces(
     if !config.output.as_ref().is_some_and(|o| o.forces) {
         return Ok(None);
     }
-    let operations = if reference_requested(config) {
+    let operations = if crate::driver_select::select(
+        config,
+        crate::driver_select::Mode::Classic,
+        crate::driver_select::Command::Run,
+        &potentials.iter().map(|p| p.potential).collect::<Vec<_>>(),
+    )
+    .reference()
+    {
         config.density_operations().map_err(|e| error(1, e))?
     } else {
         config
@@ -3479,7 +3522,14 @@ fn requested_stress(
     if !config.output.as_ref().is_some_and(|o| o.stress) {
         return Ok(None);
     }
-    let operations = if reference_requested(config) {
+    let operations = if crate::driver_select::select(
+        config,
+        crate::driver_select::Mode::Classic,
+        crate::driver_select::Command::Run,
+        &potentials.iter().map(|p| p.potential).collect::<Vec<_>>(),
+    )
+    .reference()
+    {
         config.density_operations().map_err(|e| error(1, e))?
     } else {
         config
@@ -3501,7 +3551,14 @@ fn requested_stress(
         density_floor,
         symmetry: &operations,
     };
-    if reference_requested(config) {
+    if crate::driver_select::select(
+        config,
+        crate::driver_select::Mode::Classic,
+        crate::driver_select::Command::Run,
+        &potentials.iter().map(|p| p.potential).collect::<Vec<_>>(),
+    )
+    .reference()
+    {
         if let Some(prepared) = reference_symmetry(config)? {
             dft_engine::stress::stress_prepared(&state, &prepared)
         } else {

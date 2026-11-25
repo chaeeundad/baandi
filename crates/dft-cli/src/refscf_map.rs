@@ -46,8 +46,8 @@ pub struct Arguments {
     /// Explicit occupied Ritz-change threshold in Ry, applied to every step.
     #[arg(long)]
     pub ethr: Option<f64>,
-    #[arg(long, value_enum, default_value = "legacy")]
-    pub solver: Solver,
+    #[arg(long, value_enum)]
+    pub solver: Option<Solver>,
     #[arg(long, default_value_t = 4.0 * QE_FLOOR)]
     pub atol: f64,
     /// Restart atomic orbitals at every step instead of carrying BAANDI orbitals.
@@ -208,13 +208,14 @@ fn solve(
     warm: Option<&ComplexMatrix>,
     ethr: f64,
     first: bool,
-    solver: Solver,
+    selection: dft_cli::driver_select::Selection,
 ) -> Result<Map, RunError> {
-    match solver {
-        Solver::Legacy => {
+    match selection.driver {
+        dft_cli::driver_select::Driver::LegacyStandard
+        | dft_cli::driver_select::Driver::StrictOracle => {
             let starts = warm.map(std::slice::from_ref);
             let s = problem
-                .step_kpoints_with_certification(n, starts, ethr / 2., false)
+                .step_kpoints_with_certification(n, starts, ethr / 2., selection.strict())
                 .map_err(fail)?;
             Ok(Map {
                 density: s.density,
@@ -228,7 +229,7 @@ fn solve(
                 h_columns: s.solution.operator_applications,
             })
         }
-        Solver::Reference => {
+        dft_cli::driver_select::Driver::Reference => {
             let s = problem
                 .reference_fixed_map(n, warm, ethr / 2., first)
                 .map_err(fail)?;
@@ -272,14 +273,6 @@ pub fn execute(args: &Arguments) -> Result<(), RunError> {
     if profile.beta == 1. {
         return Err(fail("rho_in(1) recovery requires mixing_beta != 1"));
     }
-    let mut opts = run::options(&config)?;
-    // This explicit diagnostic always uses the Ritz-change map at the given
-    // threshold, irrespective of the ordinary SCF path or ladder selection.
-    opts.standard = Some(dft_engine::StandardProfile {
-        threshold_ha: profile.threshold_ry / 2.,
-    });
-    opts.gamma_real = dft_engine::GammaReal::On;
-    opts.start_wavefunctions = dft_engine::StartWavefunctions::Atomic;
     let prepared = config.prepare().map_err(fail)?;
     let base = args.input.parent().unwrap_or(Path::new("."));
     let mut pps = Vec::new();
@@ -302,6 +295,26 @@ pub fn execute(args: &Arguments) -> Result<(), RunError> {
         .iter()
         .map(|a| Atom::new(&a.species, a.fractional))
         .collect();
+    let selection = dft_cli::driver_select::select(
+        &config,
+        dft_cli::driver_select::Mode::Classic,
+        dft_cli::driver_select::Command::RefscfMap {
+            reference: args
+                .solver
+                .map(|solver| matches!(solver, Solver::Reference)),
+        },
+        &pps.iter().map(|(_, p)| p).collect::<Vec<_>>(),
+    );
+    selection.announce();
+    let mut opts = run::options_for(&config, selection)?;
+    // The map diagnostic supplies its own threshold; STRICT keeps residual certification.
+    if !selection.strict() {
+        opts.standard = Some(dft_engine::StandardProfile {
+            threshold_ha: profile.threshold_ry / 2.,
+        });
+    }
+    opts.gamma_real = dft_engine::GammaReal::On;
+    opts.start_wavefunctions = dft_engine::StartWavefunctions::Atomic;
     let mut problem = ScfProblem::new(&prepared.cell, &atoms, &refs, opts).map_err(fail)?;
     if let Some(floor) = config
         .xc
@@ -385,7 +398,7 @@ pub fn execute(args: &Arguments) -> Result<(), RunError> {
     if rank == 0 {
         println!(
             "{}",
-            json!({"schema":"refscf-map-1","solver":format!("{:?}",args.solver).to_lowercase(),
+            json!({"schema":"refscf-map-1","solver":if selection.reference() { "reference" } else { "legacy" },"scf":selection.json(),
         "input_sha256":run::sha256(text.as_bytes()),"pseudopotentials":provenance,"qe_directory":args.qe,
         "ranks":ranks,"grid":dims,"volume_bohr3":volume,"g_vectors":all.len(),"electrons":problem.electron_count(),
         "density_atol_e_bohr3":args.atol,"qe_rank_floor_max_e_bohr3":QE_FLOOR,
@@ -436,7 +449,7 @@ pub fn execute(args: &Arguments) -> Result<(), RunError> {
         let mut map = None;
         let (mut iterations, mut columns) = (0, 0);
         for t in thresholds.iter().copied() {
-            let result = solve(&mut problem, &n, warm.as_ref(), t, k == 1, args.solver)?;
+            let result = solve(&mut problem, &n, warm.as_ref(), t, k == 1, selection)?;
             iterations += result.iterations;
             columns += result.h_columns;
             warm = Some(result.orbitals.clone());

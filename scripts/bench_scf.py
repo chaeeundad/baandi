@@ -6,11 +6,18 @@ engine phase times, iterations and total energy, and compares them with a stored
 baseline: an optimization must keep the total energy within 1e-12 Ha and, where
 the change is meant to be numerically neutral, the density file bit-identical.
 The recorded scf.driver and effective profile must match; baselines without
-driver metadata are historical records and cannot establish identity.
+driver metadata are historical records and cannot establish identity. R0's
+legacy/strict label is recognized only when its recorded switches prove the
+strict oracle ran (REFERENCE_SCF off, REFERENCE_STRICT on).
 The pseudopotential is not in the repository: pass --upf (never commit it).
 
-  python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
-      --cases gamma,k222 --repeats 3 --baseline docs/performance/baseline.json
+Select the driver explicitly; choosing a baseline never changes run routing:
+  BAANDI_REFERENCE_SCF=on BAANDI_REFERENCE_STRICT=off python3 -I scripts/bench_scf.py \
+      --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
+      --cases gamma,k222s,k222 --baseline docs/performance/baseline-reference.json --require-identical
+  BAANDI_REFERENCE_SCF=off BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py \
+      --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
+      --cases gamma,k222s,k222 --baseline docs/performance/baseline-oracle.json --require-identical
   ... --record docs/performance/baseline.json     # write a new baseline (initial or after a decision)
 Exit codes: 0 all cases within tolerance, 5 energy outside tolerance or density not
 identical when --require-identical, 3 inconsistent inputs, 1 usage or I/O error.
@@ -44,9 +51,10 @@ functional = "lda-pz"
 max_iterations = 100
 mixing = "pulay"
 mixing_beta = 0.5
-energy_tolerance_ha = 1e-8
-density_residual_tolerance = 1e-7
 """
+# These legacy tolerances equal the engine defaults (1e-8 Ha, 1e-7 density
+# residual). Omit them: their explicit presence requests an R1 legacy fallback,
+# while R0 reference runs ignored them. --extra-toml can still request them.
 CASES = {
     "si8": ("8-atom conventional Gamma, 30 Ry", 30.0, "kpoints = [[0.0, 0.0, 0.0]]"),
     "gamma": ("Gamma only, 30 Ry", 30.0, "kpoints = [[0.0, 0.0, 0.0]]"),
@@ -63,12 +71,27 @@ def driver_metadata(report):
     scf = report.get("scf", {})
     driver = scf.get("driver")
     switches = scf.get("switches", {})
-    if not isinstance(driver, str) or not driver:
+    if driver not in ("reference", "legacy", "strict_oracle"):
         raise RuntimeError("results.json is missing scf.driver; cannot establish identity")
+    if scf.get("driver_source") not in ("default", "env", "input") or "driver_reason" not in scf:
+        raise RuntimeError("results.json is missing R1 driver source/reason metadata")
     if any(name not in switches for name in DRIVER_SWITCHES):
         raise RuntimeError("results.json is missing reference/strict switch metadata")
-    return {"driver": driver,
+    return {"driver": driver, "driver_reason": scf["driver_reason"],
+            "driver_source": scf["driver_source"],
             "reference_switches": {name: switches[name] for name in DRIVER_SWITCHES}}
+
+
+def baseline_driver(case):
+    """Normalize only an evidenced pre-R1 oracle label; never relabel a run."""
+    scf = case.get("scf", {})
+    driver = scf.get("driver")
+    switches = scf.get("reference_switches", {})
+    if (driver == "legacy" and case.get("effective_profile") == "strict"
+            and switches.get("BAANDI_REFERENCE_SCF", {}).get("value") == "off"
+            and switches.get("BAANDI_REFERENCE_STRICT", {}).get("value") == "on"):
+        return "strict_oracle"
+    return driver
 
 
 def sha256(path):
@@ -179,7 +202,10 @@ def main(argv):
     if not (os.path.isfile(a.binary) and os.path.isfile(a.upf)):
         print("I/O error: binary or UPF not found")
         return 1
-    base = json.load(open(a.baseline))["cases"] if a.baseline and os.path.isfile(a.baseline) else {}
+    base = {}
+    if a.baseline and os.path.isfile(a.baseline):
+        with open(a.baseline) as stream:
+            base = json.load(stream)["cases"]
     result, status = {}, 0
     print(f"{'case':8} {'wall med (s)':>13} {'engine (s)':>11} {'diag (s)':>9} {'iters':>5} {'dE vs base (Ha)':>16} {'density':>10} {'speedup':>8}")
     for k in keys:
@@ -189,14 +215,19 @@ def main(argv):
             print(e)
             return 3
         result[k] = r
+        print(f"{k}: driver={r['scf']['driver']} source={r['scf'].get('driver_source')} "
+              f"reason={r['scf'].get('driver_reason')!r}")
         if not a.skip_legacy_si8_anchor and k == "si8" and abs(r["total_energy_ha"] - (-31.3218036010316)) > 1e-9:
             status = 5
         b = base.get(k)
-        if b and b.get("scf", {}).get("driver") != r["scf"]["driver"]:
+        if b and baseline_driver(b) != r["scf"]["driver"]:
             print(f"{k}: run driver {r['scf']['driver']!r} differs from baseline driver "
                   f"{b.get('scf', {}).get('driver')!r}; missing driver metadata also rejects. "
                   "Select a baseline recorded for this driver.")
             return 3
+        if b and baseline_driver(b) != b.get("scf", {}).get("driver"):
+            print(f"{k}: historical baseline legacy/strict label recognized as strict_oracle "
+                  "from recorded REFERENCE_SCF=off and REFERENCE_STRICT=on; numbers unchanged")
         if b and b.get("effective_profile", "strict") != r["effective_profile"]:
             print(f"{k}: run used the {r['effective_profile']} SCF path but the baseline is "
                   f"{b.get('effective_profile', 'strict')}; set BAANDI_REFERENCE_STRICT=on to compare "

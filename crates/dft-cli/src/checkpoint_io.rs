@@ -1850,11 +1850,17 @@ pub enum Kind {
 }
 fn context(
     input: &Path,
-) -> Result<(dft_engine::ScfProblem, ModelIdentity, ExecutionIdentity), Error> {
-    use crate::{
-        config::Config,
-        run::{options, sha256},
-    };
+    command: crate::driver_select::Command,
+) -> Result<
+    (
+        dft_engine::ScfProblem,
+        ModelIdentity,
+        ExecutionIdentity,
+        crate::driver_select::Selection,
+    ),
+    Error,
+> {
+    use crate::{config::Config, run::sha256};
     use dft_engine::{OccupationPolicy, ScfProblem, SpeciesPotential};
     let config = Config::parse(&fs::read_to_string(input)?)?;
     config.validate()?;
@@ -1874,7 +1880,6 @@ fn context(
         ));
     }
     let cell = config.cell()?;
-    let opts = options(&config)?;
     let atoms: Vec<_> = config
         .system
         .atoms
@@ -1895,6 +1900,11 @@ fn context(
         .iter()
         .map(|(label, potential)| SpeciesPotential { label, potential })
         .collect();
+    let upfs: Vec<_> = potentials.iter().map(|(_, p)| p).collect();
+    let selection =
+        crate::driver_select::select(&config, crate::driver_select::Mode::Classic, command, &upfs);
+    selection.announce();
+    let opts = crate::run::options_for(&config, selection)?;
     let points = config.basis.resolve_kpoints()?;
     let problem = if config.basis.legacy_gamma() {
         ScfProblem::new(&cell, &atoms, &refs, opts.clone())?
@@ -1949,7 +1959,7 @@ fn context(
         ),
         threads: opts.threads,
     };
-    Ok((problem, model, execution))
+    Ok((problem, model, execution, selection))
 }
 /// SCF path of a written checkpoint (ADR 0043): profile, threshold and, on the
 /// verified standard path, the verification attempts it carries.
@@ -1984,8 +1994,26 @@ fn finish(session: &mut dft_engine::ScfSession) -> Result<(), Error> {
     }
     Ok(())
 }
+/// Routing metadata is a companion JSON, outside the immutable checkpoint v1
+/// wire format. Never overwrite an existing result or an input alias.
+fn selection_results(
+    output: &Path,
+    selection: crate::driver_select::Selection,
+) -> Result<(), Error> {
+    let mut name = output.as_os_str().to_os_string();
+    name.push(".results.json");
+    let mut result = serde_json::json!({"checkpoint":output});
+    selection.record(&mut result);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(std::path::PathBuf::from(name))?;
+    file.write_all(&serde_json::to_vec_pretty(&result)?)?;
+    Ok(())
+}
 pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Result<(), Error> {
-    let (mut problem, model, execution) = context(input)?;
+    let (mut problem, model, execution, selection) =
+        context(input, crate::driver_select::Command::Checkpoint)?;
     if !matches!(kind, Kind::Result) {
         // M2-OWNED: the checkpoint reads the density and mixer at an active
         // boundary; the owned modes (and the distributed mixer) decline.
@@ -2011,6 +2039,7 @@ pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Resu
     }
     let cp = session.checkpoint(kind, model, execution)?;
     write(output, &cp)?;
+    selection_results(output, selection)?;
     print_profile(&cp);
     println!(
         "Wrote {:?}, iteration {}: {}",
@@ -2027,7 +2056,8 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
             "runtime checkpoint requires an authenticated runtime host",
         ));
     }
-    let (problem, model, execution) = context(input)?;
+    let (problem, model, execution, selection) =
+        context(input, crate::driver_select::Command::Restart)?;
     let mut session = if warm {
         dft_engine::ScfSession::warm_start(
             problem,
@@ -2046,6 +2076,7 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
     finish(&mut session)?;
     let result = session.checkpoint(CheckpointKind::ResultExport, model, execution)?;
     write(output, &result)?;
+    selection_results(output, selection)?;
     print_profile(&result);
     let r = result.result.as_ref().unwrap();
     println!(

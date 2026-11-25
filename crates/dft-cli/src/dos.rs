@@ -9,8 +9,15 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
     let ctx = Context::load(
         input,
         output,
+        dft_cli::driver_select::Command::Dos,
         &[
-            "dos.csv", "dos.dat", "dos.agr", "dos.json", "DOSCAR", "dos.svg",
+            "dos.csv",
+            "dos.dat",
+            "dos.agr",
+            "dos.json",
+            "results.json",
+            "DOSCAR",
+            "dos.svg",
         ],
     )?;
     let default = dft_cli::config::Dos::default();
@@ -138,6 +145,7 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         ctx.write(name, &text)?;
     }
     ctx.json("dos.json", &meta)?;
+    ctx.json("results.json", &meta)?;
     let maxdos = rows.iter().map(|r| r[1]).fold(0.0, f64::max);
     let mut svg = String::from(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"900\" height=\"600\" viewBox=\"0 0 900 600\"><rect width=\"900\" height=\"600\" fill=\"white\"/><g font-family=\"sans-serif\" font-size=\"16\"><text x=\"80\" y=\"30\">Gaussian DOS (states/eV/cell; spin included)</text><text x=\"300\" y=\"580\">Energy relative to VBM (eV)</text></g><path d=\"M80 60 V520 H840\" fill=\"none\" stroke=\"black\"/>",

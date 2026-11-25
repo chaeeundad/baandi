@@ -1,7 +1,7 @@
 //! Portable spectral output; all numerical work remains in the engine.
 use dft_cli::{
     config::Config,
-    run::{RunError, options, sha256},
+    run::{RunError, sha256},
 };
 use dft_engine::{
     NscfResult, OccupationPolicy, ScfOptions, ScfProblem, ScfResult, SpeciesPotential,
@@ -34,12 +34,18 @@ pub(crate) struct Context {
     pub atoms: Vec<Atom>,
     pub potentials: Vec<(String, dft_upf::Pseudopotential)>,
     pub options: ScfOptions,
+    pub selection: dft_cli::driver_select::Selection,
     pub out: PathBuf,
     pub input_hash: String,
     pub pp_metadata: Value,
 }
 impl Context {
-    pub fn load(input: &Path, output: Option<&Path>, names: &[&str]) -> Result<Self, RunError> {
+    pub fn load(
+        input: &Path,
+        output: Option<&Path>,
+        command: dft_cli::driver_select::Command,
+        names: &[&str],
+    ) -> Result<Self, RunError> {
         let bytes = fs::read(input)?;
         let config = Config::parse(std::str::from_utf8(&bytes).map_err(|e| err(1, e))?)
             .map_err(|e| err(1, e))?;
@@ -60,7 +66,6 @@ impl Context {
             ));
         }
         let cell = config.cell().map_err(|e| err(1, e))?;
-        let options = options(&config)?;
         let atoms = config
             .system
             .atoms
@@ -79,6 +84,15 @@ impl Context {
             pp.push(json!({"species":label,"path":path,"sha256":sha256(&data),"functional":p.functional()}));
             potentials.push((label.clone(), p));
         }
+        let upfs: Vec<_> = potentials.iter().map(|(_, p)| p).collect();
+        let selection = dft_cli::driver_select::select(
+            &config,
+            dft_cli::driver_select::Mode::Classic,
+            command,
+            &upfs,
+        );
+        selection.announce();
+        let options = dft_cli::run::options_for(&config, selection)?;
         let out = output.map(Path::to_owned).unwrap_or_else(|| {
             PathBuf::from(
                 config
@@ -118,6 +132,7 @@ impl Context {
             atoms,
             potentials,
             options,
+            selection,
             out,
             input_hash: sha256(&bytes),
             pp_metadata: json!(pp),
@@ -213,8 +228,10 @@ impl Context {
     }
     pub fn metadata(&self, result: &NscfResult, edges: &Edges, scf: &ScfResult) -> Value {
         let density_bytes: Vec<_> = scf.density.iter().flat_map(|v| v.to_le_bytes()).collect();
-        json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.total_hartree(),"scf_iterations":scf.history.len(),"scf_path":scf_path_json(&self.options, scf),"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
-        "energy_reference":"maximum occupied eigenvalue over this computed sampling (VBM); not a Fermi level","hartree_to_ev":ev(1.0),"energy_reference_hartree":edges.vbm,"vbm":{"hartree":edges.vbm,"k_index":edges.vi,"fractional":result.points[edges.vi].fractional},"cbm":{"hartree":edges.cbm,"k_index":edges.ci,"fractional":result.points[edges.ci].fractional},"gap_ev":ev(edges.cbm-edges.vbm),"gap_hartree":edges.cbm-edges.vbm,"electrons":result.electrons,"nbands":result.solutions[0].solution.eigenvalues.len(),"cutoff_hartree":self.options.cutoff_hartree,"threads":self.options.threads,"converged":result.converged,"functional":self.options.functional.name(),"lattice_columns_bohr":self.cell.lattice_columns_bohr(),"kpoints":result.points.iter().map(|p| json!({"fractional":p.fractional,"weight":p.weight})).collect::<Vec<_>>(),"residuals_hartree":result.solutions.iter().map(|k| &k.solution.residuals).collect::<Vec<_>>()})
+        let mut metadata = json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.total_hartree(),"scf_iterations":scf.history.len(),"scf_path":scf_path_json(&self.options, scf),"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
+        "energy_reference":"maximum occupied eigenvalue over this computed sampling (VBM); not a Fermi level","hartree_to_ev":ev(1.0),"energy_reference_hartree":edges.vbm,"vbm":{"hartree":edges.vbm,"k_index":edges.vi,"fractional":result.points[edges.vi].fractional},"cbm":{"hartree":edges.cbm,"k_index":edges.ci,"fractional":result.points[edges.ci].fractional},"gap_ev":ev(edges.cbm-edges.vbm),"gap_hartree":edges.cbm-edges.vbm,"electrons":result.electrons,"nbands":result.solutions[0].solution.eigenvalues.len(),"cutoff_hartree":self.options.cutoff_hartree,"threads":self.options.threads,"converged":result.converged,"functional":self.options.functional.name(),"lattice_columns_bohr":self.cell.lattice_columns_bohr(),"kpoints":result.points.iter().map(|p| json!({"fractional":p.fractional,"weight":p.weight})).collect::<Vec<_>>(),"residuals_hartree":result.solutions.iter().map(|k| &k.solution.residuals).collect::<Vec<_>>()});
+        self.selection.record(&mut metadata);
+        metadata
     }
     pub fn write(&self, name: &str, text: &str) -> Result<(), RunError> {
         fs::write(self.out.join(name), text)?;
@@ -343,10 +360,12 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
     let ctx = Context::load(
         input,
         output,
+        dft_cli::driver_select::Command::Bands,
         &[
             "bands.csv",
             "bands_labels.csv",
             "bands.json",
+            "results.json",
             "bands.dat",
             "bands.dat.gnu",
             "bands.agr",
@@ -500,6 +519,7 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         ctx.write(name, &text)?;
     }
     ctx.json("bands.json", &meta)?;
+    ctx.json("results.json", &meta)?;
     let status = std::process::Command::new("python3")
         .args([
             "-I",

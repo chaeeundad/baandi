@@ -148,6 +148,9 @@ fn evidence(path: &Path) -> Result<Value, Error> {
         }
         let mut result = json!({"source":path,"state":if value["convergence"]["converged"]==true {"converged"} else {"not_converged"},
             "convergence":value["convergence"],"energies":value["energies"],"preflight":value["preflight"]});
+        if value["scf"]["driver"].is_string() {
+            result["scf"] = serde_json::json!({"driver":value["scf"]["driver"], "driver_reason":value["scf"]["driver_reason"], "driver_source":value["scf"]["driver_source"]});
+        }
         result["preconditioner"] = value["scf"]
             .get("preconditioner")
             .cloned()
@@ -171,14 +174,33 @@ pub fn explain(path: &Path) -> Result<(), Error> {
         && !crate::checkpoint_inspect::recognizes(path)?
     {
         let config = Config::parse(&std::fs::read_to_string(path)?)?;
+        let (_, _scope) = crate::run_config::for_run(&config)?;
         let preflight = crate::config::preflight::check(&config, path)?;
+        let upfs = config
+            .pseudopotentials
+            .values()
+            .map(|p| {
+                let text = std::fs::read_to_string(
+                    path.parent().unwrap_or(std::path::Path::new(".")).join(p),
+                )?;
+                Ok(dft_upf::parse_upf(&text)?)
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let selection = crate::driver_select::select(
+            &config,
+            crate::driver_select::Mode::Classic,
+            crate::driver_select::Command::Explain,
+            &upfs.iter().collect::<Vec<_>>(),
+        );
+        selection.announce();
+        println!("{}", serde_json::json!({"scf":selection.json()}));
         let prepared = config.prepare()?;
         print!("{}", grid_report(&config, &prepared));
         println!("XC: {}", config.xc.functional.engine().name());
         preflight.print();
         println!(
             "Resolved SCF controls (energies in Ha): {:#?}",
-            crate::run::options(&config)?
+            crate::run::options_for(&config, selection)?
         );
         println!(
             "Preflight validates supported input and resource estimates; it does not establish numerical convergence or physical accuracy."

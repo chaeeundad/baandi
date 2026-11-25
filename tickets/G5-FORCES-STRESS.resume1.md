@@ -1,0 +1,2 @@
+Continuation of ticket tickets/G5-FORCES-STRESS.md (read it first; the previous Codex run stopped mid-way on an account credit error, its conversation is not available).
+The worktree already holds a partial implementation (git status / git diff in this worktree). Review it critically: keep what is correct, fix or replace what is not, then finish every item of the ticket, run all TEST_COMMANDS, and report per docs/schemas/report.schema.json in English. Same OWNED_FILES, same acceptance criteria. Leave changes uncommitted.

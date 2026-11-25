@@ -27,7 +27,6 @@ mod common;
 mod cutoff_ladder;
 mod density_transfer;
 mod diagnostics;
-mod direct_min;
 mod electrostatic;
 mod force_identity;
 mod forces;

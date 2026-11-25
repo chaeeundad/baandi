@@ -118,24 +118,7 @@ pub(crate) fn assemble_lazy_block(
     Ok(full)
 }
 
-/// Read-only storage view for the cutoff-ladder adapter. No potential or
-/// solver state is exposed or modified by the transfer.
-pub(crate) struct HandoffView<'a> {
-    pub x: &'a RealMatrix,
-    pub rows: &'a [usize],
-    pub half: &'a dft_basis::HalfSphere,
-    pub comm: &'a crate::parallel::SharedComm,
-}
-
 impl LazyOrbitals {
-    pub(crate) fn handoff_view(&self) -> HandoffView<'_> {
-        HandoffView {
-            x: &self.0.x,
-            rows: &self.0.rows,
-            half: &self.0.half,
-            comm: &self.0.comm,
-        }
-    }
     /// The caller has agreed shape/partition validity on every rank. Rows
     /// contain raw ORC coordinates; the existing warm-start round trip remains
     /// responsible for the exact complex-unpack/pack arithmetic.
@@ -155,10 +138,6 @@ impl LazyOrbitals {
             full: std::sync::OnceLock::new(),
             handoff_zero_pairs: Some(zero_pairs.into()),
         }))
-    }
-
-    pub(crate) fn handoff_materialized(&self) -> bool {
-        self.0.full.get().is_some()
     }
 
     pub fn bands(&self) -> usize {
@@ -231,7 +210,6 @@ impl LazyOrbitals {
             }
         }
         let _ = inner.full.set(full);
-        crate::cutoff_ladder::handoff_materialized(n, bands, size);
         crate::m2::count(crate::m2::Count::LazyMaterializations);
         crate::m2::add(crate::m2::Stage::LazyMaterialize, start);
         Ok(inner.full.get().expect("set above"))

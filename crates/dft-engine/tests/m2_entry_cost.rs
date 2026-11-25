@@ -16,7 +16,7 @@
 //! M2_PROFILE_MODE=production runs the production default (`ScfOptions::default()`:
 //! standard 5e-9 Ha, fixed-point verification, Pulay 0.5) with the CLI capacity rule
 //! (3 per band at four or more ranks unless `BAANDI_M2_CAPACITY=off` or
-//! M2_PROFILE_CAPACITY is set); combine with M2_PROFILE_LADDER=on for the CLI default;
+//! M2_PROFILE_CAPACITY is set).
 //! M2_PROFILE_VERIFY=off drops the verification (to size its cost only).
 //! Every distributed run also prints one machine-readable line `M2SCREEN_JSON {...}`
 //! (per-rank counters and stages) read by `scripts/fast_screen_mpi.py`.
@@ -24,9 +24,7 @@
 //! The reduced-eigenproblem distribution (orders, sum of m^3, single-column
 //! appends, bordered and broadcast solves) is printed per rank
 //! (docs/performance/mpi-reduced-eigen-analysis.md).
-//! M2_PROFILE_LADDER=on runs the C1 cutoff ladder (coarse stage report, certificate,
-//! screen and atomic-start clocks; docs/performance/mpi-coarse-certificate-analysis.md);
-//! the energy bits and a density FNV-1a hash are printed for A/B identity checks.
+//! Energy bits and a density FNV-1a hash are printed for A/B identity checks.
 #[allow(dead_code)]
 mod common;
 use dft_engine::{GammaReal, ScfOptions, ScfProblem, ScfResult, SpeciesPotential, parallel};
@@ -155,36 +153,7 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
     // BREAKTHROUGH-0-INSTRUMENT: construction is the `init` bucket of the
     // phase profile (BAANDI_PHASE_PROFILE=on; otherwise a no-op).
     dft_engine::profile::add_init(t_construct.elapsed().as_secs_f64());
-    let result = if std::env::var("M2_PROFILE_LADDER").as_deref() == Ok("on") {
-        let out = dft_engine::cutoff_ladder::run_ladder(
-            problem,
-            &potentials,
-            &dft_engine::cutoff_ladder::CutoffLadderOptions::default(),
-            false,
-        )
-        .unwrap();
-        let r = &out.report;
-        println!(
-            "  ladder: used {} coarse grid {:?} pw {} iterations {} Davidson {} setup {:.3} s session {:.3} s prolong {:.3} s, coarse phases potential {:.3} diag {:.3} density {:.3} energy {:.3} mixing {:.3}, atomic start {:.3} s",
-            r.used,
-            r.coarse_grid,
-            r.coarse_plane_waves,
-            r.coarse_iterations,
-            r.coarse_davidson_iterations,
-            r.coarse_setup.as_secs_f64(),
-            r.coarse_session.as_secs_f64(),
-            r.coarse_prolong.as_secs_f64(),
-            r.coarse_phases.potential.as_secs_f64(),
-            r.coarse_phases.diagonalization.as_secs_f64(),
-            r.coarse_phases.density.as_secs_f64(),
-            r.coarse_phases.energy.as_secs_f64(),
-            r.coarse_phases.mixing.as_secs_f64(),
-            r.coarse_clock.atomic_start.as_secs_f64()
-        );
-        out.outcome.result
-    } else {
-        problem.run().unwrap()
-    };
+    let result = problem.run().unwrap();
     dft_engine::profile::finish_rank(parallel::SharedComm::active().map_or(0, |c| c.rank()));
     parallel::set_communicator(None);
     parallel::set_m2_override(None);
@@ -224,13 +193,6 @@ fn profile_block(wall: f64) -> String {
         report.covered_wall(),
         buckets.join(",")
     )
-}
-
-fn print_first_block() {
-    let records = dft_engine::first_block::take_records();
-    if !records.is_empty() {
-        print!("{}", dft_engine::first_block::table(&records));
-    }
 }
 
 fn work(r: &ScfResult) -> (usize, usize, usize) {
@@ -299,7 +261,6 @@ fn m2_entry_cost_profile() {
         wt.apply, wt.local, wt.nonlocal_projection, wt.nonlocal_back, wt.apply_columns
     );
     let _ = profile_block(serial_wall);
-    print_first_block();
     for &p in &ranks {
         distributed_rows(&case, p, Some(&serial));
     }
@@ -586,7 +547,6 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
         // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (per rank, max
         // over ranks) and the first-block residual table (both default off).
         j.push_str(&profile_block(wall));
-        print_first_block();
         j.push('}');
         println!("M2SCREEN_JSON {j}");
     }

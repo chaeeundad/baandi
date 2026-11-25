@@ -1147,13 +1147,6 @@ fn profile_report(profiles: Vec<dft_engine::profile::RankProfile>) -> Option<Val
     Some(dft_cli::run::profile_json(&report, f64::NAN))
 }
 
-fn print_first_block() {
-    let records = dft_engine::first_block::take_records();
-    if !records.is_empty() {
-        print!("{}", dft_engine::first_block::table(&records));
-    }
-}
-
 fn main() {
     let args = parse_args();
     let universe = dft_mpi::Universe::init().expect("MPI init");
@@ -1196,7 +1189,6 @@ fn main() {
         let diag = maxima(&refs, |r| r.diag_s);
         let map = maxima(&refs, |r| r.map_s);
         let profile = profile_report(dft_engine::profile::take_registry());
-        print_first_block();
         report(&args, &outs[0], p, "simulated", &diag, &map, profile);
         return;
     }
@@ -1238,7 +1230,6 @@ fn main() {
     parallel::set_communicator(None);
     if world.rank() == 0 {
         let profile = profile_report(profiles);
-        print_first_block();
         report(
             &args,
             &out,

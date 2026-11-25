@@ -696,40 +696,12 @@ pub struct Scf {
     pub extra_bands: Option<usize>,
     pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
-    /// C1 cutoff ladder: "on" (default since the adoption rule, 2026-11-10; dev08 C1: -28 to -36 percent at realistic displacements, -4 percent at the 1e-7 Bohr protocol, correctness clean) or "off"; `BAANDI_CUTOFF_LADDER` overrides. Ineligible runs fall back automatically.
+    /// Retained off-only input pin until legacy key retirement (R10c).
     pub cutoff_ladder: Option<String>,
-    /// Coarse cutoff as a fraction of ecutwfc, in (0, 1); default 0.5.
+    /// Retired legacy input; a supplied value is rejected.
     pub cutoff_ladder_fraction: Option<f64>,
 }
 impl Scf {
-    /// Coarse-cutoff fraction when the ladder is on. The environment variable
-    /// `BAANDI_CUTOFF_LADDER` (off, on or a fraction) overrides the file for A/B runs.
-    pub fn cutoff_ladder(scf: Option<&Self>) -> Result<Option<f64>, ConfigError> {
-        let fraction = scf.and_then(|s| s.cutoff_ladder_fraction).unwrap_or(0.5);
-        let file = match scf.and_then(|s| s.cutoff_ladder.as_deref()).unwrap_or("on") {
-            "off" => None,
-            "on" => Some(fraction),
-            _ => {
-                return Err(ConfigError::Invalid(
-                    "scf.cutoff_ladder must be off or on".into(),
-                ));
-            }
-        };
-        let chosen = match dft_numerics::switches::text(dft_numerics::switches::Id::CUTOFF_LADDER) {
-            Some("off") => None,
-            Some("on") => Some(fraction),
-            Some(v) => Some(v.parse::<f64>().map_err(|_| {
-                ConfigError::Invalid("BAANDI_CUTOFF_LADDER must be off, on or a fraction".into())
-            })?),
-            None => file,
-        };
-        if chosen.is_some_and(|f| !(f.is_finite() && f > 0.0 && f < 1.0)) {
-            return Err(ConfigError::Invalid(
-                "scf.cutoff_ladder_fraction must be in (0, 1)".into(),
-            ));
-        }
-        Ok(chosen)
-    }
     pub fn preconditioner(&self) -> Result<dft_engine::DavidsonPreconditioner, ConfigError> {
         match self.preconditioner.as_deref().unwrap_or("default") {
             "default" => Ok(dft_engine::DavidsonPreconditioner::Default),
@@ -1343,6 +1315,11 @@ impl Config {
             }
         }
         if let Some(s) = &self.scf {
+            if s.cutoff_ladder.as_deref().is_some_and(|v| v != "off")
+                || s.cutoff_ladder_fraction.is_some()
+            {
+                return Err(invalid("legacy cutoff_ladder is unavailable"));
+            }
             s.spectral_guard()?;
             s.locking()?;
             s.gamma_real()?;

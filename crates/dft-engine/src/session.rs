@@ -70,21 +70,28 @@ pub struct ScfSession {
     state_version: u64,
     events: Option<EventQueue>,
     certificate_attempted: bool,
-    spectral_report: Option<crate::SpectralReport>,
-    /// Standard profile only: eigen tolerance of the first step instead of the
-    /// cap (cutoff-ladder hand-off; set before the first step, crate-private).
-    standard_seed: Option<f64>,
-    /// Strict residual schedule only: eigen tolerance of the first step instead
-    /// of the schedule's 1e-2 start (cutoff-ladder hand-off, D1
-    /// `BAANDI_LADDER_FIRST_TOL`; set before the first step, crate-private).
-    strict_seed: Option<f64>,
     /// ADR 0043: attempts of the post-convergence verification.
     verification: VerificationReport,
-    /// BREAKTHROUGH-3 (`BAANDI_SCF_ADVANCE=on`): correction blocks of the next
-    /// advanced map (adapted from the previous advanced map's inner/SCF ratio).
-    advance_blocks: usize,
 }
+type WarmState<'a> = (&'a Array3<f64>, Option<Vec<ComplexMatrix>>);
+
 impl ScfSession {
+    pub(crate) fn warm_state(&mut self) -> Result<Option<WarmState<'_>>, ScfError> {
+        self.materialize_density()?;
+        let Some(c) = self.continuation.as_ref() else {
+            return Ok(None);
+        };
+        Ok(Some((&c.n, full_previous(c)?)))
+    }
+    pub(crate) fn initialize_oracle_ladder(
+        &mut self,
+        state: &crate::checkpoint::ElectronicState,
+    ) -> Result<(), ScfError> {
+        self.initialize()?;
+        self.import_electronic(state)
+            .map_err(|e| ScfError::Numerical(format!("oracle ladder hand-off state rejected: {e}")))
+    }
+
     pub(crate) fn prepare_boundary_policy(
         &self,
         changes: &[PolicyChange],
@@ -193,10 +200,12 @@ impl ScfSession {
     ) -> Result<Self, ScfError> {
         config.validate()?;
         let events = (config.mode != ExecutionMode::Classic).then(|| EventQueue::new(&config));
-        let spectral_report = (problem.options.spectral_guard == crate::SpectralGuard::Final)
-            .then(crate::SpectralReport::default);
+        if problem.options.spectral_guard != crate::SpectralGuard::Off {
+            return Err(ScfError::InvalidInput(
+                "scalar spectral SCF experiment was removed",
+            ));
+        }
         Ok(Self {
-            spectral_report,
             problem,
             completion,
             config,
@@ -207,57 +216,14 @@ impl ScfSession {
             state_version: 0,
             events,
             certificate_attempted: false,
-            standard_seed: None,
-            strict_seed: None,
             verification: VerificationReport::default(),
-            advance_blocks: crate::advance::starting_blocks(),
         })
     }
 
-    /// BREAKTHROUGH-3: whether the coming ordinary map may run as a bounded
-    /// subspace update (design `docs/design/bounded-subspace-scf.md`, section
-    /// 5): switch on, standard path, a history exists (iteration 1 and its
-    /// redo initialize the subspace exactly), the previous map's SCF residual
-    /// is at or above the threshold (otherwise the stop rule is in reach and
-    /// the map must be exact), one k point, closed-shell fixed occupations
-    /// (equal occupation of every occupied band, so P = X X^T is the density
-    /// matrix) and no runtime solver override.
-    fn advance_eligible(problem: &ScfProblem, history: &[IterationRecord]) -> bool {
-        let Some(profile) = problem.options.standard else {
-            return false;
-        };
-        if !crate::advance::enabled() || problem.states.len() != 1 {
-            return false;
-        }
-        if crate::advance::fine_only() && !dft_numerics::work_timers::in_fine_stage() {
-            return false;
-        }
-        let Some(last) = history.last() else {
-            return false;
-        };
-        if last
-            .standard_error_ha
-            .is_none_or(|e| e < profile.threshold_ha)
-        {
-            return false;
-        }
-        let occupied: Vec<f64> = problem
-            .occupations
-            .iter()
-            .copied()
-            .filter(|&f| f > 0.0)
-            .collect();
-        !occupied.is_empty()
-            && occupied.iter().all(|&f| f == occupied[0])
-            && matches!(
-                problem.options.eigensolver,
-                dft_solvers::SolverChoice::Davidson
-            )
-    }
     pub fn initialize(&mut self) -> Result<(), ScfError> {
-        self.initialize_mode(false)
+        self.initialize_mode()
     }
-    fn initialize_mode(&mut self, handoff: bool) -> Result<(), ScfError> {
+    fn initialize_mode(&mut self) -> Result<(), ScfError> {
         // RUN-CONFIG: legacy switch reads below see the problem's configuration.
         let _run = self.problem.run.enter();
         if self.continuation.is_some() || self.status != StepStatus::Created {
@@ -265,7 +231,7 @@ impl ScfSession {
                 "session already initialized or failed",
             ));
         }
-        match self.initialize_inner(handoff) {
+        match self.initialize_inner() {
             Ok(()) => {
                 self.state_version += 1;
                 self.status = StepStatus::Ready;
@@ -464,7 +430,7 @@ impl ScfSession {
         };
         Ok(mixer)
     }
-    fn initialize_inner(&mut self, handoff: bool) -> Result<(), ScfError> {
+    fn initialize_inner(&mut self) -> Result<(), ScfError> {
         let start = Instant::now();
         // M2-OWNED: an agent-controlled run may replace the mixer or read the
         // density at an active boundary; the owned modes decline for it.
@@ -475,31 +441,17 @@ impl ScfSession {
         let mut mixer = self.make_mixer(&self.problem.options.mixing)?;
         // Validate mixer parameters even if a future system converges immediately.
         let n = self.problem.starting_density();
-        if handoff {
-            // The initial trial is discarded. Validate the same density and
-            // Pulay parameters locally instead of communicating three times.
-            // Eligibility is restricted to plain Pulay for this constructor.
-            let Mixing::Pulay { beta, history } = self.problem.options.mixing else {
-                return Err(ScfError::InvalidInput("owned handoff requires Pulay"));
-            };
-            PulayMixer::new(beta, history)?.mix(
-                n.as_slice().unwrap(),
-                n.as_slice().unwrap(),
-                self.problem.electrons / self.problem.cell.volume_bohr3(),
-            )?;
-        } else {
-            mixer.mix(
-                n.as_slice().unwrap(),
-                n.as_slice().unwrap(),
-                self.problem.electrons / self.problem.cell.volume_bohr3(),
-            )?;
-        }
+        mixer.mix(
+            n.as_slice().unwrap(),
+            n.as_slice().unwrap(),
+            self.problem.electrons / self.problem.cell.volume_bohr3(),
+        )?;
         mixer.reset();
         let weight = self.problem.cell.volume_bohr3() / n.len() as f64;
         // M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`, default off): the density stays
         // on the slab planes through the audit, the mixer and the next
         // potential; static replicated eligibility (no spectral audit here).
-        let owned = if self.spectral_report.is_none() && self.problem.owned_density_eligible() {
+        let owned = if self.problem.owned_density_eligible() {
             let Mixing::Pulay { beta, history } = self.problem.options.mixing else {
                 unreachable!("eligibility requires plain Pulay");
             };
@@ -578,7 +530,7 @@ impl ScfSession {
         }
         let standard = self.problem.options.standard;
         let mut tolerance = if standard.is_some() {
-            let first = self.standard_seed.unwrap_or(StandardProfile::CAP_HA);
+            let first = StandardProfile::CAP_HA;
             let ordinary = history.last().map_or(first, |r| {
                 StandardProfile::ratchet(
                     r.requested_eigen_tolerance,
@@ -598,7 +550,7 @@ impl ScfSession {
                 &self.problem.options,
                 self.problem.sw.eigen_factor,
                 history.last().map(|r| r.density_residual),
-                self.strict_seed.unwrap_or(1e-2),
+                1e-2,
             )
         } else {
             (self.problem.options.initial_eigen_tolerance
@@ -616,7 +568,7 @@ impl ScfSession {
         let identity = identity || self.problem.force_energy_identity;
         self.problem.energy_identity = identity;
         // BREAKTHROUGH-0-INSTRUMENT: context of the map (snapshot labels,
-        // first-block records) and its phase-profile bucket.
+        // solve labels) and its phase-profile bucket.
         let context = crate::profile::context();
         crate::profile::set_context(crate::profile::Context {
             kind: if previous.is_none() {
@@ -627,19 +579,6 @@ impl ScfSession {
             iteration,
             ..context
         });
-        // BREAKTHROUGH-3: request a bounded subspace update of this map.
-        let advance_requested = Self::advance_eligible(&self.problem, history);
-        if advance_requested {
-            // The block count decides; the column cap only bounds a start
-            // that is not the kept one (its initial application is one block).
-            let bands = self.problem.occupations.len();
-            self.problem.states[0].gamma_real.advance = Some(crate::advance::AdvanceSlot::new(
-                dft_solvers::real_davidson::SubspaceBudget {
-                    correction_blocks: self.advance_blocks,
-                    h_columns: (self.advance_blocks + 1).saturating_mul(bands).max(1),
-                },
-            ));
-        }
         let mut step = self
             .problem
             .step_session(
@@ -662,104 +601,6 @@ impl ScfSession {
                 .stop_error_step(n, &step.density, step.owned_density.as_ref())?;
         crate::profile::between(crate::profile::BetweenPart::StopRule, stop_clock);
         crate::profile::map_commit(crate::profile::MapKind::Ordinary);
-        // BREAKTHROUGH-3: completion rules of an advanced map (design section 5).
-        let mut advance_record = None;
-        match step.advance.take() {
-            Some(slot) => match slot.outcome {
-                Some(diagnostics) => {
-                    let error = standard_error_ha.expect("standard history metric");
-                    let inner = StandardProfile::residual_energy_estimate(
-                        step.k_points
-                            .iter()
-                            .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
-                        &self.problem.occupations,
-                    );
-                    let occupied = self
-                        .problem
-                        .occupations
-                        .iter()
-                        .filter(|&&f| f > 0.0)
-                        .count();
-                    let values = &step.k_points[0].solution.eigenvalues;
-                    let gap_stable = occupied == 0
-                        || occupied >= values.len()
-                        || values[occupied - 1] < values[occupied];
-                    let threshold = standard.expect("standard profile").threshold_ha;
-                    let previous_error = history.last().and_then(|r| r.standard_error_ha);
-                    let trigger = crate::advance::completion_trigger(
-                        error,
-                        inner,
-                        threshold,
-                        previous_error,
-                        gap_stable,
-                    );
-                    let mut record = crate::advance::AdvanceRecord {
-                        budget_blocks: slot.budget.correction_blocks,
-                        blocks_used: diagnostics.correction_blocks,
-                        h_columns: diagnostics.h_columns,
-                        kept_start: diagnostics.kept_start,
-                        unconverged_roots: diagnostics.unconverged_roots,
-                        inner_estimate_ha: inner,
-                        scf_error_ha: error,
-                        completion: trigger,
-                        completion_h_columns: 0,
-                    };
-                    if trigger.is_some() {
-                        // Completion: the exact solve at the same density from
-                        // the advanced orbitals (the kept start applies, the
-                        // potential is unchanged). The advance is charged to
-                        // the step like a first-iteration redo.
-                        let (warm, warm_lazy) = split_warm(Some(&step.k_points));
-                        let mut redo = self
-                            .problem
-                            .step_session(n, warm.as_deref(), &warm_lazy, tolerance, false)
-                            .map_err(|e| match e {
-                                ScfError::NonFinite => ScfError::Diverged {
-                                    reason: "nonfinite SCF arithmetic".into(),
-                                    history: history.clone(),
-                                },
-                                other => other,
-                            })?;
-                        record.completion_h_columns = redo
-                            .k_points
-                            .iter()
-                            .map(|k| k.solution.operator_applications)
-                            .sum();
-                        for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
-                            new.solution.iterations += old.solution.iterations;
-                            new.solution.operator_applications +=
-                                old.solution.operator_applications;
-                        }
-                        redo.timings.potential += step.timings.potential;
-                        redo.timings.diagonalization += step.timings.diagonalization;
-                        redo.timings.density += step.timings.density;
-                        redo.timings.energy += step.timings.energy;
-                        step = redo;
-                        standard_error_ha = self.problem.stop_error_step(
-                            n,
-                            &step.density,
-                            step.owned_density.as_ref(),
-                        )?;
-                        // Phase profile: the completion solve is filed as a redo.
-                        crate::profile::map_commit(crate::profile::MapKind::Redo);
-                    }
-                    let ratio = if error > 0.0 {
-                        inner / error
-                    } else {
-                        f64::INFINITY
-                    };
-                    self.advance_blocks =
-                        crate::advance::adapt_blocks(self.advance_blocks, ratio, trigger);
-                    crate::advance::count_record(&record, &diagnostics);
-                    advance_record = Some(record);
-                }
-                None => crate::advance::count_declined(),
-            },
-            None if crate::advance::enabled() && standard.is_some() => {
-                crate::advance::count_exact_map();
-            }
-            None => {}
-        }
         let standard_redo = iteration == 1
             && standard_error_ha.is_some_and(|e| e < tolerance * self.problem.electrons.max(1.0));
         if standard_redo {
@@ -794,23 +635,6 @@ impl ScfSession {
                     .stop_error_step(n, &step.density, step.owned_density.as_ref())?;
         }
         let stop_clock = crate::profile::clock();
-        if dft_solvers::replay::ENABLED {
-            // Measurement only: signed density residual, normalized FFT, density
-            // sphere and G=0 omission. Do not pass a signed field to the physical
-            // Hartree API, which correctly rejects negative electron densities.
-            assert_eq!(
-                self.problem.options.threads, 1,
-                "P15A requires ordered one-thread captures"
-            );
-            let dr2_ry = super::replay_capture::density_error_ry(
-                n,
-                &step.density,
-                &self.problem.cell,
-                self.problem.options.cutoff_hartree,
-                &mut self.problem.fft,
-            )?;
-            dft_solvers::replay::metric(iteration, dr2_ry, self.problem.electrons);
-        }
         // M2-OWNED: owned pairs reduce their per-plane partials (one
         // allgatherv); full pairs keep the row-major arithmetic.
         let (residual, output_sum, input_sum, min_density) =
@@ -869,7 +693,6 @@ impl ScfSession {
             input_charge_error,
             min_density,
             timings: step.timings,
-            advance: advance_record,
             pulay: None,
         };
         let converged = if let Some(p) = standard {
@@ -937,11 +760,9 @@ impl ScfSession {
         // Certify the returned output density itself, not just the input
         // fixed-point residual. A small-gap response can amplify that residual.
         self.problem.energy_identity = false;
-        let mut rescued = None;
         // VERIFY-REUSE (`BAANDI_VERIFY_REUSE=warm|feed`): orbitals and output
         // density F(rho_out) of a failed verification solve.
         let mut verification_reuse: Option<(VerifyReuse, VerificationMap)> = None;
-        let mut unable_to_verify = false;
         // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
@@ -1026,20 +847,8 @@ impl ScfSession {
             });
             false
         } else if converged && let Some(profile) = standard {
-            // Standard convergence is explicitly uncertified. An independently
-            // requested spectral audit remains a separate, charged operation.
+            // The standard stop is certified by its fixed-point verification.
             let mut passed = true;
-            if let Some(report) = &mut self.spectral_report {
-                // MPI-LAZY-ORBITALS: the spectral audit reads the full blocks.
-                materialize_kpoints(&mut step.k_points)?;
-                (rescued, unable_to_verify) = self.problem.audit_reported_spectrum(
-                    n,
-                    &mut step.k_points,
-                    iteration,
-                    report,
-                )?;
-                passed = report.passed;
-            }
             if passed && self.problem.options.verification == Verification::FixedPoint {
                 // No scheduling branch, call or bookkeeping on ordinary maps.
                 // The default predictor runs only after a real failure; the opt-in
@@ -1048,20 +857,13 @@ impl ScfSession {
                     || matches!(self.problem.sw.verify_schedule, "first" | "first-trace"))
                     && self.problem.sw.verify_schedule != "off"
                     && {
-                        let profiling = self.problem.sw.verify_profile && crate::profile::enabled();
-                        let clock = (profiling
-                            && self
-                                .problem
-                                .run
-                                .on(dft_numerics::switches::Id::STAGE_TIMERS))
-                        .then(Instant::now);
-                        let deferred = if self.verification.attempts.is_empty() {
+                        if self.verification.attempts.is_empty() {
                             schedule_first_attempt(
                                 history,
                                 &mut self.verification,
                                 self.problem.sw.verify_schedule,
                                 self.problem.options.max_iterations,
-                                self.spectral_report.is_none(),
+                                true,
                                 profile.threshold_ha,
                             )
                         } else {
@@ -1070,20 +872,9 @@ impl ScfSession {
                                 &mut self.verification,
                                 self.problem.sw.verify_schedule,
                                 self.problem.options.max_iterations,
-                                self.spectral_report.is_none(),
+                                true,
                             )
-                        };
-                        if profiling {
-                            crate::profile::verification::schedule(
-                                iteration,
-                                self.problem.options.cutoff_hartree,
-                                history.len(),
-                                self.verification.attempts.len(),
-                                clock,
-                                deferred,
-                            );
                         }
-                        deferred
                     };
                 if defer {
                     passed = false;
@@ -1214,7 +1005,7 @@ impl ScfSession {
                         .sum::<usize>()
                 );
             }
-            let mut passed = density_residual <= self.problem.options.density_tolerance
+            let passed = density_residual <= self.problem.options.density_tolerance
                 && occupied_eigenvalue_change <= CERT_EIGENVALUE_LIMIT_HA;
             if passed && self.problem.density_floor.is_some() {
                 let clipped = self
@@ -1275,15 +1066,6 @@ impl ScfSession {
                     .collect(),
                 timings: check.timings,
             });
-            if passed && let Some(report) = &mut self.spectral_report {
-                (rescued, unable_to_verify) = self.problem.audit_reported_spectrum(
-                    n,
-                    &mut step.k_points,
-                    iteration,
-                    report,
-                )?;
-                passed = report.passed;
-            }
             if passed {
                 self.problem.check_gap(&check.k_points)?;
             }
@@ -1298,10 +1080,7 @@ impl ScfSession {
         if self.certificate_attempted {
             crate::phase_clock::add_certificate(certificate_clock);
         }
-        if certified
-            || unable_to_verify
-            || (retain_last && iteration == self.problem.options.max_iterations)
-        {
+        if certified || (retain_last && iteration == self.problem.options.max_iterations) {
             // MPI-LAZY-ORBITALS: the delivered state carries full blocks (one
             // gather per lazy k block; every rank reaches this point together).
             // LAZY-RESULT: kept distributed when the caller declared it reads
@@ -1398,10 +1177,7 @@ impl ScfSession {
                             });
                             report
                         }),
-                    spectral_completeness: self.spectral_report.clone().map(|mut r| {
-                        r.passed &= certified;
-                        r
-                    }),
+                    spectral_completeness: None,
                     k_points: step.k_points,
                     gap_hartree,
                     energy: step.energy,
@@ -1426,18 +1202,6 @@ impl ScfSession {
             });
         }
         let mix_start = Instant::now();
-        if rescued.is_some() {
-            // The old history converged in an incomplete invariant subspace.
-            // Its near-zero residual is not a meaningful growth baseline after
-            // inserting the missing occupied states. Start a fresh mixing history.
-            mixer.reset();
-            *best = f64::INFINITY;
-            *growing = 0;
-            *mixing_resets += 1;
-            let record = history.last_mut().unwrap();
-            record.mixer_reset = true;
-            record.mixing_resets = *mixing_resets;
-        }
         // Experimental guard (BAANDI_MIX_GROWTH_RESET=<factor>, default off): a density
         // residual that grew by more than the factor since the previous iteration means
         // the Pulay history produced a bad step and is ill-conditioned; drop it.
@@ -1467,7 +1231,7 @@ impl ScfSession {
             // M2-OWNED: the Pulay update, the feed of a failed verification and
             // the convex safeguard on this rank's planes; the next input stays
             // owned (no gather). The same branch structure as below.
-            if rescued.is_some() || history.last().is_some_and(|r| r.mixer_reset) {
+            if history.last().is_some_and(|r| r.mixer_reset) {
                 om.reset();
             }
             let input = self
@@ -1531,10 +1295,9 @@ impl ScfSession {
             history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
             crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
             let verification_orbitals = verification_reuse.map(|(_, (o, _, _))| o);
-            let (warm, lazy) = match (rescued, verification_orbitals) {
-                (Some(r), _) => (r, Vec::new()),
-                (None, Some(points)) => split_points(points),
-                (None, None) => split_points(step.k_points),
+            let (warm, lazy) = match verification_orbitals {
+                Some(points) => split_points(points),
+                None => split_points(step.k_points),
             };
             *previous = Some(warm);
             *previous_lazy = lazy;
@@ -1604,10 +1367,9 @@ impl ScfSession {
         crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
         // MPI-LAZY-ORBITALS: lazy blocks travel with their distributed rows.
         let verification_orbitals = verification_reuse.map(|(_, (o, _, _))| o);
-        let (warm, lazy) = match (rescued, verification_orbitals) {
-            (Some(r), _) => (r, Vec::new()),
-            (None, Some(points)) => split_points(points),
-            (None, None) => split_points(step.k_points),
+        let (warm, lazy) = match verification_orbitals {
+            Some(points) => split_points(points),
+            None => split_points(step.k_points),
         };
         *previous = Some(warm);
         *previous_lazy = lazy;
@@ -1809,199 +1571,7 @@ impl ScfSession {
         }
         Ok(())
     }
-    /// C1 ladder hand-off: next input density and warm orbitals at an active boundary.
-    /// Lazy blocks (MPI-LAZY-ORBITALS) and an owned density (M2-OWNED) are
-    /// gathered here (collective).
-    pub(crate) fn warm_state(&mut self) -> Result<Option<WarmState<'_>>, ScfError> {
-        let density_span = crate::cutoff_ladder::HandoffSpan::enter(
-            crate::cutoff_ladder::HandoffPart::ExportDensity,
-        );
-        self.materialize_density()?;
-        drop(density_span);
-        let Some(c) = self.continuation.as_ref() else {
-            return Ok(None);
-        };
-        let _span = crate::cutoff_ladder::HandoffSpan::enter(
-            crate::cutoff_ladder::HandoffPart::Materialize,
-        );
-        Ok(Some((&c.n, full_previous(c)?)))
-    }
-    /// Export local planes and a lazy block. The descriptor agrees
-    /// availability, consumer identity, overlaps and payload sizes in one collective.
-    pub(crate) fn warm_owned_handoff(
-        &mut self,
-        fine: &ScfProblem,
-    ) -> Result<Option<crate::cutoff_ladder::OwnedExport>, ScfError> {
-        use dft_mpi::Collective;
-        let Some(comm) = crate::parallel::SharedComm::active() else {
-            return Ok(None);
-        };
-        let lazy = self
-            .continuation
-            .as_ref()
-            .and_then(|c| c.previous_lazy.first())
-            .and_then(Option::as_ref)
-            .or_else(|| {
-                self.result()
-                    .and_then(|r| r.result.k_points.first())
-                    .and_then(|k| k.lazy.as_ref())
-            })
-            .filter(|h| !h.handoff_materialized())
-            .cloned();
-        let dims = self.problem.grid.dims();
-        let (density, axis) = if self.problem.owned.density_mode {
-            let values = self
-                .problem
-                .owned
-                .input
-                .as_ref()
-                .map(|n| n.values.clone())
-                .unwrap_or_default();
-            let axis = self.problem.grid_plan()?.1.first_axis();
-            (values, axis)
-        } else {
-            let full = self
-                .continuation
-                .as_ref()
-                .map(|c| &c.n)
-                .or_else(|| self.result().map(|r| &r.result.density));
-            let total = dims.iter().product::<usize>();
-            let start = comm.rank() * (total / comm.size()) + comm.rank().min(total % comm.size());
-            let len = total / comm.size() + usize::from(comm.rank() < total % comm.size());
-            (
-                full.and_then(|n| n.as_slice())
-                    .and_then(|n| n.get(start..start + len))
-                    .unwrap_or_default()
-                    .to_vec(),
-                2,
-            )
-        };
-        // A deterministic fingerprint covers the fine consumer's validation
-        // inputs. A local options/layout mismatch rejects before payload exchange.
-        let identity = format!(
-            "{:?}/{:?}/{:?}/{:?}",
-            fine.options,
-            fine.occupations,
-            fine.electrons,
-            fine.cell.lattice_columns_bohr()
-        )
-        .bytes()
-        .fold(0xcbf29ce484222325u64, |h, b| {
-            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
-        });
-        let eligible = fine.options.standard.is_some()
-            && fine.owned_declined().is_none()
-            && matches!(fine.options.mixing, Mixing::Pulay { .. })
-            && !fine.options.hartree_mixing
-            && crate::snapshot::dir().is_none()
-            && crate::gamma_real::owned_handoff_supported();
-        crate::cutoff_ladder::OwnedExport::prepare(
-            lazy,
-            density,
-            dims,
-            axis,
-            &self.problem.states[0].basis,
-            &fine.states[0].basis,
-            fine.states[0].hamiltonian.fft_grid(),
-            eligible,
-            identity,
-            self.problem.occupations.len(),
-        )
-    }
-    pub(crate) fn problem_ref(&self) -> &ScfProblem {
-        &self.problem
-    }
-    /// Mixer memory of the current continuation (None before initialization or
-    /// for opaque mixers). Read-only; used by the cutoff ladder.
-    pub(crate) fn mixer_state(&self) -> Option<crate::checkpoint::MixerState> {
-        self.continuation
-            .as_ref()
-            .and_then(|c| c.mixer.checkpoint().ok())
-    }
-    /// Cutoff-ladder hand-off: seed the empty mixer of a just initialized session
-    /// with difference pairs (dx, dr) of a related map, oldest first.
-    pub(crate) fn seed_mixer_differences(
-        &mut self,
-        dx: &[Vec<f64>],
-        dr: &[Vec<f64>],
-    ) -> Result<(), ScfError> {
-        if self.status != StepStatus::Ready || self.iteration != 0 {
-            return Err(ScfError::InvalidInput(
-                "seed_mixer_differences: only before the first step",
-            ));
-        }
-        let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
-        if self
-            .continuation
-            .as_ref()
-            .is_some_and(|c| c.owned.is_some())
-        {
-            // M2-OWNED: the seeds enter the plane-mode mixer as this rank's
-            // planes (no collective).
-            let (_, plan) = self.problem.grid_plan()?;
-            let block = |v: &Vec<f64>| {
-                let mut out = Vec::new();
-                plan.planes_of(v, &mut out);
-                out
-            };
-            let bx: Vec<Vec<f64>> = dx.iter().map(block).collect();
-            let br: Vec<Vec<f64>> = dr.iter().map(block).collect();
-            let c = self.continuation.as_mut().expect("checked");
-            return c
-                .owned
-                .as_mut()
-                .expect("checked")
-                .seed_block(&bx, &br, mean)
-                .map_err(|e| ScfError::Numerical(format!("seed_mixer_differences: {e}")));
-        }
-        let c = self
-            .continuation
-            .as_mut()
-            .ok_or(ScfError::InvalidInput("seed_mixer_differences: no session"))?;
-        c.mixer
-            .seed_differences(dx, dr, mean)
-            .map_err(|e| ScfError::Numerical(format!("seed_mixer_differences: {e}")))
-    }
-    /// Cutoff-ladder hand-off: first-step eigen tolerance of the standard
-    /// profile (clamped to the ratchet's [floor, cap]). Ignored by strict.
-    pub(crate) fn seed_standard_tolerance(&mut self, tolerance: f64) -> Result<(), ScfError> {
-        if self.iteration != 0 || !tolerance.is_finite() || tolerance <= 0.0 {
-            return Err(ScfError::InvalidInput(
-                "seed_standard_tolerance: positive value before the first step",
-            ));
-        }
-        self.standard_seed =
-            Some(tolerance.clamp(StandardProfile::FLOOR_HA, StandardProfile::CAP_HA));
-        Ok(())
-    }
-    /// Cutoff-ladder hand-off (D1): first-step eigen tolerance of the strict
-    /// residual schedule, clamped by the schedule's own bounds. Ignored by the
-    /// standard profile and by the legacy decay schedule.
-    pub(crate) fn seed_strict_tolerance(&mut self, tolerance: f64) -> Result<(), ScfError> {
-        if self.iteration != 0 || !tolerance.is_finite() || tolerance <= 0.0 {
-            return Err(ScfError::InvalidInput(
-                "seed_strict_tolerance: positive value before the first step",
-            ));
-        }
-        self.strict_seed = Some(tolerance);
-        Ok(())
-    }
-    /// Strict residual schedule: the eigen tolerance the next step would use
-    /// (None for the standard profile, the legacy schedule or an empty history).
-    pub(crate) fn next_strict_tolerance(&self) -> Option<f64> {
-        let o = &self.problem.options;
-        if o.standard.is_some() || !o.residual_eigen_schedule {
-            return None;
-        }
-        self.history().last().map(|r| {
-            residual_schedule(
-                o,
-                self.problem.sw.eigen_factor,
-                Some(r.density_residual),
-                1e-2,
-            )
-        })
-    }
+
     pub fn events(&mut self) -> Option<&mut EventQueue> {
         self.events.as_mut()
     }
@@ -2134,11 +1704,6 @@ impl ScfSession {
             }
             self.problem.forget_real_reuse();
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
-            // A pending first-step standard seed is not part of checkpoint v1.
-            if (self.standard_seed.is_some() || self.strict_seed.is_some()) && c.history.is_empty()
-            {
-                return Err(Rejection::Boundary);
-            }
             Some(ContinuationState {
                 verification_attempts: self.verification.attempts.clone(),
                 atomic_start: (self.problem.options.start_wavefunctions
@@ -2212,59 +1777,6 @@ impl ScfSession {
             result,
         })
     }
-    /// Track A hand-off hook (direct minimization pre-converger, `scf::direct_min`):
-    /// ordinary initialization, then the same density/orbital validation and import
-    /// as `warm_start`. Needed because `warm_start` requires host identity digests
-    /// and rejects NLCC, and `initialize_density_transfer` drops the orbitals.
-    /// Nothing is certified here; only the unchanged strict steps can converge.
-    pub(crate) fn initialize_electronic(
-        &mut self,
-        state: &crate::checkpoint::ElectronicState,
-    ) -> Result<(), ScfError> {
-        self.initialize()?;
-        self.import_electronic(state)
-            .map_err(|e| ScfError::Numerical(format!("direct_min hand-off state rejected: {e}")))
-    }
-    /// The ladder scopes initialization and import separately; ordinary
-    /// checkpoint/direct-min consumers retain their existing entry point.
-    pub(crate) fn initialize_ladder_electronic(
-        &mut self,
-        state: &crate::checkpoint::ElectronicState,
-    ) -> Result<(), ScfError> {
-        self.initialize()?;
-        let _span =
-            crate::cutoff_ladder::HandoffSpan::enter(crate::cutoff_ladder::HandoffPart::Import);
-        self.import_electronic(state)
-            .map_err(|e| ScfError::Numerical(format!("direct_min hand-off state rejected: {e}")))
-    }
-    pub(crate) fn initialize_owned_ladder(
-        &mut self,
-        state: &crate::checkpoint::ElectronicState,
-        owned: crate::gamma_real::LazyOrbitals,
-    ) -> Result<(), ScfError> {
-        let _setup = crate::cutoff_ladder::OwnedSetup::enter();
-        self.initialize_mode(true)?;
-        let _import =
-            crate::cutoff_ladder::HandoffSpan::enter(crate::cutoff_ladder::HandoffPart::Import);
-        // The transcript already validated the global shape, overlaps and
-        // identical consumer configuration. Density is replicated identically;
-        // these unchanged import checks therefore have the same result everywhere.
-        if !state.orbitals.is_empty()
-            || owned.global_len() != self.problem.states[0].basis.vectors().len()
-            || owned.bands() != self.problem.occupations.len()
-        {
-            return Err(ScfError::InvalidInput("owned handoff consumer shape"));
-        }
-        self.import_electronic(state)
-            .map_err(|e| ScfError::Numerical(format!("owned handoff import: {e}")))?;
-        let c = self.continuation.as_mut().expect("initialized");
-        c.previous = Some(vec![
-            ComplexMatrix::zeros(0, owned.bands())
-                .map_err(|e| ScfError::Numerical(e.to_string()))?,
-        ]);
-        c.previous_lazy = vec![Some(owned)];
-        Ok(())
-    }
     fn import_electronic(
         &mut self,
         state: &crate::checkpoint::ElectronicState,
@@ -2322,7 +1834,6 @@ impl ScfSession {
                 // rank imports the same replicated state), one verdict
                 // reduction; `serial` is the former replicated scalar loop.
                 let split = self.problem.sw.import_split;
-                let check_span = crate::cutoff_ladder::HandoffSpan::check();
                 let orthonormal = if split {
                     let comm = crate::parallel::SharedComm::active();
                     orthonormal_split(&m, comm.as_ref().map(|c| c as &dyn dft_mpi::Collective))
@@ -2330,7 +1841,6 @@ impl ScfSession {
                 } else {
                     orthonormal_serial(&m)
                 };
-                drop(check_span);
                 if !orthonormal {
                     return Err(R::Orbitals);
                 }
@@ -2529,9 +2039,6 @@ fn verification_attempts_consistent(c: &crate::checkpoint::ContinuationState) ->
 
 /// Attempt, its history record, a clipped-charge failure, and the solve's
 /// orbitals and output density F(rho_out) (VERIFY-REUSE).
-/// Next input density and warm orbitals at an active boundary (ladder hand-off).
-pub(crate) type WarmState<'a> = (&'a Array3<f64>, Option<Vec<ComplexMatrix>>);
-
 /// The continuation's warm-start blocks with every lazy one gathered
 /// (MPI-LAZY-ORBITALS; collective when any is lazy).
 fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
@@ -2867,43 +2374,7 @@ fn verify_fixed_point(
 ) -> Result<VerificationOutcome, ScfError> {
     // M2-OWNED: the verification map's input is the delivered (owned) output;
     // the loop's own input is restored afterwards on every path.
-    use crate::profile::verification as vp;
-    let mut trace = if problem.sw.verify_profile && crate::profile::enabled() {
-        let dims = problem.grid.dims();
-        Some(vp::Trace::new(
-            iteration,
-            problem.options.cutoff_hartree,
-            [
-                dims[0] as u64,
-                dims[1] as u64,
-                dims[2] as u64,
-                density.len() as u64,
-                owned.map_or(0, |o| o.values.len()) as u64,
-                points
-                    .iter()
-                    .map(|p| std::mem::size_of_val(p.solution.eigenvectors.as_slice()) as u64)
-                    .sum(),
-                points.len() as u64,
-                points.iter().filter(|p| p.lazy.is_some()).count() as u64,
-                points
-                    .iter()
-                    .map(|p| p.solution.eigenvalues.len() as u64)
-                    .sum(),
-                problem
-                    .states
-                    .iter()
-                    .map(|s| s.basis.vectors().len() as u64)
-                    .sum(),
-                0,
-                0,
-            ],
-            problem.run.on(dft_numerics::switches::Id::STAGE_TIMERS),
-        ))
-    } else {
-        None
-    };
     let saved = owned.map(|o| problem.owned.input.replace(o.clone()));
-    vp::mark(&mut trace, 0);
     let result = verify_fixed_point_inner(
         problem,
         density,
@@ -2912,19 +2383,9 @@ fn verify_fixed_point(
         standard_error_ha,
         iteration,
         stop_map,
-        &mut trace,
     );
     if let Some(s) = saved {
         problem.owned.input = s;
-    }
-    vp::mark(&mut trace, 7);
-    if let Some(trace) = trace {
-        trace.finish(
-            result
-                .as_ref()
-                .ok()
-                .map(|(a, _, _, _)| (a.passed, a.operator_applications, a.davidson_iterations)),
-        );
     }
     result
 }
@@ -2938,9 +2399,7 @@ fn verify_fixed_point_inner(
     standard_error_ha: f64,
     iteration: usize,
     (stop_input, stop_energy_ha): (&Array3<f64>, f64),
-    trace: &mut Option<crate::profile::verification::Trace>,
 ) -> Result<VerificationOutcome, ScfError> {
-    use crate::profile::verification as vp;
     let clock = Instant::now();
     let threshold = problem
         .options
@@ -2949,7 +2408,6 @@ fn verify_fixed_point_inner(
         .threshold_ha;
     let eigen_tolerance = StandardProfile::ratchet(tolerance, standard_error_ha, problem.electrons);
     let (warm, warm_lazy) = split_warm(Some(points));
-    vp::mark(trace, 1);
     crate::profile::set_context(crate::profile::Context {
         stage: "verification",
         kind: "verify",
@@ -2966,20 +2424,10 @@ fn verify_fixed_point_inner(
         // Same flag as an ordinary step (the standard path ignores it).
         eigen_tolerance <= problem.options.eigen_tolerance,
     )?;
-    vp::mark(trace, 2);
-    if let Some(t) = trace.as_mut() {
-        t.map([
-            check.timings.potential.as_secs_f64(),
-            check.timings.diagonalization.as_secs_f64(),
-            check.timings.density.as_secs_f64(),
-            check.timings.energy.as_secs_f64(),
-        ]);
-    }
     let glue_clock = crate::profile::clock();
     let coulomb_error_ha = problem
         .stop_error_step(density, &check.density, check.owned_density.as_ref())?
         .expect("standard Coulomb metric");
-    vp::mark(trace, 3);
     let residual_bound_ha = problem.sw.residual_guard.then(|| {
         StandardProfile::residual_energy_estimate(
             check
@@ -3011,7 +2459,6 @@ fn verify_fixed_point_inner(
     {
         return Err(ScfError::NonFinite);
     }
-    vp::mark(trace, 4);
     let guard_ok = residual_bound_ha.is_none_or(|b| b < threshold);
     #[allow(unused_mut)]
     let mut passed = coulomb_error_ha < threshold && guard_ok;
@@ -3062,7 +2509,6 @@ fn verify_fixed_point_inner(
         problem.check_gap(&check.k_points)?;
     }
     crate::profile::between(crate::profile::BetweenPart::VerifyGlue, glue_clock);
-    vp::mark(trace, 5);
     let residuals = |buffered: bool| -> Vec<Vec<f64>> {
         check
             .k_points
@@ -3114,7 +2560,6 @@ fn verify_fixed_point_inner(
     );
     // Preserve legacy predictor, forced-test failure and clipping decisions.
     attempt.passed = passed && clipped.is_none();
-    vp::mark(trace, 6);
     Ok((
         attempt,
         record,
@@ -3169,8 +2614,6 @@ pub(crate) struct SessionSwitches {
     pub(crate) stop_predictor: StopPredictor,
     /// F-VERIFY-SCHEDULE: resolved once; no environment reads in the loop.
     pub(crate) verify_schedule: &'static str,
-    /// LANE-VERIFY Phase 0, default-off observation only.
-    pub(crate) verify_profile: bool,
 }
 
 /// SCF-TAIL (`BAANDI_STOP_PREDICTOR=off|trace|on`, default off): the cross
@@ -3229,7 +2672,6 @@ impl SessionSwitches {
             growth_reset: run.number(Id::MIX_GROWTH_RESET),
             eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
             verify_schedule: run.choice(Id::VERIFY_SCHEDULE),
-            verify_profile: run.on(Id::VERIFY_PROFILE),
             stop_predictor: match run.choice(Id::STOP_PREDICTOR) {
                 "trace" => StopPredictor::Trace,
                 "on" => StopPredictor::On,

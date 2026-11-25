@@ -1,5 +1,4 @@
 //! Exact Miller-index injection and Fourier grid prolongation.
-use crate::cutoff_ladder::{HandoffPart, HandoffSpan};
 use crate::model::ScfError;
 use dft_basis::{FftGridSpec, PlaneWaveBasis};
 use dft_numerics::Fft3d;
@@ -13,7 +12,7 @@ pub fn prolong_orbitals(
     fine: &PlaneWaveBasis,
     orbitals: &ComplexMatrix,
 ) -> Result<ComplexMatrix, ScfError> {
-    let _span = HandoffSpan::enter(HandoffPart::OrbitalCopy);
+    let _span = OrbitalCopySpan::enter();
     if orbitals.rows() != coarse.vectors().len() {
         return Err(ScfError::InvalidInput(
             "cutoff_ladder: orbital rows differ from the coarse basis",
@@ -96,4 +95,24 @@ pub(crate) fn prolong_frequency(i: usize, n: usize) -> Option<i32> {
     } else {
         Some(i as i32 - n as i32)
     }
+}
+
+// Keep the reference ladder's observational copy timing in the results layer.
+static ORBITAL_COPY_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+struct OrbitalCopySpan(std::time::Instant);
+impl OrbitalCopySpan {
+    fn enter() -> Option<Self> {
+        crate::profile::enabled().then(|| Self(std::time::Instant::now()))
+    }
+}
+impl Drop for OrbitalCopySpan {
+    fn drop(&mut self) {
+        ORBITAL_COPY_NS.fetch_add(
+            self.0.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+}
+pub(crate) fn orbital_copy_seconds() -> f64 {
+    ORBITAL_COPY_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9
 }

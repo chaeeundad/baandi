@@ -615,30 +615,7 @@ impl GridPlan {
         mine.sort_unstable();
         mine.dedup();
         let gather_err = |e: dft_mpi::MpiError| ScfError::Numerical(format!("M2 grid plan: {e}"));
-        let (stick_counts, all) = if crate::cutoff_ladder::local_handoff_setup()
-            && dft_numerics::switches::on(dft_numerics::switches::Id::M2_OWNED_HANDOFF)
-        {
-            // The partition is deterministic; reconstruct exactly the same sorted
-            // rank lists locally. No field values or numerical ordering change.
-            let owners = dft_solvers::distributed_fft::position_owners(dims, &indices, ranks)
-                .map_err(err)?;
-            let mut lists = vec![Vec::new(); ranks];
-            for (g, &owner) in owners.iter().enumerate() {
-                lists[owner].push(stick_id(g));
-            }
-            for list in &mut lists {
-                list.sort_unstable();
-                list.dedup();
-            }
-            (
-                lists.iter().map(Vec::len).collect::<Vec<_>>(),
-                lists
-                    .into_iter()
-                    .flatten()
-                    .map(|s| s as f64)
-                    .collect::<Vec<_>>(),
-            )
-        } else {
+        let (stick_counts, all) = {
             let mut stick_counts_f = vec![0.0; ranks];
             comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut stick_counts_f)
                 .map_err(gather_err)?;

@@ -305,7 +305,6 @@ mod tests {
             mixing_raw_recovery: false,
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
-            advance: None,
             pulay: None,
         }
     }

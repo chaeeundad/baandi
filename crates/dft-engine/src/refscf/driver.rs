@@ -921,7 +921,6 @@ async fn run_stage<K: Collective>(
             mixing_raw_recovery: false,
             fixed_point_certificate: certificate,
             timings: timings.clone(),
-            advance: None,
             pulay: None,
         });
         records.push(Record {

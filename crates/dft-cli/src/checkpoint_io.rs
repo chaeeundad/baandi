@@ -1024,7 +1024,7 @@ wire_struct!(IterationRecord, WIterationRecord {
     mixing_raw_recovery: bool,
     fixed_point_certificate: Option<FixedPointCertificate>,
     timings: PhaseTimings,
-} defaults { advance: None, pulay: None, });
+} defaults { pulay: None, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WEnergyAudit {

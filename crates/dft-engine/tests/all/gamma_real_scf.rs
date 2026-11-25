@@ -159,9 +159,9 @@ fn real_complex_and_thread_matrix() {
 
 #[test]
 fn fallback_modes_and_warm_vectors() {
-    use dft_engine::{Locking, OccupationPolicy, SpectralGuard};
+    use dft_engine::{Locking, OccupationPolicy};
     use dft_geometry::kpoints::KPoint;
-    for case in 0..7 {
+    for case in [0, 1, 2, 4, 5] {
         let (cell, atoms, pp) = model(0);
         let mut opts = options(GammaReal::Auto, 1, 2026);
         let mut points = vec![KPoint {
@@ -183,16 +183,12 @@ fn fallback_modes_and_warm_vectors() {
                 ]
             }
             2 => opts.locking = Locking::Auto,
-            3 => opts.spectral_guard = SpectralGuard::Final,
             4 => opts.eigensolver = dft_solvers::SolverChoice::Hybrid(Default::default()),
             5 => {
                 opts.standard = Some(dft_engine::StandardProfile::default());
                 points[0].fractional[0] = 0.1;
             }
-            _ => {
-                opts.standard = Some(dft_engine::StandardProfile::default());
-                opts.spectral_guard = SpectralGuard::Final;
-            }
+            _ => unreachable!(),
         }
         let create = |o| {
             ScfProblem::with_kpoints(

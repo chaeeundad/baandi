@@ -135,17 +135,6 @@ fn b1_margin_valid(v: f64) -> bool {
 fn b1_rows_valid(v: f64) -> bool {
     v.fract() == 0.0 && (8.0..=65536.0).contains(&v)
 }
-fn coarse_stop_valid(v: f64) -> bool {
-    v.is_finite() && v > 0.0 && v < 1.0
-}
-fn advance_blocks_valid(v: f64) -> bool {
-    v.fract() == 0.0 && (1.0..=8.0).contains(&v)
-}
-fn cutoff_ladder_valid(v: &str) -> bool {
-    matches!(v, "off" | "on")
-        || v.parse::<f64>()
-            .is_ok_and(|f| f.is_finite() && f > 0.0 && f < 1.0)
-}
 fn relax_extrapolation_valid(v: &str) -> bool {
     matches!(v, "none" | "first_order" | "second_order")
 }
@@ -190,29 +179,7 @@ table! {
         "nonlocal energy from blocked projections (exact: band-by-band operator)";
     ENERGY_IDENTITY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "nonlocal energy of SCF iterations from the band-sum identity";
-    CUTOFF_LADDER_STANDARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "cutoff ladder also for the standard profile (S1)";
-    LADDER_STANDARD_SEED: Kind::Choice { allowed: &["coarse", "cap"], default: "coarse" }, "coarse",
-        "coarse, cap", "first fine eigen tolerance of the standard ladder: from the coarse ratchet or the cold-start cap";
-    LADDER_SECANT: Kind::Choice {
-        allowed: &["off", "on", "1", "2", "3", "4", "6", "8", "16", "32", "64"],
-        default: "off",
-    }, "off", "off, on (4), 1..64 difference pairs", "secant pairs carried across the ladder hand-off (S2)";
     // D1 ladder hand-off scan (work order 2026-11-14); defaults are the adopted ladder.
-    LADDER_COARSE_STOP: Kind::Number { default: Some(1e-4), valid: coarse_stop_valid }, "1e-4",
-        "number in (0, 1)", "cutoff ladder: coarse stage stops when its density residual (Bohr^-3/2) is at or below this level";
-    LADDER_COARSE_RULE: Kind::Choice { allowed: &["fixed", "atomic"], default: "fixed" }, "fixed",
-        "fixed, atomic", "cutoff ladder coarse stop level: fixed (LADDER_COARSE_STOP), or atomic (the larger of that level and the distance between the full-cutoff and prolonged coarse atomic start densities, same norm)";
-    LADDER_FRACTION_RULE: Kind::Choice { allowed: &["off", "grid"], default: "off" }, "off",
-        "off, grid", "experimental cutoff choice: fill the density FFT grid plateau of the requested fraction without increasing any grid dimension; no material constants";
-    LADDER_STOP_RULE: Kind::Choice { allowed: &["off", "modes"], default: "off" }, "off",
-        "off, modes", "experimental coarse residual stop: preserve the half-cutoff RMS budget per nonzero density Fourier mode (Parseval); never loosen the requested residual";
-    LADDER_WATCH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "diagnose early fine error above the contraction forecast from maps 1 and 2; record a path note after completion, never redo or discard work";
-    LADDER_BASIS_CHECK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "plan-time coarse basis/band/subspace check: skip an incompatible cutoff ladder before constructing the coarse problem, preserving the ordinary full-cutoff result";
-    LADDER_FIRST_TOL: Kind::Choice { allowed: &["auto", "cap", "coarse", "next"], default: "auto" }, "auto",
-        "auto, cap, coarse, next", "first fine eigen tolerance after the ladder hand-off: auto (standard per LADDER_STANDARD_SEED, strict cold 1e-2), cap (both cold), coarse (the last coarse step's requested tolerance), next (the coarse schedule's next tolerance: standard ratchet, strict factor x last coarse residual)";
     STANDARD_STOP: Kind::Choice { allowed: &["plain", "confirm"], default: "plain" }, "plain",
         "plain, confirm", "standard-class stop rule: plain threshold, or confirm (also stop when the estimator is within 2x the threshold, the previous step within 20x, and it contracted by 0.3 or better)";
     STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -235,16 +202,6 @@ table! {
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
     REUSE_PSI: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "C2: a lean real Gamma Davidson solve that starts from the previous solve's orbitals X takes H X from that solve's rotated H images plus (V_new - V_old) X, formed from the psi(r) the density build kept (one forward transform per pair; no inverse transform, nonlocal product or kinetic pass); falls back to the plain apply when X, the operator or the grid changed or the cache exceeds its memory gate; rounding class";
-    SCF_ADVANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "BREAKTHROUGH-3 (docs/design/bounded-subspace-scf.md): intermediate standard-path maps of the serial real Gamma lean path run a bounded subspace update (`Advance`: at most SCF_ADVANCE_BLOCKS correction blocks from the kept start) instead of a solve to the ratchet tolerance; the map is completed by the exact solve at the same density when its residual estimate exceeds 0.1 x the Coulomb SCF residual, when the SCF residual is below the threshold (convergence candidate) or grew, or when the occupied/empty Ritz values cross; the stop rule, the verification and the delivered state use exact maps only; trajectory change, standard class unchanged";
-    SCF_ADVANCE_BLOCKS: Kind::Number { default: Some(2.0), valid: advance_blocks_valid }, "2", "integer in [1, 8]",
-        "starting number of correction blocks per advanced map (SCF_ADVANCE=on); the session adapts it by one block from the inner/SCF residual ratio of the previous advanced map";
-    SCF_ADVANCE_GROWTH: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "SCF_ADVANCE research: complete an advanced map whose Coulomb SCF residual grew against the previous map (off: growth is left to the mixer, as on the exact path)";
-    SCF_ADVANCE_ADAPT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "SCF_ADVANCE research: adapt the block budget from the previous advanced map's inner/SCF ratio (off: the budget stays at SCF_ADVANCE_BLOCKS)";
-    SCF_ADVANCE_SCOPE: Kind::Choice { allowed: &["all", "fine"], default: "all" }, "all", "all, fine",
-        "SCF_ADVANCE research: advanced maps in every standard session (all) or only outside the cutoff-ladder coarse stage (fine)";
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
     REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference Davidson only: form the first post-contraction corrections directly from retained V/HV, omitting identity-coefficient GEMMs; measured H/S refresh and band decisions unchanged";
@@ -335,8 +292,6 @@ table! {
         "M2-OWNED (default on since 2026-11-18, dev08 si32/si64 np=8 wall -2.5 to -6.0 %; declines automatically for active-boundary consumers): with M2_GRID on the M2 standard path, the effective potential stays on the producing ranks' slab planes (the planes the distributed H apply multiplies; redistributed by one alltoall only when the slab and operator plane axes differ) and is fed to the distributed operator and its kept-start potential change (delta V) without the full-grid allgatherv; the complex Hamiltonian's full potential is gathered only for a consumer that needs it (cold atomic start, complex or M1 fallback), tagged with an epoch so a stale potential is rejected; bit-identical to M2_GRID alone";
     M2_LOCAL_DENSITY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "M2-OWNED (default on since 2026-11-18, dev08 si32/si64 np=8 wall -2.5 to -6.0 %; declines automatically for active-boundary consumers): with M2_LOCAL_FIELDS and M2_MIX on, the output density stays on the owned slab planes through the energy audit, the stop rule, the session metrics (residual, charge, minimum: canonical per-plane sums), the distributed Pulay mixer (window on the owned planes) and the next potential; the full density is gathered only for a consumer that needs it (delivered result, checkpoint, ladder hand-off, declined map); rounding class against M2_MIX alone (per-plane instead of per-chunk canonical sums)";
-    M2_OWNED_HANDOFF: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G-HANDOFF-OWNED: experimental direct coarse-to-fine owned ORC transfer by Miller index; unchanged full-matrix fallback for unsupported consumers, default off pending dev08 measurement";
     // Solvers (dft-solvers).
     MIX_COULOMB_GUARD: Kind::Choice { allowed: &["off", "trace", "on"], default: "off" }, "off", "off, trace, on",
         "SCF-TRAJECTORY: plain Pulay (L2 fit) measures the residual its least squares predicts, R - dR gamma, in the Coulomb (Hartree-energy) metric; on: when that predicted residual is larger than the current one in the Coulomb metric, this step's coefficients are refitted in the Coulomb metric (no tuned constant: the rule is 'the fit must not predict a larger long-wavelength error'); trace: compute and record the ratio, never act; replicated PulayMixer and the M2 distributed mixer (chunk and owned-plane modes, Coulomb forms on the owned sticks; MIX-COULOMB-GUARD-DIST); not kerker-pulay, not mixing_metric = hartree";
@@ -443,8 +398,6 @@ table! {
     // CLI (dft-cli).
     BINARY_HASH_CACHE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "LANE-LAUNCHIO: cache executable SHA-256 in a metadata-keyed sibling sidecar on Unix; preserves provenance, falls back to fresh hashing; trusted build directories only";
-    CUTOFF_LADDER: Kind::Override { valid: cutoff_ladder_valid }, "config", "off, on, fraction in (0, 1)",
-        "overrides scf.cutoff_ladder / fraction of the input file";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",
         "none, first_order, second_order", "overrides the relaxation density extrapolation of the input file";
     REFERENCE_SCF: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -492,10 +445,6 @@ table! {
         "LAZY-RESULT: when the caller declared that it reads no delivered orbitals (dft-cli run without forces, stress, ELF or partial-charge output, classic mode), an M2 result keeps its lazy distributed orbital blocks instead of gathering the full N x B block on every rank at delivery; ScfResult::materialize_orbitals gathers them on demand (collective); energy, density, eigenvalues and history unchanged; off = always gather";
     PHASE_WAIT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "wait probe of the phase profile (ticket BREAKTHROUGH-4-OTHER-AND-INIT): a timed barrier before every collective of the distributed solver and at the entry of every M2 solve, so that the time ranks spend waiting for the last rank (load imbalance, arrival skew) is reported apart from the collective's own transfer (`solve.wait`, `solve.entry_wait`, `coll.barrier`); changes the timing (extra barriers), never the arithmetic; diagnostic only, never an acceptance arm";
-    VERIFY_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "LANE-VERIFY per-attempt/per-rank size and phase records; requires PHASE_PROFILE, clocks only with STAGE_TIMERS; no numerical changes";
-    FIRST_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "first-correction-block residual diagnostic (review E3): before every warm real Gamma solve a small Rayleigh-Ritz on the kept B vectors, the occupied residual block R_o = H X_o - X_o A_o, its singular values and effective ranks, and the unconverged-root counts of the Ritz-change rule against the true residual; read-only (the solve is unchanged; B extra H columns per solve when no kept H X exists)";
     SNAPSHOT_DIR: Kind::Path, "unset", "absolute directory",
         "SCF snapshot capture: every real Gamma solve of the run writes the state that replays it (input density, this rank's orbital rows, kept H X and its armed flag, tolerance, policy, layout hash, context) to this directory outside the timed map phases; replay with davidson_bench --snapshot <manifest.json>";
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
@@ -664,10 +613,10 @@ pub fn table_of(id: Id) -> Table {
     match id {
         COLLECTIVE_TRACE | GLUE_PROFILE | FFT_PROFILE | PHASE_PROFILE | INIT_PROFILE
         | STAGE_TIMERS | DAVIDSON_STAGES | DAVIDSON_PROFILE | SNAPSHOT_DIR | PHASE_WAIT
-        | FIRST_BLOCK | DGEMM_TIMERS | VERIFY_PROFILE => Table::Profile,
+        | DGEMM_TIMERS => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
-        CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,
+        RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,
         _ => Table::Performance,
     }
 }
@@ -1949,28 +1898,6 @@ mod tests {
             eval(Id::ORTHO, Some("dgks:2")),
             (Value::Number(None), InvalidToOff)
         );
-        assert_eq!(
-            eval(Id::LADDER_COARSE_STOP, Some("3e-3")),
-            (Value::Number(Some(3e-3)), Env)
-        );
-        assert_eq!(
-            eval(Id::LADDER_COARSE_STOP, Some("0")),
-            (Value::Number(Some(1e-4)), InvalidToDefault)
-        );
-        assert_eq!(
-            eval(Id::LADDER_COARSE_RULE, Some("atomic")),
-            (Value::Choice("atomic"), Env)
-        );
-        assert_eq!(
-            eval(Id::LADDER_FIRST_TOL, Some("coarse")),
-            (Value::Choice("coarse"), Env)
-        );
-        assert_eq!(
-            eval(Id::LADDER_FIRST_TOL, Some("last")),
-            (Value::Choice("auto"), InvalidToDefault)
-        );
-        assert_eq!(eval(Id::CUTOFF_LADDER, Some("0.5")).1, Env);
-        assert_eq!(eval(Id::CUTOFF_LADDER, Some("x")).1, InvalidToError);
         assert_eq!(eval(Id::PSEUDO_DIR, Some("relative")).1, InvalidToError);
         assert_eq!(eval(Id::DGEMM_TIMERS, Some("")).0, Value::Present(true));
     }

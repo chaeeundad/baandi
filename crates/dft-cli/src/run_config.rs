@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn toml_values_map_to_switch_texts() {
         let doc: toml::Table = toml::from_str(
-            "[performance]\nm2_grid = false\neigen_factor = 0.05\nladder_secant = 4\n[profile]\nphase_profile = \"on\"\n",
+            "[performance]\nm2_grid = false\neigen_factor = 0.05\nrefscf_ladder_ratio = 4\n[profile]\nphase_profile = \"on\"\n",
         )
         .unwrap();
         let (p, q) = tables_of(&doc).unwrap();
@@ -158,7 +158,7 @@ mod tests {
         let c = RunConfig::from_input(&input).unwrap();
         assert_eq!(c.choice(Id::M2_GRID), "off");
         assert_eq!(c.number(Id::EIGEN_FACTOR), Some(0.05));
-        assert_eq!(c.choice(Id::LADDER_SECANT), "4");
+        assert_eq!(c.number(Id::REFSCF_LADDER_RATIO), Some(4.));
         assert!(c.on(Id::PHASE_PROFILE));
         assert_eq!(c.source(Id::PHASE_PROFILE), Source::Input);
         let bad: toml::Table = toml::from_str("[performance]\nm2_grid = [1]\n").unwrap();

@@ -132,13 +132,6 @@
     "parse_error": null,
     "options_error": null
   },
-  "l09-cutoff-ladder": {
-    "command": "run",
-    "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
-    "options_error": null
-  },
   "l09-density-floor": {
     "command": "run",
     "mode": "classic",

@@ -724,8 +724,9 @@ impl<K: Collective> DistributedPulay<K> {
         Ok(next)
     }
 
-    /// `seed_differences` from block values (plane mode; `block_len()` each).
-    pub(crate) fn seed_block(
+    /// Test fixture seeding of plane-mode mixer history.
+    #[cfg(test)]
+    fn seed_block(
         &mut self,
         dx: &[Vec<f64>],
         dr: &[Vec<f64>],

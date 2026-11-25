@@ -80,6 +80,8 @@ pub struct StartMemory {
 /// ringing included). G=0 is exactly N_el/Omega. `density` and `potential` use
 /// `fields.plane_offsets()` order; the operator receives its own plane layout.
 pub struct StartState {
+    /// Run-owned unpolarized PBE convention, shared by startup and every map.
+    pub pw92_prefactor: crate::Pw92Prefactor,
     pub setup: crate::refscf::record::SetupTimings,
     pub basis: PlaneWaveBasis,
     pub grid: FftGridSpec,
@@ -117,8 +119,10 @@ impl PbeCore {
         &self.density_g
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn evaluate<K: Collective>(
         &mut self,
+        prefactor: crate::Pw92Prefactor,
         fields: &mut StartFields,
         comm: &K,
         cell: &Cell,
@@ -146,7 +150,8 @@ impl PbeCore {
         {
             *total = n + c;
         }
-        dft_physics::gga::distributed::evaluate(
+        dft_physics::gga::distributed::evaluate_pw92(
+            prefactor,
             fields,
             comm,
             cell,
@@ -414,7 +419,7 @@ fn start_inner<K: Collective>(
         || comm.rank() >= comm.size()
         || atoms.is_empty()
         || potentials.is_empty()
-        || o.pw92_prefactor != crate::Pw92Prefactor::Modified
+        || (o.pw92_prefactor == crate::Pw92Prefactor::Original && o.functional != Functional::Pbe)
     {
         return Err(ScfError::InvalidInput(
             "reference start: unsupported problem",
@@ -719,6 +724,7 @@ fn start_inner<K: Collective>(
     } else if o.functional == Functional::Pbe {
         if let Some(core) = &mut pbe_core {
             core.evaluate(
+                o.pw92_prefactor,
                 &mut fields,
                 comm,
                 cell,
@@ -727,7 +733,14 @@ fn start_inner<K: Collective>(
                 core_density.as_ref().unwrap(),
             )
         } else {
-            dft_physics::gga::distributed::evaluate(&mut fields, comm, cell, &density, &density_g)
+            dft_physics::gga::distributed::evaluate_pw92(
+                o.pw92_prefactor,
+                &mut fields,
+                comm,
+                cell,
+                &density,
+                &density_g,
+            )
         }
         .map(|x| x.potential)
     } else if let Some(core) = &core_density {
@@ -861,6 +874,7 @@ fn start_inner<K: Collective>(
         ionic,
         core_density,
         pbe_core,
+        pw92_prefactor: o.pw92_prefactor,
         potential,
         diagonal_static,
         orbitals,
@@ -1838,7 +1852,8 @@ pub fn start_kpoints_from_density<K: Collective>(
         || input.atoms.is_empty()
         || input.potentials.is_empty()
         || o.strain_reference.is_some()
-        || o.pw92_prefactor != crate::Pw92Prefactor::Modified
+        || (o.pw92_prefactor == crate::Pw92Prefactor::Original
+            && (o.functional != Functional::Pbe || density.len() != 1))
         || !(1..=2).contains(&density.len())
         || (density.len() == 2 && o.functional == Functional::LdaPz)
     {
@@ -2016,6 +2031,7 @@ pub fn start_kpoints_from_density<K: Collective>(
         ionic,
         core_density,
         pbe_core,
+        pw92_prefactor: o.pw92_prefactor,
         potential: Vec::new(),
         diagonal_static: Vec::new(),
         orbitals: RealMatrix::zeros(0, bands).map_err(err)?,

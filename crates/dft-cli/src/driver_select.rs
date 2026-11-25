@@ -72,12 +72,6 @@ impl Selection {
                     keys.push("xc.functional");
                 }
             }
-            if config.compat.reference() {
-                keys.push("compat.mode");
-            }
-            if config.xc.pw92_prefactor.as_deref() == Some("original") {
-                keys.push("xc.pw92_prefactor");
-            }
             if reason == ATOMIC_DATA {
                 keys.extend(["PP_RHOATOM", "PP_PSWFC"]);
             }
@@ -120,7 +114,6 @@ pub const VARIABLE_CELL: &str =
 pub const EXTRAPOLATION: &str = "L5: relaxation density extrapolation requires the legacy driver";
 pub const CHECKPOINT: &str = "L6: checkpoint/restart v1 requires the legacy session";
 pub const LEGACY_INPUT: &str = "L9: explicit legacy-only SCF controls";
-pub const COMPAT: &str = "L10: original PW92 prefactor requires the legacy driver";
 pub const ATOMIC_DATA: &str =
     "L11: reference start requires nonzero PP_RHOATOM and PP_PSWFC with l<=3";
 
@@ -239,9 +232,6 @@ fn legacy_keys(c: &Config) -> Vec<&'static str> {
     keys
 }
 
-fn l10(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    c.compat.reference() || c.xc.pw92_prefactor.as_deref() == Some("original")
-}
 fn l11(_: &Config, _: Mode, _: Command, upfs: &[&Pseudopotential]) -> bool {
     upfs.iter().any(|p| {
         p.atomic_wavefunctions()
@@ -251,12 +241,8 @@ fn l11(_: &Config, _: Mode, _: Command, upfs: &[&Pseudopotential]) -> bool {
     })
 }
 type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
-const LEGACY_ONLY: &[(Predicate, &str)] = &[
-    (l1, G4D_FALLBACK),
-    (l9, LEGACY_INPUT),
-    (l10, COMPAT),
-    (l11, ATOMIC_DATA),
-];
+const LEGACY_ONLY: &[(Predicate, &str)] =
+    &[(l1, G4D_FALLBACK), (l9, LEGACY_INPUT), (l11, ATOMIC_DATA)];
 /// An empty UPF slice is a preliminary input-only decision. Commands must pass
 /// every parsed potential for the final decision before engine construction.
 pub fn select(

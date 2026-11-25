@@ -8379,3 +8379,194 @@ fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
     }
     stop_to_verified_clocks(run);
 }
+
+/// R6b: external PBE Si UPF stays outside git. Run in release:
+/// DFT_COMPAT_SI_UPF=/path/Si.upf cargo test --release -p dft-engine --test refscf r6b_compat_si2 -- --ignored --nocapture
+#[test]
+#[ignore = "external PBE Si2 Gamma/k222 accuracy matrix; release command above"]
+fn r6b_compat_si2() {
+    use dft_engine::{
+        CompatMode, Functional, GammaReal, LocalMesh, OccupationPolicy, Pw92Prefactor,
+        RadialEvenRule, ScfOptions, ScfProblem, SpeciesPotential, StartDensity,
+        refstart::StartInput,
+    };
+    use dft_geometry::kpoints::{KPoint, monkhorst_pack};
+    let pp = dft_upf::parse_upf(
+        &std::fs::read_to_string(
+            std::env::var("DFT_COMPAT_SI_UPF").expect("DFT_COMPAT_SI_UPF required"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let cell = common::cell();
+    let atoms = common::atoms();
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for mesh in [false, true] {
+        let points = if mesh {
+            monkhorst_pack([2; 3], [0.; 3]).unwrap()
+        } else {
+            vec![KPoint {
+                fractional: [0.; 3],
+                weight: 1.,
+            }]
+        };
+        let options = ScfOptions {
+            functional: Functional::Pbe,
+            compat_mode: CompatMode::Reference,
+            pw92_prefactor: Pw92Prefactor::Original,
+            local_mesh: LocalMesh::QeLike,
+            radial_even_rule: RadialEvenRule::SimpsonQuadraticEnd,
+            cutoff_hartree: 10.,
+            bands: Some(5),
+            max_iterations: 200,
+            start_density: StartDensity::Atomic,
+            free_electron_initial_guess: false,
+            gamma_real: if mesh { GammaReal::Off } else { GammaReal::On },
+            ..Default::default()
+        };
+        let mut tight = options.clone();
+        let strict = ScfOptions::strict_reference();
+        tight.standard = strict.standard;
+        tight.verification = strict.verification;
+        tight.energy_tolerance = 1e-12;
+        tight.density_tolerance = 1e-10;
+        tight.eigen_tolerance = 1e-11;
+        let oracle = ScfProblem::with_kpoints(
+            &cell,
+            &atoms,
+            &potentials,
+            tight,
+            &points,
+            OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-7,
+            },
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        assert!(oracle.certified);
+        for threshold_ry in [1e-8, 1e-12] {
+            let input = StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            };
+            let profile = Profile {
+                threshold_ry,
+                ..Default::default()
+            };
+            let outcome = if mesh {
+                dft_engine::refscf::k_driver::run_with(input, profile, &points, &Serial)
+                    .unwrap()
+                    .outcome
+            } else {
+                dft_engine::refscf::driver::run_with(input, profile, &Serial)
+                    .unwrap()
+                    .outcome
+            };
+            assert!(outcome.converged);
+            let result = outcome.result;
+            assert!(result.verification.as_ref().unwrap().passed());
+            assert_eq!(result.compat_mode, CompatMode::Reference);
+            assert_eq!(result.pw92_prefactor, Pw92Prefactor::Original);
+            assert_eq!(result.local_mesh, LocalMesh::QeLike);
+            assert_eq!(result.radial_even_rule, RadialEvenRule::SimpsonQuadraticEnd);
+            let delta = (result.total_hartree() - oracle.total_hartree()).abs();
+            let cap = if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 };
+            println!(
+                "R6B Si2 mesh={mesh} threshold={threshold_ry:e} Ry reference={:.17e} Ha oracle={:.17e} Ha delta={delta:e} Ha",
+                result.total_hartree(),
+                oracle.total_hartree()
+            );
+            assert!(delta < cap, "delta={delta:e} Ha cap={cap:e} Ha");
+        }
+    }
+}
+
+#[test]
+fn r6b_original_pbe_nlcc_start_matches_serial() {
+    use dft_engine::{
+        Functional, LocalMesh, Pw92Prefactor, RadialEvenRule, ScfOptions, ScfProblem,
+        SpeciesPotential, StartDensity,
+        refstart::{self, StartInput},
+    };
+    use dft_physics::{data::FftPlan3d, gga};
+    let pp = common::potential_with_nlcc(true, "PBE");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0.1, 0.2, 5.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        pw92_prefactor: Pw92Prefactor::Original,
+        local_mesh: LocalMesh::QeLike,
+        radial_even_rule: RadialEvenRule::SimpsonQuadraticEnd,
+        start_density: StartDensity::Atomic,
+        cutoff_hartree: 3.,
+        bands: Some(3),
+        grid_override: Some([8, 10, 12]),
+        ..Default::default()
+    };
+    let old = ScfProblem::new(&cell, &atoms, &potentials, options.clone()).unwrap();
+    let n = old.starting_density();
+    let total = &n + old.core_density().unwrap();
+    let mut fft = FftPlan3d::new(old.grid_dimensions()).unwrap();
+    let x = gga::evaluate_pw92(Pw92Prefactor::Original, &total, &cell, &mut fft).unwrap();
+    let h = dft_physics::hartree::evaluate(&n, &cell, &mut fft).unwrap();
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let state = refstart::start(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                comm,
+            )
+            .unwrap();
+            assert_eq!(state.pw92_prefactor, Pw92Prefactor::Original);
+            for (j, i) in state.fields.plane_offsets().into_iter().enumerate() {
+                let expected =
+                    h.potential.as_slice().unwrap()[i].re + x.potential.as_slice().unwrap()[i];
+                assert!((state.potential[j] - state.ionic[j] - expected).abs() < 2e-12);
+                assert!((state.density[j] - n.as_slice().unwrap()[i]).abs() < 2e-14);
+            }
+            // Fixed-density setup goes through electronic_map::fields, unlike
+            // the Gamma startup path above. Both must retain Original with NLCC.
+            let fixed_options = ScfOptions {
+                bands: Some(5),
+                ..options.clone()
+            };
+            let points = [dft_geometry::kpoints::KPoint {
+                fractional: [0.13, 0.07, -0.11],
+                weight: 1.,
+            }];
+            let (fixed, potential) = refstart::start_kpoints_from_density(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &fixed_options,
+                },
+                std::slice::from_ref(&n),
+                &points,
+                comm,
+            )
+            .unwrap();
+            for (j, i) in fixed.fields.plane_offsets().into_iter().enumerate() {
+                let expected =
+                    h.potential.as_slice().unwrap()[i].re + x.potential.as_slice().unwrap()[i];
+                assert!((potential[0][j] - fixed.ionic[j] - expected).abs() < 2e-12);
+            }
+        });
+    }
+}

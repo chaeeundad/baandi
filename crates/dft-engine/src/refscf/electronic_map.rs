@@ -36,6 +36,11 @@ impl Workspace {
         spin: bool,
         functional: Functional,
     ) -> Result<Self, ScfError> {
+        if spin && state.pw92_prefactor == crate::Pw92Prefactor::Original {
+            return Err(ScfError::InvalidInput(
+                "original PW92 prefactor requires unpolarized PBE",
+            ));
+        }
         let local = (|| -> Result<_, ScfError> {
             let len = state.density.len();
             if !spin || len == 0 {

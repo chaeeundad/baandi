@@ -73,22 +73,8 @@ impl OccupationWorkspace {
         self.policy.theta_ha
     }
 }
-#[derive(Clone, Copy, Debug)]
-pub struct ThermodynamicLedger {
-    pub internal_energy_ha: f64,
-    /// Positive TS; the correction in the free-energy ledger is its negative.
-    pub entropy_term_ha: f64,
-    pub free_energy_ha: f64,
-}
-impl ThermodynamicLedger {
-    pub fn new(energy: f64, entropy_term: f64) -> Self {
-        Self {
-            internal_energy_ha: energy,
-            entropy_term_ha: entropy_term,
-            free_energy_ha: energy - entropy_term,
-        }
-    }
-}
+pub use crate::model::ThermodynamicLedger;
+
 #[derive(Clone, Debug)]
 pub struct FiniteTCertificate {
     pub passed: bool,
@@ -122,36 +108,7 @@ pub struct FiniteTResult {
     /// Eigen tolerance of every step's solve, Ha.
     pub requested_eigen_tolerances: Vec<f64>,
 }
-pub(super) fn validate_options(
-    options: &ScfOptions,
-    theta_ha: f64,
-    band_cap: usize,
-) -> Result<(), ScfError> {
-    if !theta_ha.is_finite() || theta_ha <= 0.0 {
-        return Err(ScfError::InvalidInput(
-            "occupations.smearing: require positive finite theta; use fixed for zero temperature",
-        ));
-    }
-    if band_cap == 0 || options.bands.is_some_and(|b| b > band_cap) {
-        return Err(ScfError::InvalidInput(
-            "occupations.band_cap: require a positive cap at least as large as requested bands",
-        ));
-    }
-    if options.density_tolerance > 1e-7
-        || options.energy_tolerance > 1e-8
-        || options.eigen_tolerance > 1e-8
-    {
-        return Err(ScfError::InvalidInput(
-            "occupations.certificate: tolerances exceed approved caps; use density<=1e-7 and energy/eigen<=1e-8 Ha",
-        ));
-    }
-    if options.spectral_guard != crate::SpectralGuard::Off {
-        return Err(ScfError::InvalidInput(
-            "occupations.spectral_guard: finite-T guard unavailable; use off",
-        ));
-    }
-    Ok(())
-}
+pub(crate) use crate::model::spin::validate_options;
 pub struct FiniteTProblem {
     problem: ScfProblem,
     occupations: OccupationWorkspace,

@@ -12,11 +12,16 @@ use super::{
     profile::{Profile, next_ethr_ry},
     record::{CorrectionRecord, Record, SolveRecord, VerificationCost, VerificationEnergy},
 };
+use crate::Functional;
 use crate::{
+    model::*,
     refstart::{self, KStartState as StartState, StartInput},
-    scf::*,
 };
+use dft_geometry::Cell;
 use dft_mpi::Collective;
+use dft_physics::data::{Complex64, ComplexMatrix};
+use dft_solvers::EigenSolution;
+use std::time::{Duration, Instant};
 
 use super::driver::{Run, VerificationPredictor, contraction_prediction};
 use dft_geometry::kpoints::{self, KPoint};

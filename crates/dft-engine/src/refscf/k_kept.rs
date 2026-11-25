@@ -1,6 +1,6 @@
 //! Exact per-k X/HX/potential cache. Verification borrows without publishing.
 use super::{kept_hx::Report, numerical};
-use crate::{ScfError, refstart::KStartState};
+use crate::{model::ScfError, refstart::KStartState};
 use dft_mpi::Collective;
 use dft_numerics::linalg::ComplexMatrix;
 use dft_physics::distributed_complex::DistributedComplexHamiltonian;

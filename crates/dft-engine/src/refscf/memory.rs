@@ -2,7 +2,7 @@
 //! I/O, JSON, or sampling in elementwise kernels. Each counter is an independent
 //! component maximum; adding them does NOT produce a simultaneous peak or RSS.
 use super::numerical;
-use crate::ScfError;
+use crate::model::ScfError;
 use dft_mpi::Collective;
 use std::{cell::Cell, marker::PhantomData, rc::Rc};
 

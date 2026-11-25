@@ -4,7 +4,7 @@ use super::{
     numerical,
     record::{Record, SetupTimings},
 };
-use crate::{ScfError, refstart::StartFields};
+use crate::{model::ScfError, refstart::StartFields};
 use dft_basis::{FftGridSpec, HalfSphere, PlaneWaveBasis};
 use dft_mpi::Collective;
 use dft_numerics::RealMatrix;
@@ -47,7 +47,7 @@ impl Seed {
         fields: &StartFields,
         comm: &K,
     ) -> Result<(Vec<Complex64>, RealMatrix), ScfError> {
-        let complex_map = crate::cutoff_ladder::prolong_indices(&self.basis, basis)?;
+        let complex_map = crate::refscf::prolong::prolong_indices(&self.basis, basis)?;
         let mut fine_pair = vec![usize::MAX; basis.vectors().len()];
         for (p, &g) in half.plus().iter().enumerate() {
             fine_pair[g as usize] = p;
@@ -79,7 +79,7 @@ impl Seed {
         for i in 0..cd[0] {
             for j in 0..cd[1] {
                 for k in 0..cd[2] {
-                    let signed = crate::cutoff_ladder::prolong_frequency;
+                    let signed = crate::refscf::prolong::prolong_frequency;
                     let next = match (signed(i, cd[0]), signed(j, cd[1]), signed(k, cd[2])) {
                         (Some(a), Some(b), Some(c)) => {
                             let [x, y, z] =
@@ -175,7 +175,9 @@ fn inject_rows<K: Collective>(
 mod tests {
     use super::*;
     use crate::{
-        GammaReal, ScfOptions, SpeciesPotential,
+        SpeciesPotential,
+        model::GammaReal,
+        model::ScfOptions,
         refstart::{self, StartInput},
     };
     use dft_numerics::linalg::ComplexMatrix;
@@ -260,10 +262,10 @@ mod tests {
                         .unwrap();
                 }
                 let expected =
-                    crate::cutoff_ladder::prolong_orbitals(&coarse.basis, &fine.basis, &complex)
+                    crate::refscf::prolong::prolong_orbitals(&coarse.basis, &fine.basis, &complex)
                         .unwrap();
                 let map =
-                    crate::cutoff_ladder::prolong_indices(&coarse.basis, &fine.basis).unwrap();
+                    crate::refscf::prolong::prolong_indices(&coarse.basis, &fine.basis).unwrap();
                 let seed = Seed {
                     basis: coarse.basis,
                     grid: coarse.grid,
@@ -320,7 +322,7 @@ mod tests {
                 let planes = fine.fields.inverse(comm, &g).unwrap();
                 let density = fine.fields.gather(comm, &planes).unwrap();
                 let oracle =
-                    crate::cutoff_ladder::prolong_density(&coarse_density, fine.grid.dims())
+                    crate::refscf::prolong::prolong_density(&coarse_density, fine.grid.dims())
                         .unwrap();
                 for (a, b) in density.iter().zip(&oracle) {
                     assert!((a - b).abs() < 1e-15);

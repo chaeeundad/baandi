@@ -1,7 +1,7 @@
 //! Reference SCF facade. Adapters own input parsing and output formatting; this
 //! module owns dispatch, derivative delivery and fixed-cell continuation.
 use super::{delivered, driver, electronic, profile::Profile, symmetry};
-use crate::{ScfError, ScfOutcome, ScfResult, refstart::StartInput};
+use crate::{model::ScfError, model::ScfOutcome, model::ScfResult, refstart::StartInput};
 use dft_geometry::kpoints::KPoint;
 
 pub use delivered::IonicSeed;
@@ -370,7 +370,7 @@ pub fn ionic_seed(input: StartInput<'_>, result: &ScfResult) -> Result<IonicSeed
 #[cfg(test)]
 mod seeded_symmetry_tests {
     use super::*;
-    use crate::{ScfOptions, SpeciesPotential};
+    use crate::{SpeciesPotential, model::ScfOptions};
     use dft_geometry::{Atom, Cell};
 
     #[test]

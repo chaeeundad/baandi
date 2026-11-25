@@ -1,5 +1,6 @@
 //! Weighted Bloch, spin-unpolarized insulating LDA-PZ SCF and energy audit.
 pub mod energy;
+pub mod model;
 pub mod scf;
 pub use scf::*;
 

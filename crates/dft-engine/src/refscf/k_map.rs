@@ -4,8 +4,10 @@ use super::{
     numerical,
 };
 use crate::{
-    Functional, PhaseTimings, ScfError,
+    Functional,
     energy::EnergyAudit,
+    model::PhaseTimings,
+    model::ScfError,
     refstart::{KOrbitals, KStartState},
 };
 use dft_geometry::Cell;

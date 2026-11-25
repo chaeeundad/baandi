@@ -273,6 +273,7 @@ pub(super) async fn run_continuation<K: Collective>(
     setup.collective_s += prep_comm.seconds();
     let start_time = start.elapsed();
     setup.total_s = stage_start.elapsed().as_secs_f64();
+    let mut stalls = Vec::with_capacity(o.max_iterations);
     let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
     let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
@@ -856,6 +857,28 @@ pub(super) async fn run_continuation<K: Collective>(
             variational_hartree_ha: vh,
             variational_xc_ha: vx,
         });
+        if super::stall::detected(records.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
+            let high = step
+                .solve
+                .per_k
+                .iter()
+                .map(|b| b.eigenvalues[occupied - 1])
+                .fold(f64::NEG_INFINITY, f64::max);
+            let low = step
+                .solve
+                .per_k
+                .iter()
+                .map(|b| b.eigenvalues[occupied])
+                .fold(f64::INFINITY, f64::min);
+            let gaps = [Some(low - high), None];
+            let diagnostic = super::stall::Diagnostic {
+                iteration,
+                channel_gap_ha: gaps,
+                orbital_rotation_fraction: None,
+            };
+            map_report.stall = Some(diagnostic);
+            stalls.push(diagnostic);
+        }
         map_report.safe_point = failure.is_none();
         if finish || failure.is_some() || iteration == o.max_iterations {
             boundary.publish(map_report);
@@ -1001,6 +1024,7 @@ pub(super) async fn run_continuation<K: Collective>(
             output.total_s = clock.elapsed().as_secs_f64();
             let qe_clock = Vec::new();
             return Ok(Run {
+                stalls,
                 start_report: state.common.report,
                 symmetry: symmetry.map(|s| s.report),
                 verification_k_call_indices,

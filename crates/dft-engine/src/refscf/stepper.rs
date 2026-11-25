@@ -43,6 +43,8 @@ pub struct StepReport {
     /// False while an ordinary candidate awaits verification or a first-map
     /// retry. No mixing/control intervention is legal at such a boundary.
     pub safe_point: bool,
+    /// Always-on, observational warning at an ordinary map boundary.
+    pub stall: Option<super::stall::Diagnostic>,
 }
 
 impl StepReport {
@@ -65,6 +67,7 @@ impl StepReport {
             h_columns,
             reused: false,
             safe_point: false,
+            stall: None,
         }
     }
 }

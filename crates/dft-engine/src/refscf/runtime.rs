@@ -295,6 +295,7 @@ mod tests {
             h_columns: 4,
             reused: false,
             safe_point,
+            stall: None,
         }
     }
     #[test]

@@ -208,3 +208,24 @@ exits 0 against the updated reference baseline; adding
 also exits 0. Every case has zero energy difference and identical density SHA-256.
 The Gamma-only `BAANDI_XC_SCREEN_NEGATIVE=off` check against the saved original
 baseline exits 0. No oracle or non-Gamma baseline entry was changed.
+
+## G4G mask investigation: no functional change (2026-11-25)
+
+The synthetic six-electron no-core PBE reproducer has 23 ordinary steps with
+mixing fractions below 1e-8; all 23 have an unchanged input mask. Its maximum
+per-channel screened input charge is 2.4190329430757437e-11 e. Mask changes are
+measured by comparing actual bits, including half-core when present, not by
+comparing only counts. This does not prove a smooth PBE map or eliminate GGA
+vacuum sensitivity. Turning screening off in the convex-anchor mixing
+experiment still fails to converge in 200 maps. No smoothing/hysteresis or
+threshold/budget change is justified by these negative results.
+
+Removing the positivity limiter altogether reaches a screened-charge budget
+failure (7.25776688795010203e-4 e versus 6e-4 e); bounding by the existing
+integrated budget avoids that rejection but does not converge. Both experiments
+were removed. The [G4G record](../design/reference-scf.md#g4g-isolated-open-shell-stall-investigation-2026-11-25-initial-investigation)
+contains full per-map evidence, rejected candidates, and the remaining diagnosis
+boundary. The follow-up verifies a fixed-moment FD demonstration in the engine;
+its proposed early gap rejection was withdrawn after architect review. The
+rotation probe and observational stall warnings do not modify this ADR's
+screened functional, masks, threshold or charge budget. See the linked continuation.

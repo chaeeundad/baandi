@@ -29,7 +29,9 @@ pub mod profile;
 pub mod prolong;
 pub mod qe_reference;
 pub mod record;
+mod rotation;
 pub mod runtime;
+pub mod stall;
 pub mod stepper;
 pub mod symmetry;
 

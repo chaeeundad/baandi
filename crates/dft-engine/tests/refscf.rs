@@ -8962,3 +8962,286 @@ fn r6c_kinetic_start_supports_kpoints_and_fixed_density() {
         assert_eq!(fixed.initial_h_columns, 5);
     });
 }
+
+// G4G: synthetic analytic Gaussian projectors, no external pseudopotential.
+#[test]
+#[ignore = "vacuum SCF: cargo test --release -p dft-engine --test refscf g4g_atom -- --ignored --nocapture"]
+fn g4g_atom() {
+    g4g_atom_case(false);
+}
+
+#[test]
+#[ignore = "vacuum FD SCF: cargo test --release -p dft-engine --test refscf g4g_atom_fd -- --ignored --nocapture"]
+fn g4g_atom_fd() {
+    g4g_atom_case(true);
+}
+
+fn g4g_atom_case(fd: bool) {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::SpinSector,
+        refscf::electronic::{self, Policy, Trace},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let size: f64 = std::env::var("G4G_SIZE")
+        .ok()
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(16.);
+    let z: usize = std::env::var("G4G_Z")
+        .ok()
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(6);
+    let cell = Cell::from_user_rows_bohr([[size, 0., 0.], [0., size, 0.], [0., 0., size]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let rc = std::env::var("G4G_RC")
+        .ok()
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(1.);
+    let pp = g4g_potential(z as f64, rc);
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let bands = if fd {
+        std::env::var("G4G_BANDS")
+            .ok()
+            .map(|s| s.parse().unwrap())
+            .unwrap_or(32)
+    } else {
+        6
+    };
+    let options = ScfOptions {
+        functional: if std::env::var("G4G_LDA").is_ok() {
+            Functional::LdaPw
+        } else {
+            Functional::Pbe
+        },
+        allow_functional_override: true,
+        cutoff_hartree: std::env::var("G4G_CUTOFF")
+            .ok()
+            .map(|s| s.parse().unwrap())
+            .unwrap_or(6.),
+        bands: Some(bands),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Uniform,
+        max_iterations: 200,
+        verification: dft_engine::Verification::FixedPoint,
+        ..ScfOptions::default()
+    };
+    let config = dft_numerics::switches::RunConfig::from_pairs(&[(
+        "xc_screen_negative",
+        &std::env::var("G4G_SCREEN").unwrap_or_else(|_| "on".into()),
+    )])
+    .unwrap();
+    let _scope = config.enter();
+    let mut trace = if fd {
+        Trace::default()
+    } else {
+        Trace::with_rotation_probe(
+            vec![[1, 0, 1, 2], [1, 0, 1, 3]],
+            std::env::var("G4G_ANGLE")
+                .ok()
+                .map(|v| v.parse().unwrap())
+                .unwrap_or(1e-3),
+        )
+    };
+    let result = electronic::run_with_trace(
+        StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        },
+        Profile::default(),
+        &points,
+        {
+            let sector = SpinSector {
+                n_up: if z == 1 { 1 } else { 4 },
+                n_down: if z == 1 { 0 } else { 2 },
+                axis_cartesian: [0., 0., 1.],
+                initial_moment_seed: None,
+            };
+            if fd {
+                Policy::SpinFermiDirac {
+                    sector,
+                    theta_ha: std::env::var("G4G_THETA")
+                        .ok()
+                        .map(|s| s.parse().unwrap())
+                        .unwrap_or(0.02),
+                    constraint: dft_physics::occupations::Constraint::FixedMoment(if z == 1 {
+                        1.
+                    } else {
+                        2.
+                    }),
+                    band_cap: bands,
+                }
+            } else {
+                Policy::FixedSpin(sector)
+            }
+        },
+        &Serial,
+        Some(&mut trace),
+    );
+    for t in trace.records() {
+        eprintln!(
+            "G4G fd={fd} map={} redo={} verify={} dr2_ha={:.17e} F_ha={:.17e} fraction={:.17e} condition={:?} drops={} screened={} mask_changes={} screened_charge_e={:?} gaps_ha={:?} edge_residual_ha={:?} occupied_loss={:?} rotation_fraction={:?} rotation_rank={}",
+            t.iteration,
+            t.redo,
+            t.verification,
+            0.5 * t.estimator_terms_ry.iter().sum::<f64>() + t.stiffness_ha,
+            t.free_energy_ha,
+            t.mixing_fraction,
+            t.condition,
+            t.dropped_pairs,
+            t.input_screened_points,
+            t.input_mask_changes,
+            t.input_screened_charge_electrons,
+            t.channel_gap_ha,
+            t.channel_edge_residual_ha,
+            t.occupied_subspace_loss,
+            t.rotation_fraction,
+            t.rotation_rank
+        );
+    }
+    let r = result.unwrap();
+    assert!((r.moment_mu_b - 2.).abs() < 1e-10);
+    assert!((r.channel_electrons[0] - 4.).abs() < 1e-10);
+    assert!((r.channel_electrons[1] - 2.).abs() < 1e-10);
+    eprintln!(
+        "G4G converged={} maps={} energy_ha={:.17e} F_ha={:.17e} M={} verification={:?}",
+        r.converged,
+        r.history.len(),
+        r.energy.total_hartree(),
+        r.thermodynamics.free_energy_ha,
+        r.moment_mu_b,
+        r.verification.as_ref().map(|v| v
+            .attempts
+            .iter()
+            .map(|a| (a.iteration, a.passed, a.coulomb_error_ha))
+            .collect::<Vec<_>>())
+    );
+    if fd {
+        assert!(r.converged);
+        assert!(r.verification.unwrap().attempts.last().unwrap().passed);
+    } else {
+        assert!(!r.converged);
+        assert_eq!(r.history.len(), 200);
+    }
+}
+fn g4g_potential(z: f64, rc: f64) -> dft_upf::Pseudopotential {
+    let with_core = false;
+    let well = std::env::var("G4G_WELL")
+        .ok()
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(10.);
+    let base = common::potential_with_atomic_start(z, rc, true, 401, "PBE");
+    let r = base.mesh().r();
+    let array = |v: &[f64]| {
+        v.iter()
+            .map(|v| format!("{v:.17e}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let sample = |f: &dyn Fn(f64) -> f64| array(&r.iter().map(|&r| f(r)).collect::<Vec<_>>());
+    let mut beta = String::new();
+    for (j, l) in [0, 0, 1].into_iter().enumerate() {
+        let i = j + 1;
+        beta.push_str(&format!("<PP_BETA.{i} index=\"{i}\" angular_momentum=\"{l}\" cutoff_radius=\"12\" cutoff_radius_index=\"401\">{}</PP_BETA.{i}>", sample(&|r| r.powi(l+1)*(-r*r/i as f64).exp())));
+    }
+    let core = if with_core {
+        format!(
+            "<PP_NLCC>{}</PP_NLCC>",
+            sample(&|r| (0.5 / PI).powf(1.5) * (-0.5 * r * r).exp())
+        )
+    } else {
+        String::new()
+    };
+    dft_upf::parse_upf(&format!(r#"<UPF version="2.0.1"><PP_INFO>SYNTHETIC G4G localized Gaussian ion</PP_INFO>
+<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx" pseudo_type="NC" relativistic="scalar" is_ultrasoft="F" is_paw="F" is_coulomb="F" has_so="F" has_wfc="F" has_gipaw="F" core_correction="{}" functional="PBE" z_valence="{z}" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="1" l_max_rho="0" l_local="-1" mesh_size="401" number_of_wfc="2" number_of_proj="3"/>
+<PP_MESH mesh="401"><PP_R>{}</PP_R><PP_RAB>{}</PP_RAB></PP_MESH>
+<PP_LOCAL>{}</PP_LOCAL><PP_NONLOCAL>{beta}<PP_DIJ>2 0.4 0 0.4 4 0 0 0 6</PP_DIJ></PP_NONLOCAL>
+<PP_RHOATOM>{}</PP_RHOATOM>{core}<PP_PSWFC>
+<PP_CHI.1 l="0" label="s" occupation="1">{}</PP_CHI.1><PP_CHI.2 l="1" label="p" occupation="0">{}</PP_CHI.2>
+</PP_PSWFC></UPF>"#, if with_core {"T"} else {"F"}, array(r), array(base.mesh().rab()),
+        array(&base.local_hartree().iter().zip(r).map(|(v,r)|2.*(v - well * (-r*r).exp())).collect::<Vec<_>>()),
+        sample(&|r|z*4.*PI*r*r*(1./PI).powf(1.5)*(-r*r).exp()),
+        sample(&|r|r*(-0.6*r*r).exp()), sample(&|r|r*r*(-0.5*r*r).exp()))).unwrap()
+}
+
+#[test]
+fn g4g_trace_is_observational() {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::SpinSector,
+        refscf::electronic::{self, Policy, Trace},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = g4c_potential(false);
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        cutoff_hartree: 2.5,
+        bands: Some(4),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Atomic,
+        verification: dft_engine::Verification::FixedPoint,
+        max_iterations: 200,
+        ..ScfOptions::default()
+    };
+    let config =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "on")]).unwrap();
+    for ranks in [1, 3] {
+        dft_mpi::simulate(ranks, |comm| {
+            let _scope = config.enter();
+            let run = |trace| {
+                electronic::run_with_trace(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    Profile::default(),
+                    &points,
+                    Policy::FixedSpin(SpinSector {
+                        n_up: 1,
+                        n_down: 0,
+                        axis_cartesian: [0., 0., 1.],
+                        initial_moment_seed: None,
+                    }),
+                    comm,
+                    trace,
+                )
+                .unwrap()
+            };
+            let plain = run(None);
+            let mut trace = Trace::with_rotation_probe(vec![[0, 0, 0, 1]], 1e-3);
+            let traced = run(Some(&mut trace));
+            assert!(traced.converged && traced.verification.as_ref().unwrap().passed());
+            assert_eq!(g4b_fingerprint(&plain), g4b_fingerprint(&traced));
+            assert!(!trace.records().is_empty());
+            assert!(
+                trace
+                    .records()
+                    .iter()
+                    .filter(|r| !r.verification)
+                    .all(|r| r.input_screened_points > 0)
+            );
+        });
+    }
+}

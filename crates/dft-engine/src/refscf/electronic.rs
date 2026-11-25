@@ -113,6 +113,8 @@ pub struct Iteration {
     pub calls: Vec<(usize, usize, SolveRecord)>,
 }
 pub struct Run {
+    /// Stall events from this invocation (also emitted at step boundaries).
+    pub stalls: Vec<super::stall::Diagnostic>,
     pub start_report: crate::refstart::StartReport,
     pub symmetry: Option<super::symmetry::Report>,
     pub converged: bool,
@@ -157,6 +159,21 @@ pub struct MapTrace {
     pub fd_number_slope_e_per_ha: f64,
     /// Number of combined valence plus half-core channel samples changing mask.
     pub xc_mask_crossings: usize,
+    /// Input mask compared with the preceding ordinary input (not output/verification).
+    pub input_screened_points: usize,
+    pub input_mask_changes: usize,
+    /// Absolute screened input charge by channel, including any immutable core.
+    pub input_screened_charge_electrons: [f64; 2],
+    pub mixing_fraction: f64,
+    /// Sampled indirect gap and maximum edge Ritz residual sum (Ha), fixed sectors only.
+    pub channel_gap_ha: [Option<f64>; 2],
+    pub channel_edge_residual_ha: [Option<f64>; 2],
+    /// max_k (N_occ - ||C_previous^* C_current||_F^2) / N_occ.
+    /// Invariant under phases and rotations within the occupied subspace.
+    pub occupied_subspace_loss: [Option<f64>; 2],
+    /// Fraction of squared residual norm in the explicitly requested rotation span.
+    pub rotation_fraction: Option<f64>,
+    pub rotation_rank: usize,
     pub dropped_pairs: usize,
     pub dropped_conditions: [f64; 25],
 }
@@ -164,12 +181,34 @@ pub struct MapTrace {
 pub struct Trace {
     records: Vec<MapTrace>,
     used: usize,
+    previous_mask: Vec<bool>,
+    mask_seen: bool,
+    mask_counts: Vec<f64>,
+    mask_partition: Vec<usize>,
+    previous_orbitals: Vec<Vec<ComplexMatrix>>,
+    orbitals_seen: bool,
+    overlap_local: Vec<f64>,
+    overlap_global: Vec<f64>,
+    rotation_request: Option<(Vec<[usize; 4]>, f64)>,
+    rotation_probe: Option<super::rotation::Probe>,
 }
 impl Trace {
+    /// Select (channel, k point, occupied band, empty band) pairs, zero based.
+    /// Measures both phase quadratures; it does not assert these are zero modes.
+    pub fn with_rotation_probe(pairs: Vec<[usize; 4]>, angle_radians: f64) -> Self {
+        Self {
+            rotation_request: Some((pairs, angle_radians)),
+            ..Self::default()
+        }
+    }
     pub fn records(&self) -> &[MapTrace] {
         &self.records[..self.used]
     }
-    fn prepare(&mut self, maps: usize, occupations: usize) {
+    fn prepare(&mut self, maps: usize, occupations: usize, samples: usize, ranks: usize) {
+        self.previous_mask = vec![false; samples];
+        self.mask_seen = false;
+        self.mask_counts = vec![0.; 4 * ranks];
+        self.mask_partition = vec![4; ranks];
         self.used = 0;
         self.records = (0..maps)
             .map(|_| MapTrace {
@@ -177,6 +216,127 @@ impl Trace {
                 ..Default::default()
             })
             .collect();
+    }
+    fn prepare_orbitals(&mut self, states: &[crate::refstart::KStartState], policy: &Policy) {
+        if policy.finite().is_none() {
+            self.previous_orbitals = states.iter().map(|s| s.orbitals.0.clone()).collect();
+            let n = (0..policy.channels())
+                .map(|s| policy.fixed_count(s))
+                .max()
+                .unwrap_or(0);
+            self.overlap_local = vec![0.; 2 * n * n];
+            self.overlap_global = vec![0.; 2 * n * n];
+        }
+        self.orbitals_seen = false;
+    }
+    fn spectrum<K: Collective>(
+        &mut self,
+        comm: &K,
+        step: &Map,
+        policy: &Policy,
+    ) -> Result<(), ScfError> {
+        if policy.finite().is_some() {
+            return Ok(());
+        }
+        let record = &mut self.records[self.used - 1];
+        for (s, channel) in step.blocks.iter().enumerate() {
+            let n = policy.fixed_count(s);
+            if n == 0 {
+                continue;
+            }
+            let high = channel
+                .iter()
+                .map(|b| b.eigenvalues[n - 1])
+                .fold(f64::NEG_INFINITY, f64::max);
+            let low = channel
+                .iter()
+                .map(|b| b.eigenvalues[n])
+                .fold(f64::INFINITY, f64::min);
+            record.channel_gap_ha[s] = Some(low - high);
+            record.channel_edge_residual_ha[s] = Some(
+                channel
+                    .iter()
+                    .map(|b| b.residuals[n - 1] + b.residuals[n])
+                    .fold(0., f64::max),
+            );
+            if record.verification {
+                continue;
+            }
+            let mut loss = 0_f64;
+            for (k, b) in channel.iter().enumerate() {
+                let previous = &mut self.previous_orbitals[s][k];
+                if self.orbitals_seen {
+                    loss = loss.max(subspace_loss(
+                        comm,
+                        previous,
+                        &b.orbitals,
+                        n,
+                        &mut self.overlap_local,
+                        &mut self.overlap_global,
+                    )?);
+                }
+                previous
+                    .as_mut_slice()
+                    .copy_from_slice(b.orbitals.as_slice());
+            }
+            if self.orbitals_seen {
+                record.occupied_subspace_loss[s] = Some(loss);
+            }
+        }
+        if !record.verification {
+            self.orbitals_seen = true;
+        }
+        Ok(())
+    }
+    fn input_mask<K: Collective>(
+        &mut self,
+        comm: &K,
+        density: &[Vec<f64>],
+        core: Option<&[f64]>,
+        dv: f64,
+    ) -> Result<(), ScfError> {
+        if !dft_physics::xc::screen_negative() {
+            return Ok(());
+        }
+        let mut counts = [0.; 4];
+        for (j, &n) in density.iter().flatten().enumerate() {
+            let c = core.map_or(0., |c| c[j % density[0].len()] / density.len() as f64);
+            let screened = n + c <= dft_physics::xc::DENSITY_THRESHOLD;
+            counts[0] += f64::from(screened);
+            if screened {
+                counts[2 + j / density[0].len()] += (n + c).abs() * dv;
+            }
+            counts[1] += f64::from(self.mask_seen && self.previous_mask[j] != screened);
+            self.previous_mask[j] = screened;
+        }
+        comm.allgatherv_f64(&counts, &self.mask_partition, &mut self.mask_counts)
+            .map_err(super::numerical)?;
+        let record = &mut self.records[self.used - 1];
+        record.input_screened_points = self
+            .mask_counts
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| c[0] as usize)
+            .sum();
+        record.input_mask_changes = self
+            .mask_counts
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| c[1] as usize)
+            .sum();
+        for s in 0..density.len() {
+            record.input_screened_charge_electrons[s] = self
+                .mask_counts
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| c[2 + s])
+                .sum();
+        }
+        self.mask_seen = true;
+        Ok(())
     }
     #[allow(clippy::too_many_arguments)]
     fn record<K: Collective>(
@@ -220,6 +380,37 @@ impl Trace {
         }
         Ok(())
     }
+}
+/// Fraction of occupied projector weight lost between two maps. Reducing the
+/// complex overlaps before squaring is essential on distributed plane-wave rows.
+fn subspace_loss<K: Collective>(
+    comm: &K,
+    previous: &ComplexMatrix,
+    current: &ComplexMatrix,
+    occupied: usize,
+    local: &mut [f64],
+    global: &mut [f64],
+) -> Result<f64, ScfError> {
+    for i in 0..occupied {
+        for j in 0..occupied {
+            let mut value = C::default();
+            for row in 0..previous.rows() {
+                value += previous[(row, i)].conj() * current[(row, j)];
+            }
+            local[2 * (i * occupied + j)] = value.re;
+            local[2 * (i * occupied + j) + 1] = value.im;
+        }
+    }
+    comm.tree_sum_f64(
+        &local[..2 * occupied * occupied],
+        &mut global[..2 * occupied * occupied],
+    )
+    .map_err(super::numerical)?;
+    let retained: f64 = global[..2 * occupied * occupied]
+        .iter()
+        .map(|v| v * v)
+        .sum();
+    Ok(((occupied as f64 - retained) / occupied as f64).clamp(0., 1.))
 }
 /// Gamma uses the complex solver as required by ONEPATH-3.
 pub fn run(
@@ -492,10 +683,23 @@ pub(super) async fn run_continuation<K: Collective>(
         trace.prepare(
             2 * opts.max_iterations + 1,
             policy.channels() * points.len() * bands,
+            policy.channels() * n[0].len(),
+            comm.size(),
         );
+    }
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.prepare_orbitals(&states, &policy);
+        trace.rotation_probe = trace
+            .rotation_request
+            .as_ref()
+            .map(|(pairs, angle)| {
+                super::rotation::Probe::new(pairs, *angle, &states, &plan, comm, volume)
+            })
+            .transpose()?;
     }
     workspace.symmetry = symmetry;
     let setup_s = clock.elapsed().as_secs_f64();
+    let mut stalls = Vec::with_capacity(opts.max_iterations);
     let mut history = Vec::new();
     let mut verification =
         (opts.verification == Verification::FixedPoint).then(VerificationReport::default);
@@ -630,6 +834,14 @@ pub(super) async fn run_continuation<K: Collective>(
                     redo,
                 )?;
                 trace.records[trace.used - 1].stiffness_ha = stiffness_ha;
+                trace.input_mask(comm, &n, states[0].core_density.as_deref(), dv)?;
+                trace.spectrum(comm, &step, &policy)?;
+                if let Some(probe) = &mut trace.rotation_probe {
+                    let (fraction, rank) =
+                        probe.measure(&mut states, &step, &mut plan, &mut metric, comm, &f)?;
+                    trace.records[trace.used - 1].rotation_fraction = Some(fraction);
+                    trace.records[trace.used - 1].rotation_rank = rank;
+                }
             }
             if iteration == 1 && !redo && dr2 < ethr * electrons.max(1.) {
                 let report = StepReport::new(
@@ -720,6 +932,7 @@ pub(super) async fn run_continuation<K: Collective>(
                     true,
                     false,
                 )?;
+                trace.spectrum(comm, &fresh, &policy)?;
             }
             let base_error = metric.norm(comm, &residual)? / 2.;
             let stiffness_ha = if stiffness {
@@ -862,6 +1075,9 @@ pub(super) async fn run_continuation<K: Collective>(
             n = proposal;
             warm(&mut states, &step);
         }
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.records[ordinary_trace.unwrap()].mixing_fraction = mixing_fraction;
+        }
         history.push(Iteration {
             iteration,
             dr2_ry: dr2,
@@ -877,6 +1093,32 @@ pub(super) async fn run_continuation<K: Collective>(
             mixing_fraction,
             calls,
         });
+        if super::stall::detected(history.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
+            let mut gaps = [None; 2];
+            for (s, channel) in step.blocks.iter().enumerate() {
+                let n = policy.fixed_count(s);
+                if n > 0 {
+                    let high = channel
+                        .iter()
+                        .map(|b| b.eigenvalues[n - 1])
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let low = channel
+                        .iter()
+                        .map(|b| b.eigenvalues[n])
+                        .fold(f64::INFINITY, f64::min);
+                    gaps[s] = Some(low - high);
+                }
+            }
+            let diagnostic = super::stall::Diagnostic {
+                iteration,
+                channel_gap_ha: gaps,
+                orbital_rotation_fraction: trace
+                    .as_ref()
+                    .and_then(|t| t.records[ordinary_trace.unwrap()].rotation_fraction),
+            };
+            map_report.stall = Some(diagnostic);
+            stalls.push(diagnostic);
+        }
         map_report.safe_point = true;
         if passed || iteration == opts.max_iterations {
             boundary.publish(map_report);
@@ -901,6 +1143,7 @@ pub(super) async fn run_continuation<K: Collective>(
                 blocks.push(delivered);
             }
             return Ok(Run {
+                stalls,
                 start_report: refstart::StartReport {
                     // Collinear channels use uniform counts, irrespective of the
                     // atomic density used to prepare their initial orbital span.
@@ -1070,4 +1313,81 @@ fn distances<K: Collective>(
         (dv * sums[0]).sqrt() / electrons,
         (dv * sums[1]).sqrt() / electrons,
     ))
+}
+
+#[cfg(test)]
+mod mask_trace_tests {
+    use super::*;
+
+    #[test]
+    fn mask_trace_detects_location_changes_with_unchanged_counts_and_empty_owner() {
+        let config = RunConfig::from_pairs(&[("xc_screen_negative", "on")]).unwrap();
+        dft_mpi::simulate(3, |comm| {
+            let _scope = config.enter();
+            let t = dft_physics::xc::DENSITY_THRESHOLD;
+            let mut trace = Trace::default();
+            let density = if comm.rank() == 0 {
+                vec![vec![0., 2. * t], vec![-t, 4. * t]]
+            } else {
+                vec![vec![], vec![]]
+            };
+            let core = if comm.rank() == 0 {
+                vec![t, 0.]
+            } else {
+                vec![]
+            };
+            trace.prepare(2, 0, density.iter().map(Vec::len).sum(), comm.size());
+            trace.used = 1;
+            trace.input_mask(comm, &density, Some(&core), 2.).unwrap();
+            assert_eq!(trace.records()[0].input_screened_points, 2);
+            assert_eq!(trace.records()[0].input_mask_changes, 0);
+            assert_eq!(trace.records()[0].input_screened_charge_electrons, [t, t]);
+            let next = if comm.rank() == 0 {
+                vec![vec![2. * t, 0.], vec![-t, 4. * t]]
+            } else {
+                vec![vec![], vec![]]
+            };
+            trace.used = 2;
+            trace.input_mask(comm, &next, Some(&core), 2.).unwrap();
+            assert_eq!(trace.records()[1].input_screened_points, 2);
+            assert_eq!(trace.records()[1].input_mask_changes, 2);
+            assert_eq!(trace.records()[1].input_screened_charge_electrons, [0., t]);
+        });
+    }
+}
+
+#[cfg(test)]
+mod gap_tests {
+    use super::*;
+    #[test]
+    fn occupied_projector_overlap_ignores_gauge_but_detects_empty_band_rotation() {
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let rows: Vec<_> = (0..4).filter(|i| i % ranks == comm.rank()).collect();
+                let mut previous = ComplexMatrix::zeros(rows.len(), 2).unwrap();
+                let mut current = previous.clone();
+                for (i, &row) in rows.iter().enumerate() {
+                    for j in 0..2 {
+                        previous[(i, j)] = C::new(f64::from(row == j), 0.);
+                    }
+                    // Swap the occupied basis and apply complex phases: same projector.
+                    current[(i, 0)] = C::new(0., f64::from(row == 1));
+                    current[(i, 1)] = C::new(-f64::from(row == 0), 0.);
+                }
+                let (mut local, mut global) = (vec![0.; 8], vec![0.; 8]);
+                assert_eq!(
+                    subspace_loss(comm, &previous, &current, 2, &mut local, &mut global).unwrap(),
+                    0.
+                );
+                for (i, &row) in rows.iter().enumerate() {
+                    current[(i, 0)] = C::new(f64::from(row == 0), 0.);
+                    current[(i, 1)] = C::new(f64::from(row == 2), 0.);
+                }
+                assert_eq!(
+                    subspace_loss(comm, &previous, &current, 2, &mut local, &mut global).unwrap(),
+                    0.5
+                );
+            });
+        }
+    }
 }

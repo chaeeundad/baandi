@@ -129,3 +129,29 @@ The candidate stopping changes were removed and L1/G4D_FALLBACK remains.
 Non-mutating traces and the full negative result are recorded under
 [Spin and Fermi-Dirac](../design/reference-scf.md#spin-and-fermi-dirac).
 History conditioning, G4F screening probes and acceptance bounds are unchanged.
+
+## G4G fixed-sector investigation: no policy extension (2026-11-25)
+
+A six-electron no-core PBE Gaussian-projector atom reproduces fraction collapse
+and a residual floor in 200 maps. Temporarily applying this ADR to fixed
+sectors still exhausts 200 maps (last dr2 1.29841626896237752e-7 Ha), including
+40 fractions below 1e-8 with no simultaneous input-mask changes. Combining it
+with feasibility or charge-budget candidates also fails. Those candidates
+were removed; the accepted collinear-FD-only scope is unchanged. No claim is
+made that conditioning is unnecessary, only that it is insufficient here.
+See the [complete experiment and per-map evidence](../design/reference-scf.md#g4g-isolated-open-shell-stall-investigation-2026-11-25-initial-investigation).
+The actual dev08 O HGH case has not been rerun. The follow-up verifies a
+fixed-moment FD demonstration. The proposed early gap gate was withdrawn after
+architect review: the loose startup Ritz tolerance must not reject small-gap
+insulators. Original convergence-only gap checks remain unchanged.
+
+The rotation follow-up adds an always-on observational warning to all reference
+entries: three consecutive ordinary-map transitions with condition > 1e12 and
+non-decreasing dr2. Three filters isolated spikes and one/two-map plateaus;
+this is a diagnostic persistence policy, not an accuracy threshold. Each event
+records sampled channel gaps and an optional explicitly measured orbital-rotation
+projection, and recommends fixed-moment FD or a symmetry-breaking start.
+No history is reset, no update is projected, and no stop is forced. Missing
+projection means unmeasured, never zero. See the linked design for the projection
+evidence and why a zero-mode remedy is not yet justified. This does not extend
+history conditioning.

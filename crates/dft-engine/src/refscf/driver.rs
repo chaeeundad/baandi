@@ -64,6 +64,8 @@ impl VerificationPredictor {
 }
 
 pub struct Run {
+    /// Stall events from this invocation (also emitted at step boundaries).
+    pub stalls: Vec<super::stall::Diagnostic>,
     pub start_report: crate::refstart::StartReport,
     pub symmetry: Option<super::symmetry::Report>,
     pub verification_k_call_indices: Vec<usize>,
@@ -381,6 +383,7 @@ async fn run_stage<K: Collective>(
     setup.collective_s += prep_comm.seconds();
     let start_time = start.elapsed();
     setup.total_s = stage_start.elapsed().as_secs_f64();
+    let mut stalls = Vec::with_capacity(o.max_iterations);
     let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
     let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
@@ -929,6 +932,19 @@ async fn run_stage<K: Collective>(
             variational_hartree_ha: vh,
             variational_xc_ha: vx,
         });
+        if super::stall::detected(records.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
+            let gaps = [
+                Some(step.solve.eigenvalues[occupied] - step.solve.eigenvalues[occupied - 1]),
+                None,
+            ];
+            let diagnostic = super::stall::Diagnostic {
+                iteration,
+                channel_gap_ha: gaps,
+                orbital_rotation_fraction: None,
+            };
+            map_report.stall = Some(diagnostic);
+            stalls.push(diagnostic);
+        }
         map_report.safe_point = failure.is_none();
         if finish || failure.is_some() || iteration == o.max_iterations {
             if !coarse {
@@ -1124,6 +1140,7 @@ async fn run_stage<K: Collective>(
                 )
             });
             return Ok(StageRun::Fine(Box::new(Run {
+                stalls,
                 start_report: state.report,
                 symmetry: None,
                 verification_k_call_indices: Vec::new(),

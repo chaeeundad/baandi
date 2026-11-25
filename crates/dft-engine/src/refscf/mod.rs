@@ -7,6 +7,7 @@
 //! J. Furthmueller, Phys. Rev. B 54, 11169 (1996).
 //! No legacy session or ladder control flow is used here. The map adapter still
 //! reuses the Hamiltonian/density kernels and the new reference Davidson.
+pub mod api;
 pub mod broyden;
 pub mod delivered;
 pub mod density;

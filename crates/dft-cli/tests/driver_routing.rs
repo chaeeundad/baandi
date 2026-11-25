@@ -44,7 +44,6 @@ fn reason(key: &str) -> &'static str {
         "EXTRAPOLATION" => route::EXTRAPOLATION,
         "CHECKPOINT" => route::CHECKPOINT,
         "LEGACY_INPUT" => route::LEGACY_INPUT,
-        "COMPAT" => route::COMPAT,
         "ATOMIC_DATA" => route::ATOMIC_DATA,
         _ => panic!("unknown reason {key}"),
     }

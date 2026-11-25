@@ -177,6 +177,26 @@ pub fn evaluate<K: Collective, F: Fields<K>>(
     density: &[f64],
     density_g: &[C],
 ) -> Result<XcSlab, F::Error> {
+    evaluate_pw92(
+        crate::pbe_pw92::Pw92Prefactor::Modified,
+        fields,
+        comm,
+        cell,
+        density,
+        density_g,
+    )
+}
+
+/// Select the existing unpolarized PBE correlation convention. Modified keeps
+/// the original library call and arithmetic; Original reuses the serial adapter.
+pub fn evaluate_pw92<K: Collective, F: Fields<K>>(
+    prefactor: crate::pbe_pw92::Pw92Prefactor,
+    fields: &mut F,
+    comm: &K,
+    cell: &Cell,
+    density: &[f64],
+    density_g: &[C],
+) -> Result<XcSlab, F::Error> {
     agree(
         comm,
         density.len() != fields.plane_points(),
@@ -245,7 +265,19 @@ pub fn evaluate<K: Collective, F: Fields<K>>(
                 .map_err(|e| PhysicsError::Xc(e.to_string()))
         };
         let x = eval(FunctionalId::GgaXPbe)?;
-        let c = eval(FunctionalId::GgaCPbe)?;
+        let c = match prefactor {
+            crate::pbe_pw92::Pw92Prefactor::Modified => {
+                let c = eval(FunctionalId::GgaCPbe)?;
+                super::CorrelationGrid {
+                    exc: c.exc,
+                    vrho: c.vrho,
+                    vsigma: c.vsigma,
+                }
+            }
+            crate::pbe_pw92::Pw92Prefactor::Original => {
+                super::correlation_grid(&rho, &sigma, prefactor)
+            }
+        };
         let energy = cell.volume_bohr3() / fields.dims().iter().product::<usize>() as f64
             * Array1::from_iter(
                 rho.iter()

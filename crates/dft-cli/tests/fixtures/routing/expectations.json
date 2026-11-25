@@ -23,7 +23,7 @@
   "finding07-original-prefactor": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "COMPAT",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
@@ -240,7 +240,7 @@
   "l10-compat": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "COMPAT",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

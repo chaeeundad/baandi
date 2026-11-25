@@ -78,6 +78,7 @@ pub(super) fn fields<K: Collective>(
     let pbe = if functional == Functional::Pbe {
         Some(if let Some(core) = &mut state.pbe_core {
             core.evaluate(
+                state.pw92_prefactor,
                 &mut state.fields,
                 comm,
                 cell,
@@ -86,7 +87,14 @@ pub(super) fn fields<K: Collective>(
                 state.core_density.as_ref().unwrap(),
             )?
         } else {
-            dft_physics::gga::distributed::evaluate(&mut state.fields, comm, cell, density, &coeff)?
+            dft_physics::gga::distributed::evaluate_pw92(
+                state.pw92_prefactor,
+                &mut state.fields,
+                comm,
+                cell,
+                density,
+                &coeff,
+            )?
         })
     } else {
         None

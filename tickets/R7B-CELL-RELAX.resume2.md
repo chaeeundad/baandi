@@ -1,0 +1,1 @@
+Approved: crates/dft-engine/src/stress.rs is added to OWNED_FILES for the reference cutoff-scan profile fix only. Apply your /tmp/r7b-stress-profile.patch, make the release cell suite pass (all 8), rerun TEST_COMMANDS and the full check (CHECK_SCCACHE=0, BAANDI_TEST_TMP outside the checkout). Report in English; leave changes uncommitted.

@@ -14,9 +14,17 @@ fn comment<'a>(text: &'a str, key: &str) -> &'a str {
 
 #[test]
 fn routing_fixtures_parse_with_current_reference_switch() {
-    let _scope = RunConfig::from_pairs(&[("reference_scf", "on"), ("reference_strict", "off")])
-        .unwrap()
-        .enter();
+    // Pin an environment request: explicit input requests now reject fallback.
+    let _scope = RunConfig::resolve_with(
+        |key| match key {
+            "BAANDI_REFERENCE_SCF" => Some("on".into()),
+            "BAANDI_REFERENCE_STRICT" => Some("off".into()),
+            _ => None,
+        },
+        &[],
+    )
+    .unwrap()
+    .enter();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routing");
     let mut files: Vec<_> = fs::read_dir(root)
         .unwrap()

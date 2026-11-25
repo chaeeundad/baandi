@@ -173,8 +173,19 @@ pub fn explain(path: &Path) -> Result<(), Error> {
     if path.extension().is_some_and(|e| e == "toml")
         && !crate::checkpoint_inspect::recognizes(path)?
     {
-        let config = Config::parse(&std::fs::read_to_string(path)?)?;
+        let config = Config::parse_unvalidated(&std::fs::read_to_string(path)?)?;
         let (_, _scope) = crate::run_config::for_run(&config)?;
+        let preliminary = crate::driver_select::preliminary(&config);
+        let record = preliminary.json();
+        println!(
+            "driver: {} ({}, {})",
+            record["driver"].as_str().unwrap(),
+            record["driver_source"].as_str().unwrap(),
+            preliminary.reason.unwrap_or("no input-only conflict")
+        );
+        // Flush the selection before any validation error is printed on stderr.
+        std::io::Write::flush(&mut std::io::stdout())?;
+        config.validate()?;
         let preflight = crate::config::preflight::check(&config, path)?;
         let upfs = config
             .pseudopotentials
@@ -193,6 +204,7 @@ pub fn explain(path: &Path) -> Result<(), Error> {
             &upfs.iter().collect::<Vec<_>>(),
         );
         selection.announce();
+        selection.validate(&config)?;
         println!("{}", serde_json::json!({"scf":selection.json()}));
         let prepared = config.prepare()?;
         print!("{}", grid_report(&config, &prepared));

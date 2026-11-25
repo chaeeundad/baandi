@@ -217,6 +217,9 @@ fn xc_cross_checks() {
 
 #[test]
 fn validation_and_thresholds() {
+    let screening =
+        dft_numerics::switches::RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _scope = screening.enter();
     for n in [-1e-14, -1e-16, 0., 1e-12, 1e-10] {
         let p = xc::lda_pz(n).unwrap();
         assert_eq!(p.eps_xc(), 0.);

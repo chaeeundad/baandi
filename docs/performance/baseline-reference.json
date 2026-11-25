@@ -37,64 +37,66 @@
   "gamma": {
    "scf": {
     "driver": "reference",
+    "driver_reason": null,
+    "driver_source": "default",
     "reference_switches": {
      "BAANDI_REFERENCE_SCF": {
       "allowed": "on, off",
       "consulted": true,
-      "default": "off",
+      "default": "on",
       "fallback_reason": null,
-      "meaning": "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)",
+      "meaning": "production driver; off = legacy standard path, deprecated, removed in R10",
       "path": null,
-      "requested": "on",
-      "source": "env",
+      "requested": null,
+      "source": "default",
       "value": "on"
      },
      "BAANDI_REFERENCE_STRICT": {
       "allowed": "on, off",
-      "consulted": false,
+      "consulted": true,
       "default": "off",
       "fallback_reason": null,
       "meaning": "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification",
       "path": null,
-      "requested": "off",
-      "source": "env",
+      "requested": null,
+      "source": "default",
       "value": "off"
      }
     }
    },
-   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkpoints = [[0.0, 0.0, 0.0]]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
-   "input_sha256": "86987c72cad9d15aeabb59a672cf7dbb173724b627f8872be86701bf710877e8",
-   "total_energy_bits_hex": "c01d2e9f89e01bae",
+   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkpoints = [[0.0, 0.0, 0.0]]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\n",
+   "input_sha256": "fe9cf287b7b5b7ed240f12801debea42e82f0cc5e78eabb82a8a1e17d5ec9866",
+   "total_energy_bits_hex": "c01d2e9f89e0349a",
    "operator_applications": 85,
    "davidson_iterations": 13,
    "certificate_applications": 14,
    "certificate_iterations": 3,
    "label": "Gamma only, 30 Ry",
    "wall_s": [
-    0.434228625,
-    0.038277000000000005,
-    0.03839866700000005
+    0.46219429200000006,
+    0.04036470800000003,
+    0.04082624999999995
    ],
-   "wall_median_s": 0.03839866700000005,
-   "engine_total_s": 0.031103417,
+   "wall_median_s": 0.04082624999999995,
+   "engine_total_s": 0.032501459,
    "phases_s": {
-    "density_s": 0.00290925,
-    "diagonalization_s": 0.012627167,
-    "mixing_s": 0.001320208,
-    "potential_s": 0.00069254,
-    "total_energy_s": 0.001555165
+    "density_s": 0.002734,
+    "diagonalization_s": 0.011396792,
+    "mixing_s": 0.001287044,
+    "potential_s": 0.000803667,
+    "total_energy_s": 0.001546748
    },
-   "engine_total_median_s": 0.031132166,
+   "engine_total_median_s": 0.032501459,
    "phase_medians_s": {
-    "density_s": 0.002821167,
-    "diagonalization_s": 0.012328166,
-    "mixing_s": 0.001352582,
-    "potential_s": 0.000741834,
-    "total_energy_s": 0.001405459
+    "density_s": 0.002734,
+    "diagonalization_s": 0.011396792,
+    "mixing_s": 0.001287044,
+    "potential_s": 0.000825708,
+    "total_energy_s": 0.00178275
    },
    "iterations": 7,
-   "total_energy_ha": -7.295530466369128,
-   "density_sha256": "35295c543cfde3e7303c2edfa97a47d4d6999f52607750f355b8145c88e471d7",
+   "total_energy_ha": -7.295530466374794,
+   "density_sha256": "a0c76c8c7741125ad2cf59dee1534a0e4c29bc306002e6de22e56b92c99573e2",
    "effective_profile": "standard",
    "execution": {
     "backend": {
@@ -107,16 +109,7 @@
     "effective_profile": "standard",
     "effective_solver": "reference_block_davidson",
     "lean_solves": 0,
-    "non_default_switches": {
-     "BAANDI_REFERENCE_SCF": {
-      "source": "env",
-      "value": "on"
-     },
-     "BAANDI_REFERENCE_STRICT": {
-      "source": "env",
-      "value": "off"
-     }
-    },
+    "non_default_switches": {},
     "parallel_model": "threads",
     "path_reason": null,
     "path_status": "applied",
@@ -133,10 +126,7 @@
     "standard_threshold_ha": 5e-09,
     "verification": "fixed_point"
    },
-   "switches_not_default": {
-    "BAANDI_REFERENCE_SCF": "on",
-    "BAANDI_REFERENCE_STRICT": "off"
-   }
+   "switches_not_default": {}
   },
   "k222s": {
    "scf": {

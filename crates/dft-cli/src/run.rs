@@ -4525,7 +4525,8 @@ mod tests {
             ("spin-fd-free", true, true),
             ("spin-fd-moment", true, true),
         ] {
-            let mut text = base.to_string();
+            // Fallback is allowed only for an implicit reference request.
+            let mut text = base.replace("driver='reference'\n", "");
             if spin {
                 text = text.replace(
                     "kshift=[0.5,0.5,0.5]",

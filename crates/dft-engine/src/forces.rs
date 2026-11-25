@@ -100,6 +100,7 @@ pub fn require_complete(ledger: &[DerivativeEntry]) -> Result<(), String> {
 
 #[derive(Debug)]
 pub struct ForceResult {
+    pub verification: &'static str,
     pub ledger: Vec<DerivativeEntry>,
     pub units: &'static str,
     pub quantity: &'static str,
@@ -164,7 +165,18 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     let (identity, policy, density, points) = match &state.electronic {
         ElectronicState::Fixed(r) => (
             &r.force_identity,
-            OccupationIdentity::new(&[&r.occupations], None, None),
+            OccupationIdentity::new(
+                &vec![
+                    r.occupations.as_slice();
+                    if r.force_identity.reference_delivery && !r.gamma_real_used {
+                        r.k_points.len()
+                    } else {
+                        1
+                    }
+                ],
+                None,
+                None,
+            ),
             &r.density,
             r.k_points.iter().map(|k| k.point).collect(),
         ),
@@ -307,7 +319,12 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             )
         }
     };
-    if (state.options.standard.is_some() && !verified) || standard {
+    let unverified = matches!(&state.electronic, ElectronicState::Fixed(r)
+        if r.force_identity.unverified_delivery
+            && state.options.verification == crate::Verification::Off
+            && r.standard.is_some()
+            && r.verification.is_none());
+    if !unverified && ((state.options.standard.is_some() && !verified) || standard) {
         return Err(ScfError::InvalidInput(
             "observables.forces: strict convergence profile required, or a passed fixed-point verification on the standard path; rerun with scf.verify = fixed_point (default) or on the strict reference path (BAANDI_REFERENCE_STRICT=on)",
         ));
@@ -320,7 +337,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             "observables.forces: certificate tolerances exceed strict caps; tighten density<=1e-7 and energy/eigen<=1e-8 Ha",
         ));
     }
-    if !certified {
+    if !certified && !unverified {
         return Err(ScfError::InvalidInput(
             "observables.forces: passing fixed-point certificate required; converge the state",
         ));
@@ -495,11 +512,16 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     let mut ewald = ewald::forces(state.cell, &ions, ewald::EwaldOptions::default())?;
     let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
     let mut band_passes = 0;
+    let band_first = dft_numerics::switches::on(dft_numerics::switches::Id::FORCE_BAND_FIRST);
     for (k, occupations) in blocks {
         let basis = state.options.basis(state.cell, k.point.fractional, 1.0)?;
         let operator = NonlocalOperator::new(&basis, volume, &species)?;
         let occupations: Vec<_> = occupations.iter().map(|f| f * k.point.weight).collect();
-        let part = terms::nonlocal(&operator, &basis, &k.solution.eigenvectors, &occupations)?;
+        let part = if band_first {
+            nonlocal_band_first(&operator, &basis, &k.solution.eigenvectors, &occupations)?
+        } else {
+            terms::nonlocal(&operator, &basis, &k.solution.eigenvectors, &occupations)?
+        };
         band_passes += occupations.len();
         for (sum, part) in nonlocal.iter_mut().zip(part) {
             for axis in 0..3 {
@@ -522,6 +544,13 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     }
     let maximum_absolute_component = values.iter().flatten().map(|v| v.abs()).fold(0.0, f64::max);
     Ok(ForceResult {
+        verification: if unverified {
+            "unverified"
+        } else if verified {
+            "verified"
+        } else {
+            "strict_certificate"
+        },
         ledger,
         units: "Ha/Bohr",
         quantity,
@@ -535,6 +564,74 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         elapsed: start.elapsed(),
         band_passes,
     })
+}
+
+/// Stack beta and its three position derivatives into one projector matrix.
+/// One adjoint GEMM per k evaluates all overlaps for every band and atom.
+/// This changes reduction order only; occupations already include k weights.
+pub fn nonlocal_band_first(
+    operator: &NonlocalOperator,
+    basis: &dft_basis::PlaneWaveBasis,
+    orbitals: &ComplexMatrix,
+    occupations: &[f64],
+) -> Result<Vec<[f64; 3]>, ScfError> {
+    use dft_numerics::linalg::{MatrixOp, gemm};
+    let ng = basis.momenta().len();
+    if orbitals.rows() != ng || orbitals.cols() != occupations.len() {
+        return Err(ScfError::InvalidInput("nonlocal forces: orbital shape"));
+    }
+    if occupations.iter().any(|f| !f.is_finite() || *f < 0.) {
+        return Err(ScfError::NonFinite);
+    }
+    let count: usize = operator.atoms().iter().map(|a| a.columns().len()).sum();
+    let mut forces = vec![[0.; 3]; operator.atoms().len()];
+    if count == 0 {
+        return Ok(forces);
+    }
+    let mut projectors =
+        ComplexMatrix::zeros(ng, 4 * count).map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let mut index = 0;
+    for atom in operator.atoms() {
+        for column in atom.columns() {
+            if column.len() != ng {
+                return Err(ScfError::InvalidInput("nonlocal forces: projector shape"));
+            }
+            for (g, (&beta, momentum)) in column.iter().zip(basis.momenta()).enumerate() {
+                projectors[(g, index)] = beta;
+                for axis in 0..3 {
+                    projectors[(g, (axis + 1) * count + index)] =
+                        Complex64::new(0., -momentum.cartesian[axis]) * beta;
+                }
+            }
+            index += 1;
+        }
+    }
+    let overlaps = gemm(&projectors, MatrixOp::Adjoint, orbitals, MatrixOp::Identity)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let mut offset = 0;
+    for (atom, force) in operator.atoms().iter().zip(&mut forces) {
+        let n = atom.columns().len();
+        for (band, &occupation) in occupations.iter().enumerate() {
+            if occupation == 0. {
+                continue;
+            }
+            for p in 0..n {
+                let weighted: Complex64 = (0..n)
+                    .map(|q| atom.coupling_hartree()[p * n + q] * overlaps[(offset + q, band)])
+                    .sum();
+                for (axis, component) in force.iter_mut().enumerate() {
+                    *component -= 2.
+                        * occupation
+                        * (overlaps[((axis + 1) * count + offset + p, band)].conj() * weighted).re;
+                }
+            }
+        }
+        offset += n;
+    }
+    if forces.iter().flatten().any(|f| !f.is_finite()) {
+        return Err(ScfError::NonFinite);
+    }
+    Ok(forces)
 }
 
 /// Polar-vector transformation A R A^-1 and the SCF atom permutation. No

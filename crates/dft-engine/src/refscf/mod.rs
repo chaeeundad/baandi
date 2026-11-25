@@ -8,6 +8,7 @@
 //! No legacy session or ladder control flow is used here. The map adapter still
 //! reuses the Hamiltonian/density kernels and the new reference Davidson.
 pub mod broyden;
+pub mod delivered;
 pub mod density;
 pub mod driver;
 pub mod k_driver;

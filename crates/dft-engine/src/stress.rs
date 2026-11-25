@@ -45,6 +45,7 @@ pub struct PulayAssessment {
 }
 #[derive(Debug)]
 pub struct StressResult {
+    pub verification: &'static str,
     pub units: &'static str,
     pub quantity: &'static str,
     pub basis_protocol: &'static str,
@@ -318,6 +319,7 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         };
     }
     Ok(StressResult {
+        verification: validated.verification,
         units: "Ha/Bohr^3",
         quantity: validated.quantity,
         basis_protocol: "frozen_miller_set",
@@ -471,7 +473,9 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
         }
     };
     let mut used = [None; 3];
-    if budget >= 3 {
+    if budget >= 3
+        && !matches!(state.electronic, ElectronicState::Fixed(r) if r.force_identity.reference_delivery)
+    {
         let results: Vec<Result<(f64, Option<f64>), ScfError>> = std::thread::scope(|scope| {
             let handles: Vec<_> = [0., steps[0], steps[1]]
                 .into_iter()
@@ -536,6 +540,33 @@ pub fn energy_at(
 ) -> Result<f64, ScfError> {
     use crate::{ScfProblem, collinear::CollinearProblem, finite_temperature::FiniteTProblem};
     match &state.electronic {
+        ElectronicState::Fixed(r) if r.force_identity.reference_delivery => {
+            let points: Vec<_> = r.k_points.iter().map(|k| k.point).collect();
+            let profile = crate::refscf::profile::Profile::from_standard_ha(
+                options
+                    .standard
+                    .ok_or(ScfError::InvalidInput(
+                        "reference stress scan requires standard profile",
+                    ))?
+                    .threshold_ha,
+            )?;
+            let run = crate::refscf::k_driver::run(
+                crate::refstart::StartInput {
+                    cell,
+                    atoms: state.atoms,
+                    potentials: state.potentials,
+                    options: &options,
+                },
+                profile,
+                &points,
+            )?;
+            if !run.outcome.converged {
+                return Err(ScfError::InvalidInput(
+                    "reference stress scan did not converge",
+                ));
+            }
+            Ok(run.outcome.result.total_hartree())
+        }
         ElectronicState::Fixed(r) => {
             let points: Vec<_> = r.k_points.iter().map(|k| k.point).collect();
             let mut p = if points.len() == 1 && points[0].fractional == [0.; 3] {

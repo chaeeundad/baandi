@@ -1,5 +1,6 @@
 //! Input parsing and plain-text P1 reports.
 pub mod config;
+pub mod driver_select;
 
 use config::{Config, PreparedInput};
 use std::fmt::Write;

@@ -413,7 +413,7 @@ pub struct ScfPath {
 /// `docs/performance/requests/onepath2-stress.md` confirms it.
 pub const STRESS_DEFAULT_THRESHOLD_HA: f64 = dft_engine::StandardProfile::STRESS_THRESHOLD_HA;
 /// Reason recorded when the reference switch forces the strict path.
-pub const REFERENCE_STRICT_REASON: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
+pub const REFERENCE_STRICT_REASON: &str = crate::driver_select::STRICT;
 /// Error for the removed `scf.convergence_profile` key (user decision 2026-11-16).
 pub const CONVERGENCE_PROFILE_REMOVED: &str = "scf.convergence_profile was removed (user decision 2026-11-16, ADR 0043): every run uses the single standard SCF path with the fixed-point verification after convergence; set the accuracy with scf.standard_threshold_ha (default 5e-9 Ha) and the verification with scf.verify = \"fixed_point\" (default) or \"off\"; the strict path is a reference tool only (environment BAANDI_REFERENCE_STRICT=on); delete the key";
 /// Error for `scf.locking = "auto"` on the standard path (ONEPATH-4).
@@ -425,21 +425,24 @@ impl Config {
     /// standard path with the fixed-point verification. The strict path is
     /// reached only through the reference switch `BAANDI_REFERENCE_STRICT=on`.
     pub fn scf_path(&self) -> Result<ScfPath, ConfigError> {
-        // The independent density driver always uses the explicitly mapped
-        // standard threshold; the legacy strict switch cannot relabel it.
-        let reference = dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
-            || self
-                .scf
-                .as_ref()
-                .is_some_and(|s| s.driver.as_deref() == Some("reference"));
-        self.scf_path_with(
-            !reference && dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT),
-        )
+        self.scf_path_selected(crate::driver_select::preliminary(self))
     }
     /// `scf_path` with the reference switch given explicitly (`true` = the
     /// strict reference path, as under `BAANDI_REFERENCE_STRICT=on`), for
     /// in-process callers that must match a child process with the switch set.
     pub fn scf_path_with(&self, reference_strict: bool) -> Result<ScfPath, ConfigError> {
+        let mut selection = crate::driver_select::preliminary(self);
+        selection.driver = if reference_strict {
+            crate::driver_select::Driver::StrictOracle
+        } else {
+            crate::driver_select::Driver::LegacyStandard
+        };
+        self.scf_path_selected(selection)
+    }
+    pub fn scf_path_selected(
+        &self,
+        selection: crate::driver_select::Selection,
+    ) -> Result<ScfPath, ConfigError> {
         let invalid = |m: String| ConfigError::Invalid(m);
         let s = self.scf.as_ref();
         if let Some(s) = s {
@@ -452,7 +455,7 @@ impl Config {
                 "scf.standard_threshold_ha must be finite and positive".into(),
             ));
         }
-        if reference_strict {
+        if selection.strict() {
             // Reference tool: the same input runs on the strict path; the
             // standard-only keys are recorded as ignored by the status.
             return Ok(ScfPath {
@@ -472,8 +475,7 @@ impl Config {
             dft_engine::Verification::FixedPoint
         };
         if verification == dft_engine::Verification::Off
-            && !(dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
-                || s.is_some_and(|s| s.driver.as_deref() == Some("reference")))
+            && !selection.reference()
             && self.output.as_ref().is_some_and(|o| o.forces)
         {
             return Err(invalid(
@@ -481,8 +483,7 @@ impl Config {
             ));
         }
         if verification == dft_engine::Verification::Off
-            && !(dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
-                || s.is_some_and(|s| s.driver.as_deref() == Some("reference")))
+            && !selection.reference()
             && self.output.as_ref().is_some_and(|o| o.stress)
         {
             return Err(invalid(
@@ -851,32 +852,6 @@ impl Scf {
 
     pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
         let invalid = |message: &str| ConfigError::Invalid(message.into());
-        if self.driver.as_deref() == Some("reference")
-            || dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
-        {
-            if !matches!(
-                self.mixing.as_deref(),
-                None | Some("plain" | "broyden" | "pulay")
-            ) || self.mixing_q0_inverse_bohr.is_some()
-            {
-                return Err(invalid(
-                    "reference mixing must be broyden/plain/pulay; use reference_preconditioning for screening",
-                ));
-            }
-            let profile = dft_engine::refscf::profile::Profile {
-                beta: self.mixing_beta.unwrap_or(0.7),
-                history: self.mixing_history.unwrap_or(8),
-                ..Default::default()
-            }
-            .validate()
-            .map_err(|e| invalid(&e.to_string()))?;
-            // Adapter compatibility value only; the reference driver uses its
-            // own Broyden profile, never constructs this legacy mixer.
-            return Ok(dft_engine::Mixing::Pulay {
-                beta: profile.beta,
-                history: profile.history,
-            });
-        }
         let beta = self.mixing_beta.unwrap_or(0.3);
         let history = self.mixing_history.unwrap_or(6);
         if !beta.is_finite() || beta <= 0.0 {
@@ -1223,14 +1198,9 @@ impl Config {
             .and_then(|s| s.get("density_group"))
             .cloned();
         let mut config: Self = value.try_into()?;
-        if let Some(s) = &mut config.scf
-            && (s.driver.as_deref() == Some("reference")
-                || dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF))
+        if crate::driver_select::preliminary(&config).reference_mixing()
+            && let Some(s) = &mut config.scf
         {
-            s.mixing_strategy()?;
-            // The shared preflight understands the historical pulay spelling.
-            // Resolve aliases only for this opt-in driver; its numerical mixer
-            // remains the independent difference-history Broyden implementation.
             s.reference_mixing_input = s.mixing.clone();
             if matches!(s.mixing.as_deref(), Some("broyden" | "plain")) {
                 s.mixing = Some("pulay".into());

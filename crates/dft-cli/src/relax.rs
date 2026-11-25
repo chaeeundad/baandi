@@ -3,7 +3,7 @@ pub(crate) mod cell;
 pub mod optimizer;
 use crate::{
     config::Config,
-    run::{RunError, options, sha256},
+    run::{RunError, sha256},
 };
 use dft_engine::{
     CompletionMode, ExecutionConfig, ScfOptions, ScfProblem, ScfSession, SpeciesPotential,
@@ -48,7 +48,7 @@ pub enum Extrapolation {
 impl Extrapolation {
     /// `BAANDI_RELAX_EXTRAPOLATION` (none, first_order, second_order) overrides
     /// the input file for A/B runs.
-    fn effective(self) -> Result<Self, RunError> {
+    pub(crate) fn effective(self) -> Result<Self, RunError> {
         match dft_numerics::switches::text(dft_numerics::switches::Id::RELAX_EXTRAPOLATION) {
             None => Ok(self),
             Some("none") => Ok(Self::None),
@@ -305,6 +305,7 @@ struct Context {
     provenance: Value,
     /// ADR 0043 path of every ionic step's SCF (recorded in results.json).
     scf_path: crate::config::ScfPath,
+    selection: crate::driver_select::Selection,
     reference_seed: std::cell::RefCell<Option<dft_engine::refscf::delivered::IonicSeed>>,
 }
 impl Context {
@@ -395,7 +396,7 @@ impl Context {
         atomic: bool,
         settings: &Settings,
     ) -> Result<Evaluated, RunError> {
-        let reference = crate::run::reference_requested(&self.config);
+        let reference = self.selection.reference();
         let (state, n_at, provenance, start_fallback, start_clipped_fraction) = if reference {
             if predicted.is_some() || atomic {
                 return Err(error(
@@ -756,28 +757,6 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     // ionic or cell step on the standard path with the fixed-point
     // verification; forces and stress come from the verified step.
     let scf_path = config.scf_path().map_err(|e| error(1, e))?;
-    let opts = options(&config)?;
-    if crate::run::reference_requested(&config) {
-        if settings.mode != cell::Mode::Ions {
-            return Err(error(
-                1,
-                "reference cell relaxation requires frozen-strain support in refstart",
-            ));
-        }
-        if settings.start_extrapolation != Extrapolation::None {
-            return Err(error(
-                1,
-                "reference relaxation density extrapolation is not yet supported",
-            ));
-        }
-    }
-    if opts.energy_tolerance > 1e-8 || opts.eigen_tolerance > 1e-8 || opts.density_tolerance > 1e-7
-    {
-        return Err(error(
-            1,
-            "relax requires SCF tolerances no looser than the force preconditions (energy 1e-8 Ha, eigen 1e-8 Ha, density 1e-7)",
-        ));
-    }
     if config
         .finite_temperature()
         .map_err(|e| error(1, e))?
@@ -836,6 +815,22 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             .map_err(|e| error(2, e))?;
         potentials.push((label.clone(), p));
     }
+    let upfs: Vec<_> = potentials.iter().map(|(_, p)| p).collect();
+    let selection = crate::driver_select::select(
+        &config,
+        crate::driver_select::Mode::Classic,
+        crate::driver_select::Command::Relax,
+        &upfs,
+    );
+    selection.announce();
+    let opts = crate::run::options_for(&config, selection)?;
+    if opts.energy_tolerance > 1e-8 || opts.eigen_tolerance > 1e-8 || opts.density_tolerance > 1e-7
+    {
+        return Err(error(
+            1,
+            "relax requires SCF tolerances no looser than the force preconditions (energy 1e-8 Ha, eigen 1e-8 Ha, density 1e-7)",
+        ));
+    }
     let identity = sha256(&identity_bytes);
     fs::create_dir_all(out)?;
     let names = [
@@ -878,11 +873,23 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         opts,
         potentials,
         scf_path,
+        selection,
         reference_seed: std::cell::RefCell::new(None),
         provenance: json!({"input_sha256":sha256(&bytes),"executable_sha256":build_sha256,"pseudopotentials_sha256":pp_hashes,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH}),
     };
     if settings.mode != cell::Mode::Ions {
-        return cell::execute(ctx, settings, identity, out, resume);
+        let result = cell::execute(ctx, settings, identity, out, resume);
+        let path = out.join("results.json");
+        if path.is_file() {
+            let mut report: Value =
+                serde_json::from_slice(&fs::read(&path)?).map_err(|e| error(5, e))?;
+            selection.record(&mut report);
+            atomic(
+                &path,
+                &serde_json::to_vec_pretty(&report).map_err(|e| error(5, e))?,
+            )?;
+        }
+        return result;
     }
     let n = ctx.config.system.atoms.len() * 3;
     let extrapolate = settings.warm_start && settings.start_extrapolation != Extrapolation::None;
@@ -912,7 +919,8 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
                 failures.push(
                     json!({"step":0,"attempt":2,"positions_bohr":positions,"reason":e.to_string()}),
                 );
-                let report = json!({"schema_version":1,"calculation_type":"relaxation","provenance":ctx.provenance,"relaxation":{"status":"failed","steps":0,"last_good_structure":null,"final_max_force_ha_bohr":null,"constraints":settings.fixed,"failures":failures}});
+                let mut report = json!({"schema_version":1,"calculation_type":"relaxation","provenance":ctx.provenance,"relaxation":{"status":"failed","steps":0,"last_good_structure":null,"final_max_force_ha_bohr":null,"constraints":settings.fixed,"failures":failures}});
+                selection.record(&mut report);
                 atomic(
                     &out.join("results.json"),
                     &serde_json::to_vec_pretty(&report).map_err(|e| error(5, e))?,
@@ -941,7 +949,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     while state.frames.len() - 1 < settings.max_steps && state.status == "running" {
         let last = state.frames.last().unwrap().clone();
         ctx.position(&last.fractional);
-        let source = if crate::run::reference_requested(&ctx.config) {
+        let source = if ctx.selection.reference() {
             None
         } else {
             Some(ctx.problem()?)
@@ -1215,7 +1223,7 @@ fn outputs(
             }
         }
     }
-    let result = json!({"schema_version":1,"calculation_type":"relaxation","provenance":ctx.provenance,
+    let mut result = json!({"schema_version":1,"calculation_type":"relaxation","provenance":ctx.provenance,
         "single_path":crate::run::single_path_json(&ctx.scf_path, &ctx.opts),
         "scf":{"effective_profile":if ctx.opts.standard.is_some() { "standard" } else { "strict" },
             "standard_threshold_ha":ctx.opts.standard.map(|p| p.threshold_ha),
@@ -1225,6 +1233,7 @@ fn outputs(
         "relaxation":{"status":state.status,"steps":state.frames.len()-1,"final_max_force_ha_bohr":last.max_force_ha_bohr,
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});
+    ctx.selection.record(&mut result);
     for (name, text) in [
         ("trajectory.extxyz", xyz),
         ("final.xyz", final_xyz),

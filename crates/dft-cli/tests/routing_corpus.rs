@@ -1,6 +1,5 @@
-//! R0 corpus integrity only: no UPF I/O, options resolution, or SCF execution.
-//! Command/API, UPF and runtime expectations in the leading comments are a
-//! source-audited snapshot for R1's executable driver matrix, not tested routing.
+//! Corpus integrity and current parse expectations. Historical R0 routing
+//! comments remain for provenance; driver_routing executes the R1 expectations.
 use dft_cli::{config::Config, run_config::input_values};
 use dft_numerics::switches::RunConfig;
 use std::{collections::BTreeSet, fs, path::Path};

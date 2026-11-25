@@ -1012,6 +1012,26 @@ again at the next stop; the delivered state is always the converged step's own
 `[scf] verify = "fixed_point" | "off"`: default `fixed_point`; `off` skips the
 verification (its result is the former explicit standard profile, bit for bit).
 
+`scf.driver = "reference" | "legacy"` selects the requested SCF driver. Stage R1
+keeps the default legacy. Precedence is `BAANDI_REFERENCE_STRICT=on` (the strict
+oracle), then `scf.driver`, then `BAANDI_REFERENCE_SCF`, then the legacy default.
+An explicit `legacy` therefore overrides `REFERENCE_SCF=on`; STRICT overrides both.
+After UPF parsing, the shared selector checks declared legacy-only features:
+unqualified spin FD (G4B/G4D), bands/DOS, variable-cell relaxation, density
+extrapolation, checkpoint/restart, runtime stepping, explicit legacy SCF controls,
+original PW92 prefactor and missing reference atomic-start data. It records a
+fallback before engine construction; reference errors are never caught and retried.
+Invalid legacy inputs still reject (for example locking on the standard path).
+Every selection prints one JSON-bearing stderr line. Result metadata includes
+`scf.driver` (`reference`, `legacy`, `strict_oracle`), `scf.driver_reason` (nullable)
+and `scf.driver_source` (`default`, `env`, `input`). Source describes the winning
+request even when a feature requires fallback. `reference_driver_fallback_reason`
+is retained. Bands/DOS also write `results.json`; checkpoint/restart write a
+`<checkpoint-output>.results.json` companion without changing checkpoint v1.
+The stdout-only `explain` and `refscf-map` commands include the same `scf` object
+in their JSON output. The diagnostic's `--solver` is an explicit input request;
+STRICT takes precedence and retains residual certification.
+
 `BAANDI_REFERENCE_STRICT=on|off` (default `off`) forces the strict reference path
 with its fixed-point certificate for accuracy gates and tests; the standard-only
 keys of the input (`standard_threshold_ha`, `verify`, `standard_stall_guard`,

@@ -1,0 +1,304 @@
+{
+  "fd": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "finding07-k-ladder": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "finding07-k-rmm": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "finding07-original-prefactor": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "COMPAT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "finding07-spin-pz": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "fixed-spin": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "gamma-lda": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "k-mesh": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "l01-free-moment-pbe-fd": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "G4D_FALLBACK",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l02-moment-fd": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "G4B_FALLBACK",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l03-bands": {
+    "command": "bands",
+    "mode": "classic",
+    "reference_reason": "NSCF",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l03-dos": {
+    "command": "dos",
+    "mode": "classic",
+    "reference_reason": "NSCF",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l04-variable-cell": {
+    "command": "relax",
+    "mode": "classic",
+    "reference_reason": "VARIABLE_CELL",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l05-extrapolation": {
+    "command": "relax",
+    "mode": "classic",
+    "reference_reason": "EXTRAPOLATION",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l06-checkpoint": {
+    "command": "checkpoint",
+    "mode": "classic",
+    "reference_reason": "CHECKPOINT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l07-agent": {
+    "command": "run",
+    "mode": "agent",
+    "reference_reason": "RUNTIME",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l07-observe": {
+    "command": "run",
+    "mode": "observe",
+    "reference_reason": "RUNTIME",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l08-session": {
+    "command": "session",
+    "mode": "classic",
+    "reference_reason": "SESSION",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-capacity": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-cutoff-ladder": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-density-floor": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-density-forcing": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-density-tolerance": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-eigen-tolerance": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-energy-tolerance": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-hartree-mixing": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-kerker-pulay": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-linear": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-locking": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": "scf.locking",
+    "options_error": null
+  },
+  "l09-mixing-q0": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": "mixing_q0_inverse_bohr requires"
+  },
+  "l09-preconditioner": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-spectral-guard": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-stall-guard": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-uniform": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l09-wavefunctions": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "LEGACY_INPUT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l10-compat": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "COMPAT",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l11-high-l": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "ATOMIC_DATA",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l11-missing-pswfc": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "ATOMIC_DATA",
+    "parse_error": null,
+    "options_error": null
+  },
+  "l11-missing-rhoatom": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "ATOMIC_DATA",
+    "parse_error": null,
+    "options_error": null,
+    "upf_error": "missing field `PP_RHOATOM`"
+  },
+  "l11-zero-rhoatom": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": "ATOMIC_DATA",
+    "parse_error": null,
+    "options_error": null
+  },
+  "pbe-nlcc": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "relax-ions": {
+    "command": "relax",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "symmetry": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  }
+}

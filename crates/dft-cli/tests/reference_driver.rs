@@ -54,7 +54,7 @@ fn broyden_reference_inputs_and_verified_records() {
     let mut previous: Option<Value> = None;
     for (name, driver, env, input_profile, env_profile, full) in [
         ("input", "reference", "off", "", None, false),
-        ("env", "legacy", "on", "", None, false),
+        ("env", "", "on", "", None, false),
         (
             "full",
             "reference",
@@ -80,9 +80,14 @@ fn broyden_reference_inputs_and_verified_records() {
             true,
         ),
     ] {
+        let driver_input = if driver.is_empty() {
+            String::new()
+        } else {
+            format!("driver='{driver}'\n")
+        };
         fs::write(
             dir.join("in.toml"),
-            format!("{text}driver='{driver}'\n{input_profile}"),
+            format!("{text}{driver_input}{input_profile}"),
         )
         .unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_dft-cli"));

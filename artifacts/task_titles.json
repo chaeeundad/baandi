@@ -214,5 +214,6 @@
  "R6B-COMPAT-MODE": "리팩토링 R6b: QE 호환 모드를 새 경로로",
  "R6C-NO-ATOMIC-START": "리팩토링 R6c: 원자 데이터 없는 의사퍼텐셜도 새 경로에서 시작",
  "R10BC-LEGACY-STANDARD": "리팩토링 R10b·c: 기존 표준 경로·전용 입력 키 삭제(엄격 기준만 남김)",
- "G7-UPF-BETA-TAIL": "G7: SG15 ONCV·HGH 의사퍼텐셜 읽기(투영자 꼬리 처리 규칙)"
+ "G7-UPF-BETA-TAIL": "G7: SG15 ONCV·HGH 의사퍼텐셜 읽기(투영자 꼬리 처리 규칙)",
+ "R11B-ORACLE-SWITCHES": "리팩토링 R11b: 엄격 기준 내부 스위치를 기본값으로 고정하고 삭제"
 }

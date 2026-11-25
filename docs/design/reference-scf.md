@@ -3202,8 +3202,8 @@ factorization handles the transferred block. Ionic fields, mixer and
 verification are rebuilt; there is no exact-replay claim. K-seed storage is
 `16 B sum_k G_k + 8 F` bytes per rank, excluding metadata. Cold initialization
 is currently constructed before injection, so this is a correctness boundary,
-not a claim to eliminate setup cost. Density extrapolation and frozen-strain
-cell relaxation remain explicitly unsupported. Reference stress cutoff scans
+not a claim to eliminate setup cost. Density extrapolation and CLI variable-cell
+relaxation wiring remain unsupported here (R7b/R7c). Reference stress cutoff scans
 use independently converged reference SCFs, sequentially so MPI collectives
 cannot interleave between scans. G5B `stress_prepared` forwards the checked symmetry preparation to every
 cutoff scan, including scan-grid compatibility and the irreducible list. The
@@ -3212,6 +3212,75 @@ energy-scan entry on a symmetric reference state fails rather than silently
 dropping its projector. Reference CLI stress requests retain the
 existing stress default estimator threshold (5e-11 Ha); an explicit threshold
 still wins.
+
+R7a enables `ScfOptions::strain_reference` for real Gamma and complex k starts.
+The reference cell selects the ordered wavefunction Miller lists and the
+four-times-cutoff density support; `ScfOptions::basis` evaluates them with the
+current cell's reciprocal metric, fractional k and volume, exactly as the
+strict oracle does. Atomic positions, structure factors, radial transforms,
+nonlocal projectors, kinetic energies and real-space quadrature use the current
+cell. An explicit frozen `grid_override` is required at both entry points,
+before the k initializer computes its shared grid. No cutoff-sphere rebuild or
+resorting is performed at the strained cell. The None-reference branch and
+SCF iteration arithmetic are unchanged.
+
+`delivered::stress_state` retains the original options and current cell. Its
+existing model identity includes the reference cell, so removing or replacing
+that reference on delivery rejects. The analytic tensor differentiates the
+frozen wavefunction and density supports at fixed fractional atoms/k and fixed
+FFT dimensions. The separately reported Pulay assessment keeps the legacy
+protocol: independent nominal-cutoff SCFs at the current cell with
+`strain_reference = None`, a common enlarged grid and +5%/+10% cutoffs; the
+estimate is not silently added to the frozen tensor. Complex ionic seeds also
+retain the reference-cell identity and reject a changed reference at injection.
+Cross-cell seed transfer and CLI cell-relaxation routing remain R7b work.
+
+R7a tests append to `refscf_forces`: missing-grid rejection, explicit ordered
+Miller/kinetic/density-support checks across cutoff-shell crossings, standard
+(5e-9 Ha) and tight (5e-13 Ha estimator) comparisons against the strict oracle,
+and xx/symmetric-xy energy finite differences at strain steps 2e-4 and 1e-4.
+The tight acceptance limits are 1e-10 Ha in energy and 1e-8 Ha/Bohr^3 in stress;
+finite differences and the separate Pulay comparison use 1e-8 Ha/Bohr^3.
+The external Si2 matrix uses 4 Ha and 5 bands at Gamma and full k222 and is
+ignored in debug. Fast synthetic tests cover skew Gamma and a time-reversed
+two-point complex k list (the synthetic full k222 fixture was noninsulating
+and is not an insulating oracle). Run
+`DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf_forces frozen_strain -- --include-ignored --nocapture`.
+`unstrained_delivery_fingerprints` prints exact same-build fingerprints of
+energy, density, occupations, eigenvalues, orbitals and stress for comparison
+before/after this change; these are not portable floating-point goldens.
+
+R7a local evidence (2026-11-25, Mac pure Rust, strict engine oracle; no QE
+run): the release frozen-strain command passes all four tests. Si2 uses
+`A = (I + eta) A_ref`, with diagonal eta = (0.09, 0.08, 0.07),
+eta_xy = eta_yx = 0.012, and displaced fractional second atom
+(0.253, 0.249, 0.252). Both wavefunction and density cutoff-shell crossings
+are asserted. External Si UPF SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+
+| Si2 sampling | Standard absolute dE (Ha) | Tight absolute dE (Ha) | Tight max tensor difference (Ha/Bohr^3) | Max FD error, xx/xy and both steps (Ha/Bohr^3) | Pulay estimate difference (Ha/Bohr^3) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Gamma real | 7.885e-10 | 1.075e-13 | 4.657e-11 | 1.133e-10 | 7.601e-13 |
+| Full k222 complex | 2.282e-10 | 8.260e-14 | 2.020e-10 | 3.970e-10 | 6.167e-12 |
+
+The standard-threshold stress differences reach 2.343e-8 Ha/Bohr^3; the
+1e-8 derivative gate applies to the tight runs, not the standard energy
+threshold. Frozen-basis differentiation does not establish cutoff convergence.
+Same-build unstrained synthetic Gamma and two-point complex-k fingerprints
+are unchanged from the pre-edit production code at
+`60498b5ff8b0e44eb208b07e13873d1fae4a6107`: respectively
+`dbbc517c35af3115` and `56d403ae498a5177` (test-profile build).
+README evidence ingestion, dashboard/session publication and dev08 validation
+remain with their owners; no tracked files outside this ticket's owned set were edited.
+
+R7a verification: `cargo check --workspace --tests`, the requested
+`refscf_forces` (10 passed, 3 ignored) and `refscf` (84 passed, 24 ignored)
+targets, `cargo fmt --check`, and engine all-target clippy with `-D warnings`
+pass. Full `scripts/check.sh` passes build/test/fmt/clippy: 106 binaries,
+1018 passed, 0 failed, 220 ignored. The sandbox run sets
+`BAANDI_TEST_TMP=/private/tmp/r7a-check CHECK_NICE=0 CHECK_SCCACHE=0`; its
+optional process-load probe cannot invoke `ps`, but no gate is skipped.
+README freshness tests pass (9 tests).
 
 Validation commands: `cargo test -p dft-engine --test refscf_forces` includes
 synthetic finite differences, ranks 1/3/8, verification rejection/opt-out,

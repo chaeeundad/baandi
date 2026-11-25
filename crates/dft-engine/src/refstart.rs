@@ -28,6 +28,15 @@ fn err(e: impl std::fmt::Display) -> ScfError {
     ScfError::Numerical(e.to_string())
 }
 
+pub(crate) fn validate_strain_grid(options: &ScfOptions) -> Result<(), ScfError> {
+    if options.strain_reference.is_some() && options.grid_override.is_none() {
+        return Err(ScfError::InvalidInput(
+            "strain reference requires a frozen FFT grid",
+        ));
+    }
+    Ok(())
+}
+
 /// Parsed, immutable Gamma input. This API deliberately does not accept an
 /// already-constructed ScfProblem (which has paid the replicated setup cost).
 /// The caller explicitly selects this API; no environment/profile is changed.
@@ -398,11 +407,11 @@ fn start_inner<K: Collective>(
         potentials,
         options: o,
     } = input;
+    validate_strain_grid(o)?;
     if comm.size() == 0
         || comm.rank() >= comm.size()
         || atoms.is_empty()
         || potentials.is_empty()
-        || o.strain_reference.is_some()
         || o.pw92_prefactor != crate::Pw92Prefactor::Modified
     {
         return Err(ScfError::InvalidInput(
@@ -1864,6 +1873,8 @@ fn start_kpoints_inner<K: Collective>(
     dft_geometry::kpoints::validate(points).map_err(err)?;
     let o = input.options;
     let cell = input.cell;
+    // Check the caller's grid before common_options installs the k-union grid.
+    validate_strain_grid(o)?;
     let db = o.basis(cell, [0.; 3], 4.)?;
     let bases: Vec<_> = points
         .iter()

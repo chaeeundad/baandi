@@ -127,6 +127,8 @@ fn run_inner<K: Collective>(
     let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
     let profile = profile.validate()?;
     let o = input.options;
+    // Prepared symmetry must not supply an implicit grid for a frozen segment.
+    refstart::validate_strain_grid(o)?;
     if o.standard.is_none()
         || (o.crystal_density_group && prepared.is_none())
         || o.max_iterations == 0

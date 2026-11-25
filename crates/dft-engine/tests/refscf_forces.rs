@@ -762,3 +762,451 @@ fn symmetric_si2_pulay_matches_full_mesh() {
         assert!(corrected <= 1e-8);
     }
 }
+
+// R7a: emit exact delivered-state fingerprints for same-build before/after
+// comparisons. No cross-platform hash or floating-point golden is assumed.
+#[test]
+fn unstrained_delivery_fingerprints() {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let mut opts = options();
+    opts.cutoff_hartree = 1.;
+    for gamma in [true, false] {
+        opts.gamma_real = if gamma { GammaReal::On } else { GammaReal::Off };
+        let points = if gamma {
+            vec![KPoint {
+                fractional: [0.; 3],
+                weight: 1.,
+            }]
+        } else {
+            vec![
+                KPoint {
+                    fractional: [0.25, 0., 0.],
+                    weight: 0.5,
+                },
+                KPoint {
+                    fractional: [-0.25, 0., 0.],
+                    weight: 0.5,
+                },
+            ]
+        };
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        let mut run =
+            k_driver::run(input(), Profile::from_standard_ha(5e-13).unwrap(), &points).unwrap();
+        assert!(run.outcome.converged);
+        let stress = dft_engine::stress::frozen_stress(
+            &delivered::stress_state(input(), &mut run.outcome).unwrap(),
+        )
+        .unwrap();
+        let r = &run.outcome.result;
+        let mut hash = DefaultHasher::new();
+        for x in std::iter::once(&r.total_hartree())
+            .chain(r.density.iter())
+            .chain(r.occupations.iter())
+            .chain(stress.values.iter().flatten())
+        {
+            x.to_bits().hash(&mut hash);
+        }
+        for k in &r.k_points {
+            for x in &k.solution.eigenvalues {
+                x.to_bits().hash(&mut hash);
+            }
+            for z in k.solution.eigenvectors.as_slice() {
+                z.re.to_bits().hash(&mut hash);
+                z.im.to_bits().hash(&mut hash);
+            }
+        }
+        println!(
+            "R7A unstrained gamma={gamma} fingerprint={:016x}",
+            hash.finish()
+        );
+    }
+}
+mod frozen_strain {
+    use super::*;
+    use dft_basis::{FftGridSpec, PlaneWaveBasis};
+    use dft_engine::refscf::metric::Serial;
+    use dft_units::Hartree;
+
+    fn deform(cell: &Cell, strain: [[f64; 3]; 3]) -> Cell {
+        let a = cell.lattice_columns_bohr();
+        Cell::from_matrix_columns_bohr(std::array::from_fn(|i| {
+            std::array::from_fn(|j| a[i][j] + (0..3).map(|k| strain[i][k] * a[k][j]).sum::<f64>())
+        }))
+        .unwrap()
+    }
+
+    fn mesh(gamma: bool) -> Vec<KPoint> {
+        if gamma {
+            vec![KPoint {
+                fractional: [0.; 3],
+                weight: 1.,
+            }]
+        } else {
+            (0..2)
+                .flat_map(|x| {
+                    (0..2).flat_map(move |y| {
+                        (0..2).map(move |z| KPoint {
+                            fractional: [x as f64 / 2., y as f64 / 2., z as f64 / 2.],
+                            weight: 0.125,
+                        })
+                    })
+                })
+                .collect()
+        }
+    }
+
+    fn freeze(reference: &Cell, opts: &mut ScfOptions, points: &[KPoint]) {
+        let db = PlaneWaveBasis::new(reference, Hartree(4. * opts.cutoff_hartree)).unwrap();
+        let mut dims = [0; 3];
+        for k in std::iter::once([0.; 3]).chain(points.iter().map(|p| p.fractional)) {
+            let b = PlaneWaveBasis::at_k(reference, Hartree(opts.cutoff_hartree), k).unwrap();
+            let grid = FftGridSpec::new(&b, &db, None).unwrap();
+            for (d, n) in dims.iter_mut().zip(grid.dims()) {
+                *d = (*d).max(n);
+            }
+        }
+        opts.grid_override = Some(dims);
+        opts.strain_reference = Some(Box::new(reference.clone()));
+    }
+
+    #[test]
+    fn explicit_fft_grid_required_for_gamma_and_k() {
+        let cell = common::cell();
+        let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let atoms = common::atoms();
+        let mut opts = options();
+        opts.strain_reference = Some(Box::new(cell.clone()));
+        let prepared =
+            dft_engine::refscf::symmetry::Prepared::new(&cell, &atoms, &mesh(false), 1e-8, false)
+                .unwrap();
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        for result in [
+            dft_engine::refstart::start(input(), &Serial).map(|_| ()),
+            dft_engine::refstart::start_kpoints(input(), &mesh(false), &Serial).map(|_| ()),
+            k_driver::run_prepared(
+                input(),
+                Profile::from_standard_ha(5e-13).unwrap(),
+                &prepared,
+            )
+            .map(|_| ()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(dft_engine::ScfError::InvalidInput(
+                    "strain reference requires a frozen FFT grid"
+                ))
+            ));
+        }
+    }
+
+    // Compare complete ordered sets, including density support used inside H.
+    // A nominal-cutoff rebuild must differ: otherwise this would not detect
+    // accidentally ignoring strain_reference at a shell crossing.
+    fn check_basis(input: &StartInput<'_>, points: &[KPoint]) {
+        let reference = input.options.strain_reference.as_deref().unwrap();
+        let cutoff = Hartree(input.options.cutoff_hartree);
+        let expected = |k| {
+            PlaneWaveBasis::at_k(reference, cutoff, k)
+                .unwrap()
+                .in_cell_with_frozen_density(input.cell, reference)
+                .unwrap()
+        };
+        let state =
+            dft_engine::refstart::start_kpoints(StartInput { ..*input }, points, &Serial).unwrap();
+        let millers = |b: &PlaneWaveBasis| b.vectors().iter().map(|g| g.miller).collect::<Vec<_>>();
+        let mut crossed = false;
+        for block in &state.blocks {
+            let e = expected(block.point.fractional);
+            assert_eq!(millers(&block.basis), millers(&e));
+            for (actual, expected) in block.basis.momenta().iter().zip(e.momenta()) {
+                assert_eq!(actual.cartesian, expected.cartesian);
+                assert_eq!(
+                    actual.norm_squared.to_bits(),
+                    expected.norm_squared.to_bits()
+                );
+            }
+            let ordinary =
+                PlaneWaveBasis::at_k(input.cell, cutoff, block.point.fractional).unwrap();
+            let mut actual_set = millers(&block.basis);
+            let mut ordinary_set = millers(&ordinary);
+            actual_set.sort();
+            ordinary_set.sort();
+            crossed |= actual_set != ordinary_set;
+            let db = block.basis.density_basis(input.cell).unwrap();
+            let expected_db = PlaneWaveBasis::new(reference, Hartree(4. * cutoff.0))
+                .unwrap()
+                .in_cell(input.cell)
+                .unwrap();
+            assert_eq!(millers(&db), millers(&expected_db));
+            assert_eq!(state.grid.dims(), input.options.grid_override.unwrap());
+        }
+        assert!(crossed, "fixture must cross a wavefunction cutoff shell");
+        let db = expected([0.; 3]).density_basis(input.cell).unwrap();
+        let ordinary_db = PlaneWaveBasis::new(input.cell, Hartree(4. * cutoff.0)).unwrap();
+        let mut a = millers(&db);
+        let mut b = millers(&ordinary_db);
+        a.sort();
+        b.sort();
+        assert_ne!(a, b, "fixture must cross a density cutoff shell");
+        if input.options.gamma_real == GammaReal::On {
+            let real = dft_engine::refstart::start(StartInput { ..*input }, &Serial).unwrap();
+            assert_eq!(millers(&real.basis), millers(&expected([0.; 3])));
+            assert_eq!(real.grid.dims(), input.options.grid_override.unwrap());
+        }
+    }
+
+    fn compare_strained(
+        reference: &Cell,
+        atoms: &[Atom],
+        pp: &dft_upf::Pseudopotential,
+        mut opts: ScfOptions,
+        gamma: bool,
+        pulay: bool,
+        points: &[KPoint],
+    ) {
+        opts.gamma_real = if gamma { GammaReal::On } else { GammaReal::Off };
+        freeze(reference, &mut opts, points);
+        let cell = deform(
+            reference,
+            [[0.09, 0.012, 0.], [0.012, 0.08, 0.], [0., 0., 0.07]],
+        );
+        let species = [SpeciesPotential {
+            label: &atoms[0].species,
+            potential: pp,
+        }];
+        macro_rules! input {
+            ($options:expr) => {
+                StartInput {
+                    cell: &cell,
+                    atoms,
+                    potentials: &species,
+                    options: $options,
+                }
+            };
+        }
+        check_basis(&input!(&opts), points);
+        let mut strict = opts.clone();
+        strict.standard = None;
+        strict.verification = Verification::Off;
+        strict.density_tolerance = 1e-9;
+        strict.energy_tolerance = 1e-12;
+        strict.eigen_tolerance = 1e-11;
+        let oracle = ScfProblem::with_kpoints(
+            &cell,
+            atoms,
+            &species,
+            strict.clone(),
+            points,
+            dft_engine::OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-8,
+            },
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        let view = ForceState {
+            cell: &cell,
+            atoms,
+            potentials: &species,
+            options: &strict,
+            electronic: ElectronicState::Fixed(&oracle),
+            density_floor: None,
+            symmetry: &[],
+        };
+        let oracle_stress = if pulay {
+            dft_engine::stress(&view)
+        } else {
+            dft_engine::stress::frozen_stress(&view)
+        }
+        .unwrap();
+        for threshold in [5e-9, 5e-13] {
+            opts.standard = Some(dft_engine::StandardProfile {
+                threshold_ha: threshold,
+            });
+            let profile = Profile::from_standard_ha(threshold).unwrap();
+            let mut run = k_driver::run(input!(&opts), profile, points).unwrap();
+            assert!(run.outcome.converged);
+            assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+            assert_eq!(run.outcome.result.gamma_real_used, gamma);
+            let energy = run.outcome.result.total_hartree();
+            let density = run.outcome.result.density.clone();
+            let state = delivered::stress_state(input!(&opts), &mut run.outcome).unwrap();
+            let stress = if pulay && threshold < 1e-10 {
+                dft_engine::stress(&state)
+            } else {
+                dft_engine::stress::frozen_stress(&state)
+            }
+            .unwrap();
+            let de = (energy - oracle.total_hartree()).abs();
+            let ds = delta(
+                stress.values.iter().flatten(),
+                oracle_stress.values.iter().flatten(),
+            );
+            println!(
+                "R7A k={} threshold={threshold:e} E={energy:.16e} Ha dE={de:e} Ha dStress={ds:e} Ha/Bohr^3",
+                points.len()
+            );
+            assert!(de <= if threshold < 1e-10 { 1e-10 } else { 5e-9 });
+            if threshold < 1e-10 {
+                assert!(ds <= 1e-8);
+                if let Some(p) = &stress.pulay {
+                    let old = oracle_stress.pulay.as_ref().unwrap();
+                    let dp = (p.correction - old.correction).abs();
+                    println!("R7A k={} dPulay={dp:e} Ha/Bohr^3", points.len());
+                    assert!(dp <= 1e-8);
+                    assert_eq!(p.cutoff_steps_ha, old.cutoff_steps_ha);
+                }
+                for shear in [false, true] {
+                    for h in [2e-4, 1e-4] {
+                        let mut energies = Vec::new();
+                        for sign in [-1., 1.] {
+                            let mut eta = [[0.; 3]; 3];
+                            if shear {
+                                eta[0][1] = sign * h;
+                                eta[1][0] = sign * h;
+                            } else {
+                                eta[0][0] = sign * h;
+                            }
+                            let strained = deform(&cell, eta);
+                            let r = k_driver::run(
+                                StartInput {
+                                    cell: &strained,
+                                    ..input!(&opts)
+                                },
+                                profile,
+                                points,
+                            )
+                            .unwrap();
+                            assert!(r.outcome.converged);
+                            energies.push(r.outcome.result.total_hartree());
+                        }
+                        let fd = (energies[1] - energies[0]) / (2. * h * cell.volume_bohr3());
+                        let analytic = if shear {
+                            stress.values[0][1] + stress.values[1][0]
+                        } else {
+                            stress.values[0][0]
+                        };
+                        let error = (fd - analytic).abs();
+                        println!(
+                            "R7A k={} shear={shear} h={h:e} FD error={error:e} Ha/Bohr^3",
+                            points.len()
+                        );
+                        assert!(error <= 1e-8);
+                    }
+                }
+            }
+            // Delivery cannot silently reinterpret a frozen result on a new
+            // reference cell, even when the cutoff/grid remain unchanged.
+            let mut wrong = opts.clone();
+            wrong.strain_reference = Some(Box::new(cell.clone()));
+            assert!(delivered::stress_state(input!(&wrong), &mut run.outcome).is_err());
+            wrong.strain_reference = None;
+            assert!(delivered::stress_state(input!(&wrong), &mut run.outcome).is_err());
+            if !gamma && threshold < 1e-10 {
+                // Keep the same shell counts/grid so rejection tests reference
+                // identity, rather than an incidental orbital shape mismatch.
+                wrong.strain_reference = Some(Box::new(deform(
+                    reference,
+                    [[1e-8, 0., 0.], [0., 0., 0.], [0., 0., 0.]],
+                )));
+                let flat: Vec<_> = density.iter().copied().collect();
+                let delivered::IonicSeed::K(seed) =
+                    delivered::ionic_seed(input!(&opts), &run.outcome.result, &flat, &Serial)
+                        .unwrap()
+                else {
+                    panic!("complex k seed required")
+                };
+                assert!(matches!(
+                    k_driver::run_seeded_with(input!(&wrong), profile, points, &Serial, seed),
+                    Err(dft_engine::ScfError::InvalidInput(
+                        "reference k ionic seed: incompatible cell, basis, grid, mesh or charge"
+                    ))
+                ));
+            }
+            assert_eq!(
+                run.outcome.result.total_hartree().to_bits(),
+                energy.to_bits()
+            );
+            assert_eq!(run.outcome.result.density, density);
+        }
+    }
+
+    #[test]
+    fn synthetic_gamma_frozen_strain() {
+        let pp = common::potential_with_atomic_start(2., 1.0, true, 161, "SLA PZ");
+        let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+        let mut opts = options();
+        opts.cutoff_hartree = 1.1;
+        compare_strained(&cell, &atoms, &pp, opts, true, false, &mesh(true));
+    }
+
+    #[test]
+    fn synthetic_complex_k_frozen_strain() {
+        let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+        let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+        let atoms = [
+            Atom::new("Xx", [0.13, 0.21, 0.32]),
+            Atom::new("Xx", [0.30, 0.35, 0.42]),
+        ];
+        let mut opts = options();
+        opts.cutoff_hartree = 2.;
+        compare_strained(
+            &cell,
+            &atoms,
+            &pp,
+            opts,
+            false,
+            false,
+            &[
+                KPoint {
+                    fractional: [0.125, 0., 0.],
+                    weight: 0.5,
+                },
+                KPoint {
+                    fractional: [-0.125, 0., 0.],
+                    weight: 0.5,
+                },
+            ],
+        );
+    }
+
+    #[test]
+    #[ignore = "external Si2 strain/FD/Pulay matrix; DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf_forces silicon_frozen_strain -- --ignored --nocapture"]
+    fn silicon_frozen_strain_gamma_and_k222() {
+        let path = std::env::var("DFT_SI_UPF").expect("DFT_SI_UPF must name an external Si UPF");
+        let pp = dft_upf::parse_upf(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cell = common::cell();
+        let atoms = [
+            Atom::new("Si", [0.; 3]),
+            Atom::new("Si", [0.253, 0.249, 0.252]),
+        ];
+        let mut opts = options();
+        opts.cutoff_hartree = 4.;
+        opts.bands = Some(5);
+        for gamma in [true, false] {
+            compare_strained(&cell, &atoms, &pp, opts.clone(), gamma, true, &mesh(gamma));
+        }
+    }
+}

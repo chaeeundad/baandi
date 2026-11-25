@@ -454,3 +454,12 @@ The legacy engine and solver groups (about 100 switches) are classes (a) and (b)
 - `crates/dft-numerics/src/switches.rs` (186-entry `table!` :194-740, `REFERENCE_SCF`/`STRICT` :450-453)
 - Also: `crates/dft-cli/src/relax.rs`, `crates/dft-cli/src/bands.rs`, `crates/dft-engine/src/nscf.rs`, `crates/baandi-py/src/lib.rs`, `crates/baandi-mcp/src/lib.rs`, `scripts/make_readme_figures.py`, `scripts/bench_scf.py`, `docs/performance/baseline.json`
 
+
+## 7. User decisions (2026-11-25)
+
+- D1: approved as recommended (port checkpoint/restart, runtime control, Python/MCP stepping to a reference stepper, R8).
+- D2: pending; the user asked for an explanation of the strict oracle first.
+- D3: pending; the user asked for an explanation of the rollback switches first.
+- D4: legacy-only input keys are removed outright after R10 (no migration messages: there are no existing users). They become ordinary unknown-key errors.
+- D5: approved as recommended (decide port or retire of RELAX_EXTRAPOLATION from the attempts ledger).
+- D6: approved as recommended (report README factual corrections first, edit after approval).

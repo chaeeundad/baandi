@@ -78,6 +78,8 @@ pub struct StartState {
     pub ionic: Vec<f64>,
     /// Immutable NLCC density on the owned field planes, in electrons/Bohr^3.
     pub core_density: Option<Vec<f64>>,
+    /// PBE-only core Fourier cache and reusable combined-density inputs.
+    pub pbe_core: Option<PbeCore>,
     pub potential: Vec<f64>,
     /// Kinetic plus nonlocal plane-wave diagonal in Ha, in owned ORC row order.
     /// Add the current mean local potential at each solve. No pair weights.
@@ -87,6 +89,58 @@ pub struct StartState {
     pub electrons: f64,
     pub ewald: ewald::EwaldEnergy,
     pub memory: StartMemory,
+}
+
+/// Owned NLCC inputs for PBE. The core coefficients are prepared once from
+/// the real core used by XC, so the spectral derivative matches the legacy path.
+pub struct PbeCore {
+    density_g: Vec<C>,
+    total_density: Vec<f64>,
+    total_density_g: Vec<C>,
+}
+impl PbeCore {
+    /// Normalized core coefficients in `StartFields::reciprocal_indices` order.
+    pub fn density_g(&self) -> &[C] {
+        &self.density_g
+    }
+
+    pub(crate) fn evaluate<K: Collective>(
+        &mut self,
+        fields: &mut StartFields,
+        comm: &K,
+        cell: &Cell,
+        density: &[f64],
+        density_g: &[C],
+        core: &[f64],
+    ) -> Result<dft_physics::gga::distributed::XcSlab, ScfError> {
+        agree(
+            comm,
+            f64::from(
+                density.len() != self.total_density.len()
+                    || core.len() != density.len()
+                    || density_g.len() != self.density_g.len(),
+            ),
+            "reference PBE: core/valence field shape mismatch",
+        )?;
+        for ((total, n), c) in self.total_density.iter_mut().zip(density).zip(core) {
+            *total = n + c;
+        }
+        for ((total, n), c) in self
+            .total_density_g
+            .iter_mut()
+            .zip(density_g)
+            .zip(&self.density_g)
+        {
+            *total = n + c;
+        }
+        dft_physics::gga::distributed::evaluate(
+            fields,
+            comm,
+            cell,
+            &self.total_density,
+            &self.total_density_g,
+        )
+    }
 }
 
 /// Reusable owned full-grid transform. Only the index list used during plan
@@ -302,8 +356,7 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
 /// Build the final-cutoff cold start, collective on `comm` (including size 1).
 /// Atomic charge/orbitals are required, never silently replaced with uniform
 /// density or random waves. LDA-PZ, library LDA-PW (both with optional NLCC)
-/// and distributed PBE (without NLCC for now: PBE + core charge fails
-/// explicitly until the core gradient is wired, ticket G2B-PBE-NLCC).
+/// and distributed PBE with optional NLCC (including the core gradient).
 /// Randomization rule: none. Atomic columns retain species/orbital/atom/m
 /// order; missing bands are completed by deterministic kinetic-ordered ORC
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
@@ -562,14 +615,24 @@ fn start_inner<K: Collective>(
     let clock = Instant::now();
     let ionic = fields.inverse(comm, &ion_hat)?;
     drop(ion_hat);
-    if o.functional == Functional::Pbe && core_hat.is_some() {
-        return Err(ScfError::InvalidInput(
-            "reference start: PBE with core charge (NLCC) is not supported yet",
-        ));
-    }
     let core_density = core_hat
         .map(|c| fields.inverse_checked(comm, &c, true))
         .transpose()?;
+    let mut pbe_core = if o.functional == Functional::Pbe {
+        core_density
+            .as_ref()
+            .map(|core| {
+                let density_g = fields.forward(comm, core)?;
+                Ok::<_, ScfError>(PbeCore {
+                    total_density_g: vec![C::default(); density_g.len()],
+                    total_density: vec![0.; core.len()],
+                    density_g,
+                })
+            })
+            .transpose()?
+    } else {
+        None
+    };
     let prolonged = seed
         .map(|s| s.inject(&basis, &grid, &half, operator.local_rows(), &fields, comm))
         .transpose()?;
@@ -630,8 +693,19 @@ fn start_inner<K: Collective>(
     // Prolongation is not clipped or rescaled. Signed Fourier roundoff uses
     // the same absolute-density LDA evaluation as a reference SCF map.
     let xc = if o.functional == Functional::Pbe {
-        dft_physics::gga::distributed::evaluate(&mut fields, comm, cell, &density, &density_g)
-            .map(|x| x.potential)
+        if let Some(core) = &mut pbe_core {
+            core.evaluate(
+                &mut fields,
+                comm,
+                cell,
+                &density,
+                &density_g,
+                core_density.as_ref().unwrap(),
+            )
+        } else {
+            dft_physics::gga::distributed::evaluate(&mut fields, comm, cell, &density, &density_g)
+        }
+        .map(|x| x.potential)
     } else if let Some(core) = &core_density {
         local_xc(
             o.functional,
@@ -693,7 +767,10 @@ fn start_inner<K: Collective>(
     let g = fields.fft.local_len();
     let n = basis.vectors().len();
     let k = j.max(bands);
-    let core_bytes = core_density.as_ref().map_or(0, |c| 8 * c.len());
+    let core_bytes = core_density.as_ref().map_or(0, |c| 8 * c.len())
+        + pbe_core.as_ref().map_or(0, |c| {
+            16 * (c.density_g.len() + c.total_density_g.len()) + 8 * c.total_density.len()
+        });
     let retained_field_bytes = 8 * (3 * f + points + l) + 16 * g + core_bytes;
     let start_block_bytes = 8 * l * bands;
     // Named array live upper envelope; Q + next-Q/HQ + raw backup + selected,
@@ -755,6 +832,7 @@ fn start_inner<K: Collective>(
         density_g,
         ionic,
         core_density,
+        pbe_core,
         potential,
         diagonal_static,
         orbitals,

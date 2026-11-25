@@ -76,6 +76,8 @@ pub struct StartState {
     pub density: Vec<f64>,
     pub density_g: Vec<C>,
     pub ionic: Vec<f64>,
+    /// Immutable NLCC density on the owned field planes, in electrons/Bohr^3.
+    pub core_density: Option<Vec<f64>>,
     pub potential: Vec<f64>,
     /// Kinetic plus nonlocal plane-wave diagonal in Ha, in owned ORC row order.
     /// Add the current mean local potential at each solve. No pair weights.
@@ -123,19 +125,56 @@ impl StartFields {
             .collect()
     }
     pub fn inverse<K: Collective>(&mut self, comm: &K, coef: &[C]) -> Result<Vec<f64>, ScfError> {
+        self.inverse_checked(comm, coef, false)
+    }
+    fn inverse_checked<K: Collective>(
+        &mut self,
+        comm: &K,
+        coef: &[C],
+        core: bool,
+    ) -> Result<Vec<f64>, ScfError> {
         self.fft.begin_to_real(comm, coef).map_err(err)?;
         let mut out = Vec::with_capacity(self.fft.plane_points());
         let mut bad = 0.;
+        let mut re_max = 1_f64;
+        let mut im_max = 0_f64;
         for i in 0..self.fft.plane_count() {
             self.fft.to_real_plane(i).map_err(err)?;
             for z in self.fft.plane() {
                 if !z.re.is_finite() || !z.im.is_finite() {
                     bad = 1.;
                 }
+                if core {
+                    re_max = re_max.max(z.re.abs());
+                    im_max = im_max.max(z.im.abs());
+                }
                 out.push(z.re);
             }
         }
         agree(comm, bad, "reference start: nonfinite field")?;
+        if core {
+            // Match the legacy core's global reality guard without gathering a
+            // field. Empty plane owners still participate in the scalar gather.
+            let mut maxima = vec![0.; 2 * comm.size()];
+            comm.allgatherv_f64(&[re_max, im_max], &vec![2; comm.size()], &mut maxima)
+                .map_err(err)?;
+            let scale = maxima
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| p[0])
+                .fold(1., f64::max);
+            if maxima
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .any(|p| p[1] > 1e-12 * scale)
+            {
+                return Err(ScfError::InvalidInput(
+                    "reference start: non-real core density",
+                ));
+            }
+        }
         Ok(out)
     }
     pub fn forward<K: Collective>(&mut self, comm: &K, planes: &[f64]) -> Result<Vec<C>, ScfError> {
@@ -244,8 +283,8 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
 
 /// Build the final-cutoff cold start, collective on `comm` (including size 1).
 /// Atomic charge/orbitals are required, never silently replaced with uniform
-/// density or random waves. Currently LDA-PZ and library LDA-PW without NLCC;
-/// PBE, core charge and frozen-strain inputs fail explicitly before setup.
+/// density or random waves. LDA-PZ and library LDA-PW support NC data with
+/// optional NLCC. PBE and frozen-strain inputs fail explicitly before setup.
 /// Randomization rule: none. Atomic columns retain species/orbital/atom/m
 /// order; missing bands are completed by deterministic kinetic-ordered ORC
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
@@ -287,17 +326,20 @@ fn start_inner<K: Collective>(
         || atoms.is_empty()
         || potentials.is_empty()
         || o.strain_reference.is_some()
-        || o.functional == Functional::Pbe
         || o.pw92_prefactor != crate::Pw92Prefactor::Modified
     {
         return Err(ScfError::InvalidInput(
             "reference start: unsupported problem",
         ));
     }
+    if o.functional == Functional::Pbe {
+        return Err(ScfError::InvalidInput(
+            "reference start: PBE requires distributed gradients",
+        ));
+    }
     let mut positions = vec![Vec::new(); potentials.len()];
     for (i, p) in potentials.iter().enumerate() {
         if potentials[..i].iter().any(|q| q.label == p.label)
-            || p.potential.core_density().is_some()
             || (!o.allow_functional_override && !o.functional.matches_upf(p.potential.functional()))
             || p.potential
                 .atomic_wavefunctions()
@@ -306,7 +348,7 @@ fn start_inner<K: Collective>(
             || p.potential.raw().rhoatom.values.iter().all(|&v| v == 0.)
         {
             return Err(ScfError::InvalidInput(
-                "reference start: requires compatible NC atomic data without core charge",
+                "reference start: requires compatible NC atomic charge and l<=3 orbitals",
             ));
         }
     }
@@ -495,13 +537,20 @@ fn start_inner<K: Collective>(
         f64::from(coeff.is_err()),
         "reference start: atomic fields failed",
     )?;
-    let (rho_hat, ion_hat) = coeff?;
+    let AtomicFields {
+        rho: rho_hat,
+        ion: ion_hat,
+        core: core_hat,
+    } = coeff?;
     drop(db);
     drop(dg);
     setup.record("atomic_local_tables_structure_factors", clock);
     let clock = Instant::now();
     let ionic = fields.inverse(comm, &ion_hat)?;
     drop(ion_hat);
+    let core_density = core_hat
+        .map(|c| fields.inverse_checked(comm, &c, true))
+        .transpose()?;
     let prolonged = seed
         .map(|s| s.inject(&basis, &grid, &half, operator.local_rows(), &fields, comm))
         .transpose()?;
@@ -561,7 +610,16 @@ fn start_inner<K: Collective>(
     drop(vh_hat);
     // Prolongation is not clipped or rescaled. Signed Fourier roundoff uses
     // the same absolute-density LDA evaluation as a reference SCF map.
-    let xc = if warm_orbitals.is_some() {
+    let xc = if let Some(core) = &core_density {
+        local_xc(
+            o.functional,
+            &density
+                .iter()
+                .zip(core)
+                .map(|(n, c)| (n + c).abs())
+                .collect::<Vec<_>>(),
+        )
+    } else if warm_orbitals.is_some() {
         local_xc(
             o.functional,
             &density.iter().map(|v| v.abs()).collect::<Vec<_>>(),
@@ -613,7 +671,8 @@ fn start_inner<K: Collective>(
     let g = fields.fft.local_len();
     let n = basis.vectors().len();
     let k = j.max(bands);
-    let retained_field_bytes = 8 * (3 * f + points + l) + 16 * g;
+    let core_bytes = core_density.as_ref().map_or(0, |c| 8 * c.len());
+    let retained_field_bytes = 8 * (3 * f + points + l) + 16 * g + core_bytes;
     let start_block_bytes = 8 * l * bands;
     // Named array live upper envelope; Q + next-Q/HQ + raw backup + selected,
     // Gram/EVD/rotation matrices, owned fields and both projector formats.
@@ -630,8 +689,13 @@ fn start_inner<K: Collective>(
             + 8 * l * projector_count
             + complex_projector_bytes
             + 32 * g
-            + 16 * f)
-            .max(ewald_terms_bytes);
+            + 16 * f
+            + if core_density.is_some() {
+                16 * g + 8 * f
+            } else {
+                0
+            })
+        .max(ewald_terms_bytes);
     let legacy_idle_band_density_bytes = 8 * points * (bands + 1);
     let legacy_principal_peak_bound_bytes = (legacy_idle_band_density_bytes
         + 16 * n * (2 * k + bands)
@@ -668,6 +732,7 @@ fn start_inner<K: Collective>(
         density,
         density_g,
         ionic,
+        core_density,
         potential,
         diagonal_static,
         orbitals,
@@ -704,6 +769,25 @@ fn local_xc(functional: Functional, n: &[f64]) -> Result<Vec<f64>, ScfError> {
     }
 }
 
+struct AtomicFields {
+    rho: Vec<C>,
+    ion: Vec<C>,
+    core: Option<Vec<C>>,
+}
+
+fn core_radial(s: &Species<'_>, q: f64, volume: f64, o: &ScfOptions) -> Result<f64, ScfError> {
+    s.potential.core_density().map_or(Ok(0.), |core| {
+        dft_upf::radial::spherical_density_transform_with_rule(
+            s.potential.mesh(),
+            core,
+            q,
+            o.radial_even_rule,
+        )
+        .map(|v| v / volume)
+        .map_err(err)
+    })
+}
+
 fn atomic_fields(
     fields: &StartFields,
     db: &PlaneWaveBasis,
@@ -711,7 +795,11 @@ fn atomic_fields(
     volume: f64,
     species: &[Species<'_>],
     o: &ScfOptions,
-) -> Result<(Vec<C>, Vec<C>), ScfError> {
+) -> Result<AtomicFields, ScfError> {
+    let mut core = species
+        .iter()
+        .any(|s| s.potential.core_density().is_some())
+        .then(|| vec![C::default(); fields.fft.local_len()]);
     let dims = fields.dims;
     let represented: Vec<_> = if let Some(dg) = dg {
         let owned: BTreeMap<_, _> = fields
@@ -788,7 +876,7 @@ fn atomic_fields(
                         local.at_g(q)
                     }
                     .map_err(err)?;
-                    Ok((r, v))
+                    Ok((r, v, core_radial(s, q, volume, o)?))
                 })
                 .collect::<Result<_, ScfError>>()?;
             factors.fill(C::default());
@@ -811,9 +899,12 @@ fn atomic_fields(
             }
             for (a, (&(i, _), &shell)) in represented.iter().zip(&shells).enumerate() {
                 ion[i] += radial[shell].1 * factors[a];
+                if let Some(core) = &mut core {
+                    core[i] += radial[shell].2 * factors[a];
+                }
             }
         }
-        return Ok((rho, ion));
+        return Ok(AtomicFields { rho, ion, core });
     }
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
     let mut phases = if reuse {
@@ -839,7 +930,7 @@ fn atomic_fields(
         let mut cache = BTreeMap::new();
         let mut work = vec![0.; samples.len()];
         for &(i, g) in &represented {
-            let (r, v) = if let Some(&v) = cache.get(&g.norm_squared.to_bits()) {
+            let (r, v, c) = if let Some(&v) = cache.get(&g.norm_squared.to_bits()) {
                 v
             } else {
                 let q = g.norm_squared.sqrt();
@@ -857,8 +948,9 @@ fn atomic_fields(
                     local.at_g(q)
                 }
                 .map_err(err)?;
-                cache.insert(g.norm_squared.to_bits(), (r, v));
-                (r, v)
+                let c = core_radial(s, q, volume, o)?;
+                cache.insert(g.norm_squared.to_bits(), (r, v, c));
+                (r, v, c)
             };
             // Preserve every charge multiply/add and the ionic sum order.
             // Only reuse direct phases: no axis factorization or interpolation.
@@ -878,9 +970,12 @@ fn atomic_fields(
                 structure_factor(g.cartesian, s.positions_bohr)?
             };
             ion[i] += v * factor;
+            if let Some(core) = &mut core {
+                core[i] += c * factor;
+            }
         }
     }
-    Ok((rho, ion))
+    Ok(AtomicFields { rho, ion, core })
 }
 
 /// REFSTART_MKL: route the atomic-start Gram and rotation products through the

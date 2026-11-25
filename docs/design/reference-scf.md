@@ -2713,3 +2713,154 @@ in [verwarm-dev08-request.md](../performance/lanes/RSCF/verwarm-dev08-request.md
 The Mac fixtures exercise cubic, skew, elongated, synthetic nonlocal and
 actual failed-verification recovery on 1/3/8 simulated ranks. They are small
 internal oracles, not a physical Si128 SCF or MPI/MKL speed evidence.
+
+## NLCC
+
+G1-NLCC extends the implemented Start/Driver envelope above to norm-conserving
+LDA-PZ and modified LDA-PW datasets with nonlinear core correction. Earlier
+statements in those sections that NLCC rejects are superseded by this section.
+PBE/distributed gradients, spin, smearing, symmetry, density floors and
+force/stress delivery remain outside this stage. Functional mismatch still
+rejects unless the caller explicitly requests the existing diagnostic override;
+using that override does not qualify a PBE dataset for physical LDA work.
+
+### Core construction and ownership
+
+`StartState.core_density` is an optional immutable field in electrons/Bohr^3,
+ordered exactly like `density` on the owned real-space planes. Each species'
+`PP_NLCC` stores the physical radial density, not `4 pi r^2 rho`. The existing
+`spherical_density_transform_with_rule` integrates it with the selected radial
+quadrature. Its coefficients are divided by cell volume and multiplied by the
+same atomic structure factors as the ionic local field. Both setup variants
+reuse the density-sphere ownership, shell IDs/cache and structure factors already
+built for atomic charge and the ionic potential. Species without a core add
+nothing. One additional owned inverse transform constructs the core; no full
+core grid or reciprocal core array is gathered or retained. The legacy global
+reality/finite-value guard is preserved using scalar rank maxima. Core ringing
+is neither clipped nor normalized, and G=0 is the radial integral, never the
+valence electron count. A prolonged ladder seed carries only valence density;
+the core is rebuilt on the target grid from the same immutable atomic data.
+
+The core adds `8 F_r` retained bytes and transient owned reciprocal/transform
+storage. `StartMemory` includes those named buffers. With no NLCC there is no
+additional field allocation, transform or collective; charge, ionic and XC
+arithmetic and the existing energy reduction retain their previous order.
+
+### XC and energy accounting
+
+For signed mixed valence density `n` and fixed core `c`, the reference LDA map
+and initial potential evaluate `E_xc[|n+c|]` and `v_xc[|n+c|]`. The existing
+reference absolute-density rule is applied after adding the core. On positive
+total density this is the legacy `evaluate_with_core` functional exactly.
+Negative-total mixed inputs retain the reference signed-density policy; they
+are not asserted to have the legacy driver's negative-density behavior.
+
+Only XC sees `c`. Hartree uses `n`, and electron count, occupations, density
+output, G=0 charge, Broyden history, residual `dr2`, verification charge and
+`descf` density differences remain valence-only. In particular:
+
+- Direct energy: `T + E_local + E_nonlocal + E_H[n_out] + E_xc[n_out+c] + E_ion`.
+- Double counting: `integral n_out (V_H[n_in] + v_xc[n_in+c])`.
+- Harris–Foulkes: `E_band - E_H[n_in] + E_xc[n_in+c]
+  - integral n_in v_xc[n_in+c] + E_ion`.
+- The mixed-density variational energy uses the same XC replacement; the
+  signed valence integral defines `descf`. No core-potential integral is
+  subtracted a second time or added to the total energy.
+
+The delivered `EnergyAudit.nlcc` matches the legacy output-density ledger:
+core electrons, `integral c v_xc[n_out+c]` and
+`integral n_out v_xc[n_out+c]`. Ledger integrals share the existing field-energy
+reduction. The exact-density cache is valid because core/cell/functional/layout
+are immutable for its lifetime. Lean maps defer the output ledger together
+with the output audit (`nlcc=None` means unavailable there); stopped, verified,
+iteration-limit and failed-mixer deliveries complete it through the existing
+full-audit boundary. Verification has the same core as every ordinary map.
+
+### Validation and limits
+
+`nlcc_owned_start_matches_legacy_and_gaussian_fourier` checks the analytic
+unit-charge Gaussian Fourier coefficients, legacy core/start density and
+Hartree-plus-XC initial potential for LDA-PZ/PW, a skew two-species cell with
+one core-free species, both local-shell setup modes and 1/3/8 simulated ranks.
+The map unit test checks valence-only Hartree, total-density XC and both ledger
+integrals, including signed mixed input. No-core Si has a before/after
+fingerprint test over delivered arrays, energy and scientific decision traces.
+
+Full delivered-state matrices are ignored in debug (ADR 0004). They compare
+local cubic LDA-PZ and nonlocal skew LDA-PW to tight, certified legacy SCF,
+at standard `1e-8 Ry` and tight `1e-12 Ry` estimator thresholds. Each layout is
+repeated at 1/3/8 ranks. The existing `common/rank_rule.rs` checks the complete
+ordinary/verification trajectory and demands threshold-margin evidence for
+any first divergent discrete predicate. Energy caps are `5e-9 Ha` standard
+and `1e-10 Ha` tight; charge is within `1e-10 e`. Density and occupied-root
+caps are `1e-6 e/Bohr^3` (tight: `1e-7`) and `1e-5 Ha` against legacy; the independent cross-rank
+density cap remains `1e-9 e/Bohr^3` unless the rank rule explains a branch.
+All returned roots are checked within `1e-5 Ha`; empty roots retain the existing
+loose empty-band solver threshold.
+
+```sh
+cargo test --release -p dft-engine --test refscf nlcc_delivered -- --ignored --nocapture --test-threads=1
+DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf nlcc_no_core_silicon_fingerprint -- --ignored --nocapture
+```
+
+No committed real LDA NLCC UPF is available. Synthetic fixtures are not QE or
+material-validation evidence. The real MPI8 and optional correctly matched
+LDA dataset protocol is [the G1 dev08 request](../performance/lanes/RSCF/g1-nlcc-dev08-request.md).
+
+#### G1 local evidence
+
+Mac Apple Silicon, pure Rust, base `d0a93375b3b9f91ce79218e5e8dfcf7c15d9eb03`.
+These are engine-to-engine synthetic comparisons, not QE references or timings.
+The release matrix covers 12 system/threshold/rank combinations, each twice;
+no unexplained or rounding-threshold trajectory branch occurred.
+
+| Fixture | Estimator (Ry) | Maximum legacy energy difference (Ha) | Maximum density difference (e/Bohr^3) | Maximum occupied-root difference (Ha) |
+| --- | ---: | ---: | ---: | ---: |
+| Cubic local LDA-PZ | 1e-8 | 7.3443e-11 | 7.6992e-7 | 2.9851e-6 |
+| Cubic local LDA-PZ | 1e-12 | 1.7764e-15 | 4.1340e-9 | 1.6235e-8 |
+| Skew nonlocal LDA-PW | 1e-8 | 5.2606e-10 | 6.3892e-7 | 2.5841e-8 |
+| Skew nonlocal LDA-PW | 1e-12 | 1.2413e-13 | 9.5408e-9 | 9.6301e-10 |
+
+The initial MPI-harness probe accidentally used local **skew** LDA-PZ instead
+of the matrix's local cubic fixture. At `1e-8 Ry` it passed the energy class
+(`2.3783e-10 Ha`) and verification, but missed the fixed synthetic density
+cap (`1.5916e-6 e/Bohr^3 > 1e-6`); occupied-root difference was `6.3477e-6 Ha`.
+This is not hidden as a pass and no tolerance was relaxed. The harness now
+uses the exact two matrix fixtures. Energy-class acceptance alone does not
+promise the auxiliary pointwise density cap on additional systems.
+
+Initial test compilation caught a non-Sync legacy problem captured by a
+simulator closure; the test now captures only immutable arrays. The initial
+start comparison also compared atomic start to the legacy default uniform
+start; selecting `StartDensity::Atomic` fixed the oracle setup. Neither fix
+changed a numerical tolerance or production algorithm.
+
+No-core Si2 regression: the same release test was run with `refstart.rs` and
+`refscf/map.rs` from the base commit, then with the G1 implementation. All
+three FNV-1a fingerprints of the full scientific result/trajectory agree
+exactly (clocks excluded): rank 1 `4d94c48aa4101f65`, rank 3
+`dd3d0b80dddf9504`, rank 8 `9c03585f1f4dc0ea`. Respective delivered energies
+are `-7.23375645269802980`, `-7.23375645270790546`, and
+`-7.23375645263328870 Ha`. This is before/after identity at each fixed rank
+count, not cross-rank bit identity. External `Si.pz-vbc.UPF` SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`;
+cutoff `4 Ha`, five bands, Gamma, atomic start, default reference profile,
+full diagnostics. The pseudopotential remains outside the repository.
+
+Final local verification (all exit 0):
+
+| Command | Result |
+| --- | --- |
+| `cargo check --workspace --tests` | Passed |
+| `cargo test -p dft-engine --test refscf` | 65 passed, 11 ignored |
+| `cargo test -p dft-engine` | 346 passed, 92 ignored across harnesses |
+| `cargo fmt --check && cargo clippy -p dft-engine --all-targets -- -D warnings` | Passed |
+| `DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf nlcc_ -- --include-ignored --nocapture --test-threads=1` | 9 passed, including serial World harness and Si fingerprint |
+| `CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g1-nlcc-gates scripts/check.sh` | Build, test, fmt, clippy PASS; 952 passed, 202 ignored, 95 binaries |
+| `python3 -I scripts/tests/test_readme_figures.py` | 9 passed; existing generated evidence remains fresh |
+
+The full gate's optional process-load diagnostic could not invoke `ps` inside
+the sandbox; all four actual gates completed successfully (exit 0). Real MPI
+is not installed or exercised here. README/figure result generation, dashboard
+and session-registry updates are outside G1's explicit owned-file list and
+remain the orchestrator's reporting boundary; no such files were changed.

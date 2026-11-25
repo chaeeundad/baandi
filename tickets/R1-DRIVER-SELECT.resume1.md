@@ -1,0 +1,4 @@
+Ownership extension approved (orchestrator):
+1. crates/dft-cli/tests/reference_driver.rs: apply your prepared patch (target/tmp/reference_driver_scope.patch); explicit input wins over the environment by design.
+2. scripts/bench_scf.py: make the benchmark commands work under R1 routing (you reported they exit 3 because of the historical routing metadata / input template). The normal `bench_scf.py --require-identical` against both docs/performance/baseline-reference.json and baseline-oracle.json must pass through the script itself (not a side script), recording the selected driver. Do not re-record the baselines unless the only difference is the new metadata fields; if you do, say exactly which fields changed and confirm energies/hashes are identical.
+Then re-run all TEST_COMMANDS and the full scripts/check.sh (BAANDI_TEST_TMP outside the checkout). Report in English. Leave changes uncommitted.

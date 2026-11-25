@@ -22,22 +22,21 @@ this ticket's ownership. On platforms without a POSIX shell, use `dft-cli` direc
 baandi run input.toml --output-dir results
 ```
 
-No observation or control is enabled. The existing `ScfProblem::run_outcome`
-path, final outputs, console text and exit codes are retained. The original
-`dft-cli run` spelling continues to work. Execution mode does not select physics,
-change tolerances, or provide a new convergence criterion.
+No observation or control is enabled. Production uses `refscf::api::solve`,
+which completes the same reference stepper used by observed and controlled runs.
+Execution mode does not select physics or change tolerances. The original
+`dft-cli run` spelling continues to work.
 
-Every mode (classic, observed, agent) and every other command (`bands`, `dos`,
-`checkpoint`, `restart`, `explain`) runs the same SCF path: the single standard
-path with the fixed-point verification after convergence (ADR 0043; since
-ONEPATH-4, 2026-11-16, there is no strict fallback for any mode or command). The
-strict path with its certificate is a reference tool reached only with
-`BAANDI_REFERENCE_STRICT=on`. In the observed and agent modes the verification
-is reported as the `certificate_evaluated` event and in `results.json`
-(`verified`, `verification`). Agent tolerance interventions act on the strict
-reference options and do not move the standard stop rule; a hybrid eigensolver
-request is rejected on the standard path. Spin and Fermi-Dirac inputs remain
-classic-only.
+Routing is Reference or StrictOracle, with strict precedence and the free-moment
+PBE G4D exception; see [ADR 0047](../decisions/0047-reference-driver-single-path.md).
+Reference defaults are Broyden beta 0.7/history 8, threshold 5e-9 Ha, verification
+on. Reference Gamma, complex-k and eligible spin/FD can be observed/controlled.
+Oracle spin/FD (including G4D) and oracle symmetry runtime combinations reject.
+
+Reference controls change beta/history, tighten `threshold_ry` (Ry, twice the
+CLI threshold in Ha), or change verification where derivatives permit it.
+Legacy solver, eigen/density/energy tolerance, schedule and budget-extension
+controls reject. A runtime policy change is distinct from a new SCF run.
 
 ## Observed
 
@@ -53,11 +52,11 @@ log is an error, never truncated or silently appended to another calculation.
 Use a fresh output directory per calculation. `--events` adds a mirror: `-` means
 JSON-lines stdout, a path means another exclusively created file, and `unix:PATH`
 means a pre-bound Unix **datagram** listener (not a stream socket). With stdout
-telemetry, preflight and final human output go to stderr. Human telemetry always
-goes to stderr, reporting iteration, energy in Ha, normalized density residual
-in Bohr^-3/2 and `solver=iteration_completed`. This status means an iteration
-finished; only a `converged` event establishes engine certification. Certificate
-pass/fail and residuals are separate events.
+telemetry, preflight and final human output go to stderr. Human telemetry goes to stderr. Reference events distinguish ordinary, retry
+and verification maps, with estimator/optional energy in Ha, dr2/ethr in Ry,
+H columns and a safe-point flag. Uncomputed energy and unavailable legacy
+density/charge diagnostics are null. Only a terminal convergence event establishes
+completion; a completed map alone does not.
 
 Every record has schema version `1.0`, calculation ID, increasing `sequence`,
 Unix timestamp in seconds, iteration, state version, `type`, and a `data` object.
@@ -66,7 +65,9 @@ Event types are `initialized`, `iteration_finished`, `certificate_evaluated`,
 Field names encode units; relative charge error is dimensionless. JSON contains
 scalars, never density/orbital arrays. IDs identify executions, not physical models.
 
-The driver drains engine events after each complete step. A bounded 256-record
+The driver emits/drains events after each completed map; iteration numbers can
+repeat for retries and verification. `runtime.json` records final or partial
+state and policy audit; normal `results.json` retains effective and launch policy. A bounded 256-record
 worker queue moves formatting and I/O outside SCF; publication never waits for a
 subscriber. Queue exhaustion or sink failure stops driving at a boundary with
 exit code 5 and an explicit stderr error. Queued records are drained before
@@ -83,7 +84,8 @@ from that log. No overhead/performance claim is made here.
 baandi run input.toml --agent --output-dir controlled
 ```
 
-This mode uses P11B `Runtime`, with supervised approval and no autonomy policy.
+This mode uses `refscf::runtime::Runtime` on the reference path, with supervised
+approval and no autonomy policy. The oracle retains its historical runtime.
 It adds `OUTPUT/control/control.sock`, a nonblocking Unix datagram proposal socket,
 and an exclusively created `OUTPUT/control-audit.jsonl`. The default socket
 parent is created with mode 0700; the socket is 0600. `--control-socket PATH`
@@ -98,8 +100,12 @@ A proposal is a JSON datagram, at most 4096 bytes, with no unknown fields:
 {"id":"proposal-1","calc_id":"ID_FROM_EVENT_LOG","observed_state_version":1,"observed_policy_revision":0,"max_iteration":20,"action":"mixing_beta","beta":0.2}
 ```
 
-Actions are `pause`, `resume`, `cancel`, and `mixing_beta`; `beta` is only allowed
-for the latter and must be finite in (0, 1]. Versions and expiry are mandatory;
+Reference actions are `pause`, `resume`, `cancel`, `mixing_beta` (argument `beta`,
+finite `(0,1]`), `mixing_history` (`history`, `1..=25`), `threshold_ry`
+(`threshold_ry`, positive and tightening only), and `verification` (`verification`,
+boolean). A policy action carries exactly its one typed argument. Mixer changes
+clear history. Interventions apply only at safe points; a pending pause/cancel
+waits across candidate/verification or retry boundaries. Versions and expiry are mandatory;
 IDs and the calculation identity are validated by the runtime. The initial policy
 revision is 0; applied revisions appear in the audit. Late/stale requests are
 rejected, never silently retargeted. A bound client socket receives a best-effort
@@ -114,8 +120,10 @@ requires approval; an approved pause waits for an approved resume or cancel.
 Intake is limited to 16 datagrams and 16 terminal commands per boundary; runtime
 pending/audit quotas remain in force. A run may finish before an agent replies.
 
-The P11B audit sink writes and syncs each batch before committing a control
-mutation, rolling back partial writes on reported failure. Audit rows include
+The reference audit writes durable approval intent before mutation and disposition
+afterward. Journal failure stops before the next map; it cannot roll back an
+already applied mutation. Only rank zero receives proposals/approval, and all
+ranks apply the broadcast decision collectively. Audit rows include
 request ID, action, observed versions, expiry iteration, requester, approver,
 outcome, resulting state and policy revision. Debug strings for action/outcome
 are display evidence, not a replay format. Cancellation has no fabricated final
@@ -142,8 +150,8 @@ an incomplete final line with an explicit flag, and rejects malformed complete
 lines. A nonterminal record means **process liveness unknown**, not “running”.
 Final results report recorded convergence and energies.
 
-Checkpoint inspection uses the merged P11C `checkpoint_io::read` API and the
-[checkpoint v1 format](../checkpoint-format.md). Pass the file explicitly:
+Checkpoint inspection checks the container version and selects its decoder;
+[checkpoint v2 is primary, v1 is legacy/oracle only](../checkpoint-format.md). Pass the file explicitly:
 `.cp` routes damaged files through that reader, and `BAANDICP` magic recognizes
 valid containers with any extension (including `.toml`). Directory lookup keeps
 its established event-log/results priority and never guesses which checkpoint
@@ -156,11 +164,12 @@ scalar history with units.
   energy/residuals; convergence is unknown. Runtime envelopes additionally report
   saved runtime state, policy revision and audit count. Saved state is not proof
   that a process is running or paused now.
-- `WarmStart`: an initial guess, with no fabricated iteration, convergence flag,
+- v1-only `WarmStart`: an initial guess, with no fabricated iteration, convergence flag,
   history or energy. Missing evidence is JSON null.
 - `ResultExport`: the recorded convergence flag (including false), final energy
   in Ha, charge in electrons, gap in Ha and latest iteration diagnostics. This is
-  inspection evidence, not a restart capability.
+  inspection evidence, not a restart capability. v2 exports contain energy bits,
+  convergence/counts and density/orbital hashes, not the v1 full state payload.
 
 Inspection neither restores a session nor executes SCF, and requires no original
 input/UPF files. It does not establish restart compatibility, physical accuracy or
@@ -188,6 +197,15 @@ physical intent requires clarification. Approval applies to the displayed,
 validated spec, not to the original sentence. No translator is implemented here.
 
 ## Verification and limits
+
+Current reference runtime evidence: [reference-results.json](../../tests/reference/runtime/generated/reference-results.json)
+and the [R8 runtime contract](../design/reference-scf.md#runtime-control).
+Plain/observed identity does not prove controlled-trajectory accuracy. Reference
+budget-extension recovery is unsupported; its demo records the rejection.
+Checkpoint after a policy mutation cannot preserve the runtime audit in v2 and
+rejects. The following P11 records are historical oracle/adapter evidence,
+not a claim that those legacy policies are current production controls.
+
 
 `cargo test -p dft-cli --test all run::execution_modes -- --nocapture` compares a
 three-iteration synthetic small-cell fixture across the existing Classic entry,

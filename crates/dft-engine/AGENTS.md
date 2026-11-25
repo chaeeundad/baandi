@@ -1,858 +1,136 @@
 # dft-engine
 
-## Frozen legacy oracle (R9c)
-
-`src/oracle/` contains the complete legacy standard and strict drivers, including
-the legacy sessions, checkpoint v1, runtime, MPI bridge, cutoff ladder and replay
-diagnostics. The `strict-oracle` Cargo feature is on by default. Treat this code
-as frozen: changes need an oracle-specific ticket and both identity gates.
-The crate-root compatibility exports keep existing adapters working; `scf.rs`
-is only a compatibility facade. CLI explicitly enables the feature.
-
-Production `refscf`, `refstart`, shared physics, model/result contracts, parallel
-infrastructure and profiling build without that feature. Shared spin/finite-T
-result data live in `model`; `atomic_start.rs` keeps only the shared
-factorization contract, and `grid_dist.rs` keeps shared plane redistribution
-and counter contracts. Legacy grid stages live in `oracle/grid_dist.rs`.
-Legacy spectral audit code is feature-gated.
-Stress scans for reference deliveries remain available without the oracle;
-legacy-result scans require the feature. No SCF arithmetic is changed.
-
-Integration harnesses that use legacy entry points (including mixed
-reference/oracle comparisons) declare `required-features = ["strict-oracle"]`.
-Default test coverage is unchanged. Reference checkpoint/stepper and module
-independence tests also compile without it. `scripts/check.sh` independently
-runs `cargo check -p dft-engine --no-default-features` and the corresponding
-`cargo clippy --all-targets -- -D warnings`, avoiding workspace feature
-unification. Run CLI `reference_identity`, engine `oracle_identity`, and both
-`bench_scf.py --require-identical` baselines after moves.
-
-## Current ownership (2026-11-05)
-
-Owns SCF orchestration/session, `events`/`state_view`, `runtime`/`policy`,
-`diagnostics`, and in-memory `checkpoint` payload/validation; also NSCF and
-band-density orchestration. File persistence stays in CLI, transports in adapters.
-The P11A/B notes below are historical implementation detail: P11C now supplies
-checkpoint/restore APIs, including runtime/audit restoration. No cross-build exact
-restart guarantee or engine disk I/O is implied. See `docs/checkpoint-format.md`.
-
-
-**Purpose:** Orchestrates SCF, occupations, total energy and its audit (ion-ion/Ewald, double counting).
-
-**Default path (ADR 0043 ONEPATH-4, 2026-11-16):** `ScfOptions::default()` is the
-single standard path with the fixed-point verification (5e-9 Ha, Pulay beta
-0.5). The strict path is reached only through `ScfOptions::strict_reference()`
-(the former default, bit for bit) or `ScfOptions::from_reference_switch()` under
-`BAANDI_REFERENCE_STRICT=on`. Tests, oracles and accuracy gates that need the
-strict arithmetic or certificate must ask for `strict_reference()` explicitly;
-`default()` reads no environment. Checkpoint v1 carries `verification` and the
-failed `verification_attempts` of an exact continuation (`restore_exact_inner`
-validates them against the history's verification records). `nscf` clears the
-SCF profile fields (it is one residual solve). Runtime policy rejects a hybrid
-eigensolver on a standard session (`StandardRequiresDavidson`).
-
-**Invariants to preserve and test:** Every energy term has a unit test and appears in results; no hidden constants.
-
-**Before editing:** read ../../AGENTS.md, ../../ownership.toml (allowed dependencies) and the ADRs in ../../docs/decisions/.
-**Verify:** `scripts/check.sh dft-engine`, then `scripts/check.sh` for the whole workspace.
-**Rules:** keep public API changes out of unrelated tickets; every behavior change adds or updates a test with stated tolerance and units; prefer general-purpose crates (ADR 0003); record design decisions in an ADR.
-
-## Incremental SCF (P11A)
-
-`ScfSession` owns the single SCF iteration implementation (`session.rs`, a child
-of `scf` to keep problem internals private, re-exported at the crate root).
-Creation consumes a validated `ScfProblem`, `CompletionMode`, and
-`ExecutionConfig`; `initialize` performs mixer validation once. `step` executes
-one ordinary iteration including its nested certificate and applicable mixing.
-It returns `StepReport` with Ready/Converged/NotConverged, or the existing
-numerical error. Calls before initialization or after termination reject without
-mutation. Only a passed certificate sets convergence. `result` borrows an outcome
-when available; `into_result` consumes it. Strict exhaustion has history but no
-result; the legacy driver converts its status into `ScfError::NotConverged`.
-Retained exhaustion skips final mixing, exactly as the previous implementation.
-
-Direct sessions expose no public policy/mode mutation. Classic creates no queue,
-event payload or telemetry timestamp. Observed and AgentControlled share bounded
-observation. Use the P11B `Runtime` wrapper for control, pause and policy replay;
-exact checkpoints remain P11C and are explicitly unavailable. Assign a distinct `ExecutionConfig.calc_id` for each
-observed calculation; the default ID is for standalone use. Snapshots borrow
-options and scalar energy terms without copying history/arrays; after a failed
-partial step `record_iteration` can exceed the completed `iteration`.
-`density`, `history` and `result` are explicit larger-data accessors.
-
-`events.rs` uses preallocated routine/critical partitions. Routine overflow drops
-new iteration events, counts each loss, and publishes a loss summary before the
-next critical event or every 64 iterations. Pop merges by sequence. Six critical
-credits are reserved before each step; two additional emergency slots permit a
-loss summary and `TelemetryExhausted` failure without waiting or losing pending
-critical events. A consumer drains after steps and owns any persistence/fan-out.
-There is no durable journal or background worker in the engine. `Observer` is
-invoked explicitly by `EventQueue::drain_to`, never by an eigensolve or step;
-adapters must keep slow external subscribers off their numerical producer.
-Timestamp values use `SystemTime` at publication; RFC3339/JSON formatting belongs
-to adapters. Events contain no array payloads. Sequence gaps have loss summaries;
-state versions advance once for initialization and each completed/failed step.
-
-Validation: `scripts/check.sh dft-engine`; the complete equivalence matrix is
-ignored in debug to keep gates fast. Run
-`cargo test --release -p dft-engine --test all stepwise_equivalence:: -- --include-ignored --nocapture --test-threads=1`.
-It covers Gamma, four k points, skew multi-species/nonlocal-plus-local fixtures,
-Linear/Pulay/KerkerPulay, threads 1/4, all modes, full array bits and scientific
-history/certificates excluding wall-clock durations. Release fingerprints also
-allow comparison with the pre-refactor implementation. Timing samples are
-interleaved after warmup; shared-host timings do not establish quiet-node targets.
-
-## Runtime policy control (P11B)
-
-`runtime::Runtime` exclusively owns a `ScfSession`. Public access to the underlying
-session is read-only, apart from draining telemetry. No runtime object, policy,
-audit buffer or new per-iteration branch is installed in ordinary `run` or direct
-`ScfSession::step`. The original advance/step implementation is unchanged.
-The only shared setup refactor extracts construction of the existing mixers.
-`tests/all/stepwise_equivalence.rs` is unchanged.
-
-Lifecycle: Created -> Initialized -> Running -> Initialized, with certificate-only
-Converged, budget Exhausted, numerical Failed and controlled Cancelled terminal
-states. PauseRequested means an uncommitted request; a boundary first completes
-numerics and then validates that request before entering Paused. Terminal numerics
-win over pending pause/cancel; approved cancellation precedes other controls.
-Resume activates the existing continuation through the logical Restarting state,
-without initialization or resetting numerics. Restarting is not checkpoint import.
-The public pure transition table does not mutate a runtime or confer convergence.
-
-`begin_step`/`finish_step` allow scheduling and queuing before the synchronous SCF
-step. There is one mutation owner; transport threads enqueue to their driver, which
-calls `submit` at the next accessible boundary. There is no transport/thread worker
-in the engine and no interruption inside an eigensolve. `step` processes controls
-before/after an iteration. With no approved request it continues the current
-policy; pending human approvals and missing agents never block a running solve.
-`safe_point` rejects during Running/PauseRequested/Restarting. All proposals are
-validated against the completed boundary, not the transient Running projection.
-
-ControlRequest schema 1 carries calculation/request identity, observed state and
-policy revision, a tagged action and parameters, at most 8 typed predicates,
-iteration/wall expiry, stale policy and a reason capped at 512 UTF-8 bytes. Labels
-are capped at 128 graphic ASCII bytes; patches have at most 10 changes. Wall expiry
-and approval expiry are also converted to monotonic deadlines at admission.
-Stale state can be revalidated only with unchanged policy revision, explicit
-permission and passing current predicates; future versions always reject.
-Unavailable diagnostics fail closed. Unknown physical-model interventions are
-unrepresentable; checkpoint requests return UnsupportedCapability.
-
-Default authority is supervised: submit with PendingApproval, then let an
-AUTHENTICATED HOST call approve for that owned immutable request ID. Authority and
-Approval are trusted Rust adapter arguments, not fields to deserialize from an
-agent body. Approved requests can also be submitted by the host directly. A changed
-payload or requester with a reused ID conflicts; identical retries reuse the prior
-disposition without another application. Invalid/oversized input and capacity
-failures reject before admission; every admitted, disposed proposal has an audit
-record. Pending proposals can be denied or expire and never reserve a numerical
-mutation lock. Host transport rate limits and authentication remain adapter duties.
-
-Optional launch-time autonomy is a closed allow-list (beta ranges/nonincrease,
-reset, implemented solver selection, tightening, bounded budget and lifecycle).
-There are at most 16 rules and 32 total applications, with per-rule counts,
-iteration cooldown and version-lag bounds. No rule means deny. Mixer strategy
-changes use supervised approval in this initial profile. Administrative mode
-changes always need host approval. Downgrading to Observed revokes autonomy and
-rejects pending controls; counters persist and upgrading does not silently restore
-autonomy. Classic can change mode only before initialization. Observed and
-AgentControlled may switch at Initialized/Paused boundaries; a switch preserves
-numerical settings, arrays, mixer history and policy revision. Same-mode requests
-are idempotent and do not advance the state version.
-
-`policy::prepare_policy` validates immutable options. `ScfSession` has crate-private
-prepare/commit APIs used by Runtime only. A mixer change (including beta alone) or
-explicit reset constructs and validates an empty replacement before commit; it
-preserves density and orbital guesses and increments the reset count. Other changes
-preserve mixer history. Hybrid selection retains the merged implementation's
-Davidson fallback for buffer-band policies; it does not change band counts.
-No schedule or divergence intervention is allowed by P11-COMMON; those enum
-variants return named restriction errors. Overlapping mixer assignments reject;
-use one complete Mixing value for a combined kind/beta/history change. History is
-capped at 64 and the total budget at 10000, and a budget patch must increase it
-before exhaustion. Exhausted sessions are not resumed without P11C continuation.
-At most one numerical transaction is applied per completed iteration boundary.
-
-Tolerance changes need launch-time, evidence-backed positive lower bounds and
-must tighten the current values. They cannot exceed the existing certificate
-threshold defaults: density 1e-7 Bohr^-3/2, energy/eigen 1e-8 Ha. Lower bounds limit
-excessive tightening, not authorize weakening. There is no unsafe-relaxed escape
-hatch; result provenance always records unsafe_relaxed=false. Test floors are
-validator fixtures, not scientific defaults. No SCF numerical defaults changed.
-
-Audit is a bounded independent control journal (default 4096, maximum 65536
-records), separate from the existing SCF event queue. Each record carries schema,
-calculation ID, sequence, SystemTime timestamp, original request (including ID,
-reason and observed versions), requester, authority/approval, replay marker and autonomy rule index, complete before/after option
-and lifecycle projections, disposition and reset semantics. Accepted and Applied
-are separate records; rejected transactions have after=before and preserve state
-version, policy revision, density, orbitals and hidden mixer state. Submission is
-not semantic acceptance. Journal capacity is reserved for every admitted request.
-
-All validation and replacement preparation precede publication. Optional AuditSink
-is a trusted adapter contract: append an entire batch atomically or publish none.
-The Accepted/Applied batch is published before an infallible in-memory commit under
-exclusive ownership. A sink error commits no numerical change, stores a local
-JournalFailed rejection and prevents further driving; RuntimeResult exposes that
-failure. The default in-memory journal is NOT durable. No disk I/O, serialization,
-hashing/authentication, crash recovery or durable sink implementation is claimed.
-Those belong to adapters/P11C; a sink must obey its documented atomic contract.
-
-`RuntimeResult` carries optional ScfOutcome, lifecycle state, policy-change count,
-unsafe_relaxed, launch control configuration, journal-failure status and the complete bounded audit. Cancellation
-or strict failure never fabricates a scientific result. Only the unchanged SCF
-fixed-point certificate creates convergence.
-
-Replay consumes Applied records in recorded sequence at exact iteration boundaries,
-checks full before/after control projections, and revalidates the numerical policy.
-Wall/approval times are ignored, not extended. Autonomous counters and cooldown
-history are reconstructed from the recorded rule indices; replay cannot replenish
-a consumed grant. Use the same immutable model,
-launch config, build/backend/CPU and thread count; this is policy replay from the
-initial state, not exact checkpoint restoration or a cross-platform promise.
-Input journal authenticity is the adapter's responsibility. No current predicates
-or new agent decisions are substituted for the recorded committed decisions.
-
-Validation commands:
-- `scripts/check.sh dft-engine` and `scripts/check.sh`.
-- `cargo test --release -p dft-engine --test all runtime_policy:: -- --include-ignored --nocapture --test-threads=1`.
-- `cargo test --release -p dft-engine --test all stepwise_equivalence::modes_mixers_threads_and_species_are_bit_identical -- --ignored --nocapture --test-threads=1`.
-
-The runtime tests cover the complete 10-state/10-trigger matrix, rejection followed
-by identical future trajectory (including hidden mixer history), stale/expired
-requests, approval, bounded autonomy, journal failure/capacity, mode revocation,
-silent-agent fallback, solver/tolerance interventions and full-array replay.
-The ignored release replay matrix uses cubic Gamma, four k points and a skewed
-multi-species nonlocal-plus-local fixture; it compares energy/density/orbital bits,
-full scientific history and certificates, excluding only timings. No silicon-only
-default or optimization was adopted, and no new QE or overhead claim is made.
-
-### Verified P11B evidence (2026-11-04)
-
-Release runtime suite: 18 passed, 0 failed (17 ordinary debug tests and one
-release-only replay matrix). The transition test checks all 100 state/trigger
-pairs. The unchanged stepwise matrix checks 18 fixture/mixer/thread combinations
-against all three execution modes (54 comparisons). All 18 complete-state
-fingerprints also match an independently built archive of P11A commit
-`04167620eca63be4e2a3e60455414db5accbd64f` using the identical matrix command above.
-The old and current session code from `advance` through the end of the file is
-byte-identical; no control branch/allocation/logging was added to ordinary steps.
-These are equivalence checks, not measured overhead targets.
-
-Each replay fixture applies three numerical transactions at boundaries 1, 2 and 3,
-including Linear -> KerkerPulay and explicit history reset/budget extension, plus
-pause/resume. Energy, complete density/orbital arrays, scientific history and
-certificate are bit-identical on replay. Values below are synthetic engine
-results, not QE references.
-
-| Fixture | Energy (Ha) | Iterations | Certificate density (Bohr^-3/2) | Occupied eigenvalue change (Ha) |
-| --- | ---: | ---: | ---: | ---: |
-| Cubic Gamma, nonlocal | -0.62379772639925046 | 14 | 1.614491029e-9 | 1.383107906e-9 |
-| Four k points, nonlocal | -0.51412521505579167 | 14 | 4.017338130e-10 | 2.841891056e-9 |
-| Skew multi-species, nonlocal + local | -1.52491411485654660 | 15 | 3.049026055e-9 | 9.491289278e-9 |
-
-Numerical defaults, certificate thresholds and existing README reference evidence
-are unchanged. README/figure regeneration and its three specification tests pass;
-the generated files have no diff. Adding a new README result type or dashboard
-JSON entries requires the corresponding orchestrator-owned reporting files.
-
-## Collinear SCF (P13B / MF03)
-
-`scf::collinear` owns the additive `CollinearProblem`, `SpinSector`, result and
-fresh-map certificate. Legacy `ScfProblem` constructors pass no spin sector;
-no change to their iteration arithmetic or result shape is intended. Shared
-construction accepts an internal channel occupied count only for the new API.
-There is one solver implementation, called for each channel; density/audit
-buffers are reserved once. One common feasibility fraction applies to both
-existing mixer proposals. Only raw charge and spin residuals certify convergence;
-per-channel gaps apply only to nonempty channels. Output energy/eigenpairs/density
-are one state, with fresh certificate metrics separate. No spin runtime or exact
-checkpoint support is implied. See `docs/user/collinear-spin.md` for bounds,
-measured evidence and limitations. ONEPATH-3: with `options.standard` the
-collinear and finite-T drivers run the standard stop rule (collinear Coulomb
-estimate `CoulombMetric::spin_error`, block residual guard, ratchet, redo) and
-the fixed-point verification of the whole map (`standard_attempt`); the strict
-branches keep their arithmetic. Design: `docs/design/onepath3-spin-metals.md`.
-ONEPATH-3B (ADR 0042 amendment): cold fixed-sector solves start from the atomic
-subspace (span once per k shared by both channels, `atomic_start::ritz` per
-channel); FD problems call `ScfProblem::clear_atomic_start` ("Fermi-Dirac
-occupations"). `CollinearResult.atomic_start` reports it. Test
-`tests/all/spin_atomic_start.rs` (its header records why the 1e-10 bound holds for
-the free-electron start only: the atomic start amplifies rounding).
-
-The geometry/mesh test exceeds the debug budget and is ignored by default:
-`cargo test --release -p dft-engine --test all collinear:: -- --include-ignored --nocapture`.
-Run `scripts/check.sh` and the unchanged SCF benchmark identity check too.
-
-## MF06 NLCC (P13C)
-
-ScfProblem owns optional immutable core density and reusable XC input storage.
-NLCC-off dispatch retains old functional arithmetic. The output-density core XC
-is evaluated once before k-weighted audits; Hartree and band double counting use
-only valence. `EnergyAudit.nlcc` records core charge, core-potential integral and
-valence-potential integral; only `xc` contributes XC energy to total E.
-Collinear channels share the spin-neutral convention. NLCC v1 checkpoints reject
-on capture and restore; CLI serialization also rejects an active NLCC ledger,
-while legacy bytes remain unchanged. Local-potential export uses the same core.
-Run the ignored release commands in docs/cli.md; real smoke failures are explicit
-and must not be advertised as converged or qualified materials.
-
-## MF04 finite temperature
-
-`finite_temperature.rs` owns prepared occupation arrays and a separate scalar FD
-driver; collinear uses the same spin map with a shared or fixed-M number solve.
-Do not feed FD into legacy sessions/checkpoints, fixed certificates or a band-only
-occupation view. Every retained band is strict and the fresh certificate repeats
-the entire map. Direct and band E must use identical fractional weights and
-subtract the same TS once. Fixed branches retain their arithmetic. See
-`docs/validation/occupations.md` for evidence and limitations.
-
-## MF11 crystal symmetry (P19A)
-
-`enable_symmetry` re-detects the group against stored atoms, checks exact reduced sampling and compatible FFT quadrature, and installs the prepared density projector. Both scalar and spin density builds and fresh certificates use it. Noninvariant input densities and checkpoint identity without symmetry reject.
-
-See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
-observed failures and validation limits. No QE symmetry-on oracle is available.
-
-## Atomic forces (P20A)
-
-`forces(&ForceState)` is post-convergence only. It accepts a strict state with a
-passed certificate or (ADR 0043, ONEPATH-1) a standard state with a passed
-fixed-point verification, rejects unverified standard and uncertified states,
-and reports the complete NC derivative sum. The borrowed cell, atoms,
-UPFs, options, density floor and symmetry operations must be the exact original
-model. A private setup-time descriptor independently compares these fields and
-exact parsed pseudopotential content before force work. File SHA-256 provenance
-remains at the adapter boundary; the engine does not receive original file bytes. Do not alter
-SCF kernels to calculate forces. The adapter must not reuse a certificate after
-mutating result arrays. See `docs/validation/forces.md` for force term ownership,
-FD stationarity, independent oracles and versioned force schemas.
-
-Fast tests: `cargo test -p dft-engine --test all forces::`. Ignored displacement tests
-must run in release mode with the commands in that note. Do not weaken the
-1e-6 synthetic, 1e-4 real-file or 1e-8 resolved-grid net-force caps.
-
-## Fixed-cell density transfer (P21A / MF07 minimum)
-
-`ScfSession::initialize_density_transfer` is opt-in initialization only. Compare
-independent setup model descriptions with ordered atom positions removed; retain
-all other identity, sampling, occupation, symmetry and grid checks. Validate
-shape, finite/XC-feasible values and relative charge <=1e-8 before mutation.
-Do not renormalize or restore orbitals/mixer/history/certification. The caller
-records `warm_transfer`, never exact replay. Ordinary initialization and iteration
-kernels remain unchanged. Run `cargo test -p dft-engine --test all density_transfer::`
-and the release ignored three-structure warm/fresh energy oracle.
-
-## NC stress (P22A)
-
-`stress(&StressState)` requires the same model and strict certificate as forces,
-or (ONEPATH-2) a standard state with a passed fixed-point verification. Its
-cutoff scans follow the caller: standard callers run every scan standard with
-verification at min(1e-9 Ha, caller threshold) and never fall back to strict;
-strict callers keep the old scan routing bit for bit.
-It reports frozen-Miller tensor/pressure and an independent isotropic cutoff
-estimate. `frozen_stress` omits that estimate explicitly. Neither claims cutoff
-convergence. The opt-in boxed `ScfOptions.strain_reference` requires a fixed FFT
-grid and is part of derivative identity. Default None retains legacy setup.
-See `docs/validation/stress.md` and release oracles in `tests/all/stress.rs`.
-
-P23A adds `initialize_cell_density_transfer`: compare the setup model while
-allowing cell/ordered positions to differ, require identical nonempty frozen
-reference and fractional grid, scale samples by old/new volume, and retain all
-fixed-cell charge/feasibility/policy checks. No interpolation, orbitals, histories
-or certificate transfer. Ordinary initialization and numerical kernels are
-unchanged. `tests/all/density_transfer.rs` checks charge/scaling and rejection paths.
-
-P23A real-file follow-up: `ScfOptions::basis` must propagate the frozen density
-reference through the wavefunction basis into Hamiltonian construction. Freezing
-only the engine's density list is insufficient: the Hamiltonian also asks the
-basis for density support when validating its grid. Preserve the ordinary
-None-reference branch and verify legacy SCF identity after changes here.
-
-## Experimental real Gamma SCF (P26E / R5)
-
-`gamma_real.rs` owns the default-off dispatcher and RealLinearOperator bridge.
-`GammaReal::On` fails closed on ineligible inputs; Auto preserves the complex
-solve and stores a reason in per-k diagnostics and result metadata. Strict,
-unpolarized, single exact-Gamma Davidson only; no standard/locking/guard/hybrid,
-spin or FD real solves. Warm orbitals must pack at the existing absolute 1e-14
-ORC tolerance; never repair their gauge or discard an incompatible warm start.
-Only Hermitian-completed complex vectors leave this module. Density, audit,
-forces and stress retain their implementations. R4 currently certifies every
-strict eigensolve (including intermediate ones); report the extra H work.
-
-Exact checkpoints compare gamma_real. Optional v1 serialization defaults to off
-and omits off; different paths require explicit WarmStart, with complex-to-real
-Auto allowed to retain the complex path when the saved gauge is incompatible.
-
-Release validation (calibration must precede real comparisons):
-`cargo test --release -p dft-engine --test all gamma_real_scf:: -- --include-ignored --nocapture`.
-See `docs/performance/real-gamma-r5-results.md` for fixed comparison thresholds,
-Mac observations, failed exploratory commands and outstanding dev08 acceptance.
-
-## C1 cutoff ladder
-
-`cutoff_ladder.rs` (child of `scf`, default off) builds a second problem at
-`fraction * cutoff` without a fixed grid, drives an ordinary session to a
-density residual of 1e-4 (no coarse certificate), prolongs orbitals by Miller
-index and density by Fourier zero padding, and finishes through the Track A
-import (`initialize_electronic`) with the unchanged strict session. Only the
-full-cutoff certificate converges; ineligible problems run `direct_min::finish`
-with a recorded reason. Session accessors `warm_state`/`problem_ref` are
-crate-private and read-only. Fast gates: `cargo test -p dft-engine --test all cutoff_ladder::`.
-S1/S2 switches (default off, `CutoffLadderOptions::baseline()` reads no environment):
-`standard` makes the standard profile eligible (fine first-step tolerance via
-`seed_standard_tolerance`); `secant_pairs` seeds the fine Pulay mixer through
-`seed_mixer_differences` (closed block of prolonged coarse differences, carried
-by `PulayState.seed_dx/seed_dr`). A pending standard seed makes an exact
-checkpoint reject before the first step. Count bench (ignored, release):
-`cargo test --release -p dft-engine --test all cutoff_ladder::ladder_standard_secant_bench -- --ignored --nocapture --test-threads=1`.
-D1 knobs (defaults = adopted ladder, bit-identical): `coarse_density_residual`
-(`BAANDI_LADDER_COARSE_STOP`), `coarse_rule` (`BAANDI_LADDER_COARSE_RULE`, atomic
-start-density truncation distance, never lowers the level) and `first_tolerance`
-(`BAANDI_LADDER_FIRST_TOL`; strict seeds go through `seed_strict_tolerance`, used
-only by the residual schedule; a pending strict seed also rejects an exact
-checkpoint). Scan bench: `cargo test --release -p dft-engine --test all cutoff_ladder::
-ladder_d1_scan -- --ignored --nocapture --test-threads=1` (env in the test file).
-`ScfProblem::atomic_superposition_density` (C3 relax predictor) exposes the
-atomic start density built with `start_density = Atomic`; no arithmetic changed.
-
-## M2 coarse stage and certificate switches
-
-`m2::EngineTuning` (`BAANDI_M2_SCREEN=dist`, `BAANDI_M2_ATOMIC=split`, both
-default off; per-thread override `m2::set_tuning_override` for simulated ranks)
-distributes the certificate-screen clusters (`band_values` of the distributed
-operator, one tree_sum per cluster) and the atomic start (cyclic span columns,
-`orthonormalize_split` with the serial arithmetic, H Q and Gram column blocks).
-Every branch condition must stay replicated so all ranks enter the same
-collectives. Tests: `tests/m2_coarse_certificate.rs`, the lib test
-`split_two_pass_gram_schmidt_is_bit_identical_to_the_serial_routine`. See
-`docs/performance/mpi-coarse-certificate-analysis.md`.
-
-## REUSE-PSI (work order beat-QE C2, 2026-11-16)
-
-`BAANDI_REUSE_PSI=on|off` (default off until dev08; rounding class). `gamma_real.rs`
-`prepare_kept_start` asks the Davidson workspace to keep X and H X at each lean
-return, and before the next threads-only standard solve of the same k state
-brings H X to the new potential, H_new X = H_old X + (V_new - V_old) X, then arms
-the start (the solver takes it only when its `initial` is that X to 1e-14).
-`band_density.rs` `compute_keep` stores psi(r) (unscaled inverse pair
-transform) of the leading occupied pairs in `RealSolveState::psi_keep` slots, so
-the potential change costs one forward transform per kept pair; other pairs run
-the full pair transform. Memory gate `PSI_KEEP_MAX_BYTES` (2 GiB per k state):
-above it the kept H X is still used and every pair is transformed both ways.
-Any rebuild of the state (new operator identity, grid, ladder stage, MPI path)
-drops everything. Counters `reuse_psi_counters()` -> results.json
-`convergence.work.reuse_psi`. Tests: lib `reuse_psi_tests`, physics
-`reuse_psi_potential_change_matches_plain_apply`, solvers
-`kept_start_skips_initial_application`, CLI `reuse_psi_switch_keeps_energy_and_reuses_starts`.
-
-## MPI stage timers (F21, 2026-11-16)
-
-`BAANDI_STAGE_TIMERS=on|off` (default on; `dft_numerics::stage_clock`). Every
-MPI stage and collective counter takes its clock from `stage_clock::start()`
-(`None` in count-only mode) and counts entries in both modes; collectives also
-count payload bytes (`parallel::collective_bytes`). Stage call counts:
-`parallel::stage_calls`, `calls.<stage>` entries of `m2_stats().0`. Do not add a
-bare `Instant::now()` to a new MPI stage; a clock shared with the phase clock
-goes through `stage_clock::keep`. Test `tests/stage_timers.rs` (forces the mode
-with `stage_clock::force`).
-
-## MPI kept start (MPI-KEPT-START, 2026-11-16)
-
-`BAANDI_M2_REUSE=on|off` (default off until dev08; rounding class; design
-`docs/design/mpi-kept-start.md`). `gamma_real.rs` `M2Reuse` /
-`prepare_m2_kept_start`: standard M2 solves keep local X (`m2_local`, filled by
-the solver, no `extract_local`) and H X; `scf.rs` `m2_density` keeps the plane
-slabs of the leading fully occupied pairs (`M2Reuse::plane_slots`, replicated
-memory gate); the next solve adds (V_new - V_old) X via
-`DistributedRealHamiltonian::apply_local_change` and arms the solver's kept
-start. Dropped on any operator rebuild, strict solve, `forget_reuse`. Every
-condition must stay replicated. Per-thread override `set_m2_reuse_override`.
-Counters `reuse_*` in `m2::stats`. Test
-`tests/m2_kept_start.rs::m2_kept_start_keeps_the_standard_class_and_saves_columns`.
-
-## VERIFY-REUSE (2026-11-16, default off)
-
-`BAANDI_VERIFY_REUSE=off|warm|feed|feed2|replace|half` (`session.rs` `verify_reuse`; test hook
-`ScfProblem::force_verify_reuse`). Acts only after a failed ADR 0043 verification:
-`warm` starts the next step from the verification solve's orbitals (its REUSE-PSI
-kept start is then taken); `feed` also mixes the pair (rho_out, F(rho_out)) after
-the step's own pair; `half` (the dev08 candidate) takes the midpoint of the
-step's and the fed Pulay proposals; `feed2` feeds only from the second failure;
-`replace` records only the verification pair (rejected). Off is the default path bit for bit; acceptance still needs a
-passed verification. Test `verification_tests::failed_verification_reuse_keeps_the_fixed_point`.
-Ledger VERIFY-REUSE-*, dev08 request `docs/performance/requests/verify-reuse.md`.
-
-## Stage-0 benchmark hook (FASTBENCH-DAVIDSON, 2026-11-16)
-
-`ScfProblem::atomic_start_vectors(n)` (`#[doc(hidden)]`, measurement only) sets the
-local potential of `n` as a map does and returns the atomic-start vectors through
-`atomic_guesses`, the single routine every cold map calls (moved out of
-`step_with_occupations` unchanged; CLI si8/si32 density.bin SHA-256 identical before
-and after). `dft-cli/examples/davidson_bench.rs` passes them to its cold maps; the
-SCF never calls the hook. Protocol: docs/performance/fast-loop-protocol.md (stage 0).
-
-## MPI scaling gap instrumentation (MPI-SCALING-GAP, 2026-11-17)
-
-`m2::Stage::SolvePrepare` / `SolveUnpack` (stage names `solve_prepare`,
-`solve_unpack`) time the replicated solve interface of the M2 path in
-`gamma_real.rs` (operator update, diagonal, ORC packing of the N x B start;
-unpacking of the N x B result); count and clock only. `tests/m2_entry_cost.rs`
-prints the SCF phases (max over ranks) and the time outside them. Test
-`distributed_scf::m2_scaling_gap_switches_keep_classes` covers
-`BAANDI_M2_STICKS=mirror` and `BAANDI_M2_START=gram` (dft-solvers).
-
-## MPI lazy orbitals (MPI-LAZY-ORBITALS, 2026-11-17)
-
-`BAANDI_M2_LAZY=on|off` (default off until dev08; per-thread override
-`gamma_real::set_m2_lazy_override`; design and consumer inventory
-`docs/design/mpi-lazy-orbitals.md`). Session maps (`ScfProblem::step_session`)
-of the M2 standard path return `KPointSolution.lazy` (`gamma_real::LazyOrbitals`:
-this rank's stick rows, the half sphere, the communicator, a cached gathered
-block) with a 0 x B placeholder in `solution.eigenvectors`; the next solve
-starts from the rows (ORC round trip applied, so the start bits equal the
-gathered path's); the audit takes the kinetic energy from the rows
-(`lazy_kinetic_energy`, one tree sum, rounding class) and the nonlocal energy
-from the existing M2 projections. Every boundary that needs the full block
-materializes it (collective; all ranks reach it together): the delivered result,
-the spectral audit, `warm_state` (ladder hand-off), `checkpoint`, a declined M2
-density or nonlocal energy, a complex-solver fallback, and every non-lazy map
-given a lazy warm start. Public `step_kpoints*` never return lazy blocks; the
-stage-0 bench uses the hidden `step_kpoints_lazy` / `split_warm` /
-`materialize_orbitals`. Counters `lazy_returns`, `lazy_starts`,
-`lazy_materializations`, `lazy_start_mismatches`, stages `lazy_materialize`,
-`lazy_kinetic` (`m2::stats`). Do not add a consumer of
-`solution.eigenvectors` inside the session loop without checking `lazy` first.
-Test `tests/m2_lazy_orbitals.rs` (production standard + verification, cubic and
-skewed, P 2/3, kept start off/on: density, eigenvalues, orbitals and counts
-bit-identical to off, |dE| <= 1e-12 Ha, ranks equal, reproducible; checkpoint
-capture with lazy warm orbitals bit-identical).
-
-## Stop-rule estimate from kept coefficients (MPI-REMAINING, 2026-11-17)
-
-`BAANDI_STOP_METRIC=fft|kept` (default fft; per-thread override
-`set_stop_metric_override`): `ScfProblem::stop_error` (every closed-shell
-standard stop-rule estimate: session step, redo, verification) evaluates
-E_H[rho_out - rho_in] by Parseval from the map's own Fourier coefficients
-(`StopKept`: rho_in from `hartree::evaluate_keeping_density` in `input_fields`,
-rho_out moved out of the audit's `SharedAudit`), only when the two densities are
-bit-equal to the kept ones and unclamped; else the residual is transformed as
-before. Rounding class of the estimate only. Counters `stop_metric_counters()`.
-Collinear and finite-T estimators are unchanged. Tests: lib
-`coulomb_estimate_from_kept_coefficients_matches_the_transform`,
-`tests/m2_remaining.rs` (also the combined MPI stack: mirror sticks, Gram
-start, fused panel Gram-Schmidt, kept start, lazy orbitals).
-
-## MPI overlap-matrix Davidson (MPI-OVERLAP-DAVIDSON, 2026-11-17)
-
-`BAANDI_M2_LEAN_ALGEBRA=on` (dft-solvers, default off) counts as a workspace-path
-switch for the lazy and kept-start conditions in `gamma_real.rs`.
-`tests/m2_entry_cost.rs` prints its counters in `m2_counters` (`lean_*`). Test
-`tests/m2_lean_algebra.rs`: production standard SCF on the M2 path, defaults and
-the pending stack, cubic and skewed cells, P 2/3: standard class against
-threads-only, verified, ranks bit-equal, reproducible.
-
-## Measurement infrastructure (BREAKTHROUGH-0-INSTRUMENT, 2026-11-17; all default off)
-
-Three switches, none of which touches the arithmetic (test `tests/instrument.rs`:
-threads-only and 2 simulated ranks, energy and density bits equal with every
-switch on and off):
-- `BAANDI_PHASE_PROFILE=on` (`profile.rs`): exclusive nested phase profile per
-  rank thread (buckets init / coarse / fine / fine_redo / verify_pass /
-  verify_fail / materialize; map phases inside; exclusive solve stages inside
-  `solve`, with `solve.other` the remainder; collectives and M2 stages beside
-  them). Per-thread counter mirrors come from `dft_numerics::stage_clock::local`
-  (the solver, M2, collective and operator sites add to them when the profile
-  turned the mirror on). `enter(Top)` guards at the ladder coarse stage and the
-  certificate block, `map_begin`/`map_phase`/`solve_begin`/`solve_end` in
-  `step_map`, `map_commit(kind)` from the session (ordinary, redo, verification
-  pass/fail), `add_mixing`, `add_atomic_start` (filed under init, excluded from
-  the first map's potential), caller-reported `add_init`/`add_io`. `finish_rank`
-  publishes to a registry (simulated ranks) and returns the profile; `gather`
-  does the real-MPI allgatherv; `Report::from_ranks` takes max and min over
-  ranks (never a sum). Printed by dft-cli (results.json `phase_profile`,
-  `parallel.phases`), `tests/m2_entry_cost.rs` and `davidson_bench`. Count-only
-  with `BAANDI_STAGE_TIMERS=off`. `force(Some(..))` is the test hook.
-- `BAANDI_FIRST_BLOCK=on` (`first_block.rs`, review E3): before every warm real
-  Gamma solve a small Rayleigh-Ritz on the kept B vectors, the true residuals of
-  the B Ritz pairs, the singular values of the occupied residual block and its
-  effective ranks; one record per solve on rank 0, `table()` prints them. Uses
-  the kept H X when armed, else applies H once (B columns, visible in the
-  operator counters only). The solver is unchanged.
-- `BAANDI_SNAPSHOT_DIR=<abs dir>` (`snapshot.rs`, review 13.3): every real Gamma
-  solve writes its manifest (rank 0), the input density (rank 0) and this rank's
-  start rows with the armed kept H X (`write_rank_file`), outside the stage
-  clocks and subtracted from the map's `diagonalization` time. The captured X
-  is the solver's basis of a taken kept start (the kept X itself, not the
-  round-tripped start). `ScfProblem::replay_solve` injects a `ReplayStart`
-  through `inject`/`take_injection` (keyed by rank) and runs the session map;
-  the delta-V update is not replayed (its H X is stored), so the replay
-  reproduces the solver's own counters and eigenvalues. The context (stage,
-  kind, iteration) comes from `profile::set_context` (session, ladder,
-  verification).
-
-## Bounded subspace SCF (BREAKTHROUGH-3, 2026-11-17; default off, rejected as a speed idea)
-
-`BAANDI_SCF_ADVANCE=on|off` (default off; per-thread override
-`advance::set_override`; design `docs/design/bounded-subspace-scf.md`, ledger
-BT3-*). `advance.rs` owns the contract on the engine side: the session asks
-eligible intermediate standard maps (history exists, previous E at or above the
-threshold, one k point, equal integer occupations, serial real Gamma lean path)
-for `SolveIntent::Advance(SubspaceBudget)` through
-`GammaRealDiagnostics.advance` -> `ScfStep.advance`, builds density, audit and
-the Pulay pair from the approximate state, never stops on it, and completes it
-with the exact solve at the same density (`completion_trigger`: candidate,
-inner noise B > `ADVANCE_INNER_RATIO` x E, growth, gap). The first map, its
-redo, every completion, the stop step and the verification are exact; ADR 0043
-V1-V6 unchanged. `IterationRecord.advance` (not carried by checkpoint v1) and
-the counters `advance_counters()` -> results.json `convergence.work.scf_advance`
-are the diagnostics. Test `tests/scf_advance.rs`. Every other configuration
-(MPI, complex solver, classic Davidson, strict) declines with a recorded reason.
-
-## Other and init labels, removal switches (BREAKTHROUGH-4-OTHER-AND-INIT, 2026-11-17)
-
-Phase profile (`profile.rs`, still off by default, never touches the arithmetic):
-new seconds slots 32 and above (solver `setup`/`precondition`/`append`/
-`solver_total`, engine m2 stages `kept_update`, `solve_entry`, `solve_finish`,
-`entry_wait`, `real_state`; `solve.other` is derived PER RANK in
-`derive_other` and split into `other_solver` / `other_engine`), init parts
-(`profile::init_part`, `InitPart`; construction in `ScfProblem::construct`, the
-CLI part, the ladder's coarse construction reported through `add_init`),
-atomic-start parts (`atomic_part`, `AtomicPart`, in `atomic_guesses` and
-`atomic_start.rs`) and the `between` bucket (`profile::between`,
-`BetweenPart`: ladder hand-off and truncation, session set-up, stop rule,
-verification glue). `profile::clock()` reads no clock when the profile is off.
-Every new solve-window timer must be subtracted in `derive_other` or it
-reappears as `other`. `BAANDI_PHASE_WAIT=on`: timed barrier at every M2 solve
-entry (replicated condition) and before every collective of the distributed
-solver (diagnostic; timing only).
-Removal switches (default off, bit-identical; test `tests/other_init.rs`):
-`BAANDI_M2_LIGHT_STATE` (`gamma_real::m2_light_state`, per-thread override;
-the serial real Hamiltonian of an M2 solve state is built with
-`LIGHT_CAPACITY` = 2 because on the M2 path it only supplies the ORC half
-sphere; when the distributed operator cannot be built the full operator is
-built before the M1 fallback), `BAANDI_EWALD_CACHE` (`scf::ewald_energy`,
-per-thread last-construction cache keyed by lattice, charges and fractional
-position bits; counters `ewald_cache_counters`). Do not apply the serial
-operator on the M2 path without checking the light state.
-ISSUE-20 `BAANDI_M2_LAZY_SERIAL` (default off until dev08; per-thread
-override `gamma_real::set_m2_lazy_serial_override`; test
-`tests/m2_lazy_serial.rs`): `RealSolveState::op` is `Option`; on the M2 path
-the state holds only `half` (the ORC half-sphere descriptor, always present)
-and the distributed operator, and `ensure_serial_op` builds the serial
-operator in place only when a branch applies it (distributed operator
-unavailable, threads path). Every serial-apply branch binds `op` through
-`op_opt`; use `state.half` (not the serial operator) for packing and the
-diagonal. Counter `gamma_real::serial_operator_builds`.
-
-## Construction split over the ranks (INIT-SCALE, 2026-11-18)
-
-
-
-With a registered communicator (two or more ranks; every rank constructs the
-
-problem) `ScfProblem::construct` splits two replicated pieces, always on and
-
-bit-identical for every rank count: `ionic_local_coefficients` (contiguous G
-
-blocks, `ionic_local_with_conventions_rows`, one allgatherv; counter
-
-`ionic_local_splits`) and `ewald_evaluate` (`ewald::EwaldPlan` candidate blocks,
-
-running sums passed down the ranks by P broadcasts so the serial association is
-
-kept; counter `ewald_splits`; only for communicators of at least
-
-`EWALD_SPLIT_MIN_RANKS` = 4 ranks, INIT-EWALD-GATE). Any failure on a rank makes every rank repeat the
-
-serial call (same error). Do not construct a problem on a subset of the ranks
-
-while a communicator is registered. `BAANDI_M2_ATOMIC_BLOCK=on` (default off,
-
-rounding class; `EngineTuning::atomic_block`): row-distributed CholQR2 atomic
-
-span (`orthonormalize_block`, fallback to the split Gram-Schmidt below pivot
-
-1e-6, counters `atomic_block_starts` / `atomic_block_fallbacks`) and row-split
-
-Ritz rotation (`rotate_rows`). Tests `tests/init_scale.rs`,
-
-`m2_coarse_certificate::block_atomic_start_stays_in_the_class_of_the_split_start`,
-
-lib `block_cholesky_qr_matches_gram_schmidt_and_falls_back_together`; physics
-
-`setup_memo_identity::ionic_local_row_blocks_are_bit_identical_for_every_rank_count`,
-
-INIT-SCALE-2: the opt-in atomic start density is split the same way
-
-(`start_density::split_superposition`, counter `density_splits`); construction
-
-passes its k grid to `Hamiltonian::new_with_grid` and its density list to
-
-`CoulombMetric::with_sphere` (no extra density spheres); the exact Gamma point
-
-reuses the Gamma basis. All bit-identical;
-
-lib `ewald::tests`. Ledger INIT-*.
-
-## M2 Davidson stage and h_apply timers (M2-STAGE-TIMERS, 2026-11-18)
-
-`BAANDI_DAVIDSON_STAGES=on` (with `BAANDI_STAGE_TIMERS=on` for the clocks) fills
-the serial `davidson_stages` buckets and `dft_numerics::work_timers` on the M2
-path: `distributed_davidson::stage_add` forwards to
-`davidson_stages::add_distributed`, the distributed operator records
-`work_timers::DistApply` laps (local / projection / back) and
-`dist_transforms` (density, kept), and `parallel::timed` charges every
-collective to `work_timers::collective` (per run stage, and separately while a
-distributed apply is in progress). dft-cli merges the block over ranks (max,
-`min_over_ranks`). Off: one relaxed load per call site, no clock. Test
-`tests/m2_stage_timers.rs`.
-## Between and materialize (BETWEEN-MATERIALIZE, 2026-11-18)
-
-`BAANDI_IMPORT_CHECK=split|serial` (default split): the orthonormality check
-of `import_electronic` (ladder and direct-min hand-off) runs
-`session::orthonormal_split` (same per-entry overlaps, lockstep, columns j mod
-P per rank, one tree sum of the verdict) when a communicator is registered;
-every rank must import the same block. `LazyOrbitals::materialize` assembles
-through `gamma_real::assemble_lazy_block` (fused scatter and Hermitian
-completion, bit-identical to scatter then `HalfSphere::unpack`).
-LAZY-RESULT: `gamma_real::set_delivered_orbitals(false)` (per thread, default
-true; dft-cli `run` sets it from the input) with `BAANDI_M2_LAZY_RESULT=on`
-(default) delivers an M2 result with its lazy blocks; call
-`ScfResult::materialize_orbitals` (collective) before reading orbitals.
-`forces` and `frozen_stress` reject a result with `orbitals_delivered() ==
-false`. Do not add a consumer of delivered orbitals to `dft-cli run` without
-adding it to the `orbitals_needed` rule there. Tests: lib
-`split_import_check_matches_serial_verdict`,
-`fused_assembly_matches_scatter_then_unpack`, `tests/m2_lazy_result.rs`.
-`tests/m2_entry_cost.rs` takes `M2_PROFILE_ORBITALS=off` (as `run` does).
-
-## Distributed full-grid stages (M2-GRID, 2026-11-18; both default off, rounding class)
-
-`BAANDI_M2_GRID=on` (`grid_dist.rs`, per-thread override `grid_dist::set_override`):
-on the M2 path with LDA PZ/PW (modified PW92), no core density, density floor or
-symmetry, `ScfProblem::map_fields` (the SCF map's fields; `input_fields` stays the
-replicated routine for every other caller) runs the input density's Hartree FFT
-pair, the XC and the effective potential on a `GridPlan`: the M2a
-`DistributedPairFft` with every grid point as an index (owned real-space planes,
-owned sticks, two transposes per transform), one allgatherv of the effective
-potential plus partial sums. V_H and V_xc stay on the planes; the returned
-`HartreeGrid`/`XcGrid` carry the energies and EMPTY potential arrays (the marker
-that `evaluate_shared_with_kinetic` accepts; it never reads them). The audit of the
-same map (`dist_fields`) takes `GridPlan::audit` (output transform, charge, double
-counting, Bregman linear terms, local energy in its real-space form, output XC
-energy; one allgatherv) through `SharedAudit::from_distributed`; the stop rule
-takes `GridPlan::stop_error` when `StopKept::matches_dist`. Every sum is a
-canonical per-plane / per-stick partial added in a fixed order: the bits do not
-depend on the rank count. Do not hand the empty-potential grids to any other
-consumer; a reused-fields map (certificate screen) and every non-eligible map take
-the replicated path. Counters `grid_dist::counters()` (potential, audit, stop,
-plans, declined).
-`BAANDI_M2_MIX=on` (`mix_dist.rs`, override `mix_dist::set_override`):
-`session::make_mixer` builds `DistributedPulay` for plain Pulay (no Hartree
-metric) on the M2 path: window on the rank's block of 4096-point chunks, Gram row
-and charge sums as chunk partials (one allgatherv each), replicated small
-eigenproblem, one allgatherv of the new density. Exact checkpoints reject it
-(opaque `MixerHistory::checkpoint`). Counters `mix_dist::counters()`.
-Tests: lib `grid_dist::tests` (ranks 1..7, cubic and skewed, odd and even grids,
-PZ and PW), lib `mix_dist::tests` (ranks 1..7 against `PulayMixer`),
-`tests/m2_grid.rs` (production standard SCF, cubic and skewed, P 2/3). dev08
-request `docs/performance/requests/m2-grid.md`; ledger M2-GRID-*.
-
-## Owned potential and density (M2-OWNED, 2026-11-18; both default ON since M2-OWNED-DEFAULT)
-
-`BAANDI_M2_LOCAL_FIELDS=on` (needs M2_GRID; override
-`grid_dist::set_owned_override`): eligible maps (`local_fields_eligible`:
-grid path, standard, one k state, warm start, operator from the previous map,
-no snapshot, no finite T; declines counted per reason) keep the effective
-potential on the slab planes (`GridPlan::potential_field(.., None)`), move it
-to the operator's plane layout (`PlaneMap`, identity when the plane axes are
-equal, else one alltoall) and hand it to `solve_real_gamma` as
-`owned: Some((planes, epoch))`; `DistributedRealHamiltonian::set_owned_potential`
-stores only the owned planes (the rest NaN) with the epoch, and the solve
-rejects an operator whose epoch differs (stale potential). The complex
-Hamiltonians then hold an older potential (`owned.complex_stale`): every
-consumer of the full potential calls `ensure_complex_potential` (atomic start,
-certificate screen) or gathers inline (complex fallback); the M1 fallback
-errors. Kept-start delta V on owned planes (`M2Reuse::v_old_owned`, changed
-flag agreed by one tree sum). Bit-identical to M2_GRID alone.
-`BAANDI_M2_LOCAL_DENSITY=on` (needs FIELDS and M2_MIX; `owned_density_eligible`,
-fixed at session initialization): the session keeps the input density in
-`problem.owned.input` (epoch-tagged slab planes) and an EMPTY `Continuation.n`;
-maps given an empty input read it, `m2_density` keeps the output on the planes
-(`ScfStep.owned_density`, empty `density`), the audit and the stop rule take
-plane fields (`StopKept` matches by epochs), the session metrics come from
-`step_metrics` (per-plane canonical sums), the plane-mode `DistributedPulay`
-(`new_planes`, `mix_block`, `seed_block`) mixes without a gather, the convex
-safeguard is an exact global min. The full density is gathered only at
-delivery, `warm_state` (ladder hand-off) and `materialize_density`; `density()`
-is None at an active owned boundary (exact checkpoints reject with Boundary;
-runtime mixer replacement is refused). Rounding class. Counters
-`grid_dist::owned_stats()` -> `parallel::m2_stats()` (`owned.*`, results.json
-`parallel.m2`). Tests: `tests/m2_owned.rs`, lib `grid_dist::tests`
-(`plane_map_redistributes_between_slab_layouts`, owned stages in the grid test),
-`mix_dist::tests::plane_mode_*`, physics
-`owned_plane_potential_applies_like_the_full_potential`. dev08 request
-`docs/performance/requests/m2-owned.md`; ledger M2-OWNED-*.
-Declines (M2-OWNED-DECLINE): a consumer of ACTIVE-boundary state (session
-density, mixer state, checkpoint) declares itself before initialization with
-`ScfProblem::decline_owned(grid_dist::OwnedDecline::..)`; both owned modes
-then take the gathered path (`Checkpoint` also the replicated Pulay mixer).
-`restore_exact` declares `Checkpoint` and every `AgentControlled` session
-`RuntimeControl` by themselves; the CLI `checkpoint` subcommand declares it
-for exact/warm kinds. Reasons: `owned.fields_declined.<r>` (per map) and
-`owned.density_declined.<r>` (per session), r in grid_path, standard, kpoints,
-cold_map, operator, snapshot, finite_temperature, checkpoint,
-runtime_control, spin (collinear driver), functional (non-LDA). Consumers of
-the delivered result (forces, stress, volumetric/density output) need no
-decline. Do not add a reader of active-boundary state without a declaration.
-Test `tests/m2_owned_decline.rs` (one test per reason).
-Coulomb guard of the distributed mixer (MIX-COULOMB-GUARD-DIST,
-`BAANDI_MIX_COULOMB_GUARD=trace|on`, default off): `session::guard_plan`
-builds a separate `GridPlan` with the stop-rule weights for both
-`DistributedPulay` variants; `GridPlan::coulomb_forms` gives a^T C b of plane
-fields (canonical stick sums, rank-count independent). Off and trace are
-bit-identical to no guard; the per-map `history[].pulay` record is filled
-for the distributed mixers from the existing charge reduction. Counters
-`mix_dist::guard_counters()` (checks, refits, transforms). Test
-`mix_dist::tests::coulomb_guard_matches_the_replicated_guard_for_every_rank_count`.
-
-## Run configuration (RUN-CONFIG, 2026-11-18)
-
-`ScfProblem` owns a `RunConfig` (`run_config()`), taken from the calling
-thread's configuration at construction; `set_run_config(rc)` is the explicit
-per-call form (re-resolves the session switches and the `STOP_METRIC`
-choice; construction-only switches such as `EWALD_CACHE` keep the
-construction's value: construct under `rc.enter()`). Session switches are
-resolved once into `session::SessionSwitches` (`STANDARD_STOP`,
-`STANDARD_RESIDUAL_GUARD`, `IMPORT_CHECK`, `VERIFY_REUSE`, `CERT_SCREEN`,
-`POTENTIAL_REUSE`, `MIX_GROWTH_RESET`, `EIGEN_FACTOR`; formerly per-process
-OnceLocks). `ScfSession::initialize`/`step` enter the problem's configuration
-as the thread scope, so unmigrated deep reads (and pool workers) see it; the
-cutoff ladder builds and runs its coarse problem under the fine problem's
-configuration (`CutoffLadderOptions::from_run`). Run-local counters: stop
-estimates (kept/fft), Ewald hits/computed, problems, session steps,
-verification maps. Per-thread override hooks keep precedence. Test
-`tests/all/run_config.rs`: two concurrent runs with opposite `STOP_METRIC` in one
-process, no lock, each bit-identical to its solo run, independent counters.
-Phase profile (RUN-REPORT): `RankProfile.wall` (caller-set, carried by
-`gather`), `Report::per_rank` / `closure()` close each rank's exclusive tree on
-that rank; `covered_wall()` (sum of per-bucket maxima) is legacy. Tests: lib
-`profile::closure_tests`, `tests/instrument.rs::per_rank_closure_*`.
-
-## Verification cross estimate (SCF-TAIL, 2026-11-18; default off)
-
-`BAANDI_STOP_PREDICTOR=off|trace|on` (`SessionSwitches::stop_predictor`).
-`verify_fixed_point` receives the stop map's input density and energy; with
-the switch on and full (replicated) densities it evaluates E_H[F(rho_out) -
-rho_in] once more and forms -X = -<rho_out - rho_in, F(rho_out) - rho_out>_C
-(`verification_cross`, polarization). trace prints a `STOP-PREDICTOR` line per
-attempt (stderr) and changes nothing; on also passes an attempt whose old
-criterion fails when 0 < -X < threshold / `CROSS_SAFETY` (4), the stop
-estimate is below the threshold and the residual guard passes. The owned-plane
-loop keeps the old criterion. Measured -X / T >= 0.654 only (not a bound);
-the Mac evidence does not support `on` (ledger SCF-TAIL-*). Tests:
-`verification_tests::verification_cross_matches_the_linear_model`,
-`stop_predictor_trace_is_inert_and_on_keeps_the_class`.
+**Purpose:** SCF orchestration, occupations, energy audit and post-SCF derivatives.
+No file I/O, serde, transport, network or logging in numerical loops.
+
+**Before editing:** read `../../AGENTS.md`, `../../ownership.toml`, the ticket,
+[ADR 0047](../../docs/decisions/0047-reference-driver-single-path.md), and relevant
+physics/performance contracts. Stay inside ticket ownership. Shared contracts
+and numerical conventions cannot change incidentally during a refactor.
+
+**Verify:** `scripts/check.sh dft-engine`, then `scripts/check.sh`; report actual
+exit codes. Tests over about 10 seconds in debug stay ignored with a documented
+release command. Physics oracles remain independent and are never deleted merely
+to remove an implementation dependency. Do not relax numerical gates.
+
+## Production ownership and entry points
+
+`refscf::api::{solve, stepper}` is the production facade, with Gamma, complex-k
+and electronic spin/FD dispatch. `refstart` initializes the physical problem;
+`model/` owns shared options, results, verification and spin contracts. These
+modules are top-level, not children of the legacy `scf` facade. Use the reference
+`Request`/`Profile` for Broyden beta 0.7/history 8 and threshold 1e-8 Ry = 5e-9 Ha.
+Shared `ScfOptions` alone does not select a driver. Verification defaults on;
+strict certification is a different oracle contract. `refscf::nscf` solves the
+fixed-density band problem; it does not reuse legacy SCF orchestration.
+
+The CLI has Reference or StrictOracle routing, strict precedence and the sole
+G4D free-moment PBE fallback. Do not add hidden fallback after an engine error.
+Fixed spin, fixed-moment FD, free-moment LDA-PW, NLCC/PBE, k meshes and spatial
+symmetry use their qualified reference paths. Qualification limits are in
+[reference design](../../docs/design/reference-scf.md) and ADR 0047.
+
+Keep Hartree units in physical contracts; reference dr2/ethr and policy
+`threshold_ry` are explicitly Ry. Preserve charge/moment conventions, owned-row
+ordering, same-rank determinism and rank-count acceptance. No material-specific
+thresholds or implicit renormalization. Every energy term is independently
+checked and reported; do not double count core or verification energies.
+
+## Frozen legacy oracle (R9c, R10, R11)
+
+`src/oracle/` is gated by `strict-oracle`, enabled by default. The CLI explicitly
+enables it. Root `scf`, `ScfProblem`, `ScfSession`, runtime/checkpoint compatibility
+exports are oracle APIs, not the production facade. Legacy standard SCF branches
+were removed in R10/R11, see git history; strict spin/FD and the MPI bridge remain.
+The oracle's narrow fixed-default ladder and `cutoff_ladder="off"` compatibility
+pin preserve its original start identity; they are not the removed tunable ladder.
+
+Freeze default arithmetic. Any change needs an oracle-specific ticket, local
+L-ORC and dev08 RG-ORC identity; shared changes also require reference identity.
+R11b removes oracle-only switches/default-off arms while retaining the default
+operations. **Integration boundary at R12 base `27d91ece`: R11b is a ticket,
+not a merged implementation; oracle-only switches still exist.** Do not infer
+retirement from the policy or retune these switches for an acceptance run.
+Shared-kernel switches need reader analysis. R10d MPI trimming remains a separate
+decision with a 1e-12 Ha oracle-versus-oracle prerequisite.
+
+Reference/model/physics compile without the feature. The gate independently
+checks and lints `dft-engine --no-default-features`, without workspace feature
+unification. Oracle-dependent test harnesses declare
+`required-features = ["strict-oracle"]`. Reference stepper/checkpoint and module
+independence tests also compile without it. CLI `--no-default-features` does
+not disable an explicitly enabled dependency feature.
+
+## Stepper, runtime and checkpoint
+
+`refscf::stepper::Stepper` owns the thread-affine synchronous continuation:
+initialize once, step one logical map, finish only a completed delivery.
+Ordinary/retry/verification reports can repeat an iteration number. `safe_point`
+is the mutation/capture boundary, not every map return. Numerical failure is
+terminal; exhausted delivery stays nonconverged. Never replay maps to implement
+stepping or serialize compiler-generated future bytes. Keep the run configuration
+scope alive on the owning thread. MPI ranks drive the same sequence collectively.
+
+`refscf::runtime::Runtime` owns lifecycle and scalar audit. Policy allow-list:
+beta `(0,1]`, history `1..=25`, tightening positive `threshold_ry`, verification.
+Mixer changes clear history; density/orbitals and the ethr ratchet remain.
+Legacy solver/schedule/divergence/budget controls reject. Pause/cancel waits for
+a safe return; terminal delivery wins. The historical budget-recovery demo is
+not supported reference recovery. Transport approval and persistence belong to
+CLI/MCP, never to SCF. See [runtime contract](../../docs/design/reference-scf.md#runtime-control).
+
+`refscf::checkpoint` captures explicit v2 numerical state only on request:
+density planes/coefficients, Broyden cache/history, kept orbitals/HX, potential
+epochs, ratchet and verification/history. Rebuild immutable workspace and install
+saved state before the next map; capture runs zero maps. Same build/input/model,
+backend/platform, threads, ranks and partition are required. v2 rejects warm,
+terminal exact, coarse-ladder/external-seeded continuations and capture after
+runtime policy mutation (audit not persisted). Retired failed-map slots must be
+empty. v1 under `oracle/` is historical/oracle only; no automatic conversion.
+Wire format and file publication belong to [CLI checkpoint I/O](../../docs/checkpoint-format.md).
+
+Useful release matrices (synthetic, not new QE/MPI speed evidence):
+
+```sh
+cargo test --release -p dft-engine --test refscf_stepper -- --include-ignored --nocapture
+cargo test --release -p dft-engine --test refscf_checkpoint -- --include-ignored --nocapture
+```
+
+## Derivative and ionic-state contracts
+
+`delivered`/`api` expose deferred force/stress state and `IonicSeed`. Prepare
+observables once, then compute derivatives from the delivered verified state;
+verification never substitutes its map output for that state. No forces from
+an uncertified/unverified or failed candidate. Preserve per-term ledgers,
+ordered atoms, and unavailable values as unavailable (never zero).
+Stress is tensile-positive Ha/Bohr^3; pressure is minus trace/3. Frozen-Miller
+stress and its separate Pulay assessment do not prove cutoff convergence.
+Reference stress scans remain available without the oracle feature.
+
+Live ionic seeds carry compatible density/orbitals, invalidate changed-potential
+caches and reset SCF history. Cell seeds retain frozen support and transform
+with `IonicSeed::in_cell`; do not confuse a warm seed with exact checkpoint
+continuation. CLI optimizer restart currently lacks the reference orbital seed.
+Read [relaxation](../../docs/user/relaxation.md), [cell relaxation](../../docs/user/cell-relaxation.md),
+[forces](../../docs/validation/forces.md), and [stress](../../docs/validation/stress.md).
+
+## Retired implementation instructions
+
+The old descriptions of tunable cutoff ladders, direct minimization, bounded
+SCF advance, fixed/spectral maps, first-block/replay experiments, standard stall
+and density-forcing branches, verification scheduling and reference rollback
+arms were **removed in R10/R11, see git history**. They are not instructions for
+new work. Retained reference RMM/ladder algorithms are separate modules.
+Detailed retirement/recreation provenance is in
+[switch-retirement.md](../../docs/performance/switch-retirement.md); historical
+measurements remain in the ledger and stored evidence. Root AGENTS.md is unchanged.
+
+## Measurement and evidence boundaries
+
+Use `baseline-reference.json` for production identity and `baseline-oracle.json`
+with `BAANDI_REFERENCE_STRICT=on` for oracle identity. Never use historical
+`baseline-legacy.json` as a production baseline. Mac timing is observational;
+dev08 acceptance belongs to the orchestrator and must obey same-model comparison.
+No new performance claim follows from a move or deletion. Spin/FD results lack
+scalar map-boundary clocks; report missing measurements honestly. Historical
+P11 v1 runtime/checkpoint evidence does not establish current v2 capabilities.

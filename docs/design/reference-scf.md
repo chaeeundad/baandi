@@ -1,6 +1,25 @@
 # Reference SCF path (issue #25): design
 
-Status: design draft by the orchestrator, 2026-11-23. User decisions of the same day: all lane/A-B work stopped; a NEW SCF driver replaces the legacy one; numerical kernels are reused only where they are good, and bold rewrites are allowed wherever they promise speed (the old code stays in git history). Implementation goes through Codex tickets; QE conventions reach implementers only through the Claude note `docs/research/qe-study/qe-density-mixing-spec.md` and the published literature.
+## Status
+
+The reference driver is the **only production SCF path** (Stage R, 2026-11-25).
+[ADR 0047](../decisions/0047-reference-driver-single-path.md) is the current routing,
+oracle-freeze, switch-retirement and persistence contract. Gamma, complex-k,
+NLCC/PBE, eligible spin/FD, symmetry, derivatives, relaxation, NSCF, stepper and
+runtime are implemented. Free-moment PBE remains G4D and routes to StrictOracle.
+See the ADR for evidence availability and the pending R11b integration boundary.
+
+The dated implementation/research sections below preserve the development record.
+Their opt-in defaults, proposed removals, old switches and temporary fallbacks
+are historical where superseded by ADR 0047; they are not current CLI recipes.
+
+## R: production routing
+
+Use `refscf::api::{solve, stepper}`; shared data live in `model/`. The oracle lives
+under `oracle/`, behind the default-enabled `strict-oracle` feature. CLI routing
+is Reference or StrictOracle, with strict precedence and the sole G4D fallback.
+Checkpoint v2 and `refscf::runtime::Runtime` drive the same continuation; see
+[checkpoint format](../checkpoint-format.md) and [runtime](#runtime-control).
 
 ## Why a new driver
 The dev08 decomposition (docs/performance/requests/si64-gap-attribution-2026-11-20.md, architecture brief addendum) shows the ratio to QE as per-map cost x map count x non-SCF overhead: si32 1.51 x 0.83 x 1.66, si64 1.56 x 1.00 x 1.49, si128 1.35 x 1.93 x 1.31 (A/D 3.586 measured), si216 1.21 x 1.50 x 1.47. The per-map cost is closing with size; the map count (si128: 29 maps vs QE 15, maps 3-13 diverge with the standard error growing 272x while no control reacts) and the overhead outside the SCF loop (coarse ladder 18-24 % of wall at every size, verification 9-11 %) are the levers. The legacy driver (`ScfSession::advance`, about 1100 lines, plus the cutoff ladder and verification scheduling, more than 130 switches) is where both live. A new driver that follows a published, QE-equivalent fixed-point scheme lets us (1) compare every iteration with QE term by term and (2) add BAANDI's own accelerations back one at a time, each with a measured gain.
@@ -24,7 +43,7 @@ A new module `crates/dft-engine/src/refscf/` (no session/ladder control flow or 
 - Patch 3 (speed): dev08 pure MPI8 matched runs, Si128 with Si64 and Si216 controls, A/A floor first, crossed A/B, effect >= 3x floor and |mean|/SE >= 3, uninstrumented external wall including startup, certificate and output; skewed/slab and non-Si PP coverage; strict 1e-10 / standard 5e-9 Ha before any default change. Then add BAANDI accelerations back one at a time (kept orbitals first, then the ladder only if it pays at equal accuracy), and rewrite kernels where the per-iteration profile shows waste (per-iteration non-column cost was 99 ms vs QE 69 ms at si64; Gram/rotate/update 2.53 s vs QE 0.78 s of non-eigen algebra).
 
 ## Rules
-No QE source to implementers; equations and conventions from the note and the literature only, the note's INFERRED items verified against QE reference data. Same parallel model on both sides. No constant tuned to silicon. The legacy driver stays the default until the new path passes the gates on the generality set; then the old driver and its switches are removed in one step.
+No QE source to implementers; equations and conventions from the note and the literature only, the note's INFERRED items verified against QE reference data. Same parallel model on both sides. No constant tuned to silicon. The original one-step removal proposal is superseded by ADR 0047: staged migration, a frozen feature-gated oracle, and the G4D exception.
 
 ## Diagnostics level
 
@@ -4720,9 +4739,9 @@ and wall acceptance remain with the master session's
 ## Runtime control
 
 R8c routes eligible `run --observe` and `run --agent` calculations through
-`api::stepper` and `refscf::runtime::Runtime`. L7 is removed; explicit
-`scf.driver = "legacy"` retains the historical runtime. Other eligibility
-predicates still apply. The reference facade handles Gamma, complex-k and
+`api::stepper` and `refscf::runtime::Runtime`. L7 is removed. R10c removed `scf.driver = "legacy"`; only explicit
+StrictOracle and the G4D exception use the oracle. Unsupported runtime
+combinations reject rather than creating an implicit legacy standard route. The reference facade handles Gamma, complex-k and
 eligible electronic/spin/FD calculations with the same numerical continuations
 as a plain run. Observation never changes a numerical option.
 

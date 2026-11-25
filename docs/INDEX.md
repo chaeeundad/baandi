@@ -1,5 +1,10 @@
 # Documentation map
 
+Current SCF contract: [ADR 0047: single production reference driver](decisions/0047-reference-driver-single-path.md).
+Start with [CLI usage](cli.md), [checkpoint v2](checkpoint-format.md), and
+[reference runtime](design/reference-scf.md#runtime-control). Historical evidence
+and earlier ADRs do not select current defaults.
+
 Current evidence and status: [claim-to-evidence map](validation/evidence-map.md),
 [dated status](progress.md), [performance status index](performance/README.md).
 
@@ -77,7 +82,7 @@ Conventions: docs are English; one fact lives in one place and others link to it
 | Tagged spin, explicit arrays and spin XC | [ADR 0031](decisions/0031-spin-electronic-state.md) (accepted) |
 | Occupations, entropy and finite-T certificate | [ADR 0032](decisions/0032-occupations-scf-certificate.md) (accepted) |
 | Grid roles, derivative ownership and force/stress signs | [ADR 0033](decisions/0033-grids-derivative-ledger.md) (accepted) |
-| Spin/occupation extension of concrete P11C persistence | [ADR 0034](decisions/0034-state-envelope-extension.md) (accepted); [existing v1 format](checkpoint-format.md) |
+| Spin/occupation extension of concrete P11C persistence | [ADR 0034](decisions/0034-state-envelope-extension.md) (accepted); [v2 primary / legacy v1 format](checkpoint-format.md) |
 | Additive results extension schemas, not current engine output | [Results extension](schemas/results-state.proposal.json), [spin](schemas/spin.proposal.json), [occupations](schemas/occupations.proposal.json) (proposed) |
 | MF03–MF14 independent oracles, tolerance rationale and pending dev08 recipes | [Stage oracles](validation/stage-oracles.md) (proposed, no new measurements) |
 - `docs/research/nc-dataset-candidates.md`: PseudoDojo NC-SR v0.4 PBE standard set (O, Ni, Al, Mg, Si) facts, hashes, CC BY 4.0, NLCC and projector consequences (MF05 groundwork).

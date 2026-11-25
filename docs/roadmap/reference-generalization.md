@@ -1,11 +1,12 @@
 # Generalizing the accelerated reference SCF path (user decision A, 2026-11-26)
 
-The reference driver (issue 25) is today Gamma-only, LDA, closed-shell fixed occupations, norm-conserving
-pseudopotentials without core charge, no density symmetrization, and not wired to forces, stress or relaxation.
-User decisions: 2026-11-25 (generalize when the speed target is near or met, then refactor) and 2026-11-26 (A:
-start now, in parallel with the speed work). Each stage is its own ticket; the oracle for every stage is the
-legacy path on the same input (already validated against QE where noted) plus the existing analytic/synthetic
-tests; the reference path keeps its accuracy classes, verification and rank-count rule.
+Status (Stage R, 2026-11-25): the reference driver is the only production path.
+NLCC, PBE, complex k points, fixed spin/eligible FD, symmetry, forces/stress,
+relaxation, NSCF and runtime/checkpoint v2 are implemented. Free-moment PBE (G4D)
+remains unqualified and routes to the strict oracle. Current contracts and scoped
+evidence: [ADR 0047](../decisions/0047-reference-driver-single-path.md).
+The G-stage table and early measurements below are the historical rollout record;
+their original rejection notes do not describe current refstart support.
 
 | stage | capability | oracle | notes |
 |---|---|---|---|
@@ -15,7 +16,7 @@ tests; the reference path keeps its accuracy classes, verification and rank-coun
 | G4 | Fermi-Dirac occupations, collinear spin | legacy finite-T and collinear oracles | needs occupation update in the map and Broyden on two spins |
 | G5 | forces, stress, relaxation from the reference state | legacy forces/stress tests, finite differences | band-first nonlocal contraction (post-performance-tasks.md) |
 | G6 | symmetry (k reduction, density symmetrization) | legacy symmetry evidence | |
-| R | refactor: reference path becomes the single SCF path, legacy duplicates retired | full suite, README table | after G1-G6 |
+| R | Done except G4D: single production reference path, oracle isolated | [ADR 0047 evidence](../decisions/0047-reference-driver-single-path.md#evidence-gen14gen28), [R plan](refactor-r-plan.md#8-evidence-log) | R11b implementation and gen22–gen28 evidence require integration reconciliation; README corrections await D6 approval |
 
 Generality evidence for speed defaults (AGENTS.md "Generality rule"): from G1/G2 on, every speed screen adds
 at least one non-Si NLCC/PBE system (e.g. MgO, GaAs, SiC with PseudoDojo files; never committed).
@@ -35,7 +36,7 @@ at least one non-Si NLCC/PBE system (e.g. MgO, GaAs, SiC with PseudoDojo files; 
 
 All within the standard class (5e-9 Ha). Evidence: dev08 /data/sig-dft/gen/RESULT.md /data/sig-dft/gen4/RESULT.md and /data/sig-dft/gen5/RESULT.md (binary e3a75a5, sha256 183df05a...5a49).
 
-Open gaps found by the runs: spin with PBE needs a two-channel distributed GGA evaluator (stage G4C; real PseudoDojo files are PBE, so this blocks spin on real materials in the reference driver); `refscf-check --stop-to-verified` does not read the k/FD results schema (fold into G5B). Evidence for G4: dev08 /data/sig-dft/gen6/RESULT.md.
+Historical gaps found by the early runs (G4C is now implemented; current open items are in ADR 0047): spin with PBE needs a two-channel distributed GGA evaluator (stage G4C; real PseudoDojo files are PBE, so this blocks spin on real materials in the reference driver); `refscf-check --stop-to-verified` does not read the k/FD results schema (fold into G5B). Evidence for G4: dev08 /data/sig-dft/gen6/RESULT.md.
 
 ### bcc Fe (dev08 gen15, 2026-11-25)
 

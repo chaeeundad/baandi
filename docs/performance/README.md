@@ -1,6 +1,29 @@
 # Performance: rules, measurements and the optimization log
 
-## Current state — 2026-11-20..24 (issue #26)
+## Current SCF baseline — Stage R, 2026-11-25
+
+The reference driver is the only production path; use
+[ADR 0047](../decisions/0047-reference-driver-single-path.md) for routing and limits.
+`bench_scf.py` defaults to [baseline-reference.json](baseline-reference.json).
+For the strict oracle, set `BAANDI_REFERENCE_STRICT=on` and explicitly select
+[baseline-oracle.json](baseline-oracle.json). Selecting a file does not select a
+driver. Assert result driver/profile before interpreting a comparison. Do not
+set the removed `BAANDI_REFERENCE_SCF` switch. The original R0 switch values
+below are historical provenance only.
+
+The reference Gamma baseline was re-recorded for the accepted ADR 0046 screening
+policy (R1B): delta -5.666578317686799e-12 Ha from the original signed-density
+trajectory; k222s/k222 and the oracle baseline were unchanged. This is a recorded
+policy change, not relaxed regression tolerance. Mac baseline identity is not
+dev08 performance acceptance. Stage R dev08 evidence and unavailable generations
+are indexed in ADR 0047; no timings are remeasured by this documentation task.
+
+Adopted reference rollback branches and rejected experiments were retired under
+D3; recreate them from git when needed. [Switch retirement](switch-retirement.md)
+records R11a and the R11b integration boundary. Shared/oracle switches still
+present in this checkout must not be described as already removed.
+
+## Historical operations context — 2026-11-20..24 (issue #26)
 
 The new reference SCF path (issue #25) is the active work; the threads lane is
 dropped. Defaults are unchanged by this reconciliation. dev08 is operated by
@@ -101,7 +124,7 @@ Read this before touching a hot path (anything on the Hamiltonian apply, the eig
 
 ## Tools
 - `scripts/bench_scf.py` (standard library only): runs the release `dft-cli` on fixed Si cases (`gamma`, `k222s`, `k222`, `k444s`), reports median wall time, engine and diagonalization time, iterations, energy and the density hash, and compares with the baseline. The pseudopotential path is passed with `--upf` (the file is not in the repository).
-- **Baseline provenance (Mac timings are observations only):** [baseline-reference.json](baseline-reference.json) freezes the R0 reference driver (`BAANDI_REFERENCE_SCF=on`, `BAANDI_REFERENCE_STRICT=off`); [baseline-oracle.json](baseline-oracle.json) freezes the legacy strict oracle (`BAANDI_REFERENCE_SCF=off`, `BAANDI_REFERENCE_STRICT=on`). Both use the existing `gamma`, `k222s`, and `k222` Si cases, a release build on macOS Apple Silicon, one thread, and three identical repetitions; `scripts/bench_scf.py` now defaults to `baseline-reference.json`, matching the R2 default driver with no switches set. Select `baseline-oracle.json` with `BAANDI_REFERENCE_STRICT=on` for the oracle; choosing a baseline never selects a driver. They record the actual `scf.driver`, reference/strict switch manifests, profile, energy bits, density SHA-256, work counts, exact inputs, command, and binary/UPF hashes. R0 recorded the strict oracle as driver `legacy` with profile `strict`; the harness recognizes that historical label only with its recorded `REFERENCE_SCF=off` and `REFERENCE_STRICT=on`. Since R1, STRICT takes precedence even when `REFERENCE_SCF` is on and records `strict_oracle`. The harness rejects differing or missing driver metadata and differing profiles. [baseline-legacy.json](baseline-legacy.json) (renamed from `baseline.json` by the orchestrator; before optimization) and [baseline-after-o4.json](baseline-after-o4.json) (after Davidson product reuse) remain historical legacy captures without driver metadata and cannot serve as R0 identity baselines. These Si-only captures establish identity on the recorded Mac build, not physical accuracy, cross-platform bit identity, QE agreement, or dev08 performance. Accepted timing evidence comes from dev08.
+- **Baseline provenance (Mac timings are observations only):** [baseline-reference.json](baseline-reference.json) freezes the R0 reference driver (`BAANDI_REFERENCE_SCF=on`, `BAANDI_REFERENCE_STRICT=off`); [baseline-oracle.json](baseline-oracle.json) freezes the legacy strict oracle (`BAANDI_REFERENCE_SCF=off`, `BAANDI_REFERENCE_STRICT=on`). Both use the existing `gamma`, `k222s`, and `k222` Si cases, a release build on macOS Apple Silicon, one thread, and three identical repetitions; `scripts/bench_scf.py` now defaults to `baseline-reference.json`, matching the R2 default driver with no switches set. Select `baseline-oracle.json` with `BAANDI_REFERENCE_STRICT=on` for the oracle; choosing a baseline never selects a driver. They record the actual `scf.driver`, reference/strict switch manifests, profile, energy bits, density SHA-256, work counts, exact inputs, command, and binary/UPF hashes. R0 recorded the strict oracle as driver `legacy` with profile `strict`; the harness recognizes that historical label only with its recorded `REFERENCE_SCF=off` and `REFERENCE_STRICT=on`. Since R1, STRICT takes precedence and records `strict_oracle`; R10c subsequently removed `REFERENCE_SCF`. The harness rejects differing or missing driver metadata and differing profiles. [baseline-legacy.json](baseline-legacy.json) (renamed from `baseline.json` by the orchestrator; before optimization) and [baseline-after-o4.json](baseline-after-o4.json) (after Davidson product reuse) remain historical legacy captures without driver metadata and cannot serve as R0 identity baselines. These Si-only captures establish identity on the recorded Mac build, not physical accuracy, cross-platform bit identity, QE agreement, or dev08 performance. Accepted timing evidence comes from dev08.
 
 ## P10I deterministic intra-k linear algebra
 

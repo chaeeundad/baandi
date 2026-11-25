@@ -8,13 +8,27 @@
 **Verify:** `scripts/check.sh dft-cli`, then `scripts/check.sh` for the whole workspace.
 **Rules:** keep public API changes out of unrelated tickets; every behavior change adds or updates a test with stated tolerance and units; prefer general-purpose crates (ADR 0003); record design decisions in an ADR.
 
+## Current routing (Stage R)
+
+[ADR 0047](../../docs/decisions/0047-reference-driver-single-path.md) is the current
+contract. `driver_select` resolves Reference or StrictOracle before construction;
+STRICT wins, and only G4D free-moment PBE falls back to the oracle. Assert the
+recorded driver in gates; never retry an engine error on another path.
+Reference uses `refscf::api`, beta 0.7/history 8, standard verification on.
+Removed D4 keys are ordinary unknown-key errors even in oracle mode. Retained
+atomic-only start keys and the oracle `cutoff_ladder="off"` pin are documented
+in [CLI usage](../../docs/cli.md). `REFERENCE_SCF`/legacy driver are removed.
+
 ## Collinear input/results (P13B / MF03)
 
-`SpinConfig` and shared preflight validate explicit integer sectors; `spin_run`
-serializes the additive version 2 result profile, proposal-schema extension,
+`SpinConfig` and shared preflight validate explicit integer sectors. Reference
+`run::reference_electronic_run` serializes version 2 `reference_spin_fd_v1`;
+`spin_run` is the strict-oracle serializer. Preserve the extension,
 full spin/k/band axes, fixed-sector certificate and conventional density cubes.
-Unpolarized results remain version 1. Never route a collinear result through a
-scalar legacy orbital view or unpolarized runtime/checkpoint/postprocessing.
+Fixed-occupation unpolarized results retain their scalar schema; reference FD
+uses the electronic version 2 profile even without spin. Never route a collinear result through a
+scalar legacy orbital view or an unpolarized-only postprocessor. Reference
+spin/FD runtime and checkpoint v2 are supported; v1 is not spin restart.
 Use `tests/spin.rs` and its independent standard-library schema/cube checker.
 See `docs/user/collinear-spin.md` for supported combinations and format losses.
 
@@ -28,8 +42,8 @@ NLCC ledger data cannot be silently serialized into checkpoint v1.
 
 ## MF04 finite-temperature boundary
 
-`finite_run.rs` writes the explicit FD profile and proposed state-contracts
-extension; default/fixed outputs retain their existing path. Unit conversion is
+`finite_run.rs` writes the strict-oracle FD profile; production uses the
+reference electronic serializer and its explicit E/TS/F and spin/k/band axes. Unit conversion is
 only in config. Unknown schemes, competing widths, finite-T v1 checkpoints and
 unsupported output/runtime options reject. Model identity excludes spontaneous
 moment and seeds; state identity includes the actual occupations, mu and entropy.
@@ -90,36 +104,31 @@ all stage inputs, times and failures. `rebuilt_pressure_check` warns independent
 of the Pulay tensor-difference warning; frozen-only convergence must not imply
 nominal-cutoff equilibrium, and the default rebuild cadence remains zero.
 
-## Single SCF path (ADR 0043, default since 2026-11-16; complete since ONEPATH-4)
+## Reference runtime and checkpoint
 
-`scf.convergence_profile` is removed (input error with the replacement). `Config::scf_path`
-(`scf_path_with(reference)` for in-process comparisons with a child that sets the switch)
-selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; otherwise the standard path with
-verification for every command and mode (`run` classic/observe/agent, `relax`, `bands`, `dos`,
-`checkpoint`, `restart`, `explain`; all resolve `run::options`). There is no strict fallback:
-`scf.locking = "auto"` is an input error naming the switch (ONEPATH-4); spin/FD run standard
-since ONEPATH-3, forces/relaxation since ONEPATH-1, stress/variable-cell since ONEPATH-2.
-Checkpoint v1 carries the verification option and attempts (`docs/checkpoint-format.md`);
-`bands`/`dos` record `scf_path`. Every result records `single_path` and `execution`
-(review F01); MPI runs without a distributed solve report `mpi_replicated` (F02). Tests
-that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/all/run.rs` `Case::run`), use
-`run::options_with_reference(config, true)` or the engine's `ScfOptions::strict_reference()`;
-`tests/all/single_path.rs` and `tests/all/onepath_last_fallbacks.rs` cover the default path.
+Observe/agent runs drive `refscf::runtime::Runtime` and the production stepper.
+Policies are beta/history, tightening threshold in Ry and verification; legacy
+budget/solver/tolerance controls reject. Keep JSON, sockets and audit outside
+maps. Approval intent precedes mutation, disposition follows; do not promise
+rollback after mutation if journal publication fails. MPI rank zero owns intake;
+all ranks apply controls and agree transport errors at safe points.
 
-## Measurement outputs (BREAKTHROUGH-0-INSTRUMENT, 2026-11-17)
+Checkpoint defaults to v2; v1 is legacy/oracle only. Restart dispatches by checked
+version and validates identity. v2 restart writes an export container and a
+routing-only `.results.json` companion, not a normal results directory. No warm
+v2 import or conversion from v1. Safe-point state and kept HX must survive exactly;
+never rerun maps to fake continuation. Wire/publication rules and reproduction:
+[checkpoint format](../../docs/checkpoint-format.md).
 
-`run` writes results.json `phase_profile` (and `parallel.phases` on MPI runs,
-gathered over ranks: max and min per entry) with `BAANDI_PHASE_PROFILE=on`
-(`run::profile_json`), and `convergence.work.first_block` with
-`BAANDI_FIRST_BLOCK=on`; both tables also go to the console. Problem
-construction is reported to the profile as `init`, the output materialization
-after the SCF as `materialize` io. `examples/davidson_bench.rs --snapshot
-<manifest.json>` replays a captured solve (`BAANDI_SNAPSHOT_DIR`): the timed
-kind is `replay` (one map at the captured density from the captured start),
-the manifest's cutoff rebuilds a coarse-stage problem, and the report prints
-whether the Davidson iterations, H columns and eigenvalue FNV of the captured
-solve were reproduced (`DAVBENCH_JSON` field `snapshot`). Both harnesses print
-the phase profile and the first-block table when their switches are on.
+## Retired measurement and standard-path instructions
+
+Legacy standard routes, tunable ladder JSON, FIRST_BLOCK/replay experiments and
+reference rollback arms were **removed in R10/R11, see git history**. Old
+`ScfSession` runtime/standard-profile descriptions are oracle history, not
+production instructions. `PHASE_PROFILE` diagnostics remain. R11b oracle-only
+switch retirement is pending integration at R12 base `27d91ece`; consult the
+[retirement inventory](../../docs/performance/switch-retirement.md) before
+claiming a switch disappeared. Do not edit root AGENTS.md.
 
 ## Run configuration and run report (RUN-CONFIG / RUN-REPORT, 2026-11-18)
 

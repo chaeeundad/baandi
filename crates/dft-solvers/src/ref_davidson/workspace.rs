@@ -44,6 +44,9 @@ pub(crate) struct Workspace {
     pub(crate) gemm: RealGemmWorkspace,
     evd: RealEighWorkspace,
     single_gemm: bool,
+    triangle: bool,
+    stacked: Option<(RealMatrix, RealMatrix)>,
+    pub extra_elements: usize,
     swap_buffers: bool,
     lean_reset: bool,
     ideal_reset: bool,
@@ -103,7 +106,19 @@ impl Workspace {
         hv.reshape_within_storage(rows, cap)?;
         e.reshape_within_storage(rows, n)?;
         he.reshape_within_storage(rows, n)?;
+        let stack = on(Id::REF_DAV_STACK_ROTATE);
+        let stacked = if stack {
+            Some((
+                RealMatrix::zeros(2 * rows, cap)?,
+                RealMatrix::zeros(2 * rows, n)?,
+            ))
+        } else {
+            None
+        };
         Ok(Self {
+            triangle: on(Id::REF_DAV_TRIANGLE),
+            stacked,
+            extra_elements: if stack { 2 * rows * (cap + n) } else { 0 },
             sqrt_precondition: on(Id::REF_DAV_SQRT),
             diagonal_bounds: (f64::INFINITY, f64::NEG_INFINITY),
             fused_append: on(Id::REF_DAV_FUSED_APPEND),
@@ -139,7 +154,11 @@ impl Workspace {
             reduced: vec![0.0; cap * cap],
             norms: vec![0.0; cap + 1],
             sums: vec![0.0; cap + 1],
-            gemm: RealGemmWorkspace::with_pool(rows.max(cap), cap, pool)?,
+            gemm: RealGemmWorkspace::with_pool(
+                (if stack { 2 * rows } else { rows }).max(cap),
+                cap,
+                pool,
+            )?,
             evd: RealEighWorkspace::new(cap)?,
         })
     }
@@ -246,25 +265,61 @@ impl Workspace {
         let k = to - from;
         self.border.reshape_within_storage(to, k)?;
         let b = if is_h { &self.hv } else { &self.v };
-        r.gemm(if is_h { "border_h" } else { "border_s" }, to, k, self.rows);
-        let entry = if self.single_gemm {
-            RealGemmWorkspace::multiply_slices_single_into
+        let triangular = self.triangle
+            && self
+                .gemm
+                .try_upper_border_into(&self.v, b, from, to, &mut self.border)?;
+        if triangular {
+            if from > 0 {
+                r.gemm(
+                    if is_h { "border_h_top" } else { "border_s_top" },
+                    from,
+                    k,
+                    self.rows,
+                );
+                // Adapter output scatter is excluded on both paths by the
+                // existing logical-work model (m*k here, to*k in single GEMM).
+            }
+            // Keep the square shape but charge only its computed upper entries.
+            r.gemm(
+                if is_h {
+                    "border_h_gemmt"
+                } else {
+                    "border_s_gemmt"
+                },
+                k,
+                k,
+                self.rows,
+            );
+            let saved = self.rows as u64 * k as u64 * k.saturating_sub(1) as u64;
+            r.gemms.last_mut().unwrap().flops -= saved;
+            work::add(profile, |s| {
+                s.gemm_flops -= saved;
+                s.gemm_operand_bytes -= 4 * (k * k.saturating_sub(1)) as u64;
+                s.zeroed_bytes += 4 * (k * k.saturating_sub(1)) as u64;
+                s.streamed_bytes += 4 * (k * k.saturating_sub(1)) as u64;
+            });
         } else {
-            RealGemmWorkspace::multiply_slices_into
-        };
-        entry(
-            &mut self.gemm,
-            GemmSite::Other,
-            self.v.as_slice(),
-            self.rows,
-            to,
-            self.rows,
-            RealOp::Transpose,
-            &b.as_slice()[from * self.rows..],
-            k,
-            self.rows,
-            self.border.as_mut(),
-        )?;
+            r.gemm(if is_h { "border_h" } else { "border_s" }, to, k, self.rows);
+            let entry = if self.single_gemm {
+                RealGemmWorkspace::multiply_slices_single_into
+            } else {
+                RealGemmWorkspace::multiply_slices_into
+            };
+            entry(
+                &mut self.gemm,
+                GemmSite::Other,
+                self.v.as_slice(),
+                self.rows,
+                to,
+                self.rows,
+                RealOp::Transpose,
+                &b.as_slice()[from * self.rows..],
+                k,
+                self.rows,
+                self.border.as_mut(),
+            )?;
+        }
         c.tree_sum_f64(self.border.as_slice(), &mut self.reduced[..to * k])
             .map_err(error)?;
         let target = if is_h { &mut self.hr } else { &mut self.lean.s };
@@ -707,26 +762,30 @@ impl Workspace {
     ) -> Result<(), SolverError> {
         let t = clock(profile);
         let _stage = span(profile, Stage::Restart);
-        rotate(
-            &mut self.gemm,
-            &self.v,
-            &self.lean.c,
-            &mut self.x,
-            m,
-            self.n,
-            r,
-            "restart_v",
-        )?;
-        rotate(
-            &mut self.gemm,
-            &self.hv,
-            &self.lean.c,
-            &mut self.hx,
-            m,
-            self.n,
-            r,
-            "restart_hv",
-        )?;
+        if self.stacked.is_some() {
+            self.rotate_stacked(m, r, "restart_stacked", profile)?;
+        } else {
+            rotate(
+                &mut self.gemm,
+                &self.v,
+                &self.lean.c,
+                &mut self.x,
+                m,
+                self.n,
+                r,
+                "restart_v",
+            )?;
+            rotate(
+                &mut self.gemm,
+                &self.hv,
+                &self.lean.c,
+                &mut self.hx,
+                m,
+                self.n,
+                r,
+                "restart_hv",
+            )?;
+        }
         self.v.reshape_within_storage(self.rows, self.n)?;
         self.hv.reshape_within_storage(self.rows, self.n)?;
         if self.swap_buffers {
@@ -864,6 +923,41 @@ impl Workspace {
         r.seconds[2] += elapsed(t);
         Ok(())
     }
+    /// The owned matrices are separate allocations. Pack once into persistent
+    /// scratch and unpack once; account for that traffic rather than assuming
+    /// a free stacked view. MKL executes one 2r x m by m x n call.
+    fn rotate_stacked(
+        &mut self,
+        m: usize,
+        r: &mut Iteration,
+        site: &'static str,
+        profile: bool,
+    ) -> Result<(), SolverError> {
+        let (input, output) = self.stacked.as_mut().expect("stack scratch");
+        input.reshape_within_storage(2 * self.rows, m)?;
+        output.reshape_within_storage(2 * self.rows, self.n)?;
+        for j in 0..m {
+            let dst = &mut input.as_mut_slice()[2 * j * self.rows..2 * (j + 1) * self.rows];
+            dst[..self.rows]
+                .copy_from_slice(&self.v.as_slice()[j * self.rows..(j + 1) * self.rows]);
+            dst[self.rows..]
+                .copy_from_slice(&self.hv.as_slice()[j * self.rows..(j + 1) * self.rows]);
+        }
+        r.gemm(site, 2 * self.rows, self.n, m);
+        self.gemm
+            .multiply_contiguous_single_into(GemmSite::Rotate, input, &self.lean.c, output)?;
+        self.x.reshape_within_storage(self.rows, self.n)?;
+        self.hx.reshape_within_storage(self.rows, self.n)?;
+        for j in 0..self.n {
+            let src = &output.as_slice()[2 * j * self.rows..2 * (j + 1) * self.rows];
+            self.x.as_mut_slice()[j * self.rows..(j + 1) * self.rows]
+                .copy_from_slice(&src[..self.rows]);
+            self.hx.as_mut_slice()[j * self.rows..(j + 1) * self.rows]
+                .copy_from_slice(&src[self.rows..]);
+        }
+        work::copy(profile, 2 * self.rows * (m + self.n));
+        Ok(())
+    }
     pub fn finish(
         &mut self,
         m: usize,
@@ -873,27 +967,31 @@ impl Workspace {
     ) -> Result<(), SolverError> {
         let t = clock(profile);
         let _stage = span(profile, Stage::Return);
-        rotate(
-            &mut self.gemm,
-            &self.v,
-            &self.lean.c,
-            &mut self.x,
-            m,
-            self.n,
-            r,
-            "return_x",
-        )?;
-        if hx {
+        if hx && self.stacked.is_some() {
+            self.rotate_stacked(m, r, "return_stacked", profile)?;
+        } else {
             rotate(
                 &mut self.gemm,
-                &self.hv,
+                &self.v,
                 &self.lean.c,
-                &mut self.hx,
+                &mut self.x,
                 m,
                 self.n,
                 r,
-                "return_hx",
+                "return_x",
             )?;
+            if hx {
+                rotate(
+                    &mut self.gemm,
+                    &self.hv,
+                    &self.lean.c,
+                    &mut self.hx,
+                    m,
+                    self.n,
+                    r,
+                    "return_hx",
+                )?;
+            }
         }
         r.seconds[7] += elapsed(t);
         Ok(())
@@ -1268,3 +1366,7 @@ mod single_gemm_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "remainder_tests.rs"]
+mod remainder_tests;

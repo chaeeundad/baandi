@@ -929,6 +929,85 @@ the attempt record. Real MPI/MKL accuracy and dev08 performance remain unmeasure
 be reported; passing energy tests alone is not a speed or adoption claim.
 
 
+### P4-DAVREM: triangular borders, stacked rotations and setup fusion
+
+Three independent registry switches default **off**: `REF_DAV_TRIANGLE`,
+`REF_DAV_STACK_ROTATE`, `REF_DAV_SETUP_FUSED` (environment prefix `BAANDI_`,
+input keys lower case). No threshold, capacity, rank rule, collective ordering
+or H-column policy changes. Derived from the own-words
+[davidson-gemm-accounting.md](../research/qe-study/davidson-gemm-accounting.md)
+and this section's reference-path accounting, not QE source.
+
+**Triangle.** MKL computes a top m-by-k rectangle and a k-by-k upper triangle
+of the appended border, using one DGEMM and one DGEMMT. For an initial/full
+refresh (m=0), only DGEMMT is needed. The S pivot still precedes the H call;
+failed corrections never incur speculative H work. The complete upper H
+triangle uses V and HV as distinct operands, not a SYRK substitution.
+The lower triangle is never read from GEMMT; it is zeroed before the existing
+full-border reduction, then the upper result is mirrored as before. Pure Rust
+and `MKL_DGEMM=off` retain the original rectangular product and report zero
+savings. API/storage contract:
+[Intel GEMMT reference](https://www.intel.com/content/www/us/en/docs/onemkl/developer-reference-c/2026-0/cblas-gemmt.html).
+
+Per S/H pair, work falls from `4*r*(m+k)*k` to
+`4*r*m*k + 2*r*k*(k+1)`: **2*r*k*(k-1) FLOPs saved**. Border calls increase
+from two to four when m>0 and remain two when m=0. The top-output
+scatter moves 32*m*k bytes per pair versus 32*(m+k)*k in the adopted single-GEMM
+baseline; both adapter scatters remain excluded from the existing stage model.
+Lower-zero stores add 8*k*(k-1) bytes per pair and are counted. GEMMT records retain square
+m/n shapes, use site suffix `_gemmt`, and carry triangular FLOPs in the
+iteration and stage totals. A histogram consumer must use `m*(m+1)*k`
+for that suffix, not dense `2*m*n*k`. GEMMT is absent from the older dense
+`gemm_dispatch` histogram; MKL's optional adapter timer includes its actual
+triangular FLOPs under `other`. No hardware-internal FLOP claim is made.
+
+The earlier UPPER_BORDER experiment saved 16.38% FLOPs but lost 0.57% wall,
+with 12.7% more calls and narrower DGEMMs losing throughput. This explicitly
+requested new candidate changes the square kernel to GEMMT (no recursive
+upper tiles), not merely the old tile width. It still adds a rectangular call
+and might lose for the same reason. The dev08 request measures that risk;
+FLOP savings alone do not establish speed. Combining S/H into V^T[E|HE]
+before the pivot would violate failed-append H-work identity, so is not used.
+
+**Stacked rotations.** Pack the separate V and HV allocations into a persistent
+2r-by-m matrix; multiply by C once, then unpack X and HX. Restart always uses
+this route; return uses it only when HX is requested. An X-only return retains
+its single original product. MKL calls one sequential DGEMM directly into
+contiguous output, with no 256-row call subdivision. The pure backend uses
+its existing ordered kernel. FLOPs remain **4*r*m*n**, logical calls fall
+**2 to 1**. Explicit packing/unpacking adds **32*r*(m+n) bytes** per rotation
+pair. Extra initialized storage is **16*r*(capacity+n) bytes** per solve,
+counted in setup zero fills. No scratch allocation occurs in the iteration.
+The logical GEMM payload saves one C read (8*m*n bytes); that does not erase
+the packing cost or imply a net bandwidth saving. Repairs retain their
+original whitening route and buffer swaps.
+
+**Setup fusion.** After local shape validation, copy/finite-check the start
+and optional supplied HX in one traversal, and finite-check/compute diagonal
+bounds in one traversal. The unchanged two-value collective still agrees
+invalid inputs and optional-HX presence before any operator call. Invalid
+local shapes allocate no workspace. Setup saves **8*r*n + 8*r bytes** per
+solve with the adopted sqrt preconditioner; supplied HX saves another
+**8*r*n bytes**. With sqrt off the bounds pass was absent, so only the start/HX
+read savings apply. Accounting now includes the previously omitted baseline
+supplied-HX finite scan. Numerical results and decisions are bit-identical.
+
+Remaining streamed traffic, with adopted P3 fusions, is explicit:
+
+| Stage | Remaining logical bytes; no physical-DRAM claim |
+| --- | --- |
+| Setup row storage | Warm row cache leaves 16*r*capacity bytes of X/HX initialization; cold cache adds 16*r*(capacity+n). Add small arrays, adapter-excluded work, and 16*r*n start copy + 8*r diagonal read (+16*r*n if supplied HX). Stacked scratch adds the initialization above. |
+| Normalize / append E | 24*r*k per ordinary accepted block: read raw E, write compact E and V. Global norms must precede normalization; removing another store requires changing the operator's owned-matrix contract. Repair retains its exceptional passes. |
+| Apply check / append HE | 16*r*k per block: one HE read with finite classification and one HV store, then unchanged collective error agreement. A separate append scan is already absent. |
+| Initial apply check | 8*r*n finite scan for newly produced H(start). Its operator owns production; this ticket cannot fuse that producer. Supplied HX uses the setup copy/check instead. |
+
+Divide accumulated `streamed_bytes` by 1e9 for GB. The ticket's si216 setup
+5.5 GB and 2.11 s are historical relayed observations, not enough to infer
+new total GB without executed shapes/solve counts. The request requires
+all-rank stage totals, same-rank GFLOP/s and GB/s, extra RSS and decisions.
+See [P4 dev08 request](../performance/lanes/RSCF/p4-davrem-dev08-request.md)
+for validation evidence and exact one-run arms. No default is promoted here.
+
 ## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
 R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.
 

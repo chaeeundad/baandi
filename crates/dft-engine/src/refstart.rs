@@ -4,7 +4,10 @@
 //! Inputs must be identical on every communicator rank. All field values are
 //! owned; replicated basis/grid *metadata* is retained. See the Start section
 //! of docs/design/reference-scf.md for the payload-accounting boundary.
-use crate::{Functional, ScfError, ScfOptions, SpeciesPotential};
+use crate::{
+    Functional, SpeciesPotential,
+    model::{ScfError, ScfOptions},
+};
 use dft_basis::{FftGridSpec, HalfSphere, PlaneWaveBasis};
 use dft_geometry::{Atom, Cell};
 use dft_mpi::Collective;

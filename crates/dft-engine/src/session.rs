@@ -3123,53 +3123,7 @@ fn verify_fixed_point_inner(
     ))
 }
 
-/// Shared ADR 0043 fixed-point assessment, independent of a session or solver.
-/// The caller must first evaluate a fresh map at the delivered output density,
-/// at the next ratchet tolerance, and supply its measured certificate metrics.
-/// This function does not replace that map with an estimator or alter the
-/// delivered state. The reference driver uses it without legacy switches.
-#[allow(clippy::too_many_arguments)]
-pub fn assess_fixed_point(
-    options: &ScfOptions,
-    iteration: usize,
-    eigen_tolerance_ha: f64,
-    coulomb_error_ha: f64,
-    residual_bound_ha: Option<f64>,
-    record: &FixedPointCertificate,
-    wall: Duration,
-) -> VerificationAttempt {
-    let threshold_ha = options
-        .standard
-        .expect("standard verification")
-        .threshold_ha;
-    let strict_criteria_met = record.density_residual <= options.density_tolerance
-        && record.occupied_eigenvalue_change <= CERT_EIGENVALUE_LIMIT_HA
-        && record
-            .strict_residuals_per_k
-            .iter()
-            .flatten()
-            .all(|r| *r <= 0.1 * options.eigen_tolerance);
-    VerificationAttempt {
-        iteration,
-        passed: coulomb_error_ha.is_finite()
-            && coulomb_error_ha < threshold_ha
-            && residual_bound_ha.is_none_or(|b| b.is_finite() && b < threshold_ha),
-        coulomb_error_ha,
-        threshold_ha,
-        eigen_tolerance_ha,
-        residual_bound_ha,
-        density_residual: record.density_residual,
-        occupied_eigenvalue_change_ha: record.occupied_eigenvalue_change,
-        strict_criteria_met,
-        davidson_iterations: record.davidson_iterations,
-        operator_applications: record.operator_applications,
-        wall,
-        spin_density_residual: None,
-        occupation_change_electrons: None,
-        chemical_potential_change_ha: None,
-        moment_change: None,
-    }
-}
+pub use crate::model::assess_fixed_point;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum VerifyReuse {
@@ -3285,8 +3239,7 @@ impl SessionSwitches {
     }
 }
 
-/// Largest occupied-eigenvalue change (Ha) the fixed-point certificate accepts.
-const CERT_EIGENVALUE_LIMIT_HA: f64 = 1e-7;
+use crate::model::verify::CERT_EIGENVALUE_LIMIT_HA;
 /// The pre-screen rejects only above this multiple of the limit, so its
 /// second-order modelling error (about 1e-9 Ha) is far inside the margin.
 const CERT_SCREEN_MARGIN: f64 = 1.02;

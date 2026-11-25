@@ -4,49 +4,7 @@ use super::*;
 use dft_physics::occupations::Constraint;
 use dft_physics::spin::{SpinDensity, SpinFunctional, SpinHartree, SpinXc, SpinXcResponse};
 
-#[derive(Clone, Debug)]
-pub struct SpinSector {
-    pub n_up: usize,
-    pub n_down: usize,
-    /// Channel order is up/down along this unit Cartesian axis (no SOC).
-    pub axis_cartesian: [f64; 3],
-    /// Provenance only; the fixed sector, not this seed, constrains the moment.
-    pub initial_moment_seed: Option<f64>,
-}
-impl SpinSector {
-    pub fn validate(&self, electrons: f64) -> Result<(), ScfError> {
-        let n = self
-            .n_up
-            .checked_add(self.n_down)
-            .ok_or(ScfError::InvalidInput(
-                "spin.constraint: electron count overflow; reduce counts",
-            ))?;
-        if n == 0 || (n as f64 - electrons).abs() > 1e-10 {
-            return Err(ScfError::InvalidInput(
-                "spin.constraint: channel counts must sum to valence electrons; correct n_up and n_down",
-            ));
-        }
-        if self.axis_cartesian.iter().any(|v| !v.is_finite())
-            || (self.axis_cartesian.iter().map(|v| v * v).sum::<f64>() - 1.0).abs() > 1e-12
-        {
-            return Err(ScfError::InvalidInput(
-                "spin.axis: requires a finite unit Cartesian vector; normalize the axis",
-            ));
-        }
-        if self
-            .initial_moment_seed
-            .is_some_and(|v| !v.is_finite() || v.abs() > electrons)
-        {
-            return Err(ScfError::InvalidInput(
-                "spin.initial_moment_seed: outside electron capacity; use a finite seed with abs(seed)<=N",
-            ));
-        }
-        Ok(())
-    }
-    pub fn moment(&self) -> f64 {
-        self.n_up as f64 - self.n_down as f64
-    }
-}
+pub use crate::model::SpinSector;
 
 #[derive(Clone, Debug)]
 pub struct SpinCertificate {

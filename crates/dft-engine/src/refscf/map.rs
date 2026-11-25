@@ -4,7 +4,9 @@ use super::{
     memory::{Component as Mem, bytes, observe},
     numerical,
 };
-use crate::{Functional, PhaseTimings, ScfError, energy::EnergyAudit, refstart::StartState};
+use crate::{
+    Functional, energy::EnergyAudit, model::PhaseTimings, model::ScfError, refstart::StartState,
+};
 use dft_geometry::Cell;
 use dft_mpi::Collective;
 use dft_physics::data::{Array3, Complex64 as C};

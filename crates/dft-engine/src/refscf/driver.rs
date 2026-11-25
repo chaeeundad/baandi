@@ -16,11 +16,16 @@ use super::{
     profile::{Profile, next_ethr_ry},
     record::{CorrectionRecord, Record, SolveRecord, VerificationCost, VerificationEnergy},
 };
+use crate::Functional;
 use crate::{
+    model::*,
     refstart::{self, StartInput, StartState},
-    scf::*,
 };
+use dft_geometry::{Cell, kpoints::KPoint};
 use dft_mpi::Collective;
+use dft_physics::data::{Complex64, ComplexMatrix};
+use dft_solvers::EigenSolution;
+use std::time::{Duration, Instant};
 
 /// Empirical verification-error/SCF-estimator scaling, never a certificate.
 /// A skipped candidate is followed by an actual observation at the next
@@ -1436,6 +1441,7 @@ fn qe_clock_table(
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
+    use crate::SpeciesPotential;
     use dft_numerics::switches::RunConfig;
     use std::sync::Arc;
 

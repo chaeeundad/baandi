@@ -1,6 +1,6 @@
 //! Spin/k/band map: all eigenproblems precede the global occupation solve.
 use super::{electronic::Policy, k_kept::KeptHx, numerical, record::SolveRecord};
-use crate::{Functional, ScfError, energy::EnergyAudit, refstart::KStartState};
+use crate::{Functional, energy::EnergyAudit, model::ScfError, refstart::KStartState};
 use dft_geometry::Cell;
 use dft_mpi::Collective;
 use dft_numerics::linalg::ComplexMatrix;

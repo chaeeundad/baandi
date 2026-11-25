@@ -1,6 +1,8 @@
 //! Post-SCF derivative boundary. The SCF stays distributed; current derivative
 //! kernels consume replicated complex orbitals, materialized once on delivery.
-use crate::{ElectronicState, ForceState, ScfError, ScfOutcome, refstart::StartInput};
+use crate::{
+    ElectronicState, ForceState, model::ScfError, model::ScfOutcome, refstart::StartInput,
+};
 
 fn validate_model(
     input: &StartInput<'_>,

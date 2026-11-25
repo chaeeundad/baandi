@@ -7,7 +7,7 @@ use super::{
     memory::{Component as Mem, bytes, observe},
     numerical,
 };
-use crate::ScfError;
+use crate::model::ScfError;
 use dft_mpi::Collective;
 use dft_numerics::RealMatrix;
 use dft_physics::{data::Complex64, distributed_real_gamma::DistributedRealHamiltonian};

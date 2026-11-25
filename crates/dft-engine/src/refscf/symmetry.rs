@@ -1,6 +1,7 @@
 //! Geometry-checked symmetry input and owned-stick density projection.
 use crate::{
-    PreparedSymmetry, ScfError,
+    PreparedSymmetry,
+    model::ScfError,
     refstart::{StartFields, StartInput},
 };
 use dft_geometry::{Atom, Cell, kpoints::KPoint, symmetry::SymmetryOperation};

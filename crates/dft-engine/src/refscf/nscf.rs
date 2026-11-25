@@ -1,7 +1,8 @@
 //! Residual-certified spectra of a fixed supplied density. No SCF map, density
 //! update, mixing, occupations solve or self-consistency certificate is run.
 use crate::{
-    Functional, ScfError,
+    Functional,
+    model::ScfError,
     refstart::{self, KStartState, StartInput},
 };
 use dft_geometry::{Cell, kpoints::KPoint};

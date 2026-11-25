@@ -1,7 +1,7 @@
 //! Reference checkpoint v2. Pure bounded state encoding; persistence and SHA-256
 //! belong to the host. A checkpoint contains one rank's owned rows and planes.
 //! No compiler-generated continuation bytes, pointers, or scratch plans are saved.
-use crate::ScfError;
+use crate::model::ScfError;
 use dft_numerics::{RealMatrix, linalg::ComplexMatrix};
 use dft_physics::data::Complex64;
 

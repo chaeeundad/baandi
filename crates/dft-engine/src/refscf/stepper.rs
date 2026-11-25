@@ -3,7 +3,7 @@
 //! Rust's pinned future stores the existing loop locals without copying numerical
 //! arrays. It is polled only here, once per map: no executor, worker, wakeup,
 //! callback, serialization or allocation is involved at a step boundary.
-use crate::ScfError;
+use crate::model::ScfError;
 use std::{
     cell::{Cell, RefCell},
     future::Future,

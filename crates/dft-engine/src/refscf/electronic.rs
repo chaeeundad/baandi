@@ -11,10 +11,12 @@ use super::{
     record::SolveRecord,
 };
 use crate::{
-    Functional, ScfError, Verification, VerificationAttempt, VerificationReport,
-    collinear::SpinSector,
+    Functional,
     energy::EnergyAudit,
-    finite_temperature::ThermodynamicLedger,
+    model::{
+        ScfError, SpinSector, ThermodynamicLedger, Verification, VerificationAttempt,
+        VerificationReport,
+    },
     refstart::{self, StartInput},
 };
 use dft_geometry::kpoints::KPoint;

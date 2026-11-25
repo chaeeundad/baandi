@@ -477,8 +477,19 @@ pub fn inspection_report(path: &Path, manifest: Option<&Path>) -> Result<Value> 
                 let n = counts.entry(b.l().to_string()).or_insert(json!(0));
                 *n = json!(n.as_u64().unwrap() + 1);
             }
+            let projector_support: Vec<_> = p
+                .projectors()
+                .iter()
+                .enumerate()
+                .map(|(i, b)| {
+                    json!({"index": i + 1, "l": b.l(),
+                    "declared_cutoff_index": b.declared_cutoff_index(),
+                    "effective_support_index": b.effective_support_index(),
+                    "largest_tail_magnitude_bohr_minus_half": b.largest_tail_magnitude()})
+                })
+                .collect();
             let supported = xc_supported(p.functional());
-            json!({"element":p.element(),"valence_electrons":p.z_valence(),"xc":p.functional(),"relativistic":p.raw().header.relativistic,"pseudo_type":"NC","nlcc":p.core_density().is_some(),"spin_orbit":false,"paw":false,"ultrasoft":false,"projector_counts":counts,"formats":["UPF2"],"supported_by_engine":supported,"support_reasons":if supported {vec![]} else {vec!["XC label unsupported"]}})
+            json!({"element":p.element(),"valence_electrons":p.z_valence(),"xc":p.functional(),"relativistic":p.raw().header.relativistic,"pseudo_type":"NC","nlcc":p.core_density().is_some(),"spin_orbit":false,"paw":false,"ultrasoft":false,"projector_counts":counts,"projector_support":projector_support,"formats":["UPF2"],"supported_by_engine":supported,"support_reasons":if supported {vec![]} else {vec!["XC label unsupported"]}})
         }
         Err(e) => json!({"supported_by_engine":false,"support_reasons":[e.to_string()]}),
     };

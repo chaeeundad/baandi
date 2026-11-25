@@ -129,18 +129,19 @@ fn supplemental_metadata_and_storage_boundaries() {
         );
     }
     // The last Gaussian sample is about 1e-62 Bohr^-1/2: the declared
-    // shorter support now accepts it as below printed precision (G7).
-    let truncated = parse_upf(&s.replacen(
+    // shorter declared index retains it in full support (G7B).
+    let extended = parse_upf(&s.replacen(
         "cutoff_radius_index=\"601\"",
         "cutoff_radius_index=\"600\"",
         1,
     ))
     .unwrap();
-    assert_eq!(truncated.projectors()[0].cutoff_index(), 600);
-    for (actual, expected) in truncated.projectors()[0]
+    assert_eq!(extended.projectors()[0].declared_cutoff_index(), 600);
+    assert_eq!(extended.projectors()[0].cutoff_index(), 601);
+    for (actual, expected) in extended.projectors()[0]
         .radial_times_r()
         .iter()
-        .zip(&p.projectors()[0].radial_times_r()[..600])
+        .zip(p.projectors()[0].radial_times_r())
     {
         assert_eq!(actual.to_bits(), expected.to_bits());
     }

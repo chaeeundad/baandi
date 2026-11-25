@@ -125,63 +125,87 @@ PP_R, PP_RAB, PP_LOCAL or PP_RHOATOM as field identifiers.
 
 Projector tag and index must agree and follow consecutive one-based order;
 l must not exceed header l_max; a supplied cutoff radius must be finite and
-nonnegative. The cutoff index is the count of valid points (1..mesh_size).
+nonnegative. The declared cutoff index is metadata (1..mesh_size).
 Arrays may have this length or the full mesh length. All samples, including
-discarded tails, must be finite. A finite residual at r=0 is retained: it has
+tails beyond the declared index, must be finite. A finite residual at r=0 is retained: it has
 zero weight in the projector integral. The validated type stores only the
-valid prefix and retains l and cutoff count. D has exactly n_proj^2 finite real entries, in
+effective support and retains l, the declared index, effective support index,
+and largest absolute tail sample. D has exactly n_proj^2 finite real entries, in
 row-major order, with symmetry checked at **absolute 1e-12 Ha**; it is not
 silently symmetrized. Couplings between different l must be exactly zero.
 
-### Metadata-based beta support and printed tails (G7-UPF-BETA-TAIL)
+### Full stored beta support (G7B-UPF-FULL-SUPPORT)
+
+History: G7-UPF-BETA-TAIL introduced metadata-based truncation with a printed
+precision tolerance. G7B supersedes that rule: dev08 gen26 found real SG15
+Si_ONCV_PBE-1.0 and O.pbe-hgh tails that it rejected. No tolerance or
+printed-precision estimate now determines acceptance or support.
 
 The [public UPF description](https://pseudopotentials.quantum-espresso.org/home/unified-pseudopotential-format)
-defines a projector's mesh count and the stored function `u(r)=r*beta(r)`.
-The [UPF v2 schema documentation](https://orange-box.cc/qeschemas/qe_pp-v2.html)
-lists `PP_BETA.n` attributes `cutoff_radius_index` and `cutoff_radius` as
-optional. BAANDI uses the following explicit reader policy for NC files:
+defines the stored function `u(r)=r*beta(r)`; the
+[UPF v2 schema documentation](https://orange-box.cc/qeschemas/qe_pp-v2.html)
+lists the optional cutoff metadata. BAANDI's explicit NC reader policy is:
 
-- A declared `cutoff_radius_index` is authoritative, including when a radius
-  is also present. It is the one-based final included index. Zero, an index
-  outside the mesh, or an array of neither cutoff nor full-mesh length fails.
-- Without an index, a declared radius in Bohr selects the last mesh point
-  `r <= cutoff_radius`. No interpolation or extra endpoint is added. The
-  selected prefix must be nonempty; neither attribute present is an error.
-  A reader-only zero radius default permits index-only files without inventing
-  support or changing their original metadata.
-- For a nonzero full-mesh tail, let `M = max(abs(u))` over the supported prefix.
-  Let `p` be the largest number of printed significant mantissa digits among
-  nonzero prefix samples written with a decimal point or exponent. Leading
-  zeros and the exponent are excluded; trailing mantissa zeros count. Plain
-  integers and zero samples do not supply a precision estimate. The relative
-  budget is `tau = min(10^(1-p), sqrt(f64::EPSILON))`, or zero if no sample
-  supplies a precision estimate. This is one last printed significant digit;
-  the approximately `1.4901161193847656e-8` ceiling prevents coarse formatting
-  from authorizing large discarded support. The most precise sample is used
-  so a short token cannot loosen the budget. Tail tokens cannot loosen it.
-- Accept only `max(abs(tail))/M <= tau`. A zero supported projector accepts
-  only zero tails. For example, 12 fractional digits in normalized scientific
-  notation give `p=13`, `tau=1e-12`; 16 give `tau=1e-16`. No tolerance is chosen
-  by element, generator name, angular momentum, or SCF result. Printed precision
-  is a conservative acceptance policy, not proof of a generator's roundoff:
-  a tail larger than this budget still fails even if described as roundoff.
-- Accepted tails are removed from the immutable `Projector`, not integrated
-  or renormalized. `raw()` preserves the supplied samples for inspection.
-  Both production and strict drivers use this same parsed prefix through
-  `projector_transform[_with_rule]`; no driver or physics-kernel fork is needed.
-  Full-mesh zero-tail and already-shortened inputs retain their previous bits.
+- Record `cutoff_radius_index` when present (one-based). If only a radius is
+  given, infer the declared index from the last mesh point with
+  `r <= cutoff_radius`, without interpolation. An index takes precedence over
+  a conflicting radius. Missing both, an index outside `1..mesh_size`, or an
+  array of neither declared-index nor full-mesh length remains an error.
+- Reject non-finite samples anywhere, including beyond the declared index.
+  All finite tail values are accepted, irrespective of amplitude, sign,
+  printed precision, generator, or whether the declared prefix is all zero.
+- The effective support index is exactly
+  `max(declared_index, last_nonzero_sample_index)`. An all-zero array uses
+  the declared index. Positive and negative exact zeros are both zero;
+  even the smallest nonzero subnormal extends support.
+- Store and integrate the unmodified samples through this effective index.
+  No nonzero sample is truncated, thresholded, interpolated, or renormalized.
+  `raw()` retains the entire original array, including zero padding.
+  Files without nonzero tails keep their previous support and numerical bits.
+- `Projector::cutoff_index()` and `effective_support_index()` both return
+  the effective length; `declared_cutoff_index()` records the metadata-derived
+  index. `largest_tail_magnitude()` is `max(abs(u[declared_index..]))` in
+  Bohr^-1/2 (zero for absent or exactly zero tails).
+  `inspect-upf --json` exposes an ordered `projector_support` array with
+  `index`, `l`, `declared_cutoff_index`, `effective_support_index`, and
+  `largest_tail_magnitude_bohr_minus_half` for each validated projector.
 
-A support violation names `PP_BETA.n`, the cutoff index, largest tail magnitude
-in Bohr^-1/2, its one-based sample index, relative tolerance and prefix maximum.
-A non-finite value instead names its sample index and cutoff, including when
-it lies in the discarded part. Nothing non-finite is silently truncated.
+Both production and strict drivers, and the nonlocal and derivative setup,
+consume the same effective sample slice through the existing radial APIs.
+No physics-kernel or quadrature formula changes are needed. Integration ends
+at the effective index; extending across extra zero padding is not required
+and could change endpoint quadrature weights on earlier nonzero samples.
 
-Synthetic tests in `crates/dft-upf/tests/all/beta_tail.rs` cover signed
-1e-12-level tails, index-only and radius-only metadata, precedence, odd/even
-prefixes, both quadrature rules, precision changes, amplitude scaling, zero
-support, non-finite values and rejection diagnostics. Clean full-mesh,
-shortened and accepted-tailed transforms must have identical bits (stronger
-than the requested 1e-12 integral agreement).
+Synthetic tests in `crates/dft-upf/tests/all/beta_tail.rs` cover ONCV-like
+smooth sign-changing continuations and HGH-like Gaussian tails, odd and even
+full-support lengths, and both quadrature rules. An independent full-mesh
+weight-vector quadrature with `j0(x)=sin(x)/x` must agree within absolute
+1e-14 Bohr^3/2 at q=0, 0.1, 1, and 8 Bohr^-1. Separate tests check unchanged
+bits for zero-tailed versus shortened files, radius/index precedence, exact
+zero padding, subnormal tails, zero prefixes, and non-finite rejection at
+every sample position. These fixtures are synthetic, not copied UPF data.
+
+G7B local validation (2026-11-25, macOS/aarch64): the maximum independent
+full-mesh quadrature difference was `5.32907051820075139e-15 Bohr^3/2`.
+Both stored Si.pz-vbc baselines (reference and strict oracle,
+Gamma/k222s/k222, three repeats each) passed `bench_scf.py
+--require-identical`: all six energy differences were exactly zero Ha and
+all density SHA-256 hashes matched. A synthetic three-projector CLI JSON
+check independently verified declared indices `[90, 90, 90]`, effective
+indices `[101, 95, 90]`, and tail maxima
+`[2.8818320503339954e-17, 1.3494495090618492e-8, 0] Bohr^-1/2`.
+`reference_identity` passed for both drivers. `cargo test -p dft-upf`
+passed 25 tests with one external-file test ignored; the workspace test gate
+passed 1,023 tests with zero failures and 231 ignored.
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g7b-tests scripts/check.sh`
+passed build, test, fmt, Clippy, production-check and production-clippy
+(exit 0). `cargo check --workspace --tests` and workspace all-target Clippy
+with warnings denied also passed. The sandbox denied the optional `ps` load
+probe and `nice` priority adjustment; neither affected the gate results.
+Generated README
+figures were refreshed without a diff and all nine freshness tests passed.
+Real SG15/HGH files were unavailable locally; their dev08 qualification is
+not claimed by these synthetic checks. No new QE reference run was performed.
 
 An optional external SG15 Si2 smoke compares the production reference driver
 with the strict oracle at the same 10 Ry cutoff and PBE functional, requiring
@@ -197,7 +221,8 @@ DFT_ONCV_UPF=/absolute/Si_ONCV_PBE-1.0.upf cargo test --release \
 Without the variable it looks under the worktree's `../pseudo`. Missing files
 fail explicitly when this ignored test is requested; no UPF is committed.
 
-Local validation (2026-11-25, macOS/aarch64, Rust 1.99.1): the same ignored
+Historical G7 validation before the G7B support change
+(2026-11-25, macOS/aarch64, Rust 1.99.1): the same ignored
 test passed with `DFT_ONCV_UPF=$PWD/../pseudo/pseudodojo/ex/Si.upf`, SHA-256
 `39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282`.
 The reference energy was `-7.80444120941249153 Ha`, strict oracle energy

@@ -1,0 +1,37 @@
+# expected_driver = legacy
+# expected_reason = G4B_FALLBACK: collinear Fermi-Dirac not yet qualified unless all three G4B switches are on
+# command = run
+# expected_parse = ok
+# switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides
+# upf_requirements = NC; nonzero PP_RHOATOM and s/p PP_PSWFC; functional matches XC
+# R0 freezes current behavior; the parse-only test does not execute this command or read UPFs.
+[system]
+name = "R0 routing Si2"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,4.0,4.0],[4.0,0.0,4.0],[4.0,4.0,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "synthetic-atomic.upf"
+[basis]
+ecutwfc_ry = 3.0
+kpoints = [[0.0,0.0,0.0]]
+[xc]
+functional = "lda-pw"
+[scf]
+max_iterations = 100
+[occupations]
+mode = "fermi_dirac"
+smearing_ha = 0.01
+band_cap = 16
+[spin]
+mode = "collinear"
+total_moment = 2.0
+[performance]
+refscf_spin_fd_moment = false
+refscf_spin_stiffness = false
+refscf_history_conditioning = false

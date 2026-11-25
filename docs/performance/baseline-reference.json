@@ -1,0 +1,350 @@
+{
+ "note": "R0 identity baseline; source 181275fbad3856e0eeac60e74bfd1d34cda37939; macOS Apple Silicon; cargo build --release -p dft-cli, default features; one thread; timings are observations only, not dev08 acceptance or QE evidence.",
+ "binary": "dft-cli",
+ "binary_sha256": "13c1509a1ea52461ef2e379e3bbede46d341acb93441d9cefeb5b9c566fd0aa6",
+ "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+ "platform": {
+  "system": "Darwin",
+  "machine": "arm64",
+  "release": "27.0.0"
+ },
+ "command": [
+  "/Library/Developer/CommandLineTools/usr/bin/python3",
+  "-I",
+  "scripts/bench_scf.py",
+  "--binary",
+  "target/release/dft-cli",
+  "--upf",
+  "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+  "--cases",
+  "gamma,k222s,k222",
+  "--threads",
+  "1",
+  "--repeats",
+  "3",
+  "--record",
+  "docs/performance/baseline-reference.json",
+  "--note",
+  "R0 identity baseline; source 181275fbad3856e0eeac60e74bfd1d34cda37939; macOS Apple Silicon; cargo build --release -p dft-cli, default features; one thread; timings are observations only, not dev08 acceptance or QE evidence."
+ ],
+ "driver_environment": {
+  "BAANDI_REFERENCE_SCF": "on",
+  "BAANDI_REFERENCE_STRICT": "off"
+ },
+ "machine_note": "Mac timings are observations only; identity is driver-specific",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "scf": {
+    "driver": "reference",
+    "reference_switches": {
+     "BAANDI_REFERENCE_SCF": {
+      "allowed": "on, off",
+      "consulted": true,
+      "default": "off",
+      "fallback_reason": null,
+      "meaning": "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)",
+      "path": null,
+      "requested": "on",
+      "source": "env",
+      "value": "on"
+     },
+     "BAANDI_REFERENCE_STRICT": {
+      "allowed": "on, off",
+      "consulted": false,
+      "default": "off",
+      "fallback_reason": null,
+      "meaning": "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification",
+      "path": null,
+      "requested": "off",
+      "source": "env",
+      "value": "off"
+     }
+    }
+   },
+   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkpoints = [[0.0, 0.0, 0.0]]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+   "input_sha256": "86987c72cad9d15aeabb59a672cf7dbb173724b627f8872be86701bf710877e8",
+   "total_energy_bits_hex": "c01d2e9f89e01bae",
+   "operator_applications": 85,
+   "davidson_iterations": 13,
+   "certificate_applications": 14,
+   "certificate_iterations": 3,
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.434228625,
+    0.038277000000000005,
+    0.03839866700000005
+   ],
+   "wall_median_s": 0.03839866700000005,
+   "engine_total_s": 0.031103417,
+   "phases_s": {
+    "density_s": 0.00290925,
+    "diagonalization_s": 0.012627167,
+    "mixing_s": 0.001320208,
+    "potential_s": 0.00069254,
+    "total_energy_s": 0.001555165
+   },
+   "engine_total_median_s": 0.031132166,
+   "phase_medians_s": {
+    "density_s": 0.002821167,
+    "diagonalization_s": 0.012328166,
+    "mixing_s": 0.001352582,
+    "potential_s": 0.000741834,
+    "total_energy_s": 0.001405459
+   },
+   "iterations": 7,
+   "total_energy_ha": -7.295530466369128,
+   "density_sha256": "35295c543cfde3e7303c2edfa97a47d4d6999f52607750f355b8145c88e471d7",
+   "effective_profile": "standard",
+   "execution": {
+    "backend": {
+     "linear_algebra": "pure",
+     "mpi_feature": false,
+     "ranks": 1,
+     "threads": 1
+    },
+    "davidson_mode": "reference_generalized",
+    "effective_profile": "standard",
+    "effective_solver": "reference_block_davidson",
+    "lean_solves": 0,
+    "non_default_switches": {
+     "BAANDI_REFERENCE_SCF": {
+      "source": "env",
+      "value": "on"
+     },
+     "BAANDI_REFERENCE_STRICT": {
+      "source": "env",
+      "value": "off"
+     }
+    },
+    "parallel_model": "threads",
+    "path_reason": null,
+    "path_status": "applied",
+    "real_gamma": true,
+    "real_gamma_fallback_reason": null,
+    "requested": {
+     "gamma_real": "auto",
+     "reference_strict": false,
+     "standard_threshold_ha": null,
+     "threads": 1,
+     "verify": null
+    },
+    "solver_note": "refstart and owned-row ref_davidson; no legacy session/ladder/solver switches; fresh-map fixed-point assessment from session.rs",
+    "standard_threshold_ha": 5e-09,
+    "verification": "fixed_point"
+   },
+   "switches_not_default": {
+    "BAANDI_REFERENCE_SCF": "on",
+    "BAANDI_REFERENCE_STRICT": "off"
+   }
+  },
+  "k222s": {
+   "scf": {
+    "driver": "reference",
+    "reference_switches": {
+     "BAANDI_REFERENCE_SCF": {
+      "allowed": "on, off",
+      "consulted": true,
+      "default": "off",
+      "fallback_reason": null,
+      "meaning": "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)",
+      "path": null,
+      "requested": "on",
+      "source": "env",
+      "value": "on"
+     },
+     "BAANDI_REFERENCE_STRICT": {
+      "allowed": "on, off",
+      "consulted": false,
+      "default": "off",
+      "fallback_reason": null,
+      "meaning": "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification",
+      "path": null,
+      "requested": "off",
+      "source": "env",
+      "value": "off"
+     }
+    }
+   },
+   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [2, 2, 2]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+   "input_sha256": "e8fc0602494f31b3a4df09e0e5c06f1f91248a0896c75403767c2bbee95779f1",
+   "total_energy_bits_hex": "c01fad7d54bc623e",
+   "operator_applications": 455,
+   "davidson_iterations": 74,
+   "certificate_applications": 40,
+   "certificate_iterations": 8,
+   "label": "2x2x2 shifted (4 k), 30 Ry",
+   "wall_s": [
+    0.31402429200000004,
+    0.3061505419999999,
+    0.30571670800000006
+   ],
+   "wall_median_s": 0.3061505419999999,
+   "engine_total_s": 0.29746675,
+   "phases_s": {
+    "density_s": 0.026079085,
+    "diagonalization_s": 0.10343671,
+    "mixing_s": 0.001466084,
+    "potential_s": 0.000874501,
+    "total_energy_s": 0.001661668
+   },
+   "engine_total_median_s": 0.298431875,
+   "phase_medians_s": {
+    "density_s": 0.026188293,
+    "diagonalization_s": 0.105816335,
+    "mixing_s": 0.001466084,
+    "potential_s": 0.000874501,
+    "total_energy_s": 0.001509873
+   },
+   "iterations": 7,
+   "total_energy_ha": -7.919423412321121,
+   "density_sha256": "67120c8ad65d1b86021aec1aa39c82e5e3dfd39f5dc758473589a9cd77c29d5c",
+   "effective_profile": "standard",
+   "execution": {
+    "backend": {
+     "linear_algebra": "pure",
+     "mpi_feature": false,
+     "ranks": 1,
+     "threads": 1
+    },
+    "davidson_mode": "reference_generalized",
+    "effective_profile": "standard",
+    "effective_solver": "reference_block_davidson",
+    "lean_solves": 0,
+    "non_default_switches": {
+     "BAANDI_REFERENCE_SCF": {
+      "source": "env",
+      "value": "on"
+     },
+     "BAANDI_REFERENCE_STRICT": {
+      "source": "env",
+      "value": "off"
+     }
+    },
+    "parallel_model": "threads",
+    "path_reason": null,
+    "path_status": "applied",
+    "real_gamma": false,
+    "real_gamma_fallback_reason": null,
+    "requested": {
+     "gamma_real": "auto",
+     "reference_strict": false,
+     "standard_threshold_ha": null,
+     "threads": 1,
+     "verify": null
+    },
+    "solver_note": "refstart and owned-row ref_davidson; no legacy session/ladder/solver switches; fresh-map fixed-point assessment from session.rs",
+    "standard_threshold_ha": 5e-09,
+    "verification": "fixed_point"
+   },
+   "switches_not_default": {
+    "BAANDI_REFERENCE_SCF": "on",
+    "BAANDI_REFERENCE_STRICT": "off"
+   }
+  },
+  "k222": {
+   "scf": {
+    "driver": "reference",
+    "reference_switches": {
+     "BAANDI_REFERENCE_SCF": {
+      "allowed": "on, off",
+      "consulted": true,
+      "default": "off",
+      "fallback_reason": null,
+      "meaning": "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)",
+      "path": null,
+      "requested": "on",
+      "source": "env",
+      "value": "on"
+     },
+     "BAANDI_REFERENCE_STRICT": {
+      "allowed": "on, off",
+      "consulted": false,
+      "default": "off",
+      "fallback_reason": null,
+      "meaning": "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification",
+      "path": null,
+      "requested": "off",
+      "source": "env",
+      "value": "off"
+     }
+    }
+   },
+   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [2, 2, 2]\nkshift = [0.0, 0.0, 0.0]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+   "input_sha256": "15061f5f3be45e3ff8f9fbf4d413e04ae4f4078b7424077a6ec4218b141712c2",
+   "total_energy_bits_hex": "c01f532df8c633b9",
+   "operator_applications": 744,
+   "davidson_iterations": 111,
+   "certificate_applications": 88,
+   "certificate_iterations": 16,
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    0.5451430000000002,
+    0.5293657079999998,
+    0.5478442500000003
+   ],
+   "wall_median_s": 0.5451430000000002,
+   "engine_total_s": 0.539297375,
+   "phases_s": {
+    "density_s": 0.048640121,
+    "diagonalization_s": 0.180056706,
+    "mixing_s": 0.001545585,
+    "potential_s": 0.000896625,
+    "total_energy_s": 0.0016745
+   },
+   "engine_total_median_s": 0.535868792,
+   "phase_medians_s": {
+    "density_s": 0.048154082,
+    "diagonalization_s": 0.175565211,
+    "mixing_s": 0.001515499,
+    "potential_s": 0.000896625,
+    "total_energy_s": 0.001688707
+   },
+   "iterations": 7,
+   "total_energy_ha": -7.831230055901806,
+   "density_sha256": "680dd07126157dadfe5d2cb2cf036a3a05e5778e4afa8c99357651d7c3b3cdef",
+   "effective_profile": "standard",
+   "execution": {
+    "backend": {
+     "linear_algebra": "pure",
+     "mpi_feature": false,
+     "ranks": 1,
+     "threads": 1
+    },
+    "davidson_mode": "reference_generalized",
+    "effective_profile": "standard",
+    "effective_solver": "reference_block_davidson",
+    "lean_solves": 0,
+    "non_default_switches": {
+     "BAANDI_REFERENCE_SCF": {
+      "source": "env",
+      "value": "on"
+     },
+     "BAANDI_REFERENCE_STRICT": {
+      "source": "env",
+      "value": "off"
+     }
+    },
+    "parallel_model": "threads",
+    "path_reason": null,
+    "path_status": "applied",
+    "real_gamma": false,
+    "real_gamma_fallback_reason": null,
+    "requested": {
+     "gamma_real": "auto",
+     "reference_strict": false,
+     "standard_threshold_ha": null,
+     "threads": 1,
+     "verify": null
+    },
+    "solver_note": "refstart and owned-row ref_davidson; no legacy session/ladder/solver switches; fresh-map fixed-point assessment from session.rs",
+    "standard_threshold_ha": 5e-09,
+    "verification": "fixed_point"
+   },
+   "switches_not_default": {
+    "BAANDI_REFERENCE_SCF": "on",
+    "BAANDI_REFERENCE_STRICT": "off"
+   }
+  }
+ }
+}

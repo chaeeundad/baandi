@@ -1744,6 +1744,8 @@ fn execute_mode_inner(
     let mut reference_setup = Value::Null;
     let mut reference_output = Value::Null;
     let mut reference_records = Vec::new();
+    let mut reference_map_diagnostics = Vec::new();
+    let mut reference_stalls = Vec::new();
     let mut reference_status = None;
     let mut reference_summary = None;
     let mut reference_ladder = Value::Null;
@@ -1891,6 +1893,8 @@ fn execute_mode_inner(
                     "peak_rss_bytes_per_rank":null,
                     "verification_calls":run.verification_calls.iter().enumerate().map(|(i,c)| {let mut v=reference_solve_json(c);if let Some(k)=run.verification_k_call_indices.get(i){v["k_index"]=json!(k);}v}).collect::<Vec<_>>()
                 }));
+                reference_map_diagnostics = run.map_diagnostics;
+                reference_stalls = run.stalls;
                 reference_records = run.records;
                 reference_status = Some((run.reference_stopped, run.exit_reason));
                 run.outcome
@@ -1999,6 +2003,14 @@ fn execute_mode_inner(
                 let mut row = history_json(r);
                 if let Some(v) = reference_records.get(i) {
                     row["reference_scf"] = reference_record_json(v);
+                    reference_map_json(
+                        &mut row["reference_scf"],
+                        v.iteration,
+                        &reference_map_diagnostics,
+                        &reference_stalls,
+                        v.mixing.condition,
+                        v.dr2_ry,
+                    );
                 }
                 row
             })
@@ -2103,11 +2115,26 @@ fn execute_mode_inner(
             "mixing_input":config.scf.as_ref().and_then(|s|s.reference_mixing_input.as_ref().or(s.mixing.as_ref())),
             "mixing_implementation":"modified_broyden_difference_history",
             "verification":r.verification.as_ref().map(|v| reference_verification_json(v, &reference_records)),
-            "iterations":reference_records.iter().map(reference_record_json).collect::<Vec<_>>(),
+            "iterations":reference_records.iter().map(|r| {
+                let mut row = reference_record_json(r);
+                reference_map_json(&mut row, r.iteration, &reference_map_diagnostics, &reference_stalls, r.mixing.condition, r.dr2_ry);
+                row
+            }).collect::<Vec<_>>(),
+            "stalls":reference_stalls.iter().map(|s| {
+                let r = reference_records.iter().find(|r| r.iteration == s.iteration).expect("stall map record");
+                reference_stall_json(s, r.mixing.condition, r.dr2_ry)
+            }).collect::<Vec<_>>(),
             "run":reference_summary,
             "threshold_ha":reference_profile(&config)?.threshold_ry/2.,
             "density_role":"last map output (also on exhaustion); energies refer to this output",
             "threshold_ry":reference_profile(&config)?.threshold_ry});
+        for s in &reference_stalls {
+            let r = reference_records
+                .iter()
+                .find(|r| r.iteration == s.iteration)
+                .expect("stall map record");
+            print_reference_stall(s, r.mixing.condition, r.dr2_ry);
+        }
         if reference_records
             .iter()
             .any(|r| r.verification_cost.is_some())
@@ -3010,12 +3037,28 @@ fn reference_electronic_run(
             })
             .collect()
     };
-    let rows: Vec<_> = r.history.iter().map(|h| json!({"iteration":h.iteration,
+    let rows: Vec<_> = r.history.iter().map(|h| { let mut row = json!({"iteration":h.iteration,
         "dr2_ry":h.dr2_ry,"dr2_ha":h.dr2_ry/2.,"ethr_ry":h.ethr_ry,
         "first_iteration_redo":h.first_iteration_redo,"internal_energy_ha":h.energy_ha,
         "entropy_term_ha":h.entropy_term_ha,"free_energy_ha":h.free_energy_ha,
         "moment_mu_b":h.moment_mu_b,"residual_guard_ha":h.residual_guard_ha,
-        "mixing":{"fraction":h.mixing_fraction,"history_used":h.mixing.occupancy,"condition":h.mixing.condition},"calls":calls(&h.calls)})).collect();
+        "mixing":{"fraction":h.mixing_fraction,"history_used":h.mixing.occupancy,"condition":h.mixing.condition},"calls":calls(&h.calls)});
+        reference_map_json(&mut row, h.iteration, &r.map_diagnostics, &r.stalls, h.mixing.condition, h.dr2_ry);
+        row
+    }).collect();
+    let stalls: Vec<_> = r
+        .stalls
+        .iter()
+        .map(|s| {
+            let h = r
+                .history
+                .iter()
+                .find(|h| h.iteration == s.iteration)
+                .expect("stall map record");
+            print_reference_stall(s, h.mixing.condition, h.dr2_ry);
+            reference_stall_json(s, h.mixing.condition, h.dr2_ry)
+        })
+        .collect();
     let eigenvalues: Vec<_> = r
         .blocks
         .iter()
@@ -3083,7 +3126,7 @@ fn reference_electronic_run(
         "execution":execution_json(config,&path,opts,Solver { gamma_real_used:false,gamma_real_fallback_reason:Some("spin/FD"),parallel_model:model }),
         "parallel":{"model":model,"ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"k_concurrency":1,"g_vectors":"distributed"},
         "timings":{"setup_s":r.setup_s,"engine_total_s":r.total_s},
-        "reference_scf":{"start":start_report_json(r.start_report),"schema":"reference-spin-fd-1","iterations":rows,"verification_calls":calls(&r.verification_calls),
+        "reference_scf":{"start":start_report_json(r.start_report),"schema":"reference-spin-fd-1","iterations":rows,"stalls":stalls,"verification_calls":calls(&r.verification_calls),
             "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>()},
         "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ unavailable; free-moment collinear FD with PBE routes to legacy pending G4D"]});
     if let Some(report) = &r.symmetry {
@@ -4058,6 +4101,55 @@ fn reference_solve_json(c: &dft_engine::refscf::record::SolveRecord) -> Value {
                 .map(|(name, seconds)|(name.to_string(), json!(seconds))).collect::<serde_json::Map<_, _>>()})),
         "repairs":c.repairs,"dropped_corrections":c.dropped_corrections})
 }
+/// Adapter-only formatting: observational records never feed back into the engine.
+fn reference_stall_json(
+    s: &dft_engine::refscf::stall::Diagnostic,
+    condition: Option<f64>,
+    dr2_ry: f64,
+) -> Value {
+    json!({"iteration":s.iteration,"condition":condition,"dr2_ry":dr2_ry,
+        "estimate_ha":dr2_ry/2.,"channel_gap_ha":s.channel_gap_ha,
+        "orbital_rotation_fraction":s.orbital_rotation_fraction,
+        "recommendation":dft_engine::refscf::stall::Diagnostic::RECOMMENDATION})
+}
+
+fn print_reference_stall(
+    s: &dft_engine::refscf::stall::Diagnostic,
+    condition: Option<f64>,
+    dr2_ry: f64,
+) {
+    if crate::parallel::rank() == 0 {
+        eprintln!(
+            "SCF stall: map={} condition={:.8e} estimate={:.8e} Ha; {}",
+            s.iteration,
+            condition.expect("stall requires a measured condition"),
+            dr2_ry / 2.,
+            dft_engine::refscf::stall::Diagnostic::RECOMMENDATION
+        );
+    }
+}
+
+fn reference_map_json(
+    row: &mut Value,
+    iteration: usize,
+    samples: &[dft_engine::refscf::stall::MapDiagnostic],
+    stalls: &[dft_engine::refscf::stall::Diagnostic],
+    condition: Option<f64>,
+    dr2_ry: f64,
+) {
+    let sample = samples
+        .iter()
+        .find(|s| s.iteration == iteration)
+        .copied()
+        .unwrap_or_default();
+    row["channel_gap_ha"] = json!(sample.channel_gap_ha);
+    row["channel_edge_residual_ha"] = json!(sample.channel_edge_residual_ha);
+    row["occupied_subspace_loss"] = json!(sample.occupied_subspace_loss);
+    if let Some(s) = stalls.iter().find(|s| s.iteration == iteration) {
+        row["stall"] = reference_stall_json(s, condition, dr2_ry);
+    }
+}
+
 fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
     let mut record = json!({"stage":r.stage,"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,
         "ethr_requested_ry":r.ethr_requested_ry,"ethr_requested_ha":r.ethr_requested_ry/2.,

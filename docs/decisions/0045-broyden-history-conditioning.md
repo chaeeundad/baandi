@@ -150,7 +150,14 @@ entries: three consecutive ordinary-map transitions with condition > 1e12 and
 non-decreasing dr2. Three filters isolated spikes and one/two-map plateaus;
 this is a diagnostic persistence policy, not an accuracy threshold. Each event
 records sampled channel gaps and an optional explicitly measured orbital-rotation
-projection, and recommends fixed-moment FD or a symmetry-breaking start.
+projection. The corrected G4G recommendation is to use the strict oracle
+(`BAANDI_REFERENCE_STRICT=on`) for the integer broken-symmetry state until G4G
+is resolved. Fixed-moment FD can converge to a different fractional spherical
+state, not cure the integer-sector stall: architect-supplied dev08 gen30 O HGH
+at theta=0.005 Ha and moment 2.0 mu_B verifies in 14 maps with minority 2p
+occupations 1/3 each, 0.0107 Ha above the strict integer-sector energy.
+The CLI now exposes the sampled gaps and stall records in results.json and
+prints each event's map, condition, estimate and recommendation to stderr.
 No history is reset, no update is projected, and no stop is forced. Missing
 projection means unmeasured, never zero. See the linked design for the projection
 evidence and why a zero-mode remedy is not yet justified. This does not extend

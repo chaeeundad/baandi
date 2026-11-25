@@ -64,6 +64,7 @@ impl VerificationPredictor {
 }
 
 pub struct Run {
+    pub map_diagnostics: Vec<super::stall::MapDiagnostic>,
     /// Stall events from this invocation (also emitted at step boundaries).
     pub stalls: Vec<super::stall::Diagnostic>,
     pub start_report: crate::refstart::StartReport,
@@ -384,6 +385,7 @@ async fn run_stage<K: Collective>(
     let start_time = start.elapsed();
     setup.total_s = stage_start.elapsed().as_secs_f64();
     let mut stalls = Vec::with_capacity(o.max_iterations);
+    let mut map_diagnostics = Vec::with_capacity(o.max_iterations);
     let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
     let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
@@ -932,14 +934,25 @@ async fn run_stage<K: Collective>(
             variational_hartree_ha: vh,
             variational_xc_ha: vx,
         });
-        if super::stall::detected(records.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
-            let gaps = [
-                Some(step.solve.eigenvalues[occupied] - step.solve.eigenvalues[occupied - 1]),
+        map_diagnostics.push(super::stall::MapDiagnostic {
+            iteration,
+            channel_gap_ha: [
+                (occupied > 0 && occupied < bands).then(|| {
+                    step.solve.eigenvalues[occupied] - step.solve.eigenvalues[occupied - 1]
+                }),
                 None,
-            ];
+            ],
+            channel_edge_residual_ha: [
+                (occupied > 0 && occupied < bands)
+                    .then(|| step.residuals[occupied] + step.residuals[occupied - 1]),
+                None,
+            ],
+            ..Default::default()
+        });
+        if super::stall::detected(records.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
             let diagnostic = super::stall::Diagnostic {
                 iteration,
-                channel_gap_ha: gaps,
+                channel_gap_ha: map_diagnostics.last().unwrap().channel_gap_ha,
                 orbital_rotation_fraction: None,
             };
             map_report.stall = Some(diagnostic);
@@ -1141,6 +1154,7 @@ async fn run_stage<K: Collective>(
             });
             return Ok(StageRun::Fine(Box::new(Run {
                 stalls,
+                map_diagnostics,
                 start_report: state.report,
                 symmetry: None,
                 verification_k_call_indices: Vec::new(),

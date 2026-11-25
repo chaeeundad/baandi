@@ -39,7 +39,7 @@ pub fn run_with<K: Collective>(
     points: &[KPoint],
     comm: &K,
 ) -> Result<Run, ScfError> {
-    run_inner(input, profile, points, comm, None)
+    run_inner(input, profile, points, comm, None, None)
 }
 /// Run the verified irreducible list and weights from legacy preparation.
 pub fn run_prepared(
@@ -59,7 +59,24 @@ pub fn run_prepared_with<K: Collective>(
     prepared: &super::symmetry::Prepared,
     comm: &K,
 ) -> Result<Run, ScfError> {
-    run_inner(input, profile, prepared.points(), comm, Some(prepared))
+    run_inner(
+        input,
+        profile,
+        prepared.points(),
+        comm,
+        Some(prepared),
+        None,
+    )
+}
+/// Fixed-cell seed; mixer and verification history are always fresh.
+pub fn run_seeded_with<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    points: &[KPoint],
+    comm: &K,
+    seed: super::delivered::KSeed,
+) -> Result<Run, ScfError> {
+    run_inner(input, profile, points, comm, None, Some(seed))
 }
 fn run_inner<K: Collective>(
     input: StartInput<'_>,
@@ -67,9 +84,11 @@ fn run_inner<K: Collective>(
     points: &[KPoint],
     comm: &K,
     prepared: Option<&super::symmetry::Prepared>,
+    seed: Option<super::delivered::KSeed>,
 ) -> Result<Run, ScfError> {
     kpoints::validate(points).map_err(numerical)?;
-    if prepared.is_none()
+    if seed.is_none()
+        && prepared.is_none()
         && points.len() == 1
         && points[0].fractional == [0.; 3]
         && input.options.gamma_real == crate::GammaReal::On
@@ -133,6 +152,9 @@ fn run_inner<K: Collective>(
         points,
         comm,
     )?;
+    if let Some(seed) = seed {
+        seed.inject(&input, &mut state)?;
+    }
     let mut symmetry = prepared
         .map(|p| {
             super::symmetry::Workspace::new(&input, p, state.grid.dims(), &state.fields, 1, comm)

@@ -415,6 +415,9 @@ struct WallRun {
 pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
     let require = |ok, why| if ok { Ok(()) } else { Err(fail(why)) };
     require(doc["run"]["completed"] == true, "incomplete results record")?;
+    if doc["reference_scf"]["schema"] == "reference-spin-fd-1" {
+        return electronic_stop_summary(doc);
+    }
     let run: WallRun = serde_json::from_value(doc["reference_scf"].clone()).map_err(fail)?;
     require(
         run.stop_to_verified_clock == "reference-scf-wall-1",
@@ -618,6 +621,89 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
         summary["verification_predictions"] = json!(predictions);
     }
     Ok(summary)
+}
+
+// G4 stores iteration estimators and attempt durations, but no monotonic map
+// boundaries. Preserve that distinction: durations cannot reconstruct an interval.
+fn electronic_stop_summary(doc: &Value) -> Result<Value, RunError> {
+    #[derive(serde::Deserialize)]
+    struct Map {
+        iteration: usize,
+        dr2_ry: f64,
+    }
+    #[derive(serde::Deserialize)]
+    struct Attempt {
+        iteration: usize,
+        passed: bool,
+        wall_s: f64,
+    }
+    #[derive(serde::Deserialize)]
+    struct Verification {
+        mode: String,
+        passed: bool,
+        attempts: Vec<Attempt>,
+    }
+    let threshold = doc["standard_threshold_ha"]
+        .as_f64()
+        .filter(|v| v.is_finite() && *v > 0.)
+        .ok_or_else(|| fail("missing or invalid electronic threshold"))?
+        * 2.;
+    let maps: Vec<Map> =
+        serde_json::from_value(doc["reference_scf"]["iterations"].clone()).map_err(fail)?;
+    let verification: Option<Verification> =
+        serde_json::from_value(doc["verification"].clone()).map_err(fail)?;
+    if maps.is_empty()
+        || maps
+            .iter()
+            .enumerate()
+            .any(|(i, m)| m.iteration != i + 1 || !m.dr2_ry.is_finite() || m.dr2_ry < 0.)
+    {
+        return Err(fail("invalid electronic map history"));
+    }
+    let attempts = verification
+        .as_ref()
+        .map_or(&[][..], |v| v.attempts.as_slice());
+    if let Some(v) = &verification
+        && (v.mode != "fixed_point" || v.passed != attempts.last().is_some_and(|a| a.passed))
+    {
+        return Err(fail("inconsistent electronic verification verdict"));
+    }
+    let mut previous = 0;
+    let mut passing = None;
+    let mut seconds = 0.;
+    for a in attempts {
+        if passing.is_some()
+            || a.iteration <= previous
+            || a.iteration > maps.len()
+            || maps[a.iteration - 1].dr2_ry >= threshold
+            || !a.wall_s.is_finite()
+            || a.wall_s < 0.
+        {
+            return Err(fail("invalid electronic verification attempt"));
+        }
+        previous = a.iteration;
+        seconds += a.wall_s;
+        if a.passed {
+            passing = Some(a.iteration);
+        }
+    }
+    if passing.is_some_and(|i| i != maps.len())
+        || doc["verified"].as_bool() != Some(passing.is_some())
+        || (passing.is_some() && doc["convergence"]["converged"] != true)
+    {
+        return Err(fail("electronic delivery/verification mismatch"));
+    }
+    Ok(json!({"schema":"stop-to-verified-1",
+        "verification_mode":verification.as_ref().map(|v| v.mode.as_str()),
+        "status":if passing.is_some() {"VERIFIED"} else {"UNVERIFIED"},
+        "first_stop_map":maps.iter().find(|m| m.dr2_ry < threshold).map(|m| m.iteration),
+        "passing_map":passing,"attempt_count":attempts.len(),
+        "clock":null,"clock_unavailable_reason":"reference-spin-fd-1 does not record monotonic map boundaries",
+        "interval_start_s":null,"interval_end_s":null,"interval_wall_s":null,
+        "interval_end_kind":"not_recorded","verification_attempts_s":seconds,
+        "ordinary_scf_after_failure_s":null,"unassigned_s":null,"closure_error_s":null,
+        "parts_sum_checked":false,
+        "diagnostic_on_off_delta":"separate measurement; may overlap this interval"}))
 }
 
 #[cfg(test)]

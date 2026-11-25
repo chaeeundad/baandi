@@ -305,7 +305,7 @@ struct Context {
     provenance: Value,
     /// ADR 0043 path of every ionic step's SCF (recorded in results.json).
     scf_path: crate::config::ScfPath,
-    reference_seed: std::cell::RefCell<Option<dft_engine::refscf::ladder::Seed>>,
+    reference_seed: std::cell::RefCell<Option<dft_engine::refscf::delivered::IonicSeed>>,
 }
 impl Context {
     fn position(&mut self, fractional: &[[f64; 3]]) {
@@ -619,7 +619,7 @@ impl Context {
             start_clipped_fraction,
             verification: verification_summary(&state, &self.opts),
         };
-        if reference && settings.warm_start && state.gamma_real_used {
+        if reference && settings.warm_start {
             let atoms = self.atoms();
             let refs = self.refs();
             let input = dft_engine::refstart::StartInput {
@@ -630,9 +630,9 @@ impl Context {
             };
             let density: Vec<_> = state.density.iter().copied().collect();
             let seed = if let Some(comm) = dft_engine::parallel::SharedComm::active() {
-                dft_engine::refscf::delivered::gamma_seed(input, &state, &density, &comm)
+                dft_engine::refscf::delivered::ionic_seed(input, &state, &density, &comm)
             } else {
-                dft_engine::refscf::delivered::gamma_seed(
+                dft_engine::refscf::delivered::ionic_seed(
                     input,
                     &state,
                     &density,
@@ -762,17 +762,6 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             return Err(error(
                 1,
                 "reference cell relaxation requires frozen-strain support in refstart",
-            ));
-        }
-        let points = config.resolved_points().map_err(|e| error(1, e))?;
-        if settings.warm_start
-            && (points.len() != 1
-                || points[0].fractional != [0.; 3]
-                || opts.gamma_real != dft_engine::GammaReal::On)
-        {
-            return Err(error(
-                1,
-                "reference k relaxation warm starts require a k-driver seed entry point; warm_start=false permits cold steps",
             ));
         }
         if settings.start_extrapolation != Extrapolation::None {

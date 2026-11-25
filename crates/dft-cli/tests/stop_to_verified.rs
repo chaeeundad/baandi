@@ -220,17 +220,7 @@ fn cli_roundtrip(active: bool) {
     } else {
         text.to_string()
     };
-    for (variant, reuse, gate, first) in [
-        ("energy_default", "off", "on", "off"),
-        ("energy_first", "off", "on", "on"),
-        ("off", "off", "off", "off"),
-        ("default", "off", "on", "off"),
-        ("first", "off", "on", "on"),
-        ("first_inert", "off", "off", "on"),
-        ("reuse", "on", "off", "off"),
-        ("gate", "off", "on", "off"),
-        ("both", "on", "on", "off"),
-    ] {
+    for (variant, gate) in [("default", "on")] {
         for (level, profile) in [
             ("lightweight", ""),
             ("full", "[profile]\ndavidson_stages=true\n"),
@@ -247,17 +237,6 @@ fn cli_roundtrip(active: bool) {
                 }
             }
             // This matrix tests the historical Coulomb gate/reuse behavior.
-            let energy_mode = variant.starts_with("energy_");
-            command.env(
-                "BAANDI_REFSCF_VERIFY_ENERGY",
-                if energy_mode { "on" } else { "off" },
-            );
-            if variant != "default" {
-                command
-                    .env("BAANDI_REFSCF_VERIFY_REUSE", reuse)
-                    .env("BAANDI_REFSCF_VERIFY_GATE", gate)
-                    .env("BAANDI_REFSCF_VERIFY_GATE_FIRST", first);
-            }
             let output_dir = format!("{level}-{variant}");
             let output = command
                 .current_dir(&dir)
@@ -277,32 +256,7 @@ fn cli_roundtrip(active: bool) {
             let expected = reader::stop_to_verified_summary(&doc).unwrap();
             assert_eq!(expected["status"], "VERIFIED");
             assert_eq!(r["verification"], doc["verification"]);
-            if energy_mode {
-                assert_eq!(r["verification"]["mode"], "energy_change");
-                assert_eq!(expected["verification_mode"], "energy_change");
-                assert_eq!(r["verification"]["gate_enabled"], false);
-                assert_eq!(expected["attempt_count"], if active { 2 } else { 1 });
-                let attempts = r["verification"]["attempts"].as_array().unwrap();
-                let a = attempts.last().unwrap();
-                let delta = (a["verification_variational_energy_ha"].as_f64().unwrap()
-                    - a["delivered_variational_energy_ha"].as_f64().unwrap())
-                .abs();
-                assert_eq!(a["energy_change_ha"], delta);
-                assert!(delta < 5e-9);
-                assert_eq!(a["threshold_ha"], 5e-9);
-                assert!(a["residual_bound_ha"].is_number());
-                assert!(a["density_residual"].is_number());
-                if active {
-                    let first = &attempts[0];
-                    assert_eq!(first["iteration"], expected["first_stop_map"]);
-                    assert_eq!(first["passed"], false);
-                    assert!(first["energy_change_ha"].as_f64().unwrap() >= 5e-9);
-                    assert!(first["coulomb_error_ha"].as_f64().unwrap() > 5e-9);
-                    assert!(expected["ordinary_scf_after_failure_s"].as_f64().unwrap() > 0.);
-                } else {
-                    assert_eq!(expected["first_stop_map"], expected["passing_map"]);
-                }
-            } else {
+            {
                 assert_eq!(r["verification"]["mode"], "fixed_point");
             }
             if variant == "first" {
@@ -315,10 +269,7 @@ fn cli_roundtrip(active: bool) {
                 }
             }
             let costs = &r["verification_cost"];
-            if energy_mode || variant == "off" || variant == "first_inert" {
-                assert!(r.get("verification_cost").is_none());
-                assert!(expected.get("skipped").is_none());
-            } else {
+            {
                 let maps = r["iterations"].as_array().unwrap();
                 let reused = maps
                     .iter()
@@ -382,9 +333,7 @@ fn cli_roundtrip(active: bool) {
                     map.get("verification_cost"),
                     history["reference_scf"].get("verification_cost")
                 );
-                if energy_mode || variant == "off" || variant == "first_inert" {
-                    assert!(map.get("verification_cost").is_none());
-                } else {
+                {
                     let cost = &map["verification_cost"];
                     assert_eq!(
                         cost.as_object().unwrap().len(),

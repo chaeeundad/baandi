@@ -8,13 +8,13 @@ pub use dft_solvers::ref_rmm::{
 use super::memory::{self, Component as Mem, bytes, observe};
 use super::stepper::{Boundary, StepKind, StepReport, Stepper};
 use super::{
-    broyden::{Broyden, Diagnostics, PredictionScratch},
+    broyden::{Broyden, Diagnostics},
     density::DensityPlan,
     map,
     metric::{Metric, Serial},
     numerical,
     profile::{Profile, next_ethr_ry},
-    record::{CorrectionRecord, Record, SolveRecord, VerificationCost, VerificationEnergy},
+    record::{CorrectionRecord, Record, SolveRecord, VerificationCost},
 };
 use crate::Functional;
 use crate::{
@@ -61,22 +61,6 @@ impl VerificationPredictor {
         self.skipped_last = skip;
         skip
     }
-}
-
-/// Scalar mixed-map contraction candidate, retained for audit only. dr2 is a
-/// squared norm in Ry; this assumes the next *unmixed* map contracts likewise,
-/// which Broyden does not guarantee.
-pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
-    if !previous.is_finite()
-        || previous <= 0.
-        || !current.is_finite()
-        || current <= 0.
-        || current >= previous
-    {
-        return None;
-    }
-    let value = (current / previous) * (current / 2.);
-    value.is_finite().then_some(value)
 }
 
 pub struct Run {
@@ -263,19 +247,7 @@ async fn run_stage<K: Collective>(
     let qe_scope = full_diagnostics.then(dft_solvers::ref_davidson::QeClockScope::begin);
     let mut qe_verification = dft_solvers::ref_davidson::QeCounters::default();
     let mut qe_mixing_calls = 0;
-    let reuse = config.on(Id::REFSCF_VERIFY_REUSE);
-    let energy_judgment = config.on(Id::REFSCF_VERIFY_ENERGY);
-    let gate = !energy_judgment && config.on(Id::REFSCF_VERIFY_GATE);
-    if energy_judgment {
-        for id in [Id::REFSCF_VERIFY_GATE, Id::REFSCF_VERIFY_GATE_FIRST] {
-            config.note_path(
-                id,
-                "inactive",
-                Some("REFSCF_VERIFY_ENERGY uses energy, not Coulomb prediction"),
-            );
-        }
-    }
-    let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
+
     let mut profile = profile.validate()?;
     let o = input.options;
     if o.standard.is_none()
@@ -332,7 +304,6 @@ async fn run_stage<K: Collective>(
     let mut y = x.clone();
     let mut f = x.clone();
     let mut next = x.clone();
-    let mut prediction_scratch = gate_first.then(|| PredictionScratch::new(x.len()));
     let mut next_planes = vec![0.; n.len()];
     plan.forward(&prep_comm, &n, &mut x)?;
     set_zero(&plan, &mut x, state.electrons / volume);
@@ -386,11 +357,10 @@ async fn run_stage<K: Collective>(
                 + 16 * x.len() * (2 * profile.history + 12)
                 + 8 * state.operator.local_len() * (5 * cap + 3 * bands),
         )
-        + if gate_first { 32 * x.len() + 8 * 76 } else { 0 }
         // Exact field cache (density + HXC + VH), retained candidate/check
         // input fields and a temporary cloned field pair.
         + 8 * n.len() * 9
-        + if config.on(Id::REFSCF_KEPT_HX) {
+        + {
             // Retained X/HX, supplied HX and delta workspace, owned potentials,
             // bounded slabs and the existing full-index delta-kernel adapter.
             32 * state.operator.local_len() * bands
@@ -398,7 +368,7 @@ async fn run_stage<K: Collective>(
                 + (16 * (bands / 2) * state.operator.plane_points())
                     .min(super::kept_hx::SLAB_LIMIT_BYTES)
                 + 8 * dims.iter().product::<usize>()
-        } else { 0 };
+        };
     let mut peaks = vec![0.; comm.size()];
     let mut local_peak = peaks.clone();
     local_peak[comm.rank()] = peak as f64;
@@ -420,11 +390,10 @@ async fn run_stage<K: Collective>(
     let mut first_reference_stop = None;
     let mut pending: Option<(map::Map, f64, usize)> = None;
     let mut predictor = VerificationPredictor::default();
-    let lean = config.on(Id::REFSCF_LEAN_ENERGY);
     let permap = config.on(Id::REFSCF_PERMAP);
     let mut field_cache = None;
-    let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
-    let mut kept = super::kept_hx::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
+
+    let mut kept = super::kept_hx::KeptHx::new(true);
     let mut completed = 0usize;
     // R8b: closure creation borrows locals only. State visits occur exclusively
     // on an explicit checkpoint poll; ordinary maps allocate nothing here.
@@ -490,11 +459,11 @@ async fn run_stage<K: Collective>(
                 io.value(&mut field_cache)?;
                 io.value(&mut pending)?;
                 super::checkpoint::cached_fields(&field_cache, n.len())?;
-                if let Some((map, tolerance, source)) = &pending {
+                if let Some((map, _, _)) = &pending {
                     map.validate_checkpoint(state.operator.local_len(), bands, n.len())?;
-                    if !tolerance.is_finite() || *tolerance <= 0. || *source > completed {
-                        return Err(super::checkpoint::invalid("pending verification counters"));
-                    }
+                    return Err(super::checkpoint::invalid(
+                        "retired failed-verification reuse",
+                    ));
                 }
                 super::checkpoint::counters(
                     completed,
@@ -520,17 +489,15 @@ async fn run_stage<K: Collective>(
     for iteration in completed + 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
-        let reused_from = pending.as_ref().map(|(_, _, source)| *source);
-        if let Some((_, tolerance, _)) = &pending {
-            // Already solved at precisely the next-ratchet tolerance. Do not
-            // ratchet it a second time (including the iteration-two reset).
-            ethr = *tolerance;
-        } else if iteration > 1 {
-            ethr = next_ethr_ry(
-                if iteration == 2 { 1e-2 } else { ethr },
-                last_dr2,
-                state.electrons,
-            );
+        let reused_from = None;
+        {
+            if iteration > 1 {
+                ethr = next_ethr_ry(
+                    if iteration == 2 { 1e-2 } else { ethr },
+                    last_dr2,
+                    state.electrons,
+                );
+            }
         }
         let requested = ethr;
         let mut redo = false;
@@ -540,9 +507,7 @@ async fn run_stage<K: Collective>(
         let (mut map_s, mut transform_s, mut metric_s) = (0., 0., 0.);
         let (mut step, dr2) = loop {
             let clock = Instant::now();
-            let step = if let Some((step, _, _)) = pending.take() {
-                step
-            } else {
+            let step = {
                 let step = solve_map(
                     &mut state,
                     comm,
@@ -561,7 +526,7 @@ async fn run_stage<K: Collective>(
                     &mut calls,
                     &mut timings,
                     &mut field_cache,
-                    lean,
+                    true,
                     &mut kept,
                 )?;
                 map_s += clock.elapsed().as_secs_f64();
@@ -597,7 +562,6 @@ async fn run_stage<K: Collective>(
             }
             break (step, dr2);
         };
-        let previous_dr2 = last_dr2;
         last_dr2 = dr2;
         let stopped = dr2 < profile.threshold_ry;
         let estimator_s = start.elapsed().as_secs_f64();
@@ -607,30 +571,14 @@ async fn run_stage<K: Collective>(
         let mut certificate = None;
         // Compute before the attempt and before inserting this iterate into
         // the mixer. Later attempts retain the adopted empirical gate.
-        let first_prediction_ha = if stopped
-            && verification.is_some()
-            && let Some(scratch) = &mut prediction_scratch
-        {
-            mixer.predict_output_error(comm, &mut metric, &x, &f, scratch)?
+        let first_prediction_ha = None;
+        let contraction_prediction_ha = None;
+        let predicted_error_ha = if stopped && verification.is_some() {
+            predictor.predict(dr2)
         } else {
             None
         };
-        let contraction_prediction_ha = if gate_first && stopped && verification.is_some() {
-            contraction_prediction(previous_dr2, dr2)
-        } else {
-            None
-        };
-        let predicted_error_ha = if gate && stopped && verification.is_some() {
-            if predictor.observed.is_none() && gate_first {
-                first_prediction_ha
-            } else {
-                predictor.predict(dr2)
-            }
-        } else {
-            None
-        };
-        let skipped = gate
-            && stopped
+        let skipped = stopped
             && verification.is_some()
             && predictor.skip(predicted_error_ha, profile.threshold_ry / 2.);
         if ((stopped && !skipped) || iteration == o.max_iterations) && step.energy.kinetic.is_nan()
@@ -664,7 +612,6 @@ async fn run_stage<K: Collective>(
         );
         map_report.stage = if coarse { "coarse" } else { "fine" };
         map_report.reused = reused_from.is_some();
-        let mut verification_energy = None;
         let mut verification_warm = None;
         let mut actual_error_ha = None;
         let mut verification_s = 0.;
@@ -681,11 +628,8 @@ async fn run_stage<K: Collective>(
             let tol = next_ethr_ry(ethr, dr2, state.electrons);
             let mut t = PhaseTimings::default();
             let first_call = verification_calls.len();
-            if !warm_verification {
-                kept.invalidate();
-            }
+
             kept.preserve_input(true);
-            let mut cold = super::kept_hx::KeptHx::new(false);
             let check = solve_map(
                 &mut state,
                 comm,
@@ -701,11 +645,7 @@ async fn run_stage<K: Collective>(
                 &mut t,
                 &mut field_cache,
                 false,
-                if warm_verification {
-                    &mut kept
-                } else {
-                    &mut cold
-                },
+                &mut kept,
             )?;
             kept.preserve_input(false);
             let current_calls = &verification_calls[first_call..];
@@ -718,7 +658,7 @@ async fn run_stage<K: Collective>(
             }
             let error = metric.norm(comm, &checked)? / 2.;
             actual_error_ha = Some(error);
-            if gate {
+            {
                 predictor.observe(dr2, error);
             }
             let mut l2 = [0.];
@@ -754,7 +694,7 @@ async fn run_stage<K: Collective>(
                 std::iter::once((1., check.residuals.as_slice())),
                 &occupations,
             );
-            let mut attempt = crate::model::assess_fixed_point(
+            let attempt = crate::model::assess_fixed_point(
                 &options,
                 iteration,
                 tol / 2.,
@@ -763,17 +703,7 @@ async fn run_stage<K: Collective>(
                 &record,
                 clock.elapsed(),
             );
-            if energy_judgment {
-                // Same variational functional on each map's output density.
-                // Do not use the mixed-next-density correction computed below.
-                let energy = VerificationEnergy {
-                    delivered_ha: step.energy.band_form,
-                    checked_ha: check.energy.band_form,
-                };
-                attempt.passed = energy.passed();
-                attempt.threshold_ha = VerificationEnergy::THRESHOLD_HA;
-                verification_energy = Some(energy);
-            }
+
             map_report = StepReport::new(
                 iteration,
                 StepKind::Verification,
@@ -783,9 +713,7 @@ async fn run_stage<K: Collective>(
                 current_calls.iter().map(|c| c.h_columns).sum(),
             );
             map_report.stage = if coarse { "coarse" } else { "fine" };
-            if reuse && !attempt.passed && iteration < o.max_iterations {
-                pending = Some((check, tol, iteration));
-            }
+
             report.attempts.push(attempt);
             certificate = Some(record);
             verification_s = clock.elapsed().as_secs_f64();
@@ -815,12 +743,7 @@ async fn run_stage<K: Collective>(
                 Err(e) => failure = Some(e.to_string()),
             }
             if failure.is_none() {
-                if pending.is_some() {
-                    // Keep the original pair in history, but choose the input
-                    // of the cached map instead of the mixer's proposal.
-                    next.copy_from_slice(&y);
-                    next_planes.copy_from_slice(&step.density);
-                } else {
+                {
                     plan.inverse(comm, &next, &mut next_planes)?;
                 }
             }
@@ -962,9 +885,9 @@ async fn run_stage<K: Collective>(
             warm_start: step.warm_start && !calls.is_empty(),
             stage: if coarse { "coarse" } else { "fine" },
             iteration,
-            verification_cost: (reuse || gate).then_some(VerificationCost {
-                gate_enabled: gate,
-                first_gate_enabled: gate_first,
+            verification_cost: Some(VerificationCost {
+                gate_enabled: true,
+                first_gate_enabled: false,
                 first_prediction_ha,
                 contraction_prediction_ha,
                 skipped,
@@ -974,7 +897,7 @@ async fn run_stage<K: Collective>(
             }),
             map_start_s,
             estimator_s,
-            verification_energy,
+            verification_energy: None,
             verification_warm,
             verification_start_s,
             verification_end_s,
@@ -1016,16 +939,11 @@ async fn run_stage<K: Collective>(
             let exit_reason = failure.unwrap_or_else(|| {
                 if !stopped {
                     "reference SCF maximum iterations reached".into()
-                } else if !verified && energy_judgment {
-                    "reference estimator stop reached; independent energy verification failed"
-                        .into()
                 } else if !verified {
                     "reference estimator stop reached; independent fixed-point verification failed"
                         .into()
                 } else if verification.is_none() {
                     "reference estimator stop reached; verification explicitly off".into()
-                } else if energy_judgment {
-                    "reference estimator stop and independent energy verification passed".into()
                 } else {
                     "reference estimator stop and independent fixed-point verification passed"
                         .into()
@@ -1071,7 +989,6 @@ async fn run_stage<K: Collective>(
                 drop(mixer);
                 drop(metric);
                 drop(plan);
-                drop(prediction_scratch);
                 drop(x);
                 drop(y);
                 drop(f);
@@ -1087,9 +1004,9 @@ async fn run_stage<K: Collective>(
             let density = state.fields.gather(&delivery_comm, &step.density)?;
             output.record("density_gather", phase);
             let phase = Instant::now();
-            let lazy_comm = owned_comm.clone().filter(|_| {
-                config.on(Id::REFSCF_LAZY_OUTPUT) && crate::refscf::lazy::lazy_result_allowed()
-            });
+            let lazy_comm = owned_comm
+                .clone()
+                .filter(|_| crate::refscf::lazy::lazy_result_allowed());
             let (orbitals, lazy) = if let Some(comm) = lazy_comm {
                 let placeholder = ComplexMatrix::zeros(0, bands).map_err(numerical)?;
                 let lazy = crate::refscf::lazy::LazyOrbitals::from_owned_handoff(
@@ -1504,16 +1421,8 @@ mod delivery_tests {
                     ..Default::default()
                 };
                 let mut baseline: Option<ScfResult> = None;
-                for (switch, needed, trim) in [
-                    ("off", false, "off"),
-                    ("on", false, "off"),
-                    ("on", true, "off"),
-                    ("off", false, "on"),
-                    ("on", false, "on"),
-                    ("on", true, "on"),
-                ] {
+                for (needed, trim) in [(false, "off"), (true, "off"), (false, "on"), (true, "on")] {
                     let config = RunConfig::from_pairs(&[
-                        ("refscf_lazy_output", switch),
                         ("refscf_memory_trim", trim),
                         ("m2_lazy_result", "on"),
                     ])
@@ -1533,7 +1442,7 @@ mod delivery_tests {
                     assert!(run.outcome.converged);
                     let mut r = run.outcome.result;
                     assert!(r.verification.as_ref().unwrap().passed());
-                    assert_eq!(r.orbitals_delivered(), switch == "off" || needed);
+                    assert_eq!(r.orbitals_delivered(), needed);
                     if !r.orbitals_delivered() {
                         assert_eq!(r.orbitals.rows(), 0);
                     }

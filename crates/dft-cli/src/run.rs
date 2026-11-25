@@ -3289,7 +3289,6 @@ fn reference_verification_json(
     v: &dft_engine::VerificationReport,
     records: &[dft_engine::refscf::record::Record],
 ) -> Value {
-    use dft_numerics::switches::{Id, RunConfig};
     let mut result = verification_json(v);
     for (value, attempt) in result["attempts"]
         .as_array_mut()
@@ -3304,28 +3303,7 @@ fn reference_verification_json(
         );
         value["h_columns"] = json!(attempt.operator_applications);
     }
-    if RunConfig::current().on(Id::REFSCF_VERIFY_ENERGY) {
-        result["mode"] = json!("energy_change");
-        result["criterion"] = json!(
-            "abs(verification_variational_energy_ha - delivered_variational_energy_ha) < 5e-9 Ha; Coulomb error, residual_bound_ha, density residual and strict criteria are diagnostics only"
-        );
-        result["gate_enabled"] = json!(false);
-        result["gate_reason"] = json!("Coulomb predictors inactive under REFSCF_VERIFY_ENERGY");
-        for (value, attempt) in result["attempts"]
-            .as_array_mut()
-            .unwrap()
-            .iter_mut()
-            .zip(&v.attempts)
-        {
-            let energy = records[attempt.iteration - 1]
-                .verification_energy
-                .as_ref()
-                .expect("reference energy attempt");
-            value["delivered_variational_energy_ha"] = json!(energy.delivered_ha);
-            value["verification_variational_energy_ha"] = json!(energy.checked_ha);
-            value["energy_change_ha"] = json!(energy.change_ha());
-        }
-    }
+
     result
 }
 
@@ -4555,21 +4533,11 @@ mod tests {
             if spin && finite {
                 // R6a keeps moment FD on reference for every A/B switch combination.
                 let route_config = Config::parse(&text).unwrap();
-                for mask in 0..8 {
-                    let scope = dft_numerics::switches::RunConfig::from_pairs(&[
-                        (
-                            "refscf_spin_fd_moment",
-                            if mask & 1 != 0 { "on" } else { "off" },
-                        ),
-                        (
-                            "refscf_spin_stiffness",
-                            if mask & 2 != 0 { "on" } else { "off" },
-                        ),
-                        (
-                            "refscf_history_conditioning",
-                            if mask & 4 != 0 { "on" } else { "off" },
-                        ),
-                    ])
+                for mask in 0..2 {
+                    let scope = dft_numerics::switches::RunConfig::from_pairs(&[(
+                        "refscf_spin_fd_moment",
+                        if mask & 1 != 0 { "on" } else { "off" },
+                    )])
                     .unwrap();
                     let _guard = scope.enter();
                     assert!(!reference_spin_fd_fallback(&route_config));
@@ -4762,11 +4730,11 @@ mod tests {
         pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>",
             &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>", array(&|r| r * (-0.6 * r * r).exp())));
         fs::write(dir.join("syn.xml"), pp).unwrap();
-        let base = "[system]\nname='lazy output test'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=2.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=2\ndriver='reference'\nverify='off'\n[performance]\nm2_lazy_result=true\n";
+        let base = "[system]\nname='lazy output test'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=2.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=2\ndriver='reference'\nverify='off'\n[performance]\n";
         for arm in ["off", "on"] {
             fs::write(
                 dir.join(format!("{arm}.toml")),
-                format!("{base}refscf_lazy_output='{arm}'\n"),
+                format!("{base}m2_lazy_result='{arm}'\n"),
             )
             .unwrap();
         }
@@ -4882,7 +4850,7 @@ mod tests {
             let input = dir.join(format!("{verify}.toml"));
             fs::write(
                 &input,
-                format!("{base}verify='{verify}'\n[performance]\nrefscf_ladder='on'\nrefscf_kept_hx='on'\n"),
+                format!("{base}verify='{verify}'\n[performance]\nrefscf_ladder='on'\n"),
             )
             .unwrap();
             let out = dir.join(verify);

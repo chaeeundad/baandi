@@ -1,6 +1,6 @@
 use super::accounting::{clock, elapsed};
 use super::work::{self, Stage, span};
-use super::{Iteration, Options, ReducedPlacement, error, preconditioner_denominator, stream};
+use super::{Iteration, Options, ReducedPlacement, error, stream};
 use crate::{SolverError, distributed_davidson::DistributedRealOperator, real_davidson::lean};
 use dft_mpi::Collective;
 use dft_numerics::{
@@ -58,20 +58,9 @@ pub(crate) struct Workspace {
     sums: Vec<f64>,
     pub(crate) gemm: RealGemmWorkspace,
     evd: RealEighWorkspace,
-    single_gemm: bool,
-    triangle: bool,
-    stacked: Option<(RealMatrix, RealMatrix)>,
-    pub extra_elements: usize,
-    swap_buffers: bool,
-    lean_reset: bool,
-    ideal_reset: bool,
     reset_disabled: bool,
     contractions: usize,
-    pub sqrt_precondition: bool,
     pub diagonal_bounds: (f64, f64),
-    fused_append: bool,
-    check_append: bool,
-    reuse_rows: bool,
     compact_return: bool,
     returned_hx: bool,
     staged_append: Option<usize>,
@@ -82,7 +71,6 @@ impl Workspace {
         op: &O,
         n: usize,
         cap: usize,
-        single_gemm: bool,
     ) -> Result<Self, SolverError> {
         let rows = op.local_rows().len();
         let pool = op
@@ -91,14 +79,12 @@ impl Workspace {
             .unwrap_or_else(|| WorkerPool::new(op.inner_threads()))
             .map_err(|e| SolverError::Application(e.to_string()))?;
         use dft_numerics::switches::{Id, on};
-        let reuse_rows = on(Id::REF_DAV_REUSE_ROWS);
+
         let compact_return = on(Id::REFSCF_MEMORY_TRIM);
         let scratch_cols = if compact_return { cap } else { n };
-        let cached = if reuse_rows || compact_return {
+        let cached = {
             ROWS.with(|slot| slot.borrow_mut().take())
-                .filter(|r| reuse_rows && r.key == (rows, n, cap, compact_return))
-        } else {
-            None
+                .filter(|r| r.key == (rows, n, cap, compact_return))
         };
         let reused_elements = if cached.is_some() {
             2 * rows * cap + 2 * rows * scratch_cols
@@ -143,24 +129,9 @@ impl Workspace {
                 he,
             )
         };
-        let stack = on(Id::REF_DAV_STACK_ROTATE);
-        let stacked = if stack {
-            Some((
-                RealMatrix::zeros(2 * rows, cap)?,
-                RealMatrix::zeros(2 * rows, n)?,
-            ))
-        } else {
-            None
-        };
+
         let workspace = Self {
-            triangle: on(Id::REF_DAV_TRIANGLE),
-            stacked,
-            extra_elements: if stack { 2 * rows * (cap + n) } else { 0 },
-            sqrt_precondition: on(Id::REF_DAV_SQRT),
             diagonal_bounds: (f64::INFINITY, f64::NEG_INFINITY),
-            fused_append: on(Id::REF_DAV_FUSED_APPEND),
-            check_append: on(Id::REF_DAV_CHECK_APPEND),
-            reuse_rows,
             compact_return,
             returned_hx: false,
             reused_elements,
@@ -168,14 +139,8 @@ impl Workspace {
             rows,
             n,
             cap,
-            single_gemm,
-            ideal_reset: on(Id::REF_DAV_IDEAL_RESET),
             reset_disabled: false,
             contractions: 0,
-            lean_reset: dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_LEAN_RESET),
-            swap_buffers: dft_numerics::switches::on(
-                dft_numerics::switches::Id::REF_DAV_SWAP_BUFFERS,
-            ),
             v,
             hv,
             x,
@@ -193,11 +158,7 @@ impl Workspace {
             reduced: vec![0.0; cap * cap],
             norms: vec![0.0; cap + 1],
             sums: vec![0.0; cap + 1],
-            gemm: RealGemmWorkspace::with_pool(
-                (if stack { 2 * rows } else { rows }).max(cap),
-                cap,
-                pool,
-            )?,
+            gemm: RealGemmWorkspace::with_pool(rows.max(cap), cap, pool)?,
             evd: RealEighWorkspace::new(cap)?,
         };
         work::memory_observe(work::WorkspaceMemory {
@@ -244,7 +205,7 @@ impl Workspace {
                 } else {
                     self.cap
                 },
-            cached: if self.reuse_rows {
+            cached: {
                 2 * size_of::<f64>()
                     * self.rows
                     * (self.cap
@@ -253,12 +214,10 @@ impl Workspace {
                         } else {
                             self.n
                         })
-            } else {
-                0
             },
             ..Default::default()
         });
-        if self.reuse_rows {
+        {
             let take = |matrix: &mut RealMatrix| {
                 std::mem::replace(matrix, RealMatrix::zeros(0, 0).expect("empty matrix"))
             };
@@ -288,7 +247,6 @@ impl Workspace {
             sums,
             self.n,
             self.cap,
-            self.fused_append,
             r,
             profile,
         )?;
@@ -321,7 +279,7 @@ impl Workspace {
         r.h_calls += 1;
         r.h_columns += k;
         let result = op.apply_block(c, &self.e, &mut self.he);
-        if self.check_append {
+        {
             let _check = span(r.profile, Stage::ApplyCheck);
             self.hv.reshape_within_storage(self.rows, m + k)?;
             let dst = &mut self.hv.as_mut_slice()[m * self.rows..(m + k) * self.rows];
@@ -334,13 +292,6 @@ impl Workspace {
             }
             work::copy(r.profile, self.rows * k);
             agree_failure(c, failed)?;
-        } else {
-            agree_apply(c, result, &self.he, r.profile)?;
-            let _append = span(r.profile, Stage::Append);
-            work::copy(r.profile, self.rows * k);
-            self.hv.reshape_within_storage(self.rows, m + k)?;
-            self.hv.as_mut_slice()[m * self.rows..(m + k) * self.rows]
-                .copy_from_slice(self.he.as_slice());
         }
         Ok(())
     }
@@ -360,10 +311,9 @@ impl Workspace {
         let k = to - from;
         self.border.reshape_within_storage(to, k)?;
         let b = if is_h { &self.hv } else { &self.v };
-        let triangular = self.triangle
-            && self
-                .gemm
-                .try_upper_border_into(&self.v, b, from, to, &mut self.border)?;
+        let triangular = self
+            .gemm
+            .try_upper_border_into(&self.v, b, from, to, &mut self.border)?;
         if triangular {
             if from > 0 {
                 r.gemm(
@@ -396,11 +346,7 @@ impl Workspace {
             });
         } else {
             r.gemm(if is_h { "border_h" } else { "border_s" }, to, k, self.rows);
-            let entry = if self.single_gemm {
-                RealGemmWorkspace::multiply_slices_single_into
-            } else {
-                RealGemmWorkspace::multiply_slices_into
-            };
+            let entry = { RealGemmWorkspace::multiply_slices_single_into };
             entry(
                 &mut self.gemm,
                 GemmSite::Other,
@@ -591,7 +537,7 @@ impl Workspace {
         )?;
         self.e.reshape_within_storage(self.rows, k)?;
         let precondition = span(profile, Stage::Precondition);
-        if self.sqrt_precondition {
+        {
             let mut sqrt_columns = 0;
             for (j, &band) in active.iter().enumerate() {
                 let rows = j * self.rows..(j + 1) * self.rows;
@@ -607,22 +553,6 @@ impl Workspace {
                 sqrt_columns += usize::from(safe);
             }
             stream::count(profile, self.rows, sqrt_columns, k - sqrt_columns);
-        } else {
-            self.norms[..k].fill(0.0);
-            for (j, &band) in active.iter().enumerate() {
-                for (i, &diagonal) in hamiltonian_diagonal.iter().enumerate() {
-                    let z = (self.hx[(i, j)] - self.values[band] * self.x[(i, j)])
-                        / preconditioner_denominator(diagonal, self.values[band]);
-                    self.e[(i, j)] = z;
-                    self.norms[j] += z * z;
-                }
-            }
-            work::add(profile, |s| {
-                s.scalar_flops += 13 * (self.rows * k) as u64;
-                s.hypot_calls += (self.rows * k) as u64;
-                s.zeroed_bytes += 8 * k as u64;
-                s.streamed_bytes += 32 * (self.rows * k) as u64 + 8 * k as u64;
-            });
         }
         drop(precondition);
         self.staged_append = stream::normalize(
@@ -633,7 +563,6 @@ impl Workspace {
             &mut self.sums,
             m,
             self.cap,
-            self.fused_append,
             r,
             profile,
         )?;
@@ -723,13 +652,9 @@ impl Workspace {
         )?;
         self.v.reshape_within_storage(self.rows, m)?;
         self.hv.reshape_within_storage(self.rows, m)?;
-        if self.swap_buffers {
+        {
             std::mem::swap(&mut self.v, &mut self.x);
             std::mem::swap(&mut self.hv, &mut self.hx);
-        } else {
-            work::copy(profile, 2 * self.v.rows() * self.v.cols());
-            self.v.as_mut_slice().copy_from_slice(self.x.as_slice());
-            self.hv.as_mut_slice().copy_from_slice(self.hx.as_slice());
         }
         work::copy(profile, m * m + m * self.n);
         // Preserve the physical Ritz block through the whitening.
@@ -749,11 +674,7 @@ impl Workspace {
         self.x.reshape_within_storage(self.rows, input)?;
         for _ in 0..2 {
             r.gemm("repair_projection", m, input, self.rows);
-            let entry = if self.single_gemm {
-                RealGemmWorkspace::multiply_slices_single_into
-            } else {
-                RealGemmWorkspace::multiply_slices_into
-            };
+            let entry = { RealGemmWorkspace::multiply_slices_single_into };
             entry(
                 &mut self.gemm,
                 GemmSite::Other,
@@ -857,9 +778,7 @@ impl Workspace {
     ) -> Result<(), SolverError> {
         let t = clock(profile);
         let _stage = span(profile, Stage::Restart);
-        if self.stacked.is_some() {
-            self.rotate_stacked(m, r, "restart_stacked", profile)?;
-        } else {
+        {
             rotate(
                 &mut self.gemm,
                 &self.v,
@@ -883,20 +802,16 @@ impl Workspace {
         }
         self.v.reshape_within_storage(self.rows, self.n)?;
         self.hv.reshape_within_storage(self.rows, self.n)?;
-        if self.swap_buffers {
+        {
             std::mem::swap(&mut self.v, &mut self.x);
             std::mem::swap(&mut self.hv, &mut self.hx);
-        } else {
-            work::copy(profile, 2 * self.v.rows() * self.v.cols());
-            self.v.as_mut_slice().copy_from_slice(self.x.as_slice());
-            self.hv.as_mut_slice().copy_from_slice(self.hx.as_slice());
         }
         self.lean.a.reshape_within_storage(self.n, self.n)?;
         self.lean.c.reshape_within_storage(self.n, self.n)?;
         self.y.reshape_within_storage(self.n, self.n)?;
         self.contractions += 1;
         let mut ideal = false;
-        if self.ideal_reset {
+        {
             r.resets.attempts += 1;
             if self.reset_disabled {
                 r.resets.disabled_refreshes += 1;
@@ -918,7 +833,7 @@ impl Workspace {
         for j in 0..self.n {
             for i in 0..self.n {
                 let id = f64::from(i == j);
-                if self.lean_reset && !ideal {
+                if !ideal {
                     self.lean.c[(i, j)] = id;
                 } else {
                     let h = if i == j { self.values[i] } else { 0.0 };
@@ -932,7 +847,7 @@ impl Workspace {
             }
         }
         work::add(profile, |s| {
-            let matrices = if self.lean_reset && !ideal { 1 } else { 6 };
+            let matrices = if !ideal { 1 } else { 6 };
             s.zeroed_bytes += matrices * 8 * (self.n * (self.n - 1)) as u64;
             s.streamed_bytes += matrices * 8 * (self.n * self.n) as u64;
         });
@@ -942,7 +857,7 @@ impl Workspace {
             self.refresh(c, self.n, r, profile)?;
             // Periodic full S checks also catch unit-norm but correlated columns.
             // Once unsafe, retain measured arithmetic for the rest of this solve.
-            if self.ideal_reset && !self.reset_disabled {
+            if !self.reset_disabled {
                 let t = clock(profile);
                 let mut defect: f64 = 0.0;
                 for j in 0..self.n {
@@ -1018,41 +933,6 @@ impl Workspace {
         r.seconds[2] += elapsed(t);
         Ok(())
     }
-    /// The owned matrices are separate allocations. Pack once into persistent
-    /// scratch and unpack once; account for that traffic rather than assuming
-    /// a free stacked view. MKL executes one 2r x m by m x n call.
-    fn rotate_stacked(
-        &mut self,
-        m: usize,
-        r: &mut Iteration,
-        site: &'static str,
-        profile: bool,
-    ) -> Result<(), SolverError> {
-        let (input, output) = self.stacked.as_mut().expect("stack scratch");
-        input.reshape_within_storage(2 * self.rows, m)?;
-        output.reshape_within_storage(2 * self.rows, self.n)?;
-        for j in 0..m {
-            let dst = &mut input.as_mut_slice()[2 * j * self.rows..2 * (j + 1) * self.rows];
-            dst[..self.rows]
-                .copy_from_slice(&self.v.as_slice()[j * self.rows..(j + 1) * self.rows]);
-            dst[self.rows..]
-                .copy_from_slice(&self.hv.as_slice()[j * self.rows..(j + 1) * self.rows]);
-        }
-        r.gemm(site, 2 * self.rows, self.n, m);
-        self.gemm
-            .multiply_contiguous_single_into(GemmSite::Rotate, input, &self.lean.c, output)?;
-        self.x.reshape_within_storage(self.rows, self.n)?;
-        self.hx.reshape_within_storage(self.rows, self.n)?;
-        for j in 0..self.n {
-            let src = &output.as_slice()[2 * j * self.rows..2 * (j + 1) * self.rows];
-            self.x.as_mut_slice()[j * self.rows..(j + 1) * self.rows]
-                .copy_from_slice(&src[..self.rows]);
-            self.hx.as_mut_slice()[j * self.rows..(j + 1) * self.rows]
-                .copy_from_slice(&src[self.rows..]);
-        }
-        work::copy(profile, 2 * self.rows * (m + self.n));
-        Ok(())
-    }
     pub fn finish(
         &mut self,
         m: usize,
@@ -1070,9 +950,7 @@ impl Workspace {
         }
         let t = clock(profile);
         let _stage = span(profile, Stage::Return);
-        if hx && self.stacked.is_some() {
-            self.rotate_stacked(m, r, "return_stacked", profile)?;
-        } else {
+        {
             rotate(
                 &mut self.gemm,
                 &self.v,
@@ -1116,11 +994,7 @@ pub(crate) fn rotate(
     // The plain entry falls back to the pure-Rust kernel whenever the whole
     // output (rows x k) exceeds the scratch square, which is every rotation of
     // a real cell (dev08 si128: 186 GFLOP per rank on that route).
-    let entry = if dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_WIDE_ROTATE) {
-        RealGemmWorkspace::multiply_slices_wide_into
-    } else {
-        RealGemmWorkspace::multiply_slices_into
-    };
+    let entry = { RealGemmWorkspace::multiply_slices_wide_into };
     entry(
         g,
         GemmSite::Rotate,
@@ -1302,19 +1176,16 @@ mod single_gemm_tests {
                 o.profile = true;
                 o.max_iterations = 30;
                 let mut baseline = None;
-                for (arm, reuse) in [
+                for (arm, _reuse) in [
                     ("off", "on"),
                     ("on", "on"),
                     ("on", "on"),
                     ("on", "off"),
                     ("off", "on"),
                 ] {
-                    let _scope = RunConfig::from_pairs(&[
-                        ("refscf_memory_trim", arm),
-                        ("ref_dav_reuse_rows", reuse),
-                    ])
-                    .unwrap()
-                    .enter();
+                    let _scope = RunConfig::from_pairs(&[("refscf_memory_trim", arm)])
+                        .unwrap()
+                        .enter();
                     let memory = work::MemoryScope::begin();
                     let mut result = solve(c, &mut op, &x, &diag, o).unwrap();
                     if let Some(base) = &baseline {
@@ -1358,8 +1229,8 @@ mod single_gemm_tests {
 
     #[test]
     fn single_gemm_decisions_columns_repeats_and_threads() {
-        let off = RunConfig::from_pairs(&[("ref_dav_single_gemm", "off")]).unwrap();
-        let on = RunConfig::from_pairs(&[("ref_dav_single_gemm", "on")]).unwrap();
+        let off = RunConfig::from_pairs(&[]).unwrap();
+        let on = RunConfig::from_pairs(&[]).unwrap();
         for (dim, n, clustered) in [
             (12, 3, false),
             (17, 5, true),
@@ -1428,8 +1299,8 @@ mod single_gemm_tests {
                 threads: 1,
             };
             let mut prior = None;
-            for single in [false, true, true] {
-                let mut w = Workspace::new(&op, 2, 6, single).unwrap();
+            for _single in [false, true, true] {
+                let mut w = Workspace::new(&op, 2, 6).unwrap();
                 w.v.reshape_within_storage(257, 2).unwrap();
                 w.hv.reshape_within_storage(257, 2).unwrap();
                 w.lean.c.reshape_within_storage(2, 2).unwrap();
@@ -1468,20 +1339,14 @@ mod single_gemm_tests {
         for ranks in [1, 3, 8] {
             for correlated in [false, true] {
                 dft_mpi::simulate(ranks, |c| {
-                    let _scope = RunConfig::from_pairs(&[
-                        ("ref_dav_ideal_reset", "on"),
-                        // GEMM-count contract below is the square-border layout.
-                        ("ref_dav_triangle", "off"),
-                    ])
-                    .unwrap()
-                    .enter();
+                    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
                     let op = Operator {
                         dim: 7,
                         rows: (c.rank()..7).step_by(ranks).collect(),
                         clustered: false,
                         threads: 1,
                     };
-                    let mut w = Workspace::new(&op, 4, 7, false).unwrap();
+                    let mut w = Workspace::new(&op, 4, 7).unwrap();
                     w.v.reshape_within_storage(op.rows.len(), 4).unwrap();
                     w.hv.reshape_within_storage(op.rows.len(), 4).unwrap();
                     w.lean.c.reshape_within_storage(4, 4).unwrap();

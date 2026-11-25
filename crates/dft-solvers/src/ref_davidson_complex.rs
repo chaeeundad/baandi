@@ -231,33 +231,6 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
     o: Options,
     initial_hx: Option<&Matrix>,
 ) -> Result<Solution, SolverError> {
-    use dft_numerics::switches::{Id, RunConfig};
-    let config = RunConfig::current();
-    let sqrt_precondition = config.on(Id::REF_DAV_SQRT);
-    let restart_corrections = config.on(Id::REF_DAV_RESTART_CORRECTIONS);
-    let swap_buffers = config.on(Id::REF_DAV_SWAP_BUFFERS);
-    let ideal_reset = config.on(Id::REF_DAV_IDEAL_RESET);
-    // These switches select real-only storage/BLAS implementations. Preserve
-    // the explicit setting and report the bounded complex-adapter fallback.
-    // No change of rank, stopping, or preconditioning policy is hidden here.
-    for id in [
-        Id::REF_DAV_SETUP_FUSED,
-        Id::REF_DAV_SINGLE_GEMM,
-        Id::REF_DAV_WIDE_ROTATE,
-        Id::REF_DAV_TRIANGLE,
-        Id::REF_DAV_FUSED_APPEND,
-        Id::REF_DAV_CHECK_APPEND,
-        Id::REF_DAV_STACK_ROTATE,
-        Id::REF_DAV_LEAN_RESET,
-        Id::REF_DAV_REUSE_ROWS,
-    ] {
-        let _ = config.on(id);
-        config.note_path(
-            id,
-            "complex owned workspace",
-            Some("real-only kernel optimization; complex Hermitian adapter fallback"),
-        );
-    }
     let total = clock(o.profile);
     let comm = &Counted::new(comm, o.profile);
     let n = o.bands;
@@ -381,7 +354,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         for (j, &b) in active.iter().enumerate() {
             selected.column_mut(j).copy_from_slice(c.column(b));
         }
-        if contracted && restart_corrections {
+        if contracted {
             x.resize_columns(active.len())?;
             hx.resize_columns(active.len())?;
             for (j, &band) in active.iter().enumerate() {
@@ -397,12 +370,11 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         norms[..active.len()].fill(0.);
         for (j, &b) in active.iter().enumerate() {
             for (i, &d) in diagonal.iter().enumerate() {
-                let denominator =
-                    if sqrt_precondition && ref_davidson::stream::sqrt_safe(bounds, values[b]) {
-                        ref_davidson::stream::sqrt_denominator(d, values[b])
-                    } else {
-                        ref_davidson::preconditioner_denominator(d, values[b])
-                    };
+                let denominator = if ref_davidson::stream::sqrt_safe(bounds, values[b]) {
+                    ref_davidson::stream::sqrt_denominator(d, values[b])
+                } else {
+                    ref_davidson::preconditioner_denominator(d, values[b])
+                };
                 let z = (hx[(i, j)] - values[b] * x[(i, j)]) / denominator;
                 e[(i, j)] = z;
                 norms[j] += z.norm_sqr();
@@ -541,18 +513,15 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
             let child_seconds = r.seconds[1] + r.seconds[2];
             rotate(comm, &mut products.gemm, &v, &c, &mut x, r)?;
             rotate(comm, &mut products.gemm, &hv, &c, &mut hx, r)?;
-            if swap_buffers {
+            {
                 std::mem::swap(&mut v, &mut x);
                 std::mem::swap(&mut hv, &mut hx);
-            } else {
-                v.replace_columns(&x)?;
-                hv.replace_columns(&hx)?;
             }
             contractions += 1;
             contracted = true;
             identity(&mut c, n)?;
             let mut ideal = false;
-            if ideal_reset {
+            {
                 r.resets.attempts += 1;
                 if reset_disabled {
                     r.resets.disabled_refreshes += 1;
@@ -586,7 +555,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
                 hermitize(&mut s);
                 products.gram(comm, &v, &hv, &mut h, r)?;
                 hermitize(&mut h);
-                if ideal_reset && !reset_disabled {
+                if !reset_disabled {
                     let mut defect = 0_f64;
                     for j in 0..n {
                         for i in 0..n {
@@ -632,7 +601,6 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
     record.communication = comm.snapshot();
     record.total_seconds = elapsed(total);
     record.summarize();
-    ref_davidson::ideal_reset::publish(record.resets);
     Ok(Solution {
         eigenvalues: values,
         eigenvectors: x,
@@ -714,13 +682,7 @@ mod tests {
                     (ReducedPlacement::Root, "off"),
                     (ReducedPlacement::Replicated, "on"),
                 ] {
-                    let config = dft_numerics::switches::RunConfig::from_pairs(&[
-                        ("ref_dav_sqrt", flags),
-                        ("ref_dav_ideal_reset", flags),
-                        ("ref_dav_restart_corrections", flags),
-                        ("ref_dav_swap_buffers", flags),
-                    ])
-                    .unwrap();
+                    let config = dft_numerics::switches::RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let mut o = Options::new(n, 1e-13, n);
                     o.max_iterations = 100;

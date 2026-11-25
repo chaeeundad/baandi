@@ -385,11 +385,9 @@ pub(crate) fn start_prolonged<K: Collective>(
     seed: Option<crate::refscf::ladder::Seed>,
 ) -> Result<StartState, ScfError> {
     let clock = Instant::now();
-    let share = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_FFT_SHARE);
-    let partitions =
-        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_PARTITION_CACHE);
-    let cache = (share || partitions).then(|| PlanCache::with_partition_cache(share, partitions));
-    let _plans = cache.as_ref().map(PlanCache::enter);
+
+    let cache = PlanCache::with_partition_cache(true, true);
+    let _plans = cache.enter();
     let timed = TimedCollective::new(comm);
     let mut state = start_inner(input, &timed, seed, false, false)?;
     state.setup.total_s = clock.elapsed().as_secs_f64();
@@ -484,12 +482,7 @@ fn start_inner<K: Collective>(
     let basis = o.basis(cell, [0.; 3], 1.)?;
     let db = o.basis(cell, [0.; 3], 4.)?;
     let grid = FftGridSpec::new(&basis, &db, o.grid_override)?;
-    let compact_g = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_COMPACT_G);
-    let dg = if compact_g {
-        None
-    } else {
-        Some(FftGridSpec::new(&db, &db, Some(grid.dims()))?)
-    };
+
     let half = HalfSphere::new(&basis, &grid).map_err(err)?;
     let j: usize = species
         .iter()
@@ -559,10 +552,9 @@ fn start_inner<K: Collective>(
     let projector_count = nl.projector_count();
     let complex_projector_bytes = nl.table_bytes();
     let mut diagonal_static = Vec::with_capacity(operator.local_len());
-    let reuse_diagonal =
-        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_DIAGONAL_REUSE);
+
     // One atom's owned projector values, not another G-by-projector table.
-    let mut beta = if reuse_diagonal {
+    let mut beta = {
         vec![
             C::default();
             nl.atoms()
@@ -571,8 +563,6 @@ fn start_inner<K: Collective>(
                 .max()
                 .unwrap_or(0)
         ]
-    } else {
-        Vec::new()
     };
     let mut previous = None;
     for &row in operator.local_rows() {
@@ -583,7 +573,7 @@ fn start_inner<K: Collective>(
         };
         // The real and imaginary ORC rows of one representative have the
         // same diagonal. Compare indices explicitly, including empty owners.
-        if reuse_diagonal && previous == Some(g) {
+        if previous == Some(g) {
             diagonal_static.push(*diagonal_static.last().unwrap());
             continue;
         }
@@ -591,21 +581,14 @@ fn start_inner<K: Collective>(
         let mut offset = 0;
         for atom in nl.atoms() {
             let count = atom.channel_count();
-            if reuse_diagonal {
+            {
                 for (i, b) in beta[..count].iter_mut().enumerate() {
                     *b = nl.owned_value(offset + i, g).expect("owned representative");
                 }
             }
             for j in 0..count {
                 for i in 0..count {
-                    let (bi, bj) = if reuse_diagonal {
-                        (beta[i], beta[j])
-                    } else {
-                        (
-                            nl.owned_value(offset + i, g).expect("owned representative"),
-                            nl.owned_value(offset + j, g).expect("owned representative"),
-                        )
-                    };
+                    let (bi, bj) = { (beta[i], beta[j]) };
                     value += atom.coupling_hartree()[i + count * j] * (bi * bj.conj()).re;
                 }
             }
@@ -618,7 +601,7 @@ fn start_inner<K: Collective>(
     drop(nl);
     setup.record("nonlocal_diagonal", clock);
     let clock = Instant::now();
-    let coeff = atomic_fields(&fields, &db, dg.as_ref(), volume, &species, o);
+    let coeff = atomic_fields(&fields, &db, volume, &species, o);
     agree(
         comm,
         f64::from(coeff.is_err()),
@@ -630,7 +613,6 @@ fn start_inner<K: Collective>(
         core: core_hat,
     } = coeff?;
     drop(db);
-    drop(dg);
     setup.record("atomic_local_tables_structure_factors", clock);
     let clock = Instant::now();
     let ionic = fields.inverse(comm, &ion_hat)?;
@@ -826,12 +808,7 @@ fn start_inner<K: Collective>(
     let start_block_bytes = 8 * l * bands;
     // Named array live upper envelope; Q + next-Q/HQ + raw backup + selected,
     // Gram/EVD/rotation matrices, owned fields and both projector formats.
-    let phase_scratch_bytes =
-        if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE) {
-            16 * l.max(atoms.len())
-        } else {
-            0
-        };
+    let phase_scratch_bytes = { 16 * l.max(atoms.len()) };
     let principal_peak_bound_bytes = phase_scratch_bytes
         + (retained_field_bytes
             + 8 * l * (3 * k + bands)
@@ -942,7 +919,6 @@ fn core_radial(s: &Species<'_>, q: f64, volume: f64, o: &ScfOptions) -> Result<f
 fn atomic_fields(
     fields: &StartFields,
     db: &PlaneWaveBasis,
-    dg: Option<&FftGridSpec>,
     volume: f64,
     species: &[Species<'_>],
     o: &ScfOptions,
@@ -952,23 +928,7 @@ fn atomic_fields(
         .any(|s| s.potential.core_density().is_some())
         .then(|| vec![C::default(); fields.fft.local_len()]);
     let dims = fields.dims;
-    let represented: Vec<_> = if let Some(dg) = dg {
-        let owned: BTreeMap<_, _> = fields
-            .reciprocal_indices()
-            .iter()
-            .enumerate()
-            .map(|(slot, &flat)| (flat, slot))
-            .collect();
-        dg.g_to_fft()
-            .iter()
-            .zip(db.vectors())
-            .filter_map(|(&[i, j, k], g)| {
-                owned
-                    .get(&((i * dims[1] + j) * dims[2] + k))
-                    .map(|&slot| (slot, g))
-            })
-            .collect()
-    } else {
+    let represented: Vec<_> = {
         // The wave grid already validated the complete density sphere. Reuse
         // its dimensions and the FFT's sorted local positions; no F-sized
         // reverse map or S_r-entry tree is needed to find the used G values.
@@ -982,83 +942,8 @@ fn atomic_fields(
         }
         represented
     };
-    if dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_LOCAL_SHELLS) {
-        // Geometry is common to every species. Build owned shell IDs and sqrt
-        // values once, keeping first-encounter ordering and exact norm bits.
-        let mut shell_ids = BTreeMap::new();
-        let mut q = Vec::new();
-        let shells: Vec<_> = represented
-            .iter()
-            .map(|&(_, g)| {
-                *shell_ids
-                    .entry(g.norm_squared.to_bits())
-                    .or_insert_with(|| {
-                        q.push(g.norm_squared.sqrt());
-                        q.len() - 1
-                    })
-            })
-            .collect();
-        let mut rho = vec![C::default(); fields.fft.local_len()];
-        let mut ion = rho.clone();
-        let mut angles = vec![0.; represented.len()];
-        let mut factors = vec![C::default(); represented.len()];
-        for s in species {
-            let mesh = s.potential.mesh();
-            let samples = &s.potential.raw().rhoatom.values;
-            let local = s
-                .potential
-                .local_transform_with_conventions(volume, o.local_mesh, o.radial_even_rule)
-                .map_err(err)?;
-            let mut work = vec![0.; samples.len()];
-            let radial: Vec<_> = q
-                .iter()
-                .map(|&q| {
-                    for ((v, &r), &f) in work.iter_mut().zip(mesh.r()).zip(samples) {
-                        *v = if q == 0. {
-                            f
-                        } else {
-                            f * spherical_bessel(0, q * r).map_err(err)?
-                        };
-                    }
-                    let r = mesh.integrate(&work).map_err(err)? / volume;
-                    let v = if q == 0. {
-                        local.alpha_z()
-                    } else {
-                        local.at_g(q)
-                    }
-                    .map_err(err)?;
-                    Ok((r, v, core_radial(s, q, volume, o)?))
-                })
-                .collect::<Result<_, ScfError>>()?;
-            factors.fill(C::default());
-            for &pos in s.positions_bohr {
-                // Separate contiguous angle and accumulation passes expose
-                // independent G rows to vectorization, without changing the
-                // dot-product order or using factored/interpolated phases.
-                for (angle, &(_, g)) in angles.iter_mut().zip(&represented) {
-                    *angle = g.cartesian.iter().zip(pos).map(|(g, r)| g * r).sum();
-                }
-                if angles.iter().any(|v| !v.is_finite()) {
-                    return Err(err("non-finite atomic structure-factor angle"));
-                }
-                for (a, (&(i, _), &shell)) in represented.iter().zip(&shells).enumerate() {
-                    let phase = C::from_polar(1., -angles[a]);
-                    // The old single-atom structure_factor sums from zero.
-                    rho[i] += (C::default() + phase) * radial[shell].0;
-                    factors[a] += phase;
-                }
-            }
-            for (a, (&(i, _), &shell)) in represented.iter().zip(&shells).enumerate() {
-                ion[i] += radial[shell].1 * factors[a];
-                if let Some(core) = &mut core {
-                    core[i] += radial[shell].2 * factors[a];
-                }
-            }
-        }
-        return Ok(AtomicFields { rho, ion, core });
-    }
-    let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
-    let mut phases = if reuse {
+
+    let mut phases = {
         Vec::with_capacity(
             species
                 .iter()
@@ -1066,8 +951,6 @@ fn atomic_fields(
                 .max()
                 .unwrap_or(0),
         )
-    } else {
-        Vec::new()
     };
     let mut rho = vec![C::default(); fields.fft.local_len()];
     let mut ion = rho.clone();
@@ -1105,21 +988,17 @@ fn atomic_fields(
             };
             // Preserve every charge multiply/add and the ionic sum order.
             // Only reuse direct phases: no axis factorization or interpolation.
-            if reuse {
+            {
                 phases.clear();
             }
             for &pos in s.positions_bohr {
                 let phase = structure_factor(g.cartesian, &[pos])?;
                 rho[i] += phase * r;
-                if reuse {
+                {
                     phases.push(phase);
                 }
             }
-            let factor = if reuse {
-                phases.iter().copied().sum()
-            } else {
-                structure_factor(g.cartesian, s.positions_bohr)?
-            };
+            let factor: C = phases.iter().copied().sum();
             ion[i] += v * factor;
             if let Some(core) = &mut core {
                 core[i] += c * factor;
@@ -1127,13 +1006,6 @@ fn atomic_fields(
         }
     }
     Ok(AtomicFields { rho, ion, core })
-}
-
-/// REFSTART_MKL: route the atomic-start Gram and rotation products through the
-/// dispatching GEMM entries (MKL panels in mkl builds) instead of the direct
-/// pure-Rust kernel (dev08 si128: 7 calls, 17 GFLOP per rank on pure_direct).
-fn mkl_start() -> bool {
-    dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_MKL)
 }
 
 fn gram<K: Collective>(
@@ -1144,13 +1016,8 @@ fn gram<K: Collective>(
 ) -> Result<RealMatrix, ScfError> {
     let mut g = RealMatrix::zeros(a.cols(), b.cols()).map_err(err)?;
     if a.rows() > 0 {
-        if mkl_start() {
-            let product =
-                if dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_SINGLE_GEMM) {
-                    RealGemmWorkspace::multiply_slices_single_into
-                } else {
-                    RealGemmWorkspace::multiply_slices_into
-                };
+        {
+            let product = { RealGemmWorkspace::multiply_slices_single_into };
             product(
                 ws,
                 GemmSite::Other,
@@ -1165,9 +1032,6 @@ fn gram<K: Collective>(
                 g.as_mut(),
             )
             .map_err(err)?;
-        } else {
-            ws.multiply_into(a.as_ref(), RealOp::Transpose, b.as_ref(), g.as_mut())
-                .map_err(err)?;
         }
     }
     let out = sum(comm, g.as_slice())?;
@@ -1181,7 +1045,7 @@ fn rotate(
 ) -> Result<RealMatrix, ScfError> {
     let mut q = RealMatrix::zeros(a.rows(), t.cols()).map_err(err)?;
     if a.rows() > 0 {
-        if mkl_start() {
+        {
             ws.multiply_slices_wide_into(
                 GemmSite::Rotate,
                 a.as_slice(),
@@ -1195,77 +1059,9 @@ fn rotate(
                 q.as_mut(),
             )
             .map_err(err)?;
-        } else {
-            ws.multiply_into(a.as_ref(), RealOp::Identity, t.as_ref(), q.as_mut())
-                .map_err(err)?;
         }
     }
     Ok(q)
-}
-
-/// Replicated small-matrix congruence T^t A T. Do not call gram(): these
-/// matrices are identical on every rank and must not be reduced again.
-fn congruence(
-    ws: &mut RealGemmWorkspace,
-    a: &RealMatrix,
-    t: &RealMatrix,
-) -> Result<RealMatrix, ScfError> {
-    let at = rotate(ws, a, t)?;
-    let mut out = RealMatrix::zeros(t.cols(), t.cols()).map_err(err)?;
-    if mkl_start() {
-        ws.multiply_slices_into(
-            GemmSite::Other,
-            t.as_slice(),
-            t.rows(),
-            t.cols(),
-            t.rows(),
-            RealOp::Transpose,
-            at.as_slice(),
-            at.cols(),
-            at.rows(),
-            out.as_mut(),
-        )
-        .map_err(err)?;
-    } else {
-        ws.multiply_into(t.as_ref(), RealOp::Transpose, at.as_ref(), out.as_mut())
-            .map_err(err)?;
-    }
-    for j in 0..out.cols() {
-        for i in 0..j {
-            let v = 0.5 * (out[(i, j)] + out[(j, i)]);
-            out[(i, j)] = v;
-            out[(j, i)] = v;
-        }
-    }
-    Ok(out)
-}
-
-/// One distributed S and the existing scaled Cholesky inverse. Check its
-/// metric on the small matrices before applying H. Ill-conditioned spans use
-/// the unchanged two-pass QR/MGS path, not a truncated generalized problem.
-fn overlap_transform<K: Collective>(
-    comm: &K,
-    ws: &mut RealGemmWorkspace,
-    raw: &RealMatrix,
-    setup: &mut crate::refscf::record::SetupTimings,
-) -> Result<Option<RealMatrix>, ScfError> {
-    let clock = Instant::now();
-    let s = gram(comm, ws, raw, raw)?;
-    setup.record("atomic_overlap_gram", clock);
-    let clock = Instant::now();
-    let t = crate::model::AtomicStartReport::owned_qr_transform(&s, true)?;
-    setup.record("atomic_overlap_factor_inverse", clock);
-    let Some(t) = t else { return Ok(None) };
-    let clock = Instant::now();
-    let metric = congruence(ws, &s, &t)?;
-    let good = (0..metric.cols()).all(|j| {
-        (0..metric.rows()).all(|i| {
-            let defect = (metric[(i, j)] - f64::from(i == j)).abs();
-            defect.is_finite() && defect <= dft_numerics::linalg::HERMITIAN_TOLERANCE
-        })
-    });
-    setup.record("atomic_overlap_metric_check", clock);
-    Ok(good.then_some(t))
 }
 
 /// Owned form of the legacy guarded CholQR2: two small Gram reductions and
@@ -1488,112 +1284,14 @@ fn atomic_block<K: Collective>(
                     .sum::<usize>()
         })
         .sum();
-    let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
-    let reuse_orbitals =
-        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_ORBITAL_REUSE);
-    let species_fill =
-        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_SPECIES_FILL);
-    let mut phases = if reuse && !species_fill {
-        vec![C::default(); l]
-    } else {
-        Vec::new()
-    };
     let mut raw = RealMatrix::zeros(l, j).map_err(err)?;
-    let mut col = 0;
-    let filled = (|| -> Result<(), ScfError> {
-        if species_fill {
-            return fill_species_orbitals(cell, basis, half, species, o, &rows, &mut raw);
-        }
-        for sp in species {
-            for c in sp.potential.atomic_wavefunctions().unwrap() {
-                let mut radial = BTreeMap::new();
-                // r(|G|) Y_lm(G) is independent of the atom position. Keep
-                // exactly the first atom's arithmetic and column order. No
-                // interpolation, symmetry tolerance or changed quadrature.
-                let cache = reuse_orbitals && sp.positions_bohr.len() > 1;
-                let mut amplitudes = if cache {
-                    vec![0.; l * (2 * c.l + 1)]
-                } else {
-                    Vec::new()
-                };
-                for (atom, &pos) in sp.positions_bohr.iter().enumerate() {
-                    if reuse {
-                        for (i, &row) in rows.iter().enumerate() {
-                            let g = if row == 0 {
-                                0
-                            } else {
-                                half.plus()[row.div_ceil(2)] as usize
-                            };
-                            phases[i] = structure_factor(basis.momenta()[g].cartesian, &[pos])?;
-                        }
-                    }
-                    for m in -(c.l as isize)..=c.l as isize {
-                        let il = C::new(0., -1.).powu(c.l as u32);
-                        for (i, &row) in rows.iter().enumerate() {
-                            let g = if row == 0 {
-                                0
-                            } else {
-                                half.plus()[row.div_ceil(2)] as usize
-                            };
-                            let g = &basis.momenta()[g];
-                            let slot = (m + c.l as isize) as usize * l + i;
-                            let amplitude = if cache && atom > 0 {
-                                amplitudes[slot]
-                            } else {
-                                let r = if let Some(&v) = radial.get(&g.norm_squared.to_bits()) {
-                                    v
-                                } else {
-                                    let v = projector_transform_with_rule(
-                                        sp.potential.mesh(),
-                                        c.l,
-                                        &c.radial_times_r,
-                                        g.norm_squared.sqrt(),
-                                        o.radial_even_rule,
-                                    )
-                                    .map_err(err)?
-                                        / cell.volume_bohr3().sqrt();
-                                    radial.insert(g.norm_squared.to_bits(), v);
-                                    v
-                                };
-                                let y = if g.norm_squared == 0. {
-                                    if c.l == 0 { 1. / (4. * PI).sqrt() } else { 0. }
-                                } else {
-                                    real_spherical_harmonic(c.l, m, g.cartesian).map_err(err)?
-                                };
-                                let amplitude = r * y;
-                                if cache {
-                                    amplitudes[slot] = amplitude;
-                                }
-                                amplitude
-                            };
-                            let phase = if reuse {
-                                phases[i]
-                            } else {
-                                structure_factor(g.cartesian, &[pos])?
-                            };
-                            let z = il * phase * amplitude;
-                            raw[(i, col)] = if row == 0 {
-                                z.re
-                            } else if row % 2 == 1 {
-                                SQRT_2 * z.re
-                            } else {
-                                SQRT_2 * z.im
-                            };
-                        }
-                        col += 1;
-                    }
-                }
-            }
-        }
-        Ok(())
-    })();
+    let filled = fill_species_orbitals(cell, basis, half, species, o, &rows, &mut raw);
     agree(
         comm,
         f64::from(filled.is_err()),
         "reference start: atomic orbital transform failed",
     )?;
     filled?;
-    drop(phases);
     // All ranks agree on a bad local fill before the Gram reductions.
     agree(
         comm,
@@ -1602,13 +1300,12 @@ fn atomic_block<K: Collective>(
     )?;
     setup.record("atomic_orbital_fill", clock);
     let clock = Instant::now();
-    let generalized =
-        dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_GENERALIZED) && j >= bands;
+    let generalized = j >= bands;
     let mut ws =
         RealGemmWorkspace::with_pool(if generalized { l.max(j) } else { l }, j.max(bands), pool)
             .map_err(err)?;
-    let cholesky = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_CHOLESKY);
-    if generalized && cholesky {
+
+    if generalized {
         let clock = Instant::now();
         let s = gram(comm, &mut ws, &raw, &raw)?;
         setup.record("atomic_overlap_gram", clock);
@@ -1630,22 +1327,7 @@ fn atomic_block<K: Collective>(
             }
         }
     }
-    if generalized
-        && !cholesky
-        && let Some(t) = overlap_transform(comm, &mut ws, &raw, setup)?
-    {
-        let small = projected_h(comm, &mut ws, &raw, bands, op, setup)?;
-        let clock = Instant::now();
-        let reduced = congruence(&mut ws, &small, &t)?;
-        let (mut values, rot) = dft_numerics::real::symmetric_eigh(&reduced).map_err(err)?;
-        let selected =
-            RealMatrix::new(j, bands, rot.as_slice()[..j * bands].to_vec()).map_err(err)?;
-        let coefficients = rotate(&mut ws, &t, &selected)?;
-        let out = rotate(&mut ws, &raw, &coefficients)?;
-        values.truncate(bands);
-        setup.record("atomic_generalized_diagonalize_rotate", clock);
-        return Ok((out, values));
-    }
+
     // All ranks see the same reduced S and make the same fallback decision.
     // No rank deletion, looser pivot, or alternate completion is introduced.
     let mut q = orthogonalize(comm, &mut ws, &raw, setup)?;
@@ -1847,7 +1529,7 @@ impl std::ops::DerefMut for KStartState {
 }
 
 /// Initialize a validated (possibly time-reversal-reduced) list. All k points
-/// share the density grid; their kinetic/projector supports use k+G. The common
+/// Reuse the density grid; their kinetic/projector supports use k+G. The common
 /// atomic-field initializer skips Gamma orbital/projector construction. A small
 /// unused Gamma FFT adapter remains in the shared field state; it imposes no
 /// Gamma band-rank constraint on the actual k blocks.
@@ -2141,7 +1823,7 @@ fn finish_kpoints<K: Collective>(
 /// `density` is one total-density grid or two collinear (up/down) grids. All
 /// inputs are replicated and identical on every rank. Returns the k start and
 /// the immutable channel potentials on the common owned field planes.
-/// Atomic orbitals and deterministic kinetic complements share the SCF helper.
+/// Atomic orbitals and deterministic kinetic complements reuse the SCF helper.
 pub fn start_kpoints_from_density<K: Collective>(
     input: StartInput<'_>,
     density: &[Array3<f64>],
@@ -2269,7 +1951,7 @@ pub fn start_kpoints_from_density<K: Collective>(
         .collect::<Result<Vec<_>, ScfError>>()?;
     let half = HalfSphere::new(&basis, &grid).map_err(err)?;
     let mut fields = StartFields::new(dims, comm)?;
-    let atomic = atomic_fields(&fields, &db, None, volume, &species, o);
+    let atomic = atomic_fields(&fields, &db, volume, &species, o);
     agree(
         comm,
         f64::from(atomic.is_err()),

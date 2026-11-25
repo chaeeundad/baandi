@@ -1,7 +1,5 @@
 //! Guarded contraction experiment, derived from the own-words Davidson note.
 //! No guard is an energy certificate; independent SCF verification stays required.
-use dft_numerics::switches::{Id, RunConfig};
-use std::cell::Cell;
 
 // General safeguards, not material-tuned parameters. Match the existing
 // restart orthogonality contract; limit unmeasured off-diagonal drift to three
@@ -31,39 +29,6 @@ impl ResetStats {
         self.max_measured_defect = self.max_measured_defect.max(other.max_measured_defect);
     }
 }
-thread_local! {
-    static TOTAL: Cell<(u64, ResetStats)> = const { Cell::new((0, ResetStats {
-        attempts: 0, ideal: 0, periodic_refreshes: 0, guard_fallbacks: 0,
-        disabled_refreshes: 0, max_measured_defect: 0.0,
-    })) };
-}
-/// Consecutive successful solves on this thread for one run ID; changing IDs
-/// resets this bounded summary. Per-solve Record counters remain complete.
-/// Publish outside the numerical loop through the existing run manifest, so
-/// CLI consumers can read fallback counts without a new serialization contract.
-pub(crate) fn publish(stats: ResetStats) {
-    let config = RunConfig::current();
-    if !config.on(Id::REF_DAV_IDEAL_RESET) {
-        return;
-    }
-    let total = TOTAL.with(|slot| {
-        let (id, mut total) = slot.get();
-        if id != config.run_id() {
-            total = ResetStats::default();
-        }
-        total.add(stats);
-        slot.set((config.run_id(), total));
-        total
-    });
-    config.note_path(
-        Id::REF_DAV_IDEAL_RESET,
-        &format!("successful solves, rank-local: attempts={} ideal={} periodic={} guard={} disabled={} max_measured_defect={:.17e}",
-            total.attempts, total.ideal, total.periodic_refreshes,
-            total.guard_fallbacks, total.disabled_refreshes, total.max_measured_defect),
-        (total.guard_fallbacks > 0).then_some("orthogonality guard: measured refresh until solve end"),
-    );
-}
-
 #[cfg(test)]
 thread_local! {
     static AUDIT: std::cell::RefCell<Option<Vec<f64>>> = const { std::cell::RefCell::new(None) };
@@ -107,6 +72,7 @@ mod tests {
     use crate::ref_davidson::{Options, ReducedPlacement, solve};
     use crate::{SolverError, distributed_davidson::DistributedRealOperator};
     use dft_mpi::{Collective, block_counts, simulate};
+    use dft_numerics::switches::RunConfig;
     use dft_numerics::{RealMatrix, symmetric_eigh};
 
     struct Dense {
@@ -178,11 +144,6 @@ mod tests {
 
     #[test]
     fn ideal_reset_accuracy_decisions_and_restart_orthogonality() {
-        assert!(
-            RunConfig::from_pairs(&[])
-                .unwrap()
-                .on(Id::REF_DAV_IDEAL_RESET) // default on since 2026-11-25
-        );
         for (dim, bands, occupied, capacity, cluster) in [
             (32, 8, 6, 16, false),
             (32, 8, 6, 16, true),
@@ -220,9 +181,8 @@ mod tests {
                         options.max_iterations = 400;
                         options.placement = placement;
                         options.return_hx = true;
-                        let run = |op: &mut Dense, on| {
-                            let config =
-                                RunConfig::from_pairs(&[("ref_dav_ideal_reset", on)]).unwrap();
+                        let run = |op: &mut Dense, _on| {
+                            let config = RunConfig::from_pairs(&[]).unwrap();
                             let _scope = config.enter();
                             start_audit();
                             let s = solve(c, op, &x, &diagonal, options).unwrap();
@@ -240,17 +200,8 @@ mod tests {
                                     .zip(hx.as_slice())
                                     .all(|(a, b)| (a - b).abs() < 2e-11)
                             );
-                            if on == "on" {
-                                assert!(
-                                    config
-                                        .path_note(Id::REF_DAV_IDEAL_RESET)
-                                        .unwrap()
-                                        .path
-                                        .contains("attempts=")
-                                );
+                            {
                                 assert_eq!(s.record.resets.attempts, s.record.restarts);
-                            } else {
-                                assert_eq!(s.record.resets, ResetStats::default());
                             }
                             (s, defects)
                         };

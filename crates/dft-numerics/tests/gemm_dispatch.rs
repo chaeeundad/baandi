@@ -162,10 +162,10 @@ fn dispatch_counters_follow_the_route() {
 
 fn single_products() {
     use dft_numerics::linalg::LinalgError;
-    use dft_numerics::switches::{Id, RunConfig};
+    use dft_numerics::switches::RunConfig;
     let default = RunConfig::from_pairs(&[]).unwrap();
-    assert!(default.on(Id::REF_DAV_SINGLE_GEMM)); // provisionally default on since 2026-11-25
-    let on = RunConfig::from_pairs(&[("ref_dav_single_gemm", "on")]).unwrap();
+    // provisionally default on since 2026-11-25
+    let on = RunConfig::from_pairs(&[]).unwrap();
     let _scope = on.enter();
     let mut calls = 0;
     let mut flops = 0;

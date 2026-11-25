@@ -6,7 +6,7 @@ use crate::model::ScfError;
 use dft_mpi::Collective;
 use std::{cell::Cell, marker::PhantomData, rc::Rc};
 
-pub const NAMES: [&str; 18] = [
+pub const NAMES: [&str; 17] = [
     "start_retained_vectors",
     "start_vectors_released",
     "driver_reciprocal_vectors",
@@ -15,7 +15,6 @@ pub const NAMES: [&str; 18] = [
     "metric_vectors",
     "broyden_history_vectors",
     "broyden_metadata_and_reduced",
-    "prediction_vectors",
     "map_potential_vectors",
     "map_density_vectors",
     "field_cache_vectors",
@@ -37,7 +36,6 @@ pub(crate) enum Component {
     Metric,
     History,
     Mixer,
-    Prediction,
     MapPotential,
     MapDensity,
     FieldCache,

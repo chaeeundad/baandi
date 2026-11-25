@@ -404,8 +404,7 @@ fn qe_si8_committed_trajectory() {
 mod common;
 #[test]
 fn driver_owned_maps_and_real_verification() {
-    let config =
-        dft_numerics::switches::RunConfig::from_pairs(&[("refscf_verify_energy", "off")]).unwrap();
+    let config = dft_numerics::switches::RunConfig::from_pairs(&[]).unwrap();
     let _scope = config.enter();
     use dft_engine::{
         GammaReal, ScfOptions, SpeciesPotential, StartDensity, Verification, refscf::driver,
@@ -616,9 +615,7 @@ fn stop_to_verified_first_pass_all_diagnostics() {
     };
     let mut previous = None;
     for level in ["off", "on"] {
-        let scope =
-            RunConfig::from_pairs(&[("davidson_stages", level), ("refscf_verify_energy", "off")])
-                .unwrap();
+        let scope = RunConfig::from_pairs(&[("davidson_stages", level)]).unwrap();
         let _guard = scope.enter();
         // Control-flow fixture only: the existing first-pass case, not a new default.
         let run = driver::run(
@@ -713,51 +710,20 @@ fn stop_to_verified_si8_displaced() {
     let mut science = None;
     let mut baseline = None;
     for (variant, level, pairs) in [
-        (
-            "off",
-            "off",
-            vec![
-                ("refscf_verify_reuse", "off"),
-                ("refscf_verify_gate", "off"),
-            ],
-        ),
-        (
-            "off",
-            "on",
-            vec![
-                ("refscf_verify_reuse", "off"),
-                ("refscf_verify_gate", "off"),
-            ],
-        ),
+        ("off", "off", vec![]),
+        ("off", "on", vec![]),
         ("default", "off", vec![]),
         ("default", "on", vec![]),
-        ("first", "off", vec![("refscf_verify_gate_first", "on")]),
-        (
-            "reuse",
-            "off",
-            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "off")],
-        ),
-        ("gate", "off", vec![("refscf_verify_gate", "on")]),
-        (
-            "both",
-            "off",
-            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "on")],
-        ),
+        ("first", "off", vec![]),
+        ("reuse", "off", vec![]),
+        ("gate", "off", vec![]),
+        ("both", "off", vec![]),
     ] {
         let mut pairs = pairs;
         pairs.push(("davidson_stages", level));
-        pairs.push(("refscf_verify_energy", "off"));
         let scope = RunConfig::from_pairs(&pairs).unwrap();
-        let reuse = if scope.on(dft_numerics::switches::Id::REFSCF_VERIFY_REUSE) {
-            "on"
-        } else {
-            "off"
-        };
-        let gate = if scope.on(dft_numerics::switches::Id::REFSCF_VERIFY_GATE) {
-            "on"
-        } else {
-            "off"
-        };
+        let reuse = if false { "on" } else { "off" };
+        let gate = if true { "on" } else { "off" };
         let _guard = scope.enter();
         let run = driver::run(
             dft_engine::refstart::StartInput {
@@ -854,440 +820,6 @@ fn verification_cost_predictor_fallback_and_refresh() {
 }
 
 #[test]
-fn first_prediction_linear_oracle_and_read_only_history() {
-    use dft_engine::refscf::broyden::PredictionScratch;
-    use dft_engine::refscf::driver::contraction_prediction;
-    let profile = Profile {
-        history: 2,
-        beta: 0.7,
-        ..Default::default()
-    };
-    let new = || Broyden::new(profile, &[1.; 2], &[true; 2], 1., 2.).unwrap();
-    let mut mix = new();
-    let mut control = new();
-    let mut metric = Metric::new(1. / (8. * PI), &[1.; 2], &[true; 2], 1, 350).unwrap();
-    let mut scratch = PredictionScratch::new(2);
-    // F(x)=b-2x amplifies every direction by -2. Its residual f=b-3x
-    // gives an independent exact oracle, including an initially failing
-    // candidate followed by the mandatory next-candidate attempt.
-    let residual = |x: &[C]| [c(2.) - 3. * x[0], c(3.) - 3. * x[1]];
-    let mut out = [c(0.); 2];
-    let mut expected = out;
-    assert_eq!(
-        mix.predict_output_error(&Serial, &mut metric, &out, &residual(&out), &mut scratch)
-            .unwrap(),
-        None
-    );
-    for x in [[c(0.), c(0.)], [c(1.), c(0.)]] {
-        mix.update(&Serial, &mut metric, &x, &residual(&x), &mut out)
-            .unwrap();
-        control
-            .update(&Serial, &mut metric, &x, &residual(&x), &mut expected)
-            .unwrap();
-    }
-    let x = [c(1.), c(1.)];
-    let f = residual(&x);
-    let actual = residual(&[x[0] + f[0], x[1] + f[1]]);
-    let actual_ha = metric.norm(&Serial, &actual).unwrap() / 2.;
-    let gamma = mix.gamma().to_vec();
-    let predicted = mix
-        .predict_output_error(&Serial, &mut metric, &x, &f, &mut scratch)
-        .unwrap()
-        .unwrap();
-    assert!((predicted - actual_ha).abs() < 1e-14);
-    let threshold = actual_ha / 2.;
-    assert!(metric.norm(&Serial, &f).unwrap() / 2. < threshold);
-    let mut gate = dft_engine::refscf::driver::VerificationPredictor::default();
-    assert!(gate.skip(Some(predicted), threshold));
-    assert!(!gate.skip(Some(predicted), threshold));
-    assert_eq!(mix.gamma(), gamma);
-    // A zero density secant makes the observed gain undefined.
-    assert_eq!(
-        mix.predict_output_error(&Serial, &mut metric, &[c(1.), c(0.)], &f, &mut scratch)
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        mix.predict_output_error(&Serial, &mut metric, &x, &[c(f64::NAN); 2], &mut scratch)
-            .unwrap(),
-        None
-    );
-    mix.update(&Serial, &mut metric, &x, &f, &mut out).unwrap();
-    control
-        .update(&Serial, &mut metric, &x, &f, &mut expected)
-        .unwrap();
-    assert_eq!(out, expected);
-    assert_eq!(mix.gamma(), control.gamma());
-    assert_eq!(mix.occupancy(), control.occupancy());
-    println!("FIRST_PREDICTION linear predicted_ha={predicted:.17e} actual_ha={actual_ha:.17e}");
-    assert_eq!(contraction_prediction(1e-7, 1e-8), Some(5e-10));
-    for bad in [0., -1., f64::NAN, f64::INFINITY, 1e-8] {
-        assert_eq!(contraction_prediction(bad, 1e-8), None);
-        assert_eq!(contraction_prediction(1e-8, bad), None);
-    }
-}
-
-#[test]
-fn verification_cost_small_fixture() {
-    verification_cost_fixture(false);
-}
-
-#[test]
-fn first_prediction_eviction_and_preconditioner_independence() {
-    use dft_engine::refscf::broyden::PredictionScratch;
-    for preconditioning in [Preconditioning::Plain, Preconditioning::ThomasFermi] {
-        let profile = Profile {
-            history: 1,
-            preconditioning,
-            ..Default::default()
-        };
-        let mut mixer = Broyden::new(profile, &[1.], &[true], 1., 2.).unwrap();
-        let mut metric = metric(&[1.], &[true]);
-        let mut scratch = PredictionScratch::new(1);
-        let mut out = [c(0.)];
-        mixer
-            .update(&Serial, &mut metric, &[c(0.)], &[c(4.)], &mut out)
-            .unwrap();
-        // Delta x=-1, Delta f=3, hence squared gain 4 and energy 4/2.
-        assert_eq!(
-            mixer
-                .predict_output_error(&Serial, &mut metric, &[c(1.)], &[c(1.)], &mut scratch)
-                .unwrap(),
-            Some(2.)
-        );
-        mixer
-            .update(&Serial, &mut metric, &[c(1.)], &[c(1.)], &mut out)
-            .unwrap();
-        // The new secant replaces that gain: Delta x=-1, Delta f=0.5,
-        // squared gain 0.25, current norm 0.25, predicted Ha=0.03125.
-        assert_eq!(
-            mixer
-                .predict_output_error(&Serial, &mut metric, &[c(2.)], &[c(0.5)], &mut scratch)
-                .unwrap(),
-            Some(0.03125)
-        );
-        assert_eq!(mixer.occupancy(), 1);
-    }
-}
-
-#[test]
-fn verification_cost_failed_attempt_fixture() {
-    verification_cost_fixture(true);
-}
-
-fn verification_cost_fixture(active: bool) {
-    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, StartDensity, refscf::driver};
-    use dft_numerics::switches::{Id, RunConfig};
-    assert!(
-        !RunConfig::from_pairs(&[])
-            .unwrap()
-            .on(Id::REFSCF_VERIFY_REUSE)
-    );
-    // Default on since 2026-11-24 (dev08 A/B); each arm below sets it explicitly.
-    assert!(
-        RunConfig::from_pairs(&[])
-            .unwrap()
-            .on(Id::REFSCF_VERIFY_GATE)
-    );
-    let (z, rc, length, bands) = if active {
-        (4., 1.2, 11., 3)
-    } else {
-        (2., 1.8, 7., 2)
-    };
-    let profile = Profile {
-        history: if active { 4 } else { 8 },
-        ..Default::default()
-    };
-    let pp = common::potential_with_atomic_start(z, rc, active, 161, "SLA PZ");
-    let cell = dft_geometry::Cell::from_user_rows_bohr([
-        [length, 0., 0.],
-        [0.2, length, 0.],
-        [0., 0.1, length],
-    ])
-    .unwrap();
-    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
-    let species = [SpeciesPotential {
-        label: "Xx",
-        potential: &pp,
-    }];
-    let options = ScfOptions {
-        start_density: StartDensity::Atomic,
-        gamma_real: GammaReal::On,
-        cutoff_hartree: 2.,
-        bands: Some(bands),
-        max_iterations: 100,
-        ..Default::default()
-    };
-    let mut baseline = None;
-    let mut fingerprint = None;
-    let mut off_fingerprint = None;
-    for (name, pairs) in [
-        ("default", vec![]),
-        ("first_off", vec![("refscf_verify_gate_first", "off")]),
-        ("first", vec![("refscf_verify_gate_first", "on")]),
-        (
-            "off",
-            vec![
-                ("refscf_verify_reuse", "off"),
-                ("refscf_verify_gate", "off"),
-            ],
-        ),
-        (
-            "first_inert",
-            vec![
-                ("refscf_verify_gate", "off"),
-                ("refscf_verify_gate_first", "on"),
-            ],
-        ),
-        (
-            "reuse",
-            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "off")],
-        ),
-        ("gate", vec![("refscf_verify_gate", "on")]),
-        (
-            "both",
-            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "on")],
-        ),
-    ] {
-        let mut pairs = pairs;
-        pairs.push(("refscf_verify_energy", "off"));
-        let config = RunConfig::from_pairs(&pairs).unwrap();
-        let _guard = config.enter();
-        let run = driver::run(
-            dft_engine::refstart::StartInput {
-                cell: &cell,
-                atoms: &atoms,
-                potentials: &species,
-                options: &options,
-            },
-            profile,
-        )
-        .unwrap();
-        assert!(run.outcome.converged, "{name}: {}", run.exit_reason);
-        let energy = run.outcome.result.total_hartree();
-        let base = *baseline.get_or_insert(energy);
-        assert!(
-            (energy - base).abs() < 5e-9,
-            "{name}: delta={} Ha",
-            energy - base
-        );
-        if name == "default" {
-            fingerprint = Some(stop_to_verified_science(&run));
-        }
-        // The default equals the gate-on arm since the 2026-11-24 adoption.
-        if name == "gate" || name == "first_off" {
-            assert_eq!(
-                fingerprint.as_ref().unwrap(),
-                &stop_to_verified_science(&run)
-            );
-        }
-        if name == "off" {
-            off_fingerprint = Some(stop_to_verified_science(&run));
-        }
-        if name == "first_inert" {
-            assert_eq!(
-                off_fingerprint.as_ref().unwrap(),
-                &stop_to_verified_science(&run)
-            );
-        }
-        assert!(
-            !RunConfig::from_pairs(&[])
-                .unwrap()
-                .on(Id::REFSCF_VERIFY_GATE_FIRST)
-        );
-        verify_cost_contract(&run);
-        let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
-        let reused = run
-            .records
-            .iter()
-            .filter(|r| {
-                r.verification_cost
-                    .as_ref()
-                    .is_some_and(|c| c.reused_from.is_some())
-            })
-            .count();
-        let skipped = run
-            .records
-            .iter()
-            .filter(|r| r.verification_cost.as_ref().is_some_and(|c| c.skipped))
-            .count();
-        let solves: usize =
-            run.records.iter().map(|r| r.calls.len()).sum::<usize>() + run.verification_calls.len();
-        let expected = if !active {
-            (6, 7, 1, 0, 0)
-        } else {
-            match name {
-                "reuse" | "both" => (29, 30, 2, 1, 0),
-                "gate" | "default" | "first_off" => (28, 30, 2, 0, 1),
-                "first" => (27, 28, 1, 0, 1),
-                _ => (27, 29, 2, 0, 0),
-            }
-        };
-        assert_eq!(
-            (run.records.len(), solves, attempts.len(), reused, skipped),
-            expected
-        );
-        if active && name == "first" {
-            assert_eq!(run.first_reference_stop, Some(23));
-            assert_eq!(attempts[0].iteration, 27);
-            assert!(run.records[22].verification_cost.as_ref().unwrap().skipped);
-            assert!(
-                run.records[26]
-                    .verification_cost
-                    .as_ref()
-                    .unwrap()
-                    .predicted_error_ha
-                    .unwrap()
-                    >= 5e-9
-            );
-        }
-        for r in run
-            .records
-            .iter()
-            .filter(|r| r.dr2_ry < profile.threshold_ry)
-        {
-            if let Some(cost) = &r.verification_cost {
-                println!(
-                    "FIRST_PREDICTION active={active} variant={name} iteration={} dr2_ry={:.9e} prediction_ha={:?} secant_ha={:?} contraction_ha={:?} actual_ha={:?} skipped={}",
-                    r.iteration,
-                    r.dr2_ry,
-                    cost.predicted_error_ha,
-                    cost.first_prediction_ha,
-                    cost.contraction_prediction_ha,
-                    cost.actual_error_ha,
-                    cost.skipped
-                );
-            }
-        }
-        if active && (name == "gate" || name == "reuse" || (name == "first" && skipped > 0)) {
-            let max_iterations = if name == "gate" || name == "first" {
-                run.records
-                    .iter()
-                    .find(|r| r.verification_cost.as_ref().unwrap().skipped)
-                    .unwrap()
-                    .iteration
-            } else {
-                attempts[0].iteration
-            };
-            let limited = ScfOptions {
-                max_iterations,
-                ..options.clone()
-            };
-            let exhausted = driver::run(
-                dft_engine::refstart::StartInput {
-                    cell: &cell,
-                    atoms: &atoms,
-                    potentials: &species,
-                    options: &limited,
-                },
-                profile,
-            )
-            .unwrap();
-            assert!(!exhausted.outcome.converged);
-            assert!(
-                !exhausted
-                    .outcome
-                    .result
-                    .verification
-                    .as_ref()
-                    .unwrap()
-                    .passed()
-            );
-            assert_eq!(exhausted.records.len(), max_iterations);
-            if name == "gate" || name == "first" {
-                assert!(
-                    exhausted
-                        .records
-                        .last()
-                        .unwrap()
-                        .verification_cost
-                        .as_ref()
-                        .unwrap()
-                        .skipped
-                );
-            }
-        }
-        if active && name == "reuse" {
-            assert!(reused > 0);
-        }
-        if active && name == "gate" {
-            assert!(skipped > 0);
-        }
-        println!(
-            "VERIFY_COST active={active} variant={name} energy_ha={energy:.17e} delta_ha={:.9e} iterations={} solves={solves} attempts={} reused={reused} skipped={skipped} error_ha={:.9e}",
-            energy - base,
-            run.records.len(),
-            attempts.len(),
-            attempts.last().unwrap().coulomb_error_ha
-        );
-    }
-}
-
-fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
-    let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
-    let pass = attempts.last().unwrap();
-    assert!(pass.passed);
-    assert_eq!(pass.iteration, run.records.len());
-    assert_eq!(
-        run.outcome.result.total_hartree().to_bits(),
-        run.records.last().unwrap().energy.total_hartree().to_bits()
-    );
-    for attempt in attempts {
-        assert_eq!(attempt.threshold_ha, 5e-9);
-        assert_eq!(
-            attempt.passed,
-            attempt.coulomb_error_ha.is_finite()
-                && attempt.coulomb_error_ha < 5e-9
-                && attempt
-                    .residual_bound_ha
-                    .is_none_or(|b| b.is_finite() && b < 5e-9)
-        );
-        let map = &run.records[attempt.iteration - 1];
-        assert_eq!(
-            attempt.eigen_tolerance_ha,
-            next_ethr_ry(
-                map.ethr_ry,
-                map.dr2_ry,
-                run.outcome.result.occupations.iter().sum()
-            ) / 2.
-        );
-        if let Some(c) = &map.verification_cost {
-            assert_eq!(c.actual_error_ha, Some(attempt.coulomb_error_ha));
-        }
-    }
-    let mut skipped_previous_candidate = false;
-    for r in &run.records {
-        if let Some(c) = &r.verification_cost {
-            if r.dr2_ry < 1e-8 {
-                assert!(!(skipped_previous_candidate && c.skipped));
-                skipped_previous_candidate = c.skipped;
-            }
-            if c.skipped {
-                assert!(c.gate_enabled && c.predicted_error_ha.unwrap() >= 5e-9);
-                assert!(
-                    c.actual_error_ha.is_none()
-                        && r.verification_start_s.is_none()
-                        && r.verification_end_s.is_none()
-                );
-                assert!(r.verification_calls.is_empty());
-            }
-            if let Some(source) = c.reused_from {
-                assert_eq!(source + 1, r.iteration);
-                let a = attempts.iter().find(|a| a.iteration == source).unwrap();
-                assert!(!a.passed);
-                assert_eq!(r.ethr_ry, 2. * a.eigen_tolerance_ha);
-                assert!(r.calls.is_empty());
-                assert_eq!(r.h_columns, 0);
-                assert_eq!(r.map_s, 0.);
-                assert_eq!(run.records[source - 1].descf_ha, 0.);
-                assert!((r.dr2_ry / 2. - a.coulomb_error_ha).abs() < 1e-20);
-            }
-        }
-    }
-    stop_to_verified_clocks(run);
-}
-
-#[test]
 fn setup_phase_clocks_cover_small_start() {
     let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
     for (label, rows) in [
@@ -1368,10 +900,9 @@ fn setup_phase_reuse_preserves_owned_start_bits() {
             potential: &pp,
         }];
         for ranks in [1, 3] {
-            let build = |reuse, threads| {
+            let build = |_reuse, threads| {
                 dft_mpi::simulate(ranks, |comm| {
                     let config = RunConfig::from_pairs(&[
-                        ("refscf_setup_phase_reuse", reuse),
                         ("stage_timers", "off"),
                         ("phase_profile", "off"),
                         ("davidson_stages", "off"),
@@ -1456,11 +987,7 @@ fn setup_phase_reuse_preserves_verified_science_at_both_diagnostic_levels() {
     let mut baseline = None;
     for reuse in ["off", "on"] {
         for diagnostics in ["off", "on"] {
-            let config = RunConfig::from_pairs(&[
-                ("refscf_setup_phase_reuse", reuse),
-                ("davidson_stages", diagnostics),
-            ])
-            .unwrap();
+            let config = RunConfig::from_pairs(&[("davidson_stages", diagnostics)]).unwrap();
             let _scope = config.enter();
             let run = dft_engine::refscf::driver::run_with(
                 dft_engine::refstart::StartInput {
@@ -1489,233 +1016,6 @@ fn setup_phase_reuse_preserves_verified_science_at_both_diagnostic_levels() {
                 run.records.len()
             );
         }
-    }
-}
-
-#[test]
-fn verification_energy_attempts_and_failure_recovery() {
-    use dft_engine::{
-        GammaReal, ScfOptions, SpeciesPotential, StartDensity, Verification, refscf::driver,
-    };
-    use dft_numerics::switches::{Id, RunConfig};
-    // Default off since 2026-11-25 (dev08 screen: no earlier pass, slower on si128); tested explicitly.
-    assert!(
-        !RunConfig::from_pairs(&[])
-            .unwrap()
-            .on(Id::REFSCF_VERIFY_ENERGY)
-    );
-    for active in [false, true] {
-        let (z, rc, length, bands) = if active {
-            (4., 1.2, 11., 3)
-        } else {
-            (2., 1.8, 7., 2)
-        };
-        let pp = common::potential_with_atomic_start(z, rc, active, 161, "SLA PZ");
-        let cell = dft_geometry::Cell::from_user_rows_bohr([
-            [length, 0., 0.],
-            [0.2, length, 0.],
-            [0., 0.1, length],
-        ])
-        .unwrap();
-        let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
-        let species = [SpeciesPotential {
-            label: "Xx",
-            potential: &pp,
-        }];
-        let options = ScfOptions {
-            start_density: StartDensity::Atomic,
-            gamma_real: GammaReal::On,
-            cutoff_hartree: 2.,
-            bands: Some(bands),
-            max_iterations: 100,
-            ..Default::default()
-        };
-        let profile = Profile {
-            history: if active { 4 } else { 8 },
-            ..Default::default()
-        };
-        let run = |pairs: &[(&str, &str)], options: &ScfOptions, profile| {
-            let config = RunConfig::from_pairs(pairs).unwrap();
-            let _scope = config.enter();
-            driver::run(
-                dft_engine::refstart::StartInput {
-                    cell: &cell,
-                    atoms: &atoms,
-                    potentials: &species,
-                    options,
-                },
-                profile,
-            )
-            .unwrap()
-        };
-        let old = run(&[("refscf_verify_energy", "off")], &options, profile);
-        let energy = run(&[("refscf_verify_energy", "on")], &options, profile);
-        let gates = run(
-            &[
-                ("refscf_verify_energy", "on"),
-                ("refscf_verify_gate", "on"),
-                ("refscf_verify_gate_first", "on"),
-            ],
-            &options,
-            profile,
-        );
-        assert_eq!(
-            stop_to_verified_science(&energy),
-            stop_to_verified_science(&gates)
-        );
-        assert!(energy.outcome.converged);
-        let attempts = &energy
-            .outcome
-            .result
-            .verification
-            .as_ref()
-            .unwrap()
-            .attempts;
-        assert_eq!(attempts.len(), if active { 2 } else { 1 });
-        assert_eq!(Some(attempts[0].iteration), energy.first_reference_stop);
-        assert_eq!(energy.records.len(), attempts.last().unwrap().iteration);
-        assert!(!energy.verification_calls.is_empty());
-        assert!(energy.records.iter().all(|r| r.verification_cost.is_none()));
-        let last = energy.records.last().unwrap();
-        let e = last.verification_energy.as_ref().unwrap();
-        assert_eq!(
-            e.delivered_ha.to_bits(),
-            last.variational_energy_ha.to_bits()
-        );
-        assert_eq!(last.descf_ha, 0.);
-        assert!(e.passed());
-        assert_eq!(attempts[0].threshold_ha, 5e-9);
-        assert!(attempts[0].residual_bound_ha.unwrap().is_finite());
-        assert!(attempts[0].density_residual.is_finite());
-        let delta =
-            (energy.outcome.result.total_hartree() - old.outcome.result.total_hartree()).abs();
-        assert!(delta < 5e-9, "delivered difference {delta} Ha");
-        if active {
-            assert!(
-                old.outcome
-                    .result
-                    .verification
-                    .as_ref()
-                    .unwrap()
-                    .attempts
-                    .len()
-                    > 1
-            );
-            assert!(attempts[0].coulomb_error_ha > 5e-9);
-            assert!(!attempts[0].passed);
-            assert!(
-                energy.records[attempts[0].iteration - 1]
-                    .verification_energy
-                    .as_ref()
-                    .unwrap()
-                    .change_ha()
-                    >= 5e-9
-            );
-            assert!(energy.records.len() < old.records.len());
-        }
-        // Verification must not replace any part of the candidate state,
-        // whether the first attempt passes or fails.
-        let candidate = run(
-            &[],
-            &ScfOptions {
-                max_iterations: attempts[0].iteration,
-                ..options.clone()
-            },
-            profile,
-        );
-        let unverified = run(
-            &[],
-            &ScfOptions {
-                verification: Verification::Off,
-                ..options.clone()
-            },
-            profile,
-        );
-        assert_eq!(
-            format!("{:?}", candidate.outcome.result.energy),
-            format!("{:?}", unverified.outcome.result.energy)
-        );
-        assert_eq!(
-            candidate.outcome.result.density,
-            unverified.outcome.result.density
-        );
-        assert_eq!(
-            candidate.outcome.result.orbitals,
-            unverified.outcome.result.orbitals
-        );
-        assert_eq!(
-            candidate.outcome.result.eigenvalues,
-            unverified.outcome.result.eigenvalues
-        );
-        stop_to_verified_clocks(&energy);
-        println!(
-            "VERIFY_ENERGY active={active} first_stop={} old_maps={} new_maps={} attempts={} delta_old_ha={delta:.17e} energy_change_ha={:.17e} coulomb_ha={:.17e}",
-            attempts[0].iteration,
-            old.records.len(),
-            energy.records.len(),
-            attempts.len(),
-            e.change_ha(),
-            attempts[0].coulomb_error_ha
-        );
-        // Force two early stops: the fixed energy threshold must still reject,
-        // charge both attempts, perform recovery and leave the run unverified.
-        let failed = run(
-            &[("refscf_verify_energy", "on")],
-            &ScfOptions {
-                max_iterations: 2,
-                ..options.clone()
-            },
-            Profile {
-                threshold_ry: 1e6,
-                ..profile
-            },
-        );
-        assert!(!failed.outcome.converged);
-        let attempts = &failed
-            .outcome
-            .result
-            .verification
-            .as_ref()
-            .unwrap()
-            .attempts;
-        assert_eq!(attempts.len(), 2);
-        assert!(attempts.iter().all(|a| !a.passed && a.threshold_ha == 5e-9));
-        assert!(
-            failed
-                .records
-                .iter()
-                .all(|r| r.verification_energy.as_ref().is_some_and(|e| !e.passed()))
-        );
-        assert!(failed.records[0].mixing_s > 0.);
-        assert!(
-            failed
-                .records
-                .iter()
-                .all(|r| r.verification_start_s.unwrap() >= r.estimator_s
-                    && r.verification_end_s.unwrap() >= r.verification_start_s.unwrap()
-                    && r.map_end_s >= r.verification_end_s.unwrap())
-        );
-    }
-}
-
-#[test]
-fn verification_energy_threshold_is_strict_and_finite() {
-    use dft_engine::refscf::record::VerificationEnergy;
-    let assess = |delivered_ha, checked_ha| {
-        VerificationEnergy {
-            delivered_ha,
-            checked_ha,
-        }
-        .passed()
-    };
-    assert!(assess(0., 4.999e-9));
-    assert!(assess(0., -4.999e-9));
-    assert!(!assess(0., 5e-9));
-    assert!(!assess(0., -5e-9));
-    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert!(!assess(bad, 0.));
-        assert!(!assess(0., bad));
-        assert!(!assess(bad, bad));
     }
 }
 
@@ -1753,18 +1053,7 @@ fn setup2_owned_start_identity_and_work() {
         for ranks in [1, 3, 8] {
             let build = |diagonal, orbital, threads| {
                 dft_mpi::simulate(ranks, |comm| {
-                    let config = RunConfig::from_pairs(&[
-                        // This test pins the QR start path (P3-SETUP2 phases).
-                        ("refstart_generalized", "off"),
-                        ("refstart_compact_g", "off"),
-                        ("refstart_diagonal_reuse", diagonal),
-                        ("refstart_orbital_reuse", orbital),
-                        (
-                            "refscf_setup_phase_reuse",
-                            if shape % 2 == 0 { "on" } else { "off" },
-                        ),
-                    ])
-                    .unwrap();
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let options = dft_engine::ScfOptions {
                         cutoff_hartree: 2.,
@@ -1801,13 +1090,15 @@ fn setup2_owned_start_identity_and_work() {
                         .collect();
                     assert!(!s.setup.phases.contains_key("atomic_qr_mgs_fallback"));
                     let p = &s.setup.phases;
-                    assert!(
-                        p["atomic_qr_gram"]
-                            + p["atomic_qr_factor_inverse"]
-                            + p["atomic_qr_rotate"]
-                            + p["atomic_completion"]
-                            <= p["atomic_orthonormalize_complete"]
-                    );
+                    if p.contains_key("atomic_qr_gram") {
+                        assert!(
+                            p["atomic_qr_gram"]
+                                + p["atomic_qr_factor_inverse"]
+                                + p["atomic_qr_rotate"]
+                                + p["atomic_completion"]
+                                <= p["atomic_orthonormalize_complete"]
+                        );
+                    }
                     assert!(p["atomic_h_apply"] + p["atomic_h_gram"] <= p["atomic_h_apply_gram"]);
                     if comm.rank() == 0 && threads == 1 {
                         let m = &s.memory;
@@ -1870,12 +1161,7 @@ fn setup2_verified_trajectory_identity() {
         };
         let mut baseline = None;
         for (diagonal, orbital) in [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")] {
-            let config = RunConfig::from_pairs(&[
-                ("refstart_diagonal_reuse", diagonal),
-                ("refstart_orbital_reuse", orbital),
-                ("refscf_verify_energy", "off"),
-            ])
-            .unwrap();
+            let config = RunConfig::from_pairs(&[]).unwrap();
             let _scope = config.enter();
             let run = dft_engine::refscf::driver::run_with(
                 dft_engine::refstart::StartInput {
@@ -1955,11 +1241,7 @@ fn setup2_larger_start_profile() {
         let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
         let mut baseline = None;
         for (diagonal, orbital) in [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")] {
-            let config = RunConfig::from_pairs(&[
-                ("refstart_diagonal_reuse", diagonal),
-                ("refstart_orbital_reuse", orbital),
-            ])
-            .unwrap();
+            let config = RunConfig::from_pairs(&[]).unwrap();
             let _scope = config.enter();
             let s = start(
                 StartInput {
@@ -2011,10 +1293,8 @@ fn setup2_larger_start_profile() {
 #[test]
 fn setup3_generalized_start_and_compact_g() {
     use dft_engine::refstart::{StartInput, start};
-    use dft_numerics::switches::{Id, RunConfig};
-    for id in [Id::REFSTART_GENERALIZED, Id::REFSTART_COMPACT_G] {
-        assert!(RunConfig::from_pairs(&[]).unwrap().on(id)); // default on since 2026-11-25
-    }
+    use dft_numerics::switches::RunConfig;
+
     for (shape, rows) in [
         [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
         [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
@@ -2045,12 +1325,8 @@ fn setup3_generalized_start_and_compact_g() {
         for bands in [5, 4 * atoms.len(), 4 * atoms.len() + 1] {
             for ranks in [1, 3, 8] {
                 dft_mpi::simulate(ranks, |comm| {
-                    let build = |generalized, compact, threads| {
-                        let config = RunConfig::from_pairs(&[
-                            ("refstart_generalized", generalized),
-                            ("refstart_compact_g", compact),
-                        ])
-                        .unwrap();
+                    let build = |_generalized, _compact, threads| {
+                        let config = RunConfig::from_pairs(&[]).unwrap();
                         let _scope = config.enter();
                         let options = dft_engine::ScfOptions {
                             cutoff_hartree: 2.,
@@ -2092,7 +1368,7 @@ fn setup3_generalized_start_and_compact_g() {
                             assert_eq!(bits(&base), bits(&candidate));
                             assert_eq!(base.grid.g_to_fft(), candidate.grid.g_to_fft());
                             assert_eq!(base.basis.vectors(), candidate.basis.vectors());
-                            let active = generalized == "on" && bands <= base.memory.atomic_columns;
+                            let active = bands <= base.memory.atomic_columns;
                             assert_eq!(
                                 candidate
                                     .setup
@@ -2209,13 +1485,8 @@ fn setup3_generalized_verified_trajectories() {
         };
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
-                let run = |generalized, compact| {
-                    let config = RunConfig::from_pairs(&[
-                        ("refstart_generalized", generalized),
-                        ("refstart_compact_g", compact),
-                        ("refscf_verify_energy", "off"),
-                    ])
-                    .unwrap();
+                let run = |_generalized, _compact| {
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     dft_engine::refscf::driver::run_with(
                         dft_engine::refstart::StartInput {
@@ -2323,9 +1594,7 @@ fn setup3_guarded_fallback_rank_failure_and_empty_owners() {
     // replicated algebra must still have J-row capacity on every rank.
     let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
     let empty = dft_mpi::simulate(8, |comm| {
-        let config =
-            RunConfig::from_pairs(&[("refstart_generalized", "on"), ("refstart_compact_g", "on")])
-                .unwrap();
+        let config = RunConfig::from_pairs(&[]).unwrap();
         let _scope = config.enter();
         let options = dft_engine::ScfOptions {
             cutoff_hartree: 0.5,
@@ -2358,8 +1627,8 @@ fn setup3_guarded_fallback_rank_failure_and_empty_owners() {
             dft_geometry::Atom::new("Xx", [0.13 + displacement, 0.21, 0.32]),
         ];
         dft_mpi::simulate(3, |comm| {
-            let build = |value| {
-                let config = RunConfig::from_pairs(&[("refstart_generalized", value)]).unwrap();
+            let build = |_value| {
+                let config = RunConfig::from_pairs(&[]).unwrap();
                 let _scope = config.enter();
                 let options = dft_engine::ScfOptions {
                     cutoff_hartree: 2.,
@@ -2426,12 +1695,8 @@ fn setup3_generalized_large_start() {
         ("elongated", [[10., 0., 0.], [0., 10., 0.], [0., 0., 24.]]),
     ] {
         let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
-        let build = |generalized, threads| {
-            let config = RunConfig::from_pairs(&[
-                ("refstart_generalized", generalized),
-                ("refstart_compact_g", "on"),
-            ])
-            .unwrap();
+        let build = |_generalized, threads| {
+            let config = RunConfig::from_pairs(&[]).unwrap();
             let _scope = config.enter();
             let options = dft_engine::ScfOptions {
                 cutoff_hartree: 4.,
@@ -2527,7 +1792,7 @@ fn lean_energy_preserves_delivery_and_counts() {
         [[5., 0., 0.], [0., 5., 0.], [0., 0., 12.]],
     ] {
         let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
-        for (verification, max_iterations, energy_rule) in [
+        for (verification, max_iterations, _energy_rule) in [
             (Verification::Off, 100, "off"),
             (Verification::FixedPoint, 100, "off"),
             (Verification::FixedPoint, 100, "on"),
@@ -2542,12 +1807,8 @@ fn lean_energy_preserves_delivery_and_counts() {
                     verification,
                     ..Default::default()
                 };
-                let run = |lean| {
-                    let config = RunConfig::from_pairs(&[
-                        ("refscf_lean_energy", lean),
-                        ("refscf_verify_energy", energy_rule),
-                    ])
-                    .unwrap();
+                let run = |_lean| {
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     run_with(
                         StartInput {
@@ -2635,12 +1896,9 @@ fn rmm_verified_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, thresh
                     threads,
                     ..options.clone()
                 };
-                let config = RunConfig::from_pairs(&[
-                    ("refscf_rmm", rmm),
-                    ("davidson_stages", level),
-                    ("refscf_verify_energy", "on"),
-                ])
-                .unwrap();
+                let config =
+                    RunConfig::from_pairs(&[("refscf_rmm", rmm), ("davidson_stages", level)])
+                        .unwrap();
                 let _scope = config.enter();
                 ref_rmm::take_records();
                 work::take_solves();
@@ -2912,15 +2170,9 @@ fn setup4_fft_plan_cache_and_workspace_identity() {
 #[test]
 fn setup4_start_switches_preserve_fields_and_ritz() {
     use dft_engine::refstart::{StartInput, start};
-    use dft_numerics::switches::{Id, RunConfig};
+    use dft_numerics::switches::RunConfig;
     // FFT_SHARE and SINGLE_GEMM default on since 2026-11-26; LOCAL_SHELLS stays off.
-    for (id, default_on) in [
-        (Id::REFSTART_FFT_SHARE, true),
-        (Id::REFSTART_SINGLE_GEMM, true),
-        (Id::REFSTART_LOCAL_SHELLS, false),
-    ] {
-        assert_eq!(RunConfig::from_pairs(&[]).unwrap().on(id), default_on);
-    }
+
     for (shape, rows) in [
         [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
         [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
@@ -2949,13 +2201,8 @@ fn setup4_start_switches_preserve_fields_and_ritz() {
         ];
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
-                let build = |fft, gram, shells, threads| {
-                    let config = RunConfig::from_pairs(&[
-                        ("refstart_fft_share", fft),
-                        ("refstart_single_gemm", gram),
-                        ("refstart_local_shells", shells),
-                    ])
-                    .unwrap();
+                let build = |_fft, _gram, _shells, threads| {
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let options = dft_engine::ScfOptions {
                         cutoff_hartree: if shape == 0 { 8. } else { 2. },
@@ -3112,14 +2359,8 @@ fn setup4_shared_density_plan_verified_trajectory() {
         };
         for ranks in [1, 3] {
             dft_mpi::simulate(ranks, |comm| {
-                let run = |value| {
-                    let config = RunConfig::from_pairs(&[
-                        ("refstart_fft_share", value),
-                        ("refstart_local_shells", value),
-                        ("refstart_single_gemm", "off"),
-                        ("refscf_verify_energy", "off"),
-                    ])
-                    .unwrap();
+                let run = |_value| {
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     dft_engine::refscf::driver::run_with(
                         dft_engine::refstart::StartInput {
@@ -3202,7 +2443,7 @@ fn permap_preserves_delivery_and_counts() {
         [[5., 0., 0.], [0., 5., 0.], [0., 0., 12.]],
     ] {
         let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
-        for (verification, max_iterations, energy_rule) in [
+        for (verification, max_iterations, _energy_rule) in [
             (Verification::Off, 100, "off"),
             (Verification::FixedPoint, 100, "off"),
             (Verification::FixedPoint, 100, "on"),
@@ -3218,11 +2459,7 @@ fn permap_preserves_delivery_and_counts() {
                     ..Default::default()
                 };
                 let run = |permap| {
-                    let config = RunConfig::from_pairs(&[
-                        ("refscf_permap", permap),
-                        ("refscf_verify_energy", energy_rule),
-                    ])
-                    .unwrap();
+                    let config = RunConfig::from_pairs(&[("refscf_permap", permap)]).unwrap();
                     let _scope = config.enter();
                     run_with(
                         StartInput {
@@ -3406,10 +2643,9 @@ fn reference_scf_records_calibrated_fft_choices() {
                     verification: dft_engine::Verification::Off,
                     ..Default::default()
                 };
-                let run = |adaptive, share| {
+                let run = |adaptive, _share| {
                     let config = RunConfig::from_pairs(&[
                         ("fft_kernel_by_length", adaptive),
-                        ("refstart_fft_share", share),
                         ("m2_fft", "rust"),
                         ("fft_fused_rows", "off"),
                     ])
@@ -3708,12 +2944,9 @@ fn ladder_verified_nonlocal() {
 #[test]
 fn fast_order_kept_hx_delta_and_invalidation() {
     use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::kept_hx::KeptHx, refstart};
-    use dft_numerics::{
-        RealMatrix,
-        switches::{Id, RunConfig},
-    };
+    use dft_numerics::{RealMatrix, switches::RunConfig};
     use dft_solvers::ref_davidson::{self, Options};
-    assert!(RunConfig::from_pairs(&[]).unwrap().on(Id::REFSCF_KEPT_HX)); // default on since 2026-11-26
+    // default on since 2026-11-26
     let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
     let cell =
         dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
@@ -3730,9 +2963,7 @@ fn fast_order_kept_hx_delta_and_invalidation() {
         ..Default::default()
     };
     dft_mpi::simulate(2, |comm| {
-        let _scope = RunConfig::from_pairs(&[("refscf_kept_hx", "on")])
-            .unwrap()
-            .enter();
+        let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
         let mut state = refstart::start(
             refstart::StartInput {
                 cell: &cell,
@@ -4118,10 +3349,9 @@ fn fast_order_ladder_exact_injection_and_verified_delivery() {
         let charge_error = (charge[0] - 2.).abs();
         assert!(charge_error <= 1e-12);
         let run = |ladder| {
-            let _scope =
-                RunConfig::from_pairs(&[("refscf_ladder", ladder), ("refscf_kept_hx", ladder)])
-                    .unwrap()
-                    .enter();
+            let _scope = RunConfig::from_pairs(&[("refscf_ladder", ladder)])
+                .unwrap()
+                .enter();
             let run = dft_engine::refscf::driver::run_with(
                 input(&fine_options),
                 Profile {
@@ -4133,7 +3363,7 @@ fn fast_order_ladder_exact_injection_and_verified_delivery() {
             .unwrap();
             assert!(run.outcome.converged, "{}", run.exit_reason);
             assert!(run.outcome.result.verification.as_ref().unwrap().passed());
-            assert_eq!(run.kept_hx.cache_hits > 0, ladder == "on");
+            assert!(run.kept_hx.cache_hits > 0);
             assert_eq!(
                 run.kept_hx.full_h_starting_columns_replaced,
                 3 * run.kept_hx.cache_hits
@@ -4143,9 +3373,7 @@ fn fast_order_ladder_exact_injection_and_verified_delivery() {
         let direct = run("off");
         let ladder = run("on");
         let seeded = {
-            let _scope = RunConfig::from_pairs(&[("refscf_kept_hx", "on")])
-                .unwrap()
-                .enter();
+            let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
             let run = dft_engine::refscf::driver::run_seeded_with(
                 input(&fine_options),
                 Profile {
@@ -4318,9 +3546,7 @@ fn fast_order_kept_hx_delivery_fingerprint() {
         ..Default::default()
     };
     dft_mpi::simulate(2, |comm| {
-        let _scope = RunConfig::from_pairs(&[("refscf_kept_hx", "on")])
-            .unwrap()
-            .enter();
+        let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
         let mut previous = None;
         for _ in 0..2 {
             let run = dft_engine::refscf::driver::run_with(
@@ -4379,12 +3605,8 @@ fn fast_order_kept_hx_delivery_fingerprint() {
 // P3-VERWARM: compare the complete delivered trajectory, including failed checks.
 fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recovery: bool) {
     use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::driver, refstart};
-    use dft_numerics::switches::{Id, RunConfig};
-    assert!(
-        RunConfig::from_pairs(&[])
-            .unwrap()
-            .on(Id::REFSCF_VERIFY_WARM) // default on since 2026-11-26
-    );
+    use dft_numerics::switches::RunConfig;
+
     let pp = common::potential_with_atomic_start(
         if recovery { 4. } else { 2. },
         if recovery { 1.2 } else { 1.8 },
@@ -4412,17 +3634,8 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
     let mut rank_energy: Option<f64> = None;
     for ranks in [1, 3, 8] {
         let outputs = dft_mpi::simulate(ranks, |comm| {
-            let run = |warm| {
-                let _scope = RunConfig::from_pairs(&[
-                    ("refscf_verify_warm", warm),
-                    ("refscf_kept_hx", "on"),
-                    ("refscf_verify_energy", "off"),
-                    ("refscf_verify_reuse", "off"),
-                    ("refscf_verify_gate", "on"),
-                    ("refscf_verify_gate_first", "off"),
-                ])
-                .unwrap()
-                .enter();
+            let run = || {
+                let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
                 driver::run_with(
                     refstart::StartInput {
                         cell: &cell,
@@ -4435,9 +3648,9 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
                 )
                 .unwrap()
             };
-            let cold = run("off");
-            let warm = run("on");
-            for r in [&cold, &warm] {
+            let first = run();
+            let repeat = run();
+            for r in [&first, &repeat] {
                 assert!(r.outcome.converged, "{label}: {}", r.exit_reason);
                 assert!(r.outcome.result.verification.as_ref().unwrap().passed());
                 stop_to_verified_clocks(r);
@@ -4454,17 +3667,18 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
                     .map(|a| (a.iteration, a.passed))
                     .collect::<Vec<_>>()
             };
-            assert_eq!(attempts(&cold), attempts(&warm), "{label} ranks={ranks}");
-            assert_eq!(cold.first_reference_stop, warm.first_reference_stop);
-            assert_eq!(cold.records.len(), warm.records.len());
-            let delta = warm.outcome.result.total_hartree() - cold.outcome.result.total_hartree();
+            assert_eq!(attempts(&first), attempts(&repeat), "{label} ranks={ranks}");
+            assert_eq!(first.first_reference_stop, repeat.first_reference_stop);
+            assert_eq!(first.records.len(), repeat.records.len());
+            let delta =
+                repeat.outcome.result.total_hartree() - first.outcome.result.total_hartree();
             assert!(delta.abs() < 1e-12, "{label} ranks={ranks}: {delta:e} Ha");
-            let density_delta = warm
+            let density_delta = repeat
                 .outcome
                 .result
                 .density
                 .iter()
-                .zip(&cold.outcome.result.density)
+                .zip(&first.outcome.result.density)
                 .map(|(a, b)| (a - b).abs())
                 .fold(0., f64::max);
             assert!(
@@ -4473,15 +3687,16 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
             );
             if !recovery {
                 assert_eq!(
-                    warm.outcome.result.total_hartree().to_bits(),
-                    cold.outcome.result.total_hartree().to_bits()
+                    repeat.outcome.result.total_hartree().to_bits(),
+                    first.outcome.result.total_hartree().to_bits()
                 );
                 assert!(
-                    warm.outcome
+                    repeat
+                        .outcome
                         .result
                         .density
                         .iter()
-                        .zip(&cold.outcome.result.density)
+                        .zip(&first.outcome.result.density)
                         .all(|(a, b)| a.to_bits() == b.to_bits())
                 );
             }
@@ -4491,20 +3706,22 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
                     .map(|c| c.h_columns)
                     .sum::<usize>()
             };
-            assert!(cols(&warm) < cols(&cold));
+            assert_eq!(cols(&repeat), cols(&first));
             assert!(
-                cold.records
-                    .iter()
-                    .filter_map(|r| r.verification_warm)
-                    .all(|v| !v)
-            );
-            assert!(
-                warm.records
+                first
+                    .records
                     .iter()
                     .filter_map(|r| r.verification_warm)
                     .all(|v| v)
             );
-            for (d, w) in cold
+            assert!(
+                repeat
+                    .records
+                    .iter()
+                    .filter_map(|r| r.verification_warm)
+                    .all(|v| v)
+            );
+            for (d, w) in first
                 .outcome
                 .result
                 .verification
@@ -4512,12 +3729,20 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
                 .unwrap()
                 .attempts
                 .iter()
-                .zip(&warm.outcome.result.verification.as_ref().unwrap().attempts)
+                .zip(
+                    &repeat
+                        .outcome
+                        .result
+                        .verification
+                        .as_ref()
+                        .unwrap()
+                        .attempts,
+                )
             {
                 assert_eq!(d.threshold_ha, w.threshold_ha);
                 // The input estimator can differ by rounding after a recovery;
                 // every attempt still uses exactly the same next-ratchet rule.
-                for r in [&cold, &warm] {
+                for r in [&first, &repeat] {
                     let a = &r.outcome.result.verification.as_ref().unwrap().attempts;
                     let a = a.iter().find(|a| a.iteration == d.iteration).unwrap();
                     let m = &r.records[a.iteration - 1];
@@ -4532,29 +3757,28 @@ fn verify_warm_fixture(label: &str, rows: [[f64; 3]; 3], nonlocal: bool, recover
                 }
             }
             if recovery {
-                let failed = attempts(&warm)
+                let failed = attempts(&repeat)
                     .into_iter()
                     .find(|(_, passed)| !passed)
                     .unwrap()
                     .0;
-                assert!(!cold.records[failed].warm_start);
-                assert!(warm.records[failed].warm_start);
+                assert!(first.records[failed].warm_start);
+                assert!(repeat.records[failed].warm_start);
                 assert_eq!(
-                    warm.records[failed].h_columns + options.bands.unwrap(),
-                    cold.records[failed].h_columns,
-                    "first recovery must save its starting full-H block"
+                    repeat.records[failed].h_columns, first.records[failed].h_columns,
+                    "repeated recovery must retain identical H work"
                 );
             }
             if comm.rank() == 0 {
                 eprintln!(
                     "VERWARM {label} ranks={ranks} maps={} attempts={:?} verification_H={}->{} dE={delta:.17e} Ha max_drho={density_delta:.3e} Bohr^-3",
-                    warm.records.len(),
-                    attempts(&warm),
-                    cols(&cold),
-                    cols(&warm)
+                    repeat.records.len(),
+                    attempts(&repeat),
+                    cols(&first),
+                    cols(&repeat)
                 );
             }
-            warm.outcome.result.total_hartree()
+            repeat.outcome.result.total_hartree()
         });
         if let Some(e) = rank_energy {
             assert!((outputs[0] - e).abs() < 1e-12);
@@ -4614,15 +3838,9 @@ fn verify_warm_failed_recovery() {
 #[test]
 fn p4_start_switches_preserve_fields_and_ritz() {
     use dft_engine::refstart::{StartInput, start};
-    use dft_numerics::switches::{Id, RunConfig};
+    use dft_numerics::switches::RunConfig;
     // Default on since 2026-11-26 (dev08 P4 screen).
-    for (id, default_on) in [
-        (Id::REFSTART_PARTITION_CACHE, true),
-        (Id::REFSTART_CHOLESKY, true),
-        (Id::REFSTART_SPECIES_FILL, true),
-    ] {
-        assert_eq!(RunConfig::from_pairs(&[]).unwrap().on(id), default_on);
-    }
+
     for (shape, rows) in [
         [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
         [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
@@ -4651,13 +3869,8 @@ fn p4_start_switches_preserve_fields_and_ritz() {
         ];
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
-                let build = |fft, gram, shells, threads| {
-                    let config = RunConfig::from_pairs(&[
-                        ("refstart_partition_cache", fft),
-                        ("refstart_cholesky", gram),
-                        ("refstart_species_fill", shells),
-                    ])
-                    .unwrap();
+                let build = |_fft, _gram, _shells, threads| {
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let options = dft_engine::ScfOptions {
                         cutoff_hartree: if shape == 0 { 8. } else { 2. },
@@ -4840,14 +4053,8 @@ fn p4_start_verified_trajectories_and_dependent_rejection() {
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
                 let mut base = None;
-                for arm in ["off", "on"] {
-                    let config = RunConfig::from_pairs(&[
-                        ("refstart_cholesky", arm),
-                        ("refstart_species_fill", arm),
-                        ("refstart_partition_cache", arm),
-                        ("refscf_verify_energy", "off"),
-                    ])
-                    .unwrap();
+                for _arm in ["off", "on"] {
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let run = dft_engine::refscf::driver::run_with(
                         StartInput {
@@ -5158,10 +4365,9 @@ fn denskeep_delivery(label: &str, rows: [[f64; 3]; 3], nonlocal: bool) {
     };
     dft_mpi::simulate(2, |comm| {
         let run = |arm| {
-            let _scope =
-                RunConfig::from_pairs(&[("refscf_kept_hx", "on"), ("refscf_kept_recompute", arm)])
-                    .unwrap()
-                    .enter();
+            let _scope = RunConfig::from_pairs(&[("refscf_kept_recompute", arm)])
+                .unwrap()
+                .enter();
             driver::run_with(
                 refstart::StartInput {
                     cell: &cell,
@@ -5420,11 +4626,10 @@ fn nlcc_owned_start_matches_legacy_and_gaussian_fourier() {
             )
             .unwrap();
         let ionic = old.ionic_potential().clone();
-        for shells in ["off", "on"] {
+        for _shells in ["off", "on"] {
             for ranks in [1, 3, 8] {
                 dft_mpi::simulate(ranks, |comm| {
-                    let config =
-                        RunConfig::from_pairs(&[("refstart_local_shells", shells)]).unwrap();
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let mut state = dft_engine::refstart::start(
                         dft_engine::refstart::StartInput {
@@ -6031,7 +5236,7 @@ fn pbe_legacy_fixture(label: &str, cell: dft_geometry::Cell, one_atom: bool) {
             for threshold_ry in [1e-8, 1e-12] {
                 let mut full = None;
                 for lean in ["off", "on"] {
-                    let config = RunConfig::from_pairs(&[("refscf_lean_energy", lean)]).unwrap();
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let run = dft_engine::refscf::driver::run_with(
                         StartInput {
@@ -6245,14 +5450,9 @@ fn memory_trim_case(name: &str, rows: [[f64; 3]; 3], nonlocal: bool, ranks: usiz
     }];
     dft_mpi::simulate(ranks, |comm| {
         let run = |arm, threads| {
-            let _scope = RunConfig::from_pairs(&[
-                ("refscf_memory_trim", arm),
-                ("refscf_kept_hx", "on"),
-                ("refscf_verify_warm", "on"),
-                ("refscf_verify_energy", "off"),
-            ])
-            .unwrap()
-            .enter();
+            let _scope = RunConfig::from_pairs(&[("refscf_memory_trim", arm)])
+                .unwrap()
+                .enter();
             let options = ScfOptions {
                 cutoff_hartree: 1.,
                 bands: Some(3),
@@ -6550,7 +5750,7 @@ fn pbe_nlcc_delivered_fixture(nonlocal: bool) {
             for threshold_ry in [1e-8, 1e-12] {
                 let mut full = None;
                 for lean in ["off", "on"] {
-                    let config = RunConfig::from_pairs(&[("refscf_lean_energy", lean)]).unwrap();
+                    let config = RunConfig::from_pairs(&[]).unwrap();
                     let _scope = config.enter();
                     let run = dft_engine::refscf::driver::run_with(
                         StartInput {
@@ -6740,8 +5940,7 @@ fn g3_complex_k_smoke_and_kept_state() {
     dft_mpi::simulate(3, |comm| {
         let mut previous: Option<f64> = None;
         for kept in ["off", "on"] {
-            let config =
-                dft_numerics::switches::RunConfig::from_pairs(&[("refscf_kept_hx", kept)]).unwrap();
+            let config = dft_numerics::switches::RunConfig::from_pairs(&[]).unwrap();
             let _scope = config.enter();
             let run = dft_engine::refscf::k_driver::run_with(
                 StartInput {
@@ -8443,12 +7642,7 @@ fn g4c_pbe_matrix(modes: &[&str]) {
         weight: 1.,
     }];
     // Pin the qualified G4B combination to isolate PBE/NLCC coverage from routing defaults.
-    let config = RunConfig::from_pairs(&[
-        ("refscf_spin_fd_moment", "on"),
-        ("refscf_spin_stiffness", "on"),
-        ("refscf_history_conditioning", "on"),
-    ])
-    .unwrap();
+    let config = RunConfig::from_pairs(&[("refscf_spin_fd_moment", "on")]).unwrap();
     let _scope = config.enter();
     let mut failures = Vec::new();
     for core in [false, true] {
@@ -9131,4 +8325,57 @@ fn g4f_potential() -> dft_upf::Pseudopotential {
         array(&base.local_hartree().iter().zip(r).map(|(v,r)|2.*(v - 10. * (-r*r).exp())).collect::<Vec<_>>()),
         sample(&|r|4.*PI*r*r*(1./PI).powf(1.5)*(-r*r).exp()),
         sample(&|r|r*(-0.6*r*r).exp()), sample(&|r|r*r*(-0.5*r*r).exp()))).unwrap()
+}
+
+fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
+    let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
+    let pass = attempts.last().unwrap();
+    assert!(pass.passed);
+    assert_eq!(pass.iteration, run.records.len());
+    assert_eq!(
+        run.outcome.result.total_hartree().to_bits(),
+        run.records.last().unwrap().energy.total_hartree().to_bits()
+    );
+    for attempt in attempts {
+        assert_eq!(attempt.threshold_ha, 5e-9);
+        assert_eq!(
+            attempt.passed,
+            attempt.coulomb_error_ha.is_finite()
+                && attempt.coulomb_error_ha < 5e-9
+                && attempt
+                    .residual_bound_ha
+                    .is_none_or(|b| b.is_finite() && b < 5e-9)
+        );
+        let map = &run.records[attempt.iteration - 1];
+        assert_eq!(
+            attempt.eigen_tolerance_ha,
+            next_ethr_ry(
+                map.ethr_ry,
+                map.dr2_ry,
+                run.outcome.result.occupations.iter().sum()
+            ) / 2.
+        );
+        if let Some(c) = &map.verification_cost {
+            assert_eq!(c.actual_error_ha, Some(attempt.coulomb_error_ha));
+        }
+    }
+    let mut skipped_previous_candidate = false;
+    for r in &run.records {
+        if let Some(c) = &r.verification_cost {
+            if r.dr2_ry < 1e-8 {
+                assert!(!(skipped_previous_candidate && c.skipped));
+                skipped_previous_candidate = c.skipped;
+            }
+            if c.skipped {
+                assert!(c.gate_enabled && c.predicted_error_ha.unwrap() >= 5e-9);
+                assert!(
+                    c.actual_error_ha.is_none()
+                        && r.verification_start_s.is_none()
+                        && r.verification_end_s.is_none()
+                );
+                assert!(r.verification_calls.is_empty());
+            }
+        }
+    }
+    stop_to_verified_clocks(run);
 }

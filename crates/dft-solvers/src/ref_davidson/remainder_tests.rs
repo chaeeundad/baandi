@@ -50,21 +50,8 @@ impl DistributedRealOperator for Operator {
         Ok(())
     }
 }
-fn config(mask: usize) -> RunConfig {
-    RunConfig::from_pairs(&[
-        ("ref_dav_triangle", if mask & 1 != 0 { "on" } else { "off" }),
-        (
-            "ref_dav_stack_rotate",
-            if mask & 2 != 0 { "on" } else { "off" },
-        ),
-        (
-            "ref_dav_setup_fused",
-            if mask & 4 != 0 { "on" } else { "off" },
-        ),
-        // Count cold allocation traffic consistently in each arm.
-        ("ref_dav_reuse_rows", "off"),
-    ])
-    .unwrap()
+fn config(_mask: usize) -> RunConfig {
+    RunConfig::from_pairs(&[]).unwrap()
 }
 fn decisions(s: &Solution) -> String {
     let r = &s.record;
@@ -167,7 +154,7 @@ fn p4_arms_preserve_decisions_h_columns_repeats_and_threads() {
                         let _g = config(0).enter();
                         solve(c, &mut op, &x, &diag, o).unwrap()
                     };
-                    let aw = work::take_solves().pop().unwrap();
+                    let _aw = work::take_solves().pop().unwrap();
                     for mask in [1, 2, 4, 7] {
                         let _g = config(mask).enter();
                         let b = solve(c, &mut op, &x, &diag, o).unwrap();
@@ -183,38 +170,13 @@ fn p4_arms_preserve_decisions_h_columns_repeats_and_threads() {
                             local_delta = local_delta.max((a - b).abs());
                             assert!((a - b).abs() < 1e-10, "eigenvalue delta in Ha");
                         }
-                        if mask == 4 {
-                            assert_repeat(&a, &b);
-                        }
-                        if mask & 2 != 0 {
-                            for stage in [Stage::Restart, Stage::Return] {
-                                let a = aw.stages[stage as usize];
-                                let b = bw.stages[stage as usize];
-                                assert_eq!(a.gemm_flops, b.gemm_flops);
-                                assert_eq!(a.gemm_calls, 2 * b.gemm_calls);
-                            }
-                        }
-                        let triangle_saved: u64 = b
-                            .record
-                            .setup
-                            .gemms
-                            .iter()
-                            .chain(b.record.iterations.iter().flat_map(|r| &r.gemms))
-                            .filter(|g| g.stage.ends_with("_gemmt"))
-                            .map(|g| g.k as u64 * g.m as u64 * g.m.saturating_sub(1) as u64)
-                            .sum();
-                        assert_eq!(a.record.gemm_flops - b.record.gemm_flops, triangle_saved);
+
+                        assert_eq!(a.record.gemm_flops, b.record.gemm_flops);
                         assert_eq!(
                             bw.stages.iter().map(|s| s.gemm_flops).sum::<u64>(),
                             b.record.gemm_flops
                         );
-                        if mask == 4 {
-                            assert_eq!(
-                                aw.stages[Stage::Setup as usize].streamed_bytes
-                                    - bw.stages[Stage::Setup as usize].streamed_bytes,
-                                8 * (rows * n + rows) as u64
-                            );
-                        }
+
                         let again = solve(c, &mut op, &x, &diag, o).unwrap();
                         assert_repeat(&b, &again);
                         work::take_solves();
@@ -260,6 +222,7 @@ fn p4_setup_kept_hx_and_collective_invalid_inputs() {
             o.profile = true;
             o.return_hx = true;
             work::take_solves();
+            release_row_cache();
             let a = {
                 let _g = config(0).enter();
                 solve_with_initial_hx(c, &mut op, &x, &diag, o, Some(&hx)).unwrap()
@@ -272,7 +235,7 @@ fn p4_setup_kept_hx_and_collective_invalid_inputs() {
             assert_eq!(
                 aw.stages[Stage::Setup as usize].streamed_bytes
                     - bw.stages[Stage::Setup as usize].streamed_bytes,
-                8 * (2 * rows * 3 + rows) as u64
+                16 * (rows * (6 + 3)) as u64
             );
             for field in 0..4 {
                 let mut badx = x.clone();
@@ -305,8 +268,7 @@ fn p4_upper_border_matches_independent_dot_and_ignores_stale_lower() {
             threads: 1,
         };
         dft_mpi::simulate(1, |c| {
-            let mut w = Workspace::new(&op, 3, 7, true).unwrap();
-            w.triangle = true;
+            let mut w = Workspace::new(&op, 3, 7).unwrap();
             for j in 0..7 {
                 for i in 0..rows {
                     w.v[(i, j)] = ((i + 3 * j) % 7) as f64 - 3.;
@@ -338,57 +300,5 @@ fn p4_upper_border_matches_independent_dot_and_ignores_stale_lower() {
                 }
             }
         });
-    }
-}
-
-#[test]
-fn p4_stacked_rotation_scalar_oracle_traffic_and_x_only_return() {
-    let _g = config(2).enter();
-    for rows in [0, 1, 257] {
-        let op = Operator {
-            dim: rows.max(1),
-            rows: (0..rows).collect(),
-            clustered: false,
-            threads: 1,
-        };
-        let (m, n) = (5, 3);
-        let mut w = Workspace::new(&op, n, 7, true).unwrap();
-        w.v.reshape_within_storage(rows, m).unwrap();
-        w.hv.reshape_within_storage(rows, m).unwrap();
-        w.lean.c.reshape_within_storage(m, n).unwrap();
-        for j in 0..m {
-            for i in 0..rows {
-                w.v[(i, j)] = ((i + 3 * j) % 7) as f64 - 3.;
-                w.hv[(i, j)] = ((2 * i + j) % 5) as f64 - 2.;
-            }
-        }
-        for j in 0..n {
-            for i in 0..m {
-                w.lean.c[(i, j)] = ((i + j) % 3) as f64 - 1.;
-            }
-        }
-        work::take_solves();
-        let scope = work::Scope::new(true, 1, 7);
-        let mut r = Record::new(1, 7, true, ReducedPlacement::Root);
-        w.finish(m, true, &mut r.finish, true).unwrap();
-        scope.finish();
-        let counted = work::take_solves().pop().unwrap().stages[Stage::Return as usize];
-        assert_eq!(counted.gemm_calls, 1);
-        assert_eq!(counted.gemm_flops, 4 * (rows * m * n) as u64);
-        assert_eq!(counted.streamed_bytes, 32 * (rows * (m + n)) as u64);
-        for j in 0..n {
-            for i in 0..rows {
-                let x: f64 = (0..m).map(|q| w.v[(i, q)] * w.lean.c[(q, j)]).sum();
-                let hx: f64 = (0..m).map(|q| w.hv[(i, q)] * w.lean.c[(q, j)]).sum();
-                assert_eq!(w.x[(i, j)], x);
-                assert_eq!(w.hx[(i, j)], hx);
-            }
-        }
-        w.hx.as_mut_slice().fill(123.);
-        let mut r = Record::new(1, 7, true, ReducedPlacement::Root);
-        w.finish(m, false, &mut r.finish, true).unwrap();
-        assert_eq!(r.finish.gemms.len(), 1);
-        assert_eq!(r.finish.gemms[0].stage, "return_x");
-        assert!(w.hx.as_slice().iter().all(|v| *v == 123.));
     }
 }

@@ -86,7 +86,6 @@ pub(super) fn normalize<C: Collective>(
     sums: &mut [f64],
     m: usize,
     cap: usize,
-    fuse: bool,
     r: &mut Iteration,
     profile: bool,
 ) -> Result<Option<usize>, SolverError> {
@@ -96,7 +95,7 @@ pub(super) fn normalize<C: Collective>(
     c.tree_sum_f64(&norms[..k], &mut sums[..k]).map_err(error)?;
     // Capacity-exhaustion repair must see the original basis. Only stage an
     // append when the whole uncompressed block fits (the ordinary path).
-    let stage = fuse && m + k <= cap;
+    let stage = m + k <= cap;
     if stage {
         v.reshape_within_storage(rows, m + k)?;
     }
@@ -204,7 +203,7 @@ mod tests {
     fn normalized_compaction_stages_only_retained_columns() {
         use crate::ref_davidson::{Record, ReducedPlacement};
         dft_mpi::simulate(1, |c| {
-            for fuse in [false, true] {
+            for cap in [4, 5] {
                 let mut e = RealMatrix::new(2, 3, vec![0., 0., 3., 4., 0., 2.]).unwrap();
                 let mut v = RealMatrix::new(2, 5, vec![123.; 10]).unwrap();
                 let mut sums = [0.; 3];
@@ -216,17 +215,16 @@ mod tests {
                     &[0., 25., 4.],
                     &mut sums,
                     2,
-                    5,
-                    fuse,
+                    cap,
                     &mut r.setup,
                     false,
                 )
                 .unwrap();
                 assert_eq!(e.as_slice(), &[0.6, 0.8, 0., 1.]);
                 assert_eq!(r.setup.dropped_corrections, 1);
-                assert_eq!(staged, fuse.then_some(2));
+                assert_eq!(staged, (cap == 5).then_some(2));
                 assert_eq!(&v.as_slice()[..4], &[123.; 4]);
-                if fuse {
+                if cap == 5 {
                     assert_eq!(&v.as_slice()[4..], e.as_slice());
                 }
             }

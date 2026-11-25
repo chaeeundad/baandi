@@ -45,7 +45,7 @@ impl GammaRealDiagnostics {
 /// the key guards scratch sizing and solver options. Per-iteration tolerances
 /// and certification policy are deliberately supplied afresh, not cached.
 pub(crate) struct RealSolveState {
-    /// Serial real Gamma operator. ISSUE-20 (`BAANDI_M2_LAZY_SERIAL=on`): None
+    /// Serial real Gamma operator. ISSUE-20 (frozen lazy construction): None
     /// on the M2 path until a fallback applies it (`ensure_serial_op`);
     /// always Some otherwise.
     op: Option<Operator>,
@@ -77,50 +77,8 @@ impl RealSolveState {
     }
 }
 
-/// BREAKTHROUGH-4: block capacity of the serial real Hamiltonian on the M2
-/// path with `BAANDI_M2_LIGHT_STATE=on` (one pair plan; it is never applied).
-const LIGHT_CAPACITY: usize = 2;
-/// `BAANDI_M2_LIGHT_STATE=on|off` (default off; per-thread override
-/// `set_m2_light_state_override`): build the replicated serial real
-/// Hamiltonian of an M2 solve state with the minimal block capacity.
-/// Bit-identical (that operator only supplies the ORC half sphere there).
-pub(crate) fn m2_light_state() -> bool {
-    M2_LIGHT_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
-        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_LIGHT_STATE))
-    })
-}
 thread_local! {
-    static M2_LIGHT_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-}
-/// Override `BAANDI_M2_LIGHT_STATE` for the calling thread (simulated ranks
-/// in tests); `None` restores the environment.
-pub fn set_m2_light_state_override(value: Option<bool>) {
-    M2_LIGHT_OVERRIDE.with(|o| o.set(value));
-}
-
-/// ISSUE-20 `BAANDI_M2_LAZY_SERIAL=on|off` (default off; per-thread override
-/// `set_m2_lazy_serial_override`): an M2 solve state owns only the ORC
-/// half-sphere descriptor and the distributed operator; the serial real
-/// Hamiltonian is built only if a fallback applies it. Bit-identical.
-pub(crate) fn m2_lazy_serial() -> bool {
-    M2_LAZY_SERIAL_OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| {
-            static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            *ON.get_or_init(|| {
-                dft_numerics::switches::on(dft_numerics::switches::Id::M2_LAZY_SERIAL)
-            })
-        })
-}
-thread_local! {
-    static M2_LAZY_SERIAL_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     static M2_DIST_DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-/// Override `BAANDI_M2_LAZY_SERIAL` for the calling thread (simulated ranks in
-/// tests); `None` restores the environment.
-pub fn set_m2_lazy_serial_override(value: Option<bool>) {
-    M2_LAZY_SERIAL_OVERRIDE.with(|o| o.set(value));
 }
 /// ISSUE-20 test hook: treat the distributed operator of the calling thread
 /// as unavailable (its construction "fails"), so that the M1 fallback, and
@@ -135,14 +93,6 @@ pub fn set_m2_dist_disabled_for_tests(value: bool) {
 use crate::refscf::lazy::assemble_lazy_block;
 pub use crate::refscf::lazy::{LazyOrbitals, set_delivered_orbitals};
 
-/// NL-ENERGY-REAL (opt-in `BAANDI_NL_ENERGY_REAL=on`, default off; rounding
-/// class): on the real Gamma path the audit's per-band nonlocal energies come
-/// from one real projector product of the returned ORC vectors (P^T X by the
-/// nonlocal GEMM) instead of the complex projector sums over the full sphere.
-pub(crate) fn nl_energy_real() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::NL_ENERGY_REAL))
-}
 /// C3a: audits of the real nonlocal energy that read the solver's kept
 /// projections (index 0) or formed P^T X directly (index 1).
 static NL_AUDITS: [std::sync::atomic::AtomicU64; 2] =
@@ -195,7 +145,7 @@ impl RealLinearOperator for Operator {
             .apply_block(x, y)
             .map_err(|e| SolverError::Application(e.to_string()))
     }
-    // B6 hooks (used by the solver only with `BAANDI_B6=on`).
+    // Cached-projector certificate hooks.
     fn projector_count(&self) -> usize {
         self.h.borrow().projector_count()
     }
@@ -367,12 +317,6 @@ fn ensure_state_with(
     Ok(())
 }
 
-/// ATOMIC-REAL (opt-in `BAANDI_ATOMIC_REAL=on`, default off; rounding class).
-pub(crate) fn atomic_real() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::ATOMIC_REAL))
-}
-
 /// ATOMIC-REAL: H Q for the atomic-start Ritz step through the real Gamma
 /// Hamiltonian (pair FFTs, real projector GEMM) instead of the complex apply.
 /// The state is built exactly as `solve_real_gamma` builds it, so the first
@@ -493,27 +437,15 @@ pub(crate) fn solve_real_gamma(
     }
     let capacity = real_capacity(options, bands, kinetic.len());
     let t_state = dft_numerics::stage_clock::start();
-    // BREAKTHROUGH-4 (`BAANDI_M2_LIGHT_STATE=on`): on the M2 path the serial
-    // real Hamiltonian only supplies its half sphere (ORC packing) and is
-    // never applied, so it is built with the minimal block capacity (one pair
-    // plan instead of capacity / 2 full-grid pair plans and scratch per rank).
-    // Replicated condition; the full operator is rebuilt below if the
-    // distributed operator cannot be built (the M1 fallback applies it).
-    // ISSUE-20 (`BAANDI_M2_LAZY_SERIAL=on`): on the M2 path the state holds
+    // ISSUE-20 (frozen lazy construction): on the M2 path the state holds
     // only the half-sphere descriptor; the serial operator is built below
     // only when the distributed operator is unavailable. Replicated condition.
-    let lazy_serial = comm.is_some() && crate::parallel::m2_enabled() && m2_lazy_serial();
-    let light = !lazy_serial && comm.is_some() && crate::parallel::m2_enabled() && m2_light_state();
-    let state_capacity = if light {
-        LIGHT_CAPACITY.min(capacity)
-    } else {
-        capacity
-    };
+    let lazy_serial = comm.is_some() && crate::parallel::m2_enabled();
     let ensured = ensure_state_with(
         hamiltonian,
         basis,
         bands,
-        state_capacity,
+        capacity,
         options,
         &pool,
         state,
@@ -579,26 +511,7 @@ pub(crate) fn solve_real_gamma(
             state.m2_density = None;
         }
     }
-    if light && state.dist.is_none() {
-        // The M1 fallback applies the serial operator: build it in full.
-        let mut full = None;
-        if let Err(e) = ensure_state(
-            hamiltonian,
-            basis,
-            bands,
-            capacity,
-            options,
-            &pool,
-            &mut full,
-        ) {
-            diagnostics.fallback(option, format!("real Hamiltonian construction: {e}"))?;
-            return Ok(None);
-        }
-        let full = full.expect("built above");
-        state.op = full.op;
-        state.half = full.half;
-        state.key = full.key;
-    }
+
     if state.dist.is_none()
         && let Err(e) = ensure_serial_op(hamiltonian, basis, capacity, state)
     {
@@ -945,7 +858,6 @@ pub(crate) fn solve_real_gamma(
     // of exactly these vectors in the workspace (same operator, this solve);
     // otherwise the projector product is formed here.
     if comm.is_none()
-        && nl_energy_real()
         && let Some(op) = op_opt
     {
         state.nl_values.resize(bands, 0.0);

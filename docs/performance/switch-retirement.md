@@ -253,3 +253,167 @@ Both files contain exactly the three cases below. The final release binary match
 | strict oracle | k222 | -7.831230057121148 | 10 | bit-identical |
 
 Baseline JSON, identity goldens, legacy drivers and README figures remain unchanged. No timing claim is inferred from concurrent local builds or baseline checks. The complete changes are left uncommitted for review.
+
+## R11b: freeze oracle-only switches (D3)
+
+Source/recreation commit: `1535810f4d6abffbe36483dd82c174ece6664b61`. Reader locations below are pre-change.
+The manifest shrinks from **121 to 75 switches** (46 retired). Each candidate was
+searched with `git grep Id::NAME`, followed by bare-name/string searches and a
+caller audit. The serial real Gamma operator, legacy real/distributed Davidson
+solvers and Pulay mixer are used by the oracle; reference Davidson/RMM share
+traits and selected factorization/panel helpers, which remain. No reference
+arithmetic, baseline, golden, or tolerance is changed. This is retirement,
+not a performance adoption or a QE comparison.
+
+| Retired switch | Frozen default | Readers at source commit | Decision |
+| --- | --- | --- | --- |
+| `INIT_OWNED_STATES` | on | `crates/dft-engine/src/oracle/scf.rs:775,801` | Freeze default; delete switch and alternative selection. |
+| `CERT_SCREEN` | on | `crates/dft-engine/src/oracle/session.rs:1565` | Freeze default; delete switch and alternative selection. |
+| `POTENTIAL_REUSE` | on | `crates/dft-engine/src/oracle/session.rs:1570` | Freeze default; delete switch and alternative selection. |
+| `MIX_GROWTH_RESET` | None | `crates/dft-engine/src/oracle/session.rs:1571` | Freeze default; delete switch and alternative selection. |
+| `MIX_CELL_KERKER` | off | `crates/dft-engine/src/oracle/scf.rs:689,700,706` | Freeze default; delete switch and alternative selection. |
+| `EMPTY_LOOSE` | on | `crates/dft-engine/src/oracle/scf.rs:2835` | Freeze default; delete switch and alternative selection. |
+| `BUFFER_TOL` | 1e-3 | `crates/dft-engine/src/oracle/scf.rs:2845` | Freeze default; delete switch and alternative selection. |
+| `DENSITY_PAIR` | on | `crates/dft-engine/src/oracle/band_density.rs:17` | Freeze default; delete switch and alternative selection. |
+| `DENSITY_REDUCE` | on | `crates/dft-engine/src/oracle/band_density.rs:26` | Freeze default; delete switch and alternative selection. |
+| `NL_ENERGY_REAL` | on | `crates/dft-engine/src/oracle/gamma_real.rs:144` | Freeze default; delete switch and alternative selection. |
+| `ATOMIC_LOCAL_BLOCK` | on | `crates/dft-engine/src/oracle/atomic_start.rs:158` | Freeze default; delete switch and alternative selection. |
+| `ATOMIC_REAL` | on | `crates/dft-engine/src/oracle/gamma_real.rs:373` | Freeze default; delete switch and alternative selection. |
+| `PHASE_THREADS` | on | `crates/dft-engine/src/oracle/collinear.rs:285`; `crates/dft-engine/src/oracle/scf.rs:1815` | Freeze default; delete switch and alternative selection. |
+| `MIX_COULOMB_GUARD` | off | `crates/dft-engine/src/oracle/session.rs:310,364` | Freeze default; delete switch and alternative selection. |
+| `M2_LIGHT_STATE` | on | `crates/dft-engine/src/oracle/gamma_real.rs:90` | Freeze default; delete switch and alternative selection. |
+| `M2_LAZY_SERIAL` | on | `crates/dft-engine/src/oracle/gamma_real.rs:112` | Freeze default; delete switch and alternative selection. |
+| `IMPORT_CHECK` | split | `crates/dft-engine/src/oracle/session.rs:1564` | Freeze default; delete switch and alternative selection. |
+| `M2_DENSITY` | fused | No production reader (orphan after R10). | Freeze default; delete switch and alternative selection. |
+| `M2_ORTHO` | serial | `crates/dft-solvers/src/distributed_davidson.rs:813` | Freeze default; delete switch and alternative selection. |
+| `M2_LEAN` | on | `crates/dft-solvers/src/distributed_davidson.rs:816` | Freeze default; delete switch and alternative selection. |
+| `M2_EIGEN` | replicated | `crates/dft-solvers/src/distributed_davidson.rs:817` | Freeze default; delete switch and alternative selection. |
+| `M2_B5` | off | `crates/dft-solvers/src/distributed_davidson.rs:818` | Freeze default; delete switch and alternative selection. |
+| `M2_WORKSPACE` | on | `crates/dft-solvers/src/distributed_davidson.rs:819` | Freeze default; delete switch and alternative selection. |
+| `M2_SELECTED_ROOTS` | on | `crates/dft-solvers/src/distributed_davidson.rs:820` | Freeze default; delete switch and alternative selection. |
+| `M2_PANEL_GS` | fused | `crates/dft-solvers/src/distributed_davidson.rs:821` | Freeze default; delete switch and alternative selection. |
+| `M2_START` | gram | `crates/dft-solvers/src/distributed_davidson.rs:873` | Freeze default; delete switch and alternative selection. |
+| `M2_LEAN_ALGEBRA` | on | `crates/dft-engine/src/oracle/snapshot.rs:389`; `crates/dft-solvers/src/distributed_davidson.rs:826` | Freeze default; delete switch and alternative selection. |
+| `M2_LAYOUT_CACHE` | off | `crates/dft-solvers/src/distributed_davidson.rs:120` | Freeze default; delete switch and alternative selection. |
+| `B1_NARROW` | off | `crates/dft-solvers/src/davidson_stages.rs:249` | Freeze default; delete switch and alternative selection. |
+| `B1_MARGIN` | 0.5 | `crates/dft-solvers/src/davidson_stages.rs:250` | Freeze default; delete switch and alternative selection. |
+| `B1_ROWS` | None | `crates/dft-solvers/src/davidson_stages.rs:251` | Freeze default; delete switch and alternative selection. |
+| `B6` | on | `crates/dft-solvers/src/davidson_stages.rs:268` | Freeze default; delete switch and alternative selection. |
+| `SECOND_VECTOR` | off | `crates/dft-solvers/src/real_davidson.rs:1326` | Freeze default; delete switch and alternative selection. |
+| `MGS` | blocked / classic (MKL / pure) | `crates/dft-solvers/src/distributed_davidson.rs:806`; `crates/dft-solvers/src/real_davidson.rs:2142` | Freeze default; delete switch and alternative selection. |
+| `ORTHO_BLOCK` | off / on (MKL / pure) | `crates/dft-solvers/src/distributed_davidson.rs:803`; `crates/dft-solvers/src/real_davidson.rs:2149` | Freeze default; delete switch and alternative selection. |
+| `WIDE_DOT` | on | `crates/dft-solvers/src/real_davidson.rs:2147` | Freeze default; delete switch and alternative selection. |
+| `PROJECT_WIDE` | off | `crates/dft-solvers/src/real_davidson.rs:2151,3126` | Freeze default; delete switch and alternative selection. |
+| `DAVIDSON_ROTATE_COLUMNS` | off | `crates/dft-solvers/src/real_davidson.rs:1894` | Freeze default; delete switch and alternative selection. |
+| `DAVIDSON_UPPER_BORDER` | off | `crates/dft-solvers/src/real_davidson.rs:1692` | Freeze default; delete switch and alternative selection. |
+| `LEAN_BORDER` | separate | `crates/dft-solvers/src/davidson_stages.rs:274` | Freeze default; delete switch and alternative selection. |
+| `DAVIDSON_PACKED_REDUCE` | off | `crates/dft-solvers/src/distributed_davidson/workspace/lean.rs:350` | Freeze default; delete switch and alternative selection. |
+| `MIX_INCREMENTAL` | on | `crates/dft-solvers/src/mixing.rs:301` | Freeze default; delete switch and alternative selection. |
+| `MKL_NONLOCAL` | on | `crates/dft-physics/src/real_gamma.rs:216` | Freeze default; delete switch and alternative selection. |
+| `APPLY_LEAN` | on | `crates/dft-physics/src/real_gamma.rs:614` | Freeze default; delete switch and alternative selection. |
+| `HAPPLY_OVERLAP` | off | `crates/dft-physics/src/real_gamma.rs:616` | Freeze default; delete switch and alternative selection. |
+| `HAPPLY_FOLD` | off | `crates/dft-physics/src/real_gamma.rs:622` | Freeze default; delete switch and alternative selection. |
+
+### Retained boundaries
+
+- CLI readers (including reporting/validation) retain `EIGEN_FACTOR`, `MPI_M2`,
+  `M2_BATCH`, `M2_CAPACITY`, `M2_MIX`, `B1`, `B1_SKETCH`, `B5`, `RITZ_FUSED`,
+  `NARROW_PROJ`, `NARROW_REDUCED`, `ORTHO`, `DAVIDSON`, `LEAN_PROJ_CACHE`,
+  `RESTART_KEEP`, and `EWALD_CACHE`. Their call sites are outside this ticket;
+  deleting metadata readers is not inferred to be authorized.
+- `M2_DGEMM`, `M2_FFT`, `M2_STICKS`, FFT/nonlocal shared-kernel switches,
+  `NL_ENERGY`, `ENERGY_IDENTITY`, `STANDARD_RESIDUAL_GUARD`, shared parallel/grid
+  settings and reference-driver switches retain non-oracle consumers.
+- Profiling/diagnostics remain under R11(e), including `DAVIDSON_PROFILE`,
+  `DAVIDSON_STAGES`, `PHASE_WAIT`, `SNAPSHOT_DIR`, `INIT_PROFILE`, `GLUE_PROFILE`,
+  and the shared timing/infrastructure controls. `REFERENCE_STRICT` remains the
+  oracle routing selector.
+- `M2_DENSITY` had no reader and is removed as an orphan. Backend-dependent MGS
+  and ORTHO_BLOCK defaults stay backend-dependent; no MKL/pure arithmetic is
+  interchanged. Numerical eligibility, rank/Gram, missing-operator and
+  certification fallbacks remain.
+
+### Deleted code and test migration
+
+The allocating distributed Davidson solver and its orthogonalization helpers,
+second-vector corrections, alternative distributed root/bordered solves, packed
+border reduction, fused lean border, serial H-apply overlap/fold/rollback,
+non-incremental Pulay update, geometric mixer experiment and serial/distributed
+Coulomb guards are removed. Shared solver traits, factorization/panel kernels and the
+legacy default lean/workspace paths remain. Historical reporting counters remain
+where CLI consumers require them.
+
+Tests of deleted alternatives are retired; default-path shape, residual,
+Hermiticity, thread/rank independence, dense-reference and identity coverage is
+retained. B6's plain certificate comparison uses an operator without projector
+cache capability, exercising the real default fallback. Serial orthonormality
+checking is retained only as an independent test oracle for the split checker.
+`b1_narrow_margin.rs` is a documented empty harness because its explicit Cargo
+target declaration is outside the owned files.
+
+### R11b verification
+
+Local checks of the 46-switch patch pass. The broader **untunable oracle** goal
+is not claimed complete: the 16 CLI-read switches listed above remain, including
+legacy-only arithmetic controls (`B1`, `B5`, `DAVIDSON`, `ORTHO`, etc.). Their
+non-oracle readers are largely reporting, not reference arithmetic. Removing
+them requires extending ownership to CLI source (`run.rs`, plus the
+`EIGEN_FACTOR` pin in `run_config.rs`); `MPI_M2` also has its selector in
+`dft-engine/src/parallel.rs`. These files are not in this ticket's `OWNED_FILES`.
+The remaining boundary needs the orchestrator's scope decision; it is not a
+claim that reporting readers make an oracle tunable by design.
+
+| Measure (tracked Rust files throughout the repository) | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Manifest switches | 121 | 75 | -46 |
+| Rust source lines (423 tracked `.rs` files) | 197237 | 192409 | -4828 |
+| Literal `#[test]` annotations | 1182 | 1158 | -24 |
+
+The following commands exited **0**. Logs and full recorded benchmark JSON are
+under `/tmp/r11b-evidence/` (local scratch, not portable reference evidence).
+
+```sh
+cargo check --workspace --tests
+cargo check -p dft-engine --no-default-features
+cargo check -p dft-solvers -p dft-numerics -p dft-mkl --tests --features dft-numerics/mkl
+CHECK_SCCACHE=0 BAANDI_TEST_TMP=/tmp/r11b-evidence scripts/check.sh
+cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --test oracle_identity --test reference_identity
+cargo build --release -p dft-cli
+BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 1 --baseline docs/performance/baseline-oracle.json --require-identical --record /tmp/r11b-evidence/oracle-final.json
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 1 --baseline docs/performance/baseline-reference.json --require-identical --record /tmp/r11b-evidence/reference-final.json
+python3 -I scripts/make_readme_figures.py
+python3 -I scripts/tests/test_readme_figures.py
+git diff --check
+```
+
+Full gate: **930 passed, 0 failed, 217 ignored, 103 binaries**, with build, test,
+fmt, clippy, production-check and production-clippy PASS. `oracle_identity` and
+`reference_identity` each pass their one unchanged golden test. README generation
+has no diff; all nine freshness tests pass. Early checks exposed obsolete
+alternative-arm tests/pins and compiler leftovers; these were retired or migrated
+to default-path/independent-reference coverage before the successful full gate.
+No tolerance or golden was relaxed. The sandbox denies `ps` and `nice` load/priority
+probes; the gate still runs all tests and checks. MKL is compile-checked only.
+
+The benchmark command checks density identity and energy tolerance. An additional
+Python assertion checked exact equality of **all seven** recorded fields for
+all six path/case pairs: energy bits, density SHA-256, SCF iterations,
+operator applications, Davidson iterations, certificate applications and
+certificate iterations. All agree. UPF SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+
+| Path | Case | Energy (Ha) | SCF iterations | Delta energy (Ha) | Density |
+| --- | --- | ---: | ---: | ---: | --- |
+| oracle | gamma | -7.295530468210924 | 8 | 0 | bit-identical |
+| oracle | k222s | -7.91942341246909 | 10 | 0 | bit-identical |
+| oracle | k222 | -7.831230057121148 | 10 | 0 | bit-identical |
+| reference | gamma | -7.295530466374794 | 7 | 0 | bit-identical |
+| reference | k222s | -7.919423412321121 | 7 | 0 | bit-identical |
+| reference | k222 | -7.831230055901806 | 7 | 0 | bit-identical |
+
+These are BAANDI regression baselines, not QE reference runs or performance
+results. Local synthetic fixtures include simulated ranks; real MPI/MKL execution
+and broader dev08 RG-ORC evidence are not claimed. Baseline JSON, goldens, README
+figures and non-owned artifact/dashboard files remain unchanged. Changes are
+uncommitted for review.

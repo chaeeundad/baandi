@@ -29,7 +29,7 @@ fn run(dir: &Path, name: &str, tables: &str, env: &[(&str, &str)]) -> Run {
         .current_dir(dir)
         .args(["run", &input]);
     for name in [
-        "BAANDI_CERT_SCREEN",
+        "BAANDI_EWALD_CACHE",
         "BAANDI_PHASE_PROFILE",
         "BAANDI_M2_GRID",
     ] {
@@ -77,7 +77,7 @@ fn input_tables_precedence_manifest_and_run_block() {
         format!("{:x}", Sha256::digest(&exe))
     );
     assert!(r["counters"]["session_steps"].as_u64().unwrap() > 0);
-    let sw = &b["scf"]["switches"]["BAANDI_CERT_SCREEN"];
+    let sw = &b["scf"]["switches"]["BAANDI_EWALD_CACHE"];
     assert_eq!(sw["source"], "default");
     assert_eq!(sw["consulted"], true);
     assert_eq!(sw["requested"], Value::Null);
@@ -88,14 +88,14 @@ fn input_tables_precedence_manifest_and_run_block() {
     let same = run(
         &dir,
         "explicit_defaults",
-        "[performance]\ncert_screen='on'\nm2_grid=true\n",
+        "[performance]\newald_cache='on'\nm2_grid=true\n",
         &[],
     );
     let s = ok(&same);
     assert_eq!(same.density_sha, base.density_sha);
     assert_eq!(s["total_energy"]["ha"], b["total_energy"]["ha"]);
     assert_eq!(
-        s["scf"]["switches"]["BAANDI_CERT_SCREEN"]["source"],
+        s["scf"]["switches"]["BAANDI_EWALD_CACHE"]["source"],
         "input"
     );
     assert_eq!(
@@ -108,11 +108,11 @@ fn input_tables_precedence_manifest_and_run_block() {
     let fft = run(
         &dir,
         "off",
-        "[performance]\ncert_screen='off'\n[profile]\nphase_profile=true\n",
+        "[performance]\newald_cache='off'\n[profile]\nphase_profile=true\n",
         &[],
     );
     let f = ok(&fft);
-    let sw = &f["scf"]["switches"]["BAANDI_CERT_SCREEN"];
+    let sw = &f["scf"]["switches"]["BAANDI_EWALD_CACHE"];
     assert_eq!(sw["value"], "off");
     assert_eq!(sw["source"], "input");
     assert_eq!(sw["requested"], "off");
@@ -172,11 +172,11 @@ fn input_tables_precedence_manifest_and_run_block() {
     let env = run(
         &dir,
         "env",
-        "[performance]\ncert_screen='off'\n",
-        &[("BAANDI_CERT_SCREEN", "on")],
+        "[performance]\newald_cache='off'\n",
+        &[("BAANDI_EWALD_CACHE", "on")],
     );
     let e = ok(&env);
-    let sw = &e["scf"]["switches"]["BAANDI_CERT_SCREEN"];
+    let sw = &e["scf"]["switches"]["BAANDI_EWALD_CACHE"];
     assert_eq!(
         (sw["value"].as_str(), sw["source"].as_str()),
         (Some("on"), Some("env"))
@@ -187,8 +187,8 @@ fn input_tables_precedence_manifest_and_run_block() {
     for (name, tables, message) in [
         (
             "bad_value",
-            "[performance]\ncert_screen='maybe'\n",
-            "allowed values on, off, trace",
+            "[performance]\newald_cache='maybe'\n",
+            "allowed values on, off",
         ),
         (
             "bad_key",

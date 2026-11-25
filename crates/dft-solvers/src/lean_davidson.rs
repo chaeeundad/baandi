@@ -95,12 +95,6 @@ pub(crate) struct LeanScratch {
     l: Vec<f64>,
     sel_values: Vec<f64>,
     sel_norms: Vec<f64>,
-    /// LEAN_BORDER=fused: the block [E | H E] (n x 2k, sized on first use)
-    /// and the product V^T [E | H E] ((m + k) x 2k, compact), with the column
-    /// range of the reduced border it holds for the next iteration.
-    pair: RealMatrix,
-    fb: RealMatrix,
-    pending: Option<(usize, usize)>,
     /// R1-b (`BAANDI_RESTART_KEEP`): history and scratch of the kept
     /// directions, allocated at the first solve with the switch on.
     keep: Option<Box<KeepScratch>>,
@@ -343,9 +337,6 @@ impl LeanScratch {
             l: vec![0.; panel * panel],
             sel_values: vec![0.; bands],
             sel_norms: vec![0.; bands],
-            pair: RealMatrix::zeros(0, 0)?,
-            fb: RealMatrix::zeros(cap, 2 * bands)?,
-            pending: None,
             keep: None,
         })
     }
@@ -513,100 +504,6 @@ fn overlap_border(
         for i in 0..j {
             let v = s[(i, j)];
             s[(j, i)] = v;
-        }
-    }
-    Ok(())
-}
-
-/// LEAN_BORDER=fused (ticket PERCORE-KERNELS): with the basis at `from + k`
-/// columns (E appended) and H E in `he`, one product V^T [E | H E] gives the
-/// overlap border S[:, from..from + k] (written with its mirror, as
-/// `overlap_border`) and the reduced border V^T (H E), kept in `lean.fb`
-/// columns k..2k for `reduced_from_fused`. The basis is streamed once instead
-/// of twice. On the aarch64 pure kernel every entry is the same fused
-/// multiply-add chain as in the two separate products (bit-identical); on MKL
-/// and x86 faer the wider product is rounding class.
-fn fused_border(
-    gemm: &mut RealGemmWorkspace,
-    basis: &RealMatrix,
-    e: &RealMatrix,
-    he: &RealMatrix,
-    lean: &mut LeanScratch,
-    from: usize,
-) -> Result<(), SolverError> {
-    let n = basis.rows();
-    let k = e.cols();
-    let to = from + k;
-    if basis.cols() != to || he.cols() != k || e.rows() != n || he.rows() != n {
-        return Err(LinalgError::Dimension.into());
-    }
-    if lean.pair.as_slice().len() < n * 2 * k {
-        // Sized once per shape (2 x bands columns), outside the iteration.
-        let cols = lean.sel_values.len().max(k);
-        lean.pair = RealMatrix::zeros(n, 2 * cols)?;
-    }
-    lean.pair.reshape_within_storage(n, 2 * k)?;
-    let (left, right) = lean.pair.as_mut_slice().split_at_mut(n * k);
-    left.copy_from_slice(e.as_slice());
-    right.copy_from_slice(he.as_slice());
-    lean.fb.reshape_within_storage(to, 2 * k)?;
-    flops_add(FlopSite::Overlap, to, n, k);
-    flops_add(FlopSite::Reduced, to, n, k);
-    gemm.multiply_slices_into(
-        GemmSite::Gram,
-        basis.as_slice(),
-        n,
-        to,
-        n,
-        RealOp::Transpose,
-        lean.pair.as_slice(),
-        2 * k,
-        n,
-        lean.fb.as_mut(),
-    )?;
-    for j in 0..k {
-        for i in 0..to {
-            lean.s[(i, from + j)] = lean.fb[(i, j)];
-        }
-    }
-    for j in from..to {
-        for i in 0..j {
-            let v = lean.s[(i, j)];
-            lean.s[(j, i)] = v;
-        }
-    }
-    lean.pending = Some((from, to));
-    Ok(())
-}
-
-/// The reduced-matrix step of `reduced_matrix_into` for the columns
-/// `prefix..m` whose border V^T (H E) `fused_border` already formed: the same
-/// layout expansion, the border copied from `fb` columns k..2k, the same
-/// symmetrization (bit-identical to the product it replaces on the kernel
-/// where `fused_border` is).
-fn reduced_from_fused(
-    out: &mut RealMatrix,
-    fb: &RealMatrix,
-    prefix: usize,
-    m: usize,
-) -> Result<(), SolverError> {
-    let k = m - prefix;
-    if fb.rows() != m || fb.cols() != 2 * k {
-        return Err(LinalgError::Dimension.into());
-    }
-    out.reshape_within_storage(m, m)?;
-    for j in (0..prefix).rev() {
-        out.as_mut_slice()
-            .copy_within(j * prefix..(j + 1) * prefix, j * m);
-    }
-    for j in 0..k {
-        out.as_mut_slice()[(prefix + j) * m..(prefix + j + 1) * m]
-            .copy_from_slice(&fb.as_slice()[(k + j) * m..(k + j + 1) * m]);
-    }
-    for j in prefix..m {
-        let (earlier, current) = out.as_mut_slice().split_at_mut(j * m);
-        for (col, &entry) in earlier.chunks_exact_mut(m).zip(&current[..j]) {
-            col[j] = entry;
         }
     }
     Ok(())
@@ -1329,7 +1226,6 @@ fn factor_fresh(
     proj: &mut Option<&mut ProjCache>,
 ) -> Result<bool, SolverError> {
     let m = basis.cols();
-    lean.pending = None;
     let t = timers.start();
     overlap_border(gemm, basis, 0, m, &mut lean.s)?;
     timers.stop(t, Stage::Orthonormalize);
@@ -1581,7 +1477,6 @@ pub(super) fn solve_with_intent(
     // LEAN_BORDER=fused until the first failed pivot test of this solve; the
     // remaining appends take the separate path (bounds the discarded H
     // columns to one block per solve on systems where the test fails often).
-    let mut fuse_allowed = options.lean_border_fused && !options.narrow_reduced;
     // BREAKTHROUGH-3: correction blocks appended in this call (the budget of
     // an `Advance` intent); `applications` counts its operator columns.
     let mut blocks_appended = 0usize;
@@ -1608,19 +1503,15 @@ pub(super) fn solve_with_intent(
         let m = basis.cols();
         max_basis_dimension = max_basis_dimension.max(m);
         let t = timers.start();
-        match lean.pending.take() {
-            Some((from, to)) if from == prefix && to == m && prefix < m => {
-                reduced_from_fused(reduced, &lean.fb, prefix, m)?
-            }
-            _ => reduced_matrix_into(
-                basis,
-                products,
-                prefix,
-                gemm,
-                reduced,
-                options.narrow_reduced,
-            )?,
-        }
+        reduced_matrix_into(
+            basis,
+            products,
+            prefix,
+            gemm,
+            reduced,
+            options.narrow_reduced,
+        )?;
+
         timers.stop(t, Stage::Reduced);
         let t = timers.start();
         reduced_border(gemm, reduced, lean, prefix, m)?;
@@ -1926,7 +1817,6 @@ pub(super) fn solve_with_intent(
             if !plain {
                 // Factor X, then the kept directions (pivot rule); any failure
                 // falls back to the plain restart from X alone.
-                lean.pending = None;
                 let t = timers.start();
                 overlap_border(gemm, basis, 0, cols, &mut lean.s)?;
                 timers.stop(t, Stage::Orthonormalize);
@@ -1989,33 +1879,7 @@ pub(super) fn solve_with_intent(
             })?;
             timers.stop(t, Stage::Orthonormalize);
         }
-        // LEAN_BORDER=fused: H on E first, then both borders from one product.
-        // A zero correction (exactly dependent) fails the pivot test anyway and
-        // must not reach the operator: such a block takes the separate path.
-        // Shape rule (traffic, not tuning): the fused product saves one stream
-        // of the basis (n m) and costs copies of E and H E (about 4 n k), so it
-        // is taken for blocks with 4 k <= m; wider blocks (the first append of
-        // every solve) keep the separate products.
-        let fused = fuse_allowed
-            && 4 * k <= m
-            && extra
-                .as_slice()
-                .chunks_exact(n)
-                .all(|c| c.iter().any(|&x| x != 0.));
-        if fused {
-            apply_into(
-                op,
-                extra,
-                &mut applications,
-                &mut work,
-                extra_products,
-                timers,
-            )?;
-            let t = timers.start();
-            append_into(basis, extra)?;
-            fused_border(gemm, basis, extra, extra_products, lean, m)?;
-            timers.stop(t, Stage::Orthonormalize);
-        } else {
+        {
             let t = timers.start();
             append_into(basis, extra)?;
             overlap_border(gemm, basis, m, m + k, &mut lean.s)?;
@@ -2026,23 +1890,7 @@ pub(super) fn solve_with_intent(
         timers.stop(t, Stage::Eigen);
         lean_add(LeanCount::Appends, 1);
         lean_pivot(ratio);
-        if fused {
-            if ok {
-                proj_load(&mut proj, op, m, k);
-                append_into(products, extra_products)?;
-                factored = basis.cols();
-                lean_add(LeanCount::FusedBorders, 1);
-                lean_add(LeanCount::AppendedColumns, k);
-                blocks_appended += 1;
-                timers.iteration(iteration_clock, k);
-                continue;
-            }
-            // The images of E are discarded; the fallback applies H to its
-            // own columns below (counted, expected zero).
-            lean.pending = None;
-            lean_add(LeanCount::FusedWasted, k);
-            fuse_allowed = false;
-        }
+        {}
         let mut appended = ok;
         if !ok {
             // Stage 1: re-project only this block against V and test again.

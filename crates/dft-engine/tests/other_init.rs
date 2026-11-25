@@ -50,86 +50,18 @@ fn problem(pp: &dft_upf::Pseudopotential, skew: bool) -> ScfProblem {
     .unwrap()
 }
 
-#[derive(Clone, Copy)]
-struct Arm {
-    light: bool,
-    layout: bool,
-}
-
-fn results(ranks: usize, pp: &dft_upf::Pseudopotential, skew: bool, arm: Arm) -> Vec<ScfResult> {
+fn results(ranks: usize, pp: &dft_upf::Pseudopotential, skew: bool) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
-
-        dft_engine::gamma_real::set_m2_light_state_override(Some(arm.light));
-        dft_solvers::distributed_davidson::set_layout_cache_override(Some(arm.layout));
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
         parallel::set_communicator(Some(shared));
         let r = problem(pp, skew).run().unwrap();
         dft_engine::profile::finish_rank(comm.rank());
         parallel::set_communicator(None);
-        dft_solvers::distributed_davidson::set_layout_cache_override(None);
-        dft_engine::gamma_real::set_m2_light_state_override(None);
 
         parallel::set_m2_override(None);
         r
     })
-}
-
-fn bits(r: &ScfResult) -> (u64, Vec<u64>, Vec<u64>) {
-    (
-        r.total_hartree().to_bits(),
-        r.density.iter().map(|x| x.to_bits()).collect(),
-        r.k_points[0]
-            .solution
-            .eigenvalues
-            .iter()
-            .map(|x| x.to_bits())
-            .collect(),
-    )
-}
-
-#[test]
-fn light_state_and_layout_cache_are_bit_identical() {
-    let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let pp = common::potential(4., 1., true, 401);
-    for skew in [false, true] {
-        let plain = results(
-            2,
-            &pp,
-            skew,
-            Arm {
-                light: false,
-                layout: false,
-            },
-        );
-        let (reused_before, _) = dft_solvers::distributed_davidson::layout_cache_stats();
-        let switched = results(
-            2,
-            &pp,
-            skew,
-            Arm {
-                light: true,
-                layout: true,
-            },
-        );
-        let (reused_after, stored) = dft_solvers::distributed_davidson::layout_cache_stats();
-        let _ = dft_engine::profile::take_registry();
-        for r in 0..2 {
-            assert_eq!(
-                bits(&plain[r]),
-                bits(&switched[r]),
-                "skew {skew} rank {r}: results changed"
-            );
-            assert!(switched[r].certified);
-            assert_eq!(plain[r].history.len(), switched[r].history.len());
-        }
-        assert_eq!(bits(&switched[0]), bits(&switched[1]), "ranks agree");
-        assert!(stored > 0, "layout stored");
-        assert!(
-            reused_after > reused_before,
-            "layout reused by later solves"
-        );
-    }
 }
 
 #[test]
@@ -172,15 +104,7 @@ fn finer_labels_classify_the_m2_solve() {
     let pp = common::potential(4., 1., true, 401);
     dft_engine::profile::force(Some(true));
     let _ = dft_engine::profile::take_registry();
-    let _ = results(
-        2,
-        &pp,
-        false,
-        Arm {
-            light: false,
-            layout: false,
-        },
-    );
+    let _ = results(2, &pp, false);
     dft_engine::profile::force(Some(false));
     let profiles = dft_engine::profile::take_registry();
     assert_eq!(profiles.len(), 2);

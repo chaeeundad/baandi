@@ -53,6 +53,7 @@ impl AuditTerms {
 #[derive(Clone, Copy)]
 pub(crate) enum Field<'a> {
     Full(&'a [f64]),
+    #[cfg(test)]
     Planes(&'a [f64]),
 }
 
@@ -78,6 +79,7 @@ pub(crate) struct GridPlan {
     /// global stick with canonical index s (ascending (z, other)).
     stick_order: Vec<usize>,
     /// Coulomb-metric weights at the local coefficients (stop rule).
+    #[cfg(test)]
     stop_weights: Vec<f64>,
     lda: Lda,
     volume: f64,
@@ -110,7 +112,7 @@ impl GridPlan {
         reciprocal_columns: [[f64; 3]; 3],
         volume: f64,
         lda: Lda,
-        stop_weights_full: Option<&[f64]>,
+        _stop_weights_full: Option<&[f64]>,
     ) -> Result<Self, ScfError> {
         let (rank, ranks) = (comm.rank(), comm.size());
         let total: usize = dims.iter().product();
@@ -211,7 +213,8 @@ impl GridPlan {
         if kernel.iter().any(|k| !k.is_finite()) {
             return Err(ScfError::NonFinite);
         }
-        let stop_weights = match stop_weights_full {
+        #[cfg(test)]
+        let stop_weights = match _stop_weights_full {
             Some(w) if w.len() == total => fft.local_positions().iter().map(|&g| w[g]).collect(),
             _ => Vec::new(),
         };
@@ -246,6 +249,7 @@ impl GridPlan {
             plane_counts,
             stick_counts,
             stick_order,
+            #[cfg(test)]
             stop_weights,
             lda,
             volume,
@@ -270,15 +274,6 @@ impl GridPlan {
         self.planes * self.rows * self.nz
     }
     /// Grid points of one plane.
-    #[cfg(test)]
-    pub(crate) fn plane_len(&self) -> usize {
-        self.rows * self.nz
-    }
-    /// Planes per rank (ascending plane order is rank order).
-    #[cfg(test)]
-    pub(crate) fn plane_counts(&self) -> &[usize] {
-        &self.plane_counts
-    }
     /// Effective potential of the latest `potential_field` call on this rank's planes.
     #[cfg(test)]
     pub(crate) fn effective_planes(&self) -> &[f64] {
@@ -291,6 +286,7 @@ impl GridPlan {
                 let s = self.lines[i * self.rows + y];
                 &n[s..s + self.nz]
             }
+            #[cfg(test)]
             Field::Planes(p) => {
                 let s = (i * self.rows + y) * self.nz;
                 &p[s..s + self.nz]
@@ -298,6 +294,7 @@ impl GridPlan {
         }
     }
     /// This rank's planes of a full row-major field (no collective).
+    #[cfg(test)]
     pub(crate) fn planes_of(&self, full: &[f64], out: &mut Vec<f64>) {
         out.clear();
         for i in 0..self.planes {
@@ -871,81 +868,6 @@ impl GridPlan {
         }
         bump(C_STOP);
         Ok(energy.max(0.0))
-    }
-
-    /// Coulomb (Hartree) metric forms of signed plane fields (SCF-TRAJECTORY
-    /// guard of the distributed mixer, `BAANDI_MIX_COULOMB_GUARD`): for every
-    /// pair (a, b) the value N sum_G w(G) Re(conj(F_a(G)) F_b(G)) with w the
-    /// stop-rule weights (`CoulombMetric::weights`: V / (2N) 4 pi / G^2 on the
-    /// density sphere, 0 at G = 0) and F the forward transform of the plane
-    /// field (`to_reciprocal` normalization, no density check: residuals are
-    /// signed). By Parseval this is a^T C b of the replicated `CoulombMetric`
-    /// (rounding class). Per-stick partials in ascending local order, ONE
-    /// allgatherv, sums in canonical stick order: the bits do not depend on the
-    /// rank count. Collective (one distributed transform per field).
-    pub(crate) fn coulomb_forms<K: Collective>(
-        &mut self,
-        comm: &K,
-        fields: &[&[f64]],
-        pairs: &[(usize, usize)],
-    ) -> Result<Vec<f64>, ScfError> {
-        if self.stop_weights.is_empty() {
-            return Err(ScfError::InvalidInput("M2 Coulomb forms without weights"));
-        }
-        let points = self.points();
-        if fields.iter().any(|f| f.len() != points) {
-            return Err(ScfError::InvalidInput("M2 Coulomb forms: field length"));
-        }
-        let err = |e: dft_solvers::distributed_fft::DistFftError| {
-            ScfError::Numerical(format!("M2 Coulomb transform: {e}"))
-        };
-        let nz = self.nz;
-        let mut hats: Vec<Vec<C>> = Vec::with_capacity(fields.len());
-        for f in fields {
-            for i in 0..self.planes {
-                for y in 0..self.rows {
-                    let line = self.line(Field::Planes(f), i, y);
-                    let slab = self.fft.plane_mut();
-                    for (z, &v) in line.iter().enumerate() {
-                        slab[y * nz + z] = C::new(v, 0.0);
-                    }
-                }
-                self.fft.to_reciprocal_plane(i).map_err(err)?;
-            }
-            let mut hat = vec![C::default(); self.coef.len()];
-            self.fft.finish_to_reciprocal(comm, &mut hat).map_err(err)?;
-            hats.push(hat);
-        }
-        let k = pairs.len();
-        self.send.clear();
-        self.send.resize(self.local_sticks * k, 0.0);
-        for (idx, (&w, &s)) in self.stop_weights.iter().zip(&self.stick_of).enumerate() {
-            if w != 0.0 {
-                let row = &mut self.send[s as usize * k..(s as usize + 1) * k];
-                for (o, &(a, b)) in row.iter_mut().zip(pairs) {
-                    let (p, q) = (hats[a][idx], hats[b][idx]);
-                    *o += w * (p.re * q.re + p.im * q.im);
-                }
-            }
-        }
-        let counts: Vec<usize> = self.stick_counts.iter().map(|c| c * k).collect();
-        self.recv.resize(counts.iter().sum(), 0.0);
-        comm.allgatherv_f64(&self.send, &counts, &mut self.recv)
-            .map_err(|e| ScfError::Numerical(format!("M2 Coulomb forms: {e}")))?;
-        // The gathered buffer is the concatenation of the rank stick blocks,
-        // the positions `stick_order` index.
-        let mut sums = vec![0.0; k];
-        for &pos in &self.stick_order {
-            for (q, s) in sums.iter_mut().enumerate() {
-                *s += self.recv[pos * k + q];
-            }
-        }
-        let n = self.dims.iter().product::<usize>() as f64;
-        sums.iter_mut().for_each(|s| *s *= n);
-        if sums.iter().any(|s| !s.is_finite()) {
-            return Err(ScfError::NonFinite);
-        }
-        Ok(sums)
     }
 }
 

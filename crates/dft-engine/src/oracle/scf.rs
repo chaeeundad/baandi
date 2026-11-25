@@ -509,7 +509,7 @@ impl ScfProblem {
         cell: &Cell,
         atoms: &[Atom],
         potentials: &[SpeciesPotential<'_>],
-        mut options: ScfOptions,
+        options: ScfOptions,
         points: &[KPoint],
         minimum_gap: Option<f64>,
         channel: Option<usize>,
@@ -683,33 +683,7 @@ impl ScfProblem {
         let part = crate::profile::clock();
         let gamma = options.basis(cell, [0.; 3], 1.0)?;
         let density_basis = options.basis(cell, [0.; 3], 4.0)?;
-        // G-MIXER-DIVERGENCE: geometry-only residual filtering. Resolve once
-        // at construction, before the session chooses its mixer/owned layout.
-        // A cubic cell takes the original Pulay path, without an FFT round trip.
-        if run.on(dft_numerics::switches::Id::MIX_CELL_KERKER) {
-            use dft_numerics::switches::Id;
-            if let Mixing::Pulay { beta, history } = options.mixing {
-                if let Some(q0_inverse_bohr) = convergence::cell_kerker_scale(cell, &density_basis)
-                {
-                    options.mixing = Mixing::KerkerPulay {
-                        beta,
-                        history,
-                        q0_inverse_bohr,
-                    };
-                    run.note_path(
-                        Id::MIX_CELL_KERKER,
-                        &format!("replicated Kerker-Pulay, q0={q0_inverse_bohr:.17e} Bohr^-1"),
-                        None,
-                    );
-                } else {
-                    run.note_path(
-                        Id::MIX_CELL_KERKER,
-                        "plain Pulay",
-                        Some("no represented mode longer than the equal-volume cube"),
-                    );
-                }
-            }
-        }
+
         let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
         let dg = FftGridSpec::new(&density_basis, &density_basis, Some(grid.dims()))?;
         if let Some(p) = init_profile {
@@ -771,9 +745,7 @@ impl ScfProblem {
             },
         );
         let span = init_profile.map(|p| p.span(IC::InitIonicFftCalls, IC::InitIonicFftNanos));
-        let ionic_real = if let Some(comm) =
-            crate::m2::active().filter(|_| run.on(dft_numerics::switches::Id::INIT_OWNED_STATES))
-        {
+        let ionic_real = if let Some(comm) = crate::m2::active() {
             crate::m2::initial_ionic_real(&comm, &mut fft, &ionic_g)?
         } else {
             let mut ionic = Array3::zeros(grid.dims());
@@ -798,9 +770,7 @@ impl ScfProblem {
         // the communicator registry itself is thread-local.
         let owned_layout = crate::m2::active()
             .filter(|_| {
-                run.on(dft_numerics::switches::Id::INIT_OWNED_STATES)
-                    && gamma_real_exclusion.is_none()
-                    && options.gamma_real != crate::GammaReal::Off
+                gamma_real_exclusion.is_none() && options.gamma_real != crate::GammaReal::Off
             })
             .map(|comm| (comm.rank(), comm.size()));
         let states = ordered_solves(
@@ -1584,14 +1554,13 @@ impl ScfProblem {
     /// is therefore a lower estimate of the true maximum, never an upper bound.
     /// It never certifies anything; it can only predict a certain failure.
     ///
-    /// With `keep_fields` the Hartree/XC fields built here are kept for the next
+    /// The Hartree/XC fields built here are kept for the next
     /// map (`step_*`) at the same density (POTENTIAL-REUSE), so a certificate
     /// solve that follows a passing screen does not build them again.
     pub(crate) fn certificate_shift_estimate(
         &mut self,
         density: &Array3<f64>,
         k_points: &[KPointSolution],
-        keep_fields: bool,
     ) -> Result<Option<f64>, ScfError> {
         const CLUSTER_GAP_HA: f64 = 1e-3;
         const MAX_CLUSTER: usize = 24;
@@ -1603,7 +1572,7 @@ impl ScfProblem {
         }
         let (h, x, effective) = self.input_fields(density)?;
         let standard = effective.as_standard_layout().into_owned();
-        if keep_fields {
+        {
             self.reused_fields = Some(ReusedFields {
                 density: density.clone(),
                 hartree: h,
@@ -1812,8 +1781,7 @@ impl ScfProblem {
                 species,
                 &self.options,
                 self.occupations.len(),
-                dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
-                    .then_some(&*self.pool),
+                Some(&*self.pool),
                 split.as_ref(),
             )?;
             crate::profile::atomic_part(crate::profile::AtomicPart::Span, part);
@@ -1849,7 +1817,7 @@ impl ScfProblem {
                 None
             };
             // ATOMIC-REAL remains the unchanged serial alternative.
-            let hq = if atomic_weights.is_none() && crate::gamma_real::atomic_real() {
+            let hq = if atomic_weights.is_none() {
                 crate::gamma_real::atomic_apply_real(
                     &state.hamiltonian,
                     &state.basis,
@@ -2313,7 +2281,7 @@ impl ScfProblem {
         };
         // Occupied states determine density; the first empty state determines
         // the sampled gap. Higher empty states are only subspace buffers.
-        // BAANDI_EMPTY_LOOSE (default on, `off` disables): in SCF steps whose
+        // Frozen empty-band policy: in SCF steps whose
         // eigen tolerance is above the floor 0.1 * eigen_tolerance (every step except
         // the last ones and the certificate re-solve) only the occupied bands are
         // converged strictly; the first empty band takes the buffer threshold.
@@ -2812,37 +2780,17 @@ pub(crate) fn band_tolerances(
     tolerance: f64,
     options: &ScfOptions,
 ) -> BandTolerances {
-    let intermediate = empty_loose() && tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
+    let intermediate = tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
     BandTolerances {
         strict_bands: (occupied_count + usize::from(!intermediate))
             .min(bands)
             .max(1),
         buffer_tolerance: if intermediate {
-            tolerance.max(buffer_loose_floor())
+            tolerance.max(1e-3)
         } else {
             tolerance.max(1e-5)
         },
     }
-}
-/// Empty-band looseness: default ON since the adoption rule (dev08 EMPTY-LOOSE:
-/// strict perturbed si32 -13.1 / -13.7 percent wall at T=1 / T=8, 10 of 10 seeds,
-/// Davidson work -60.7 percent; certificate verdicts and certified states
-/// unchanged). `BAANDI_EMPTY_LOOSE=off` restores the strict first empty band in
-/// every step; see `step_with_occupations`.
-fn empty_loose() -> bool {
-    // RUN-CONFIG: read from the run's configuration (thread scope or process),
-    // not cached per process; called once per construction / step / audit.
-    dft_numerics::switches::on(dft_numerics::switches::Id::EMPTY_LOOSE)
-}
-/// Residual floor of the empty buffer bands in SCF steps whose eigen tolerance is
-/// above its floor: default 1e-3 since the adoption rule (dev08 BUFFER-TOL: si32
-/// strict perturbed -7.54 percent wall, 10 of 10 seeds, optimum interior: 1e-2 is
-/// past the turn; certificates stay strict). `BAANDI_BUFFER_TOL=<x>` (1e-5 to
-/// 1e-1) overrides; 1e-5 restores the old floor.
-fn buffer_loose_floor() -> f64 {
-    // RUN-CONFIG: read from the run's configuration (thread scope or process),
-    // not cached per process; called once per construction / step / audit.
-    dft_numerics::switches::number(dft_numerics::switches::Id::BUFFER_TOL).unwrap_or(1e-3)
 }
 pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons: f64) -> f64 {
     if a.shape() != b.shape()
@@ -2992,7 +2940,7 @@ mod tests {
         }
         let step = problem.step_kpoints(&n, warm.as_deref(), 1e-11).unwrap();
         let estimate = problem
-            .certificate_shift_estimate(&step.density, &step.k_points, false)
+            .certificate_shift_estimate(&step.density, &step.k_points)
             .unwrap()
             .unwrap();
         let warm: Vec<_> = step
@@ -3029,7 +2977,7 @@ mod tests {
         let potential = pool_fixture::potential(8.0, 1.0, true, 101);
         // Cubic: the occupied p shell is a threefold cluster (matrix path).
         let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]).unwrap();
-        let run = |keep: bool, threads: usize| {
+        let run = |threads: usize| {
             let mut problem = ScfProblem::new(
                 &cell,
                 &[Atom::new("Xx", [0.0, 0.0, 0.0])],
@@ -3059,10 +3007,10 @@ mod tests {
             }
             let step = problem.step_kpoints(&n, warm.as_deref(), 1e-9).unwrap();
             let estimate = problem
-                .certificate_shift_estimate(&step.density, &step.k_points, keep)
+                .certificate_shift_estimate(&step.density, &step.k_points)
                 .unwrap()
                 .unwrap();
-            assert_eq!(problem.reused_fields.is_some(), keep);
+            assert!(problem.reused_fields.is_some());
             let warm: Vec<_> = step
                 .k_points
                 .iter()
@@ -3089,9 +3037,8 @@ mod tests {
                 check.energy.total_hartree().to_bits(),
             )
         };
-        let reference = run(true, 1);
-        assert_eq!(reference, run(false, 1));
-        assert_eq!(reference, run(true, 4));
+        let reference = run(1);
+        assert_eq!(reference, run(4));
     }
 
     /// B2: one map with the band-sum identity differs from the explicit audit

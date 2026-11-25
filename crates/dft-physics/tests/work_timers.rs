@@ -82,11 +82,11 @@ fn h_apply_timers_change_no_bit_and_count_exactly() {
 
     work_timers::set_enabled(true);
     for threads in [1, 2, 4] {
-        for overlap in [false, true] {
+        {
+            let overlap = false;
             let mut real =
                 RealHamiltonian::from_complex(&h, &basis, m, WorkerPool::new(threads).unwrap())
                     .unwrap();
-            real.set_apply_overlap(overlap);
             let start = fine(work_timers::snapshot());
             let mut y = RealMatrix::zeros(n, m).unwrap();
             real.apply_block(&x, &mut y).unwrap();

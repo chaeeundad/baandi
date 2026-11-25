@@ -78,8 +78,8 @@ fn bits(r: &ScfResult) -> (u64, Vec<u64>, Vec<u64>, usize) {
 #[test]
 fn concurrent_runs_with_opposite_settings_are_independent() {
     let pp = common::potential(4., 1., true, 401);
-    let kept = || RunConfig::from_pairs(&[("cert_screen", "on")]).unwrap();
-    let fft = || RunConfig::from_pairs(&[("cert_screen", "off")]).unwrap();
+    let kept = || RunConfig::from_pairs(&[("ewald_cache", "on")]).unwrap();
+    let fft = || RunConfig::from_pairs(&[("ewald_cache", "off")]).unwrap();
     // References, one at a time.
     let (ka, fa) = (kept(), fft());
     let ref_kept = bits(&run(&pp, Some(ka)));
@@ -95,7 +95,7 @@ fn concurrent_runs_with_opposite_settings_are_independent() {
     assert_eq!(out_fft, ref_fft, "fft run changed under concurrency");
     // The default science output: the registry default (kept) equals a run
     // under the process configuration when the environment leaves it unset.
-    if std::env::var_os("BAANDI_CERT_SCREEN").is_none() {
+    if std::env::var_os("BAANDI_EWALD_CACHE").is_none() {
         assert_eq!(bits(&run(&pp, None)), ref_kept);
     }
     let de = f64::from_bits(ref_kept.0) - f64::from_bits(ref_fft.0);
@@ -126,8 +126,8 @@ fn concurrent_runs_with_opposite_settings_are_independent() {
     assert_eq!(scf(fb), scf(fa), "same run, same counts");
     // Consulted marks belong to the configuration that was read.
     for rc in [ka, fa, kb, fb] {
-        assert!(rc.consulted(Id::CERT_SCREEN));
+        assert!(rc.consulted(Id::EWALD_CACHE));
     }
     let untouched = RunConfig::from_input(&[]).unwrap();
-    assert!(!untouched.consulted(Id::CERT_SCREEN));
+    assert!(!untouched.consulted(Id::EWALD_CACHE));
 }

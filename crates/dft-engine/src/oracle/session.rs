@@ -301,32 +301,6 @@ impl ScfSession {
         self.initialize()?;
         self.set_next_input(density.clone())
     }
-    /// SCF-TRAJECTORY Coulomb guard of the distributed mixer
-    /// (`BAANDI_MIX_COULOMB_GUARD=trace|on`): a slab plan of the M2 grid with
-    /// the Coulomb-metric weights (the plane layout of the owned density; only
-    /// its Coulomb part is used) and the refit flag. None when off.
-    /// Collective (plan construction).
-    fn guard_plan(&self) -> Result<Option<(crate::grid_dist::GridPlan, bool)>, ScfError> {
-        let guard = dft_numerics::switches::choice(dft_numerics::switches::Id::MIX_COULOMB_GUARD);
-        if guard == "off" {
-            return Ok(None);
-        }
-        let comm = crate::m2::active().ok_or(ScfError::InvalidInput(
-            "distributed Coulomb guard without the M2 path",
-        ))?;
-        let dims = self.problem.grid.dims();
-        let built = CoulombMetric::new(&self.problem.cell, &self.problem.options, dims)?;
-        let weights = built.weights();
-        let plan = crate::grid_dist::GridPlan::new(
-            &comm,
-            dims,
-            self.problem.cell.reciprocal_columns_inverse_bohr(),
-            self.problem.cell.volume_bohr3(),
-            crate::grid_dist::Lda::Pz,
-            Some(weights),
-        )?;
-        Ok(Some((plan, guard == "on")))
-    }
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
@@ -339,15 +313,13 @@ impl ScfSession {
                     && crate::mix_dist::requested()
                     && crate::m2::active().is_some() =>
             {
-                let mut m = crate::mix_dist::DistributedPulay::new(
+                let m = crate::mix_dist::DistributedPulay::new(
                     crate::m2::active().expect("checked"),
                     beta,
                     history,
                     self.problem.grid.dims().iter().product(),
                 )?;
-                if let Some((plan, refit)) = self.guard_plan()? {
-                    m.set_coulomb_guard(plan, refit);
-                }
+
                 Box::new(m)
             }
             Mixing::Pulay { beta, history } => {
@@ -358,21 +330,6 @@ impl ScfSession {
                         &self.problem.options,
                         self.problem.grid.dims(),
                     )?));
-                } else {
-                    // SCF-TRAJECTORY (`BAANDI_MIX_COULOMB_GUARD`, default off).
-                    let guard = dft_numerics::switches::choice(
-                        dft_numerics::switches::Id::MIX_COULOMB_GUARD,
-                    );
-                    if guard != "off" {
-                        p.set_coulomb_guard(
-                            Box::new(CoulombMetric::new(
-                                &self.problem.cell,
-                                &self.problem.options,
-                                self.problem.grid.dims(),
-                            )?),
-                            guard == "on",
-                        );
-                    }
                 }
                 Box::new(p)
             }
@@ -612,7 +569,7 @@ impl ScfSession {
         // Certify the returned output density itself, not just the input
         // fixed-point residual. A small-gap response can amplify that residual.
         self.problem.energy_identity = false;
-        // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
+        // Frozen certificate pre-screen: predict a certain failure of the
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
         // the full solve below. `trace` prints the bound and runs the solve anyway.
@@ -631,17 +588,8 @@ impl ScfSession {
         });
         let screen_start = Instant::now();
         let screen = if converged {
-            match self.problem.sw.cert_screen {
-                CertScreen::Off => None,
-                mode => self
-                    .problem
-                    .certificate_shift_estimate(
-                        &step.density,
-                        &step.k_points,
-                        self.problem.sw.potential_reuse,
-                    )?
-                    .map(|bound| (mode, bound)),
-            }
+            self.problem
+                .certificate_shift_estimate(&step.density, &step.k_points)?
         } else {
             None
         };
@@ -649,10 +597,8 @@ impl ScfSession {
         if screen.is_some() {
             crate::phase_clock::add_screen(screen_seconds);
         }
-        let screened = screen.and_then(|(mode, bound)| {
-            (mode == CertScreen::On && bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA)
-                .then_some(bound)
-        });
+        let screened =
+            screen.filter(|&bound| bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA);
         let certified = if let Some(bound) = screened {
             // Certain failure: the next SCF iteration continues exactly as after a
             // failed solve (that solve's result is discarded either way). The record
@@ -736,7 +682,7 @@ impl ScfSession {
                 .filter(|(_, f)| **f > 0.0)
                 .map(|((a, b), _)| (a - b).abs())
                 .fold(0.0, f64::max);
-            if let Some((_, bound)) = screen {
+            if let Some(bound) = screen {
                 eprintln!(
                     "CERT-SCREEN iter={iteration} bound={bound:.4e} actual={occupied_eigenvalue_change:.4e} density={density_residual:.4e} screen_s={screen_seconds:.6} davidson={}",
                     check
@@ -901,18 +847,6 @@ impl ScfSession {
             });
         }
         let mix_start = Instant::now();
-        // Experimental guard (BAANDI_MIX_GROWTH_RESET=<factor>, default off): a density
-        // residual that grew by more than the factor since the previous iteration means
-        // the Pulay history produced a bad step and is ill-conditioned; drop it.
-        if let Some(limit) = self.problem.sw.growth_reset {
-            let record = history.last_mut().unwrap();
-            if record.density_contraction.is_some_and(|c| c > limit) && !record.mixer_reset {
-                mixer.reset();
-                *mixing_resets += 1;
-                record.mixer_reset = true;
-                record.mixing_resets = *mixing_resets;
-            }
-        }
         let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
         let diverged = |e: dft_solvers::SolverError| ScfError::Diverged {
             reason: e.to_string(),
@@ -1377,18 +1311,15 @@ impl ScfSession {
                         .collect(),
                 )
                 .map_err(|_| R::Orbitals)?;
-                // LADDER-IMPORT-SPLIT (`BAANDI_IMPORT_CHECK=split`, default):
+                // Frozen split import check:
                 // the same per-entry overlaps, lockstep over column blocks and
                 // split over the ranks of a registered communicator (every
                 // rank imports the same replicated state), one verdict
                 // reduction; `serial` is the former replicated scalar loop.
-                let split = self.problem.sw.import_split;
-                let orthonormal = if split {
+                let orthonormal = {
                     let comm = crate::parallel::SharedComm::active();
                     orthonormal_split(&m, comm.as_ref().map(|c| c as &dyn dft_mpi::Collective))
                         .map_err(|_| R::Orbitals)?
-                } else {
-                    orthonormal_serial(&m)
                 };
                 if !orthonormal {
                     return Err(R::Orbitals);
@@ -1545,14 +1476,6 @@ pub use crate::model::assess_fixed_point;
 /// parsing rules are those of the former per-process accessors.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SessionSwitches {
-    /// `BAANDI_IMPORT_CHECK=split`.
-    pub(crate) import_split: bool,
-    /// `BAANDI_CERT_SCREEN`.
-    pub(crate) cert_screen: CertScreen,
-    /// `BAANDI_POTENTIAL_REUSE=on`.
-    pub(crate) potential_reuse: bool,
-    /// `BAANDI_MIX_GROWTH_RESET`.
-    pub(crate) growth_reset: Option<f64>,
     /// `BAANDI_EIGEN_FACTOR` (default 0.1).
     pub(crate) eigen_factor: f64,
 }
@@ -1561,14 +1484,6 @@ impl SessionSwitches {
     pub(crate) fn resolve(run: dft_numerics::switches::RunConfig) -> Self {
         use dft_numerics::switches::Id;
         Self {
-            import_split: run.choice(Id::IMPORT_CHECK) == "split",
-            cert_screen: match run.choice(Id::CERT_SCREEN) {
-                "off" => CertScreen::Off,
-                "trace" => CertScreen::Trace,
-                _ => CertScreen::On,
-            },
-            potential_reuse: run.on(Id::POTENTIAL_REUSE),
-            growth_reset: run.number(Id::MIX_GROWTH_RESET),
             eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
         }
     }
@@ -1578,22 +1493,6 @@ use crate::model::verify::CERT_EIGENVALUE_LIMIT_HA;
 /// The pre-screen rejects only above this multiple of the limit, so its
 /// second-order modelling error (about 1e-9 Ha) is far inside the margin.
 const CERT_SCREEN_MARGIN: f64 = 1.02;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CertScreen {
-    Off,
-    On,
-    Trace,
-}
-
-// Certificate screen (`SessionSwitches::cert_screen`): default ON since the
-// user's adopt-what-improves rule (2026-11-10; dev08 ledger SINGLE-NODE-AB1:
-// bit-identical density and energy in 40 of 40 pairs, -19 percent wall on si32
-// strict). `BAANDI_CERT_SCREEN=off` restores the unscreened path, `trace`
-// prints the estimates. POTENTIAL-REUSE (`SessionSwitches::potential_reuse`):
-// with the screen active, the Hartree/XC fields it builds for the output
-// density are reused by the certificate solve at that same density
-// (bit-identical either way). MIX_GROWTH_RESET: `SessionSwitches::growth_reset`.
 
 /// Coefficient of the residual-driven eigen tolerance schedule (tolerance =
 /// factor x density residual). Default 0.1 (the established empirical value);
@@ -1616,8 +1515,9 @@ fn residual_schedule(
 /// Import check of a warm orbital block: every overlap <c_i|c_j> (i <= j) within
 /// 1e-8 of the identity, each overlap the sequential sum over rows of
 /// conj(c_i) c_j from zero (the former replicated loop; kept for
-/// `BAANDI_IMPORT_CHECK=serial` and as the reference of the tests).
-pub(crate) fn orthonormal_serial(m: &ComplexMatrix) -> bool {
+/// the independent reference of the tests).
+#[cfg(test)]
+fn orthonormal_serial(m: &ComplexMatrix) -> bool {
     for j in 0..m.cols() {
         for i in 0..=j {
             let overlap: Complex64 = m

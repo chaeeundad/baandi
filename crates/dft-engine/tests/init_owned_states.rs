@@ -78,7 +78,7 @@ fn owned_rows_atomic_image_and_lazy_full_table_on_one_to_seven_ranks() {
         let mut first_weights: Option<Vec<u64>> = None;
         for ranks in 1..=7 {
             let images = simulate(ranks, |comm: &SimRank| {
-                let run = RunConfig::from_pairs(&[("init_owned_states", "on")]).unwrap();
+                let run = RunConfig::from_input(&[]).unwrap();
                 let _scope = run.enter();
                 let indices = dft_physics::distributed_real_gamma::owned_projector_indices(
                     &basis,
@@ -207,14 +207,13 @@ fn scf(ranks: usize, skew: bool, on: bool, fallback: bool) -> Vec<ScfOutput> {
 fn scf_threads(
     ranks: usize,
     skew: bool,
-    on: bool,
+    _on: bool,
     fallback: bool,
     threads: usize,
 ) -> Vec<ScfOutput> {
     let pp = common::potential_with_orbitals(4., 1., true, 101, "SLA PZ");
     simulate(ranks, |comm: &SimRank| {
-        let run =
-            RunConfig::from_pairs(&[("init_owned_states", if on { "on" } else { "off" })]).unwrap();
+        let run = RunConfig::from_input(&[]).unwrap();
         let _scope = run.enter();
         parallel::set_m2_override(Some(true));
         parallel::set_communicator(Some(Arc::new(comm.clone())));
@@ -403,13 +402,9 @@ fn initial_atomic_ritz_energies_match() {
             .map(|a| cell.fractional_to_cartesian_bohr(a.fractional_position))
             .collect();
         for ranks in 1..=7 {
-            let probe = |on| {
+            let probe = |_on: bool| {
                 simulate(ranks, |comm: &SimRank| {
-                    let config = RunConfig::from_pairs(&[(
-                        "init_owned_states",
-                        if on { "on" } else { "off" },
-                    )])
-                    .unwrap();
+                    let config = RunConfig::from_input(&[]).unwrap();
                     let _scope = config.enter();
                     parallel::set_m2_override(Some(true));
                     parallel::set_communicator(Some(Arc::new(comm.clone())));

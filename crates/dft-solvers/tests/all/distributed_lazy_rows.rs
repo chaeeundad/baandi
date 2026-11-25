@@ -117,10 +117,8 @@ fn local_start_and_lazy_return_match_the_gathered_solve() {
         buffer_tolerance: 1e-11,
     };
     for ranks in 1..=4usize {
-        for (workspace, selected) in [(true, false), (true, true), (false, false)] {
+        for workspace in [true] {
             let tuning = DistributedTuning {
-                workspace,
-                selected_roots: selected,
                 ..Default::default()
             };
             let out = simulate(ranks, |sim: &SimRank| {

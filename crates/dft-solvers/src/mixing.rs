@@ -75,15 +75,11 @@ pub struct PulayMixer {
     /// window differences and age out first (seeds + window <= capacity).
     seeds: Vec<(Vec<f64>, Vec<f64>)>,
     mean: Option<f64>,
-    /// `BAANDI_MIX_INCREMENTAL=on` (ticket MPI-REMAINING): keep the differences
+    /// Frozen incremental history (ticket MPI-REMAINING): keep the differences
     /// and Gram entries across calls (bit-identical; see `Incremental`).
-    incremental: Option<Incremental>,
+    incremental: Incremental,
     /// Diagnostics of the last `mix` call (read-only; never feeds back).
     last: Option<PulayStepDiagnostics>,
-    /// SCF-TRAJECTORY Coulomb guard (`BAANDI_MIX_COULOMB_GUARD`): the metric
-    /// in which the L2 fit's predicted residual is checked, and whether a
-    /// predicted growth refits the step in that metric (false = trace only).
-    guard: Option<(Box<dyn ResidualMetric>, bool)>,
 }
 /// What the last Pulay update did (SCF-TRAJECTORY research output). Reading it
 /// never changes a proposal; it costs three grid dot products per call.
@@ -190,7 +186,6 @@ impl Clone for PulayMixer {
             metric_r: self.metric_r.clone(),
             incremental: self.incremental.clone(),
             last: self.last.clone(),
-            guard: self.guard.as_ref().map(|(m, act)| (m.duplicate(), *act)),
         }
     }
 }
@@ -211,29 +206,14 @@ impl PulayMixer {
             pairs: Vec::new(),
             seeds: Vec::new(),
             mean: None,
-            incremental: incremental_switch().then(Incremental::default),
+            incremental: Incremental::default(),
             last: None,
-            guard: None,
         })
-    }
-    /// SCF-TRAJECTORY Coulomb guard (see `BAANDI_MIX_COULOMB_GUARD`): after the
-    /// L2 fit, the predicted residual P = R - dR gamma is measured in `metric`;
-    /// with `refit` and P^T C P > R^T C R the step's coefficients are solved
-    /// again in that metric (same spectral cut). Only for the unweighted fit
-    /// (ignored when a fit metric is set). History is not changed.
-    pub fn set_coulomb_guard(&mut self, metric: Box<dyn ResidualMetric>, refit: bool) {
-        self.guard = Some((metric, refit));
     }
     /// Diagnostics of the last `mix` call; None before the first call and
     /// after `reset`.
     pub fn last_step(&self) -> Option<&PulayStepDiagnostics> {
         self.last.as_ref()
-    }
-    /// Force the incremental update on or off (tests; the constructor reads
-    /// `BAANDI_MIX_INCREMENTAL`). Clears the history.
-    pub fn set_incremental(&mut self, on: bool) {
-        self.reset();
-        self.incremental = on.then(Incremental::default);
     }
     pub fn set_metric(&mut self, metric: Box<dyn ResidualMetric>) {
         self.reset();
@@ -281,24 +261,12 @@ impl PulayMixer {
             .zip(dr[skip..].iter().cloned())
             .collect();
         self.mean = Some(mean);
-        if let Some(inc) = &mut self.incremental {
+        {
+            let inc = &mut self.incremental;
             inc.forget(self.pairs.len(), self.seeds.len());
         }
         Ok(())
     }
-}
-thread_local! {
-    static INCREMENTAL_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-}
-/// Override `BAANDI_MIX_INCREMENTAL` for mixers constructed on the calling
-/// thread (simulated ranks in tests); `None` restores the environment.
-pub fn set_incremental_override(on: Option<bool>) {
-    INCREMENTAL_OVERRIDE.with(|o| o.set(on));
-}
-fn incremental_switch() -> bool {
-    INCREMENTAL_OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::MIX_INCREMENTAL))
 }
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>()
@@ -349,7 +317,7 @@ impl PulayMixer {
             incremental,
             ..
         } = self;
-        let inc = incremental.as_mut().expect("incremental state");
+        let inc = incremental;
         inc.sync(pairs.len(), seeds.len());
         let mut old = std::mem::take(&mut inc.diffs);
         let keys = inc
@@ -467,104 +435,7 @@ impl FitSummary {
         }
     }
 }
-impl PulayMixer {
-    /// Differences (dx, dr) of the current history, seeds first, then the
-    /// window differences (the plain path's formulas and order).
-    fn differences(&self) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
-        let window = |k: usize| {
-            self.pairs.windows(2).map(move |p| {
-                p[1].0
-                    .iter()
-                    .zip(&p[0].0)
-                    .zip(p[1].1.iter().zip(&p[0].1))
-                    .map(|((a, b), (c, d))| if k == 0 { a - b } else { c - d })
-                    .collect::<Vec<f64>>()
-            })
-        };
-        let dx = self
-            .seeds
-            .iter()
-            .map(|s| s.0.clone())
-            .chain(window(0))
-            .collect();
-        let dr = self
-            .seeds
-            .iter()
-            .map(|s| s.1.clone())
-            .chain(window(1))
-            .collect();
-        (dx, dr)
-    }
-    /// SCF-TRAJECTORY Coulomb guard of an unweighted fit: returns the predicted
-    /// Coulomb ratio and whether the step was refitted (then `next` and `fit`
-    /// are replaced by the Coulomb-metric solution). Runs once per SCF map,
-    /// outside every inner loop; allocates m + 3 grid vectors.
-    fn coulomb_guard(
-        &mut self,
-        input: &[f64],
-        r: &[f64],
-        next: &mut [f64],
-        fit: &mut FitSummary,
-    ) -> Result<(f64, bool), SolverError> {
-        let (dx, dr) = self.differences();
-        let beta = self.beta;
-        let mut pred = r.to_vec();
-        for (d, g) in dr.iter().zip(&fit.gamma) {
-            for (p, v) in pred.iter_mut().zip(d) {
-                *p -= g * v;
-            }
-        }
-        let (metric, refit) = self.guard.as_mut().expect("guard set");
-        let mut cr = vec![0.0; r.len()];
-        metric.apply(r, &mut cr)?;
-        let mut cp = vec![0.0; r.len()];
-        metric.apply(&pred, &mut cp)?;
-        let (qr, qp) = (dot(r, &cr), dot(&pred, &cp));
-        let ratio = if qr > 0.0 {
-            (qp.max(0.0) / qr).sqrt()
-        } else {
-            0.0
-        };
-        if !*refit || qp <= qr || qr <= 0.0 {
-            return Ok((ratio, false));
-        }
-        let m = dr.len();
-        let mut weighted = vec![vec![0.0; r.len()]; m];
-        for (s, w) in dr.iter().zip(weighted.iter_mut()) {
-            metric.apply(s, w)?;
-        }
-        let mut gram = ComplexMatrix::zeros(m, m)?;
-        for i in 0..m {
-            for j in 0..m {
-                gram[(i, j)] =
-                    (0.5 * (dot(&dr[i], &weighted[j]) + dot(&dr[j], &weighted[i]))).into();
-            }
-        }
-        let (values, vectors) = hermitian_eigh(&gram)?;
-        let largest = values.iter().copied().fold(0.0, f64::max);
-        let rhs: Vec<f64> = dr.iter().map(|d| dot(d, &cr)).collect();
-        let mut gamma = vec![0.0; m];
-        for (k, &value) in values.iter().enumerate() {
-            if value > 1e-12 * largest {
-                let projection: f64 =
-                    (0..m).map(|i| vectors[(i, k)].re * rhs[i]).sum::<f64>() / value;
-                for i in 0..m {
-                    gamma[i] += vectors[(i, k)].re * projection;
-                }
-            }
-        }
-        for (i, n) in next.iter_mut().enumerate() {
-            *n = input[i] + beta * r[i];
-        }
-        for j in 0..m {
-            for (i, n) in next.iter_mut().enumerate() {
-                *n -= gamma[j] * (dx[j][i] + beta * dr[j][i]);
-            }
-        }
-        *fit = FitSummary::new(&values, largest, gamma, &rhs, qr);
-        Ok((ratio, true))
-    }
-}
+impl PulayMixer {}
 impl Default for PulayMixer {
     fn default() -> Self {
         Self::new(0.3, 6).expect("valid defaults")
@@ -576,7 +447,8 @@ impl DensityMixer for PulayMixer {
         self.seeds.clear();
         self.mean = None;
         self.last = None;
-        if let Some(inc) = &mut self.incremental {
+        {
+            let inc = &mut self.incremental;
             inc.forget(0, 0);
         }
     }
@@ -603,20 +475,23 @@ impl DensityMixer for PulayMixer {
         }
         let r: Vec<_> = output.iter().zip(input).map(|(b, a)| b - a).collect();
         self.pairs.push((input.to_vec(), r.clone()));
-        if let Some(inc) = &mut self.incremental {
+        {
+            let inc = &mut self.incremental;
             inc.sync(self.pairs.len() - 1, self.seeds.len());
             let serial = inc.serial();
             inc.pair_serials.push(serial);
         }
         if self.pairs.len() > self.capacity + 1 {
             self.pairs.remove(0);
-            if let Some(inc) = &mut self.incremental {
+            {
+                let inc = &mut self.incremental;
                 inc.pair_serials.remove(0);
             }
         }
         while !self.seeds.is_empty() && self.seeds.len() + self.pairs.len() - 1 > self.capacity {
             self.seeds.remove(0);
-            if let Some(inc) = &mut self.incremental {
+            {
+                let inc = &mut self.incremental;
                 inc.seed_serials.remove(0);
             }
         }
@@ -637,104 +512,12 @@ impl DensityMixer for PulayMixer {
         let glue_span = self
             .glue_profile
             .map(|p| p.span(Gc::GlueSerialFitCalls, Gc::GlueSerialFitNanos));
-        if m > 0 && self.incremental.is_some() {
+        if m > 0 {
             fit = Some(self.incremental_update(&r, &mut next, m)?);
-        } else if m > 0 {
-            bump(&MIX_DIFFS, m);
-            bump(&MIX_DOTS, m * m + m);
-            if self.metric.is_some() {
-                bump(&MIX_METRIC, m + 1);
-            }
-            // Seeded differences first (older), then the window differences of the
-            // absolute pairs; never a difference between the two blocks.
-            let dx: Vec<Vec<f64>> = self
-                .seeds
-                .iter()
-                .map(|s| s.0.clone())
-                .chain(
-                    self.pairs
-                        .windows(2)
-                        .map(|p| p[1].0.iter().zip(&p[0].0).map(|(a, b)| a - b).collect()),
-                )
-                .collect();
-            let dr: Vec<Vec<f64>> = self
-                .seeds
-                .iter()
-                .map(|s| s.1.clone())
-                .chain(
-                    self.pairs
-                        .windows(2)
-                        .map(|p| p[1].1.iter().zip(&p[0].1).map(|(a, b)| a - b).collect()),
-                )
-                .collect();
-            let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
-            let weighted = &mut self.metric_vectors;
-            let weighted_r = &mut self.metric_r;
-            if let Some(metric) = &mut self.metric {
-                for (source, dest) in dr.iter().zip(weighted.iter_mut()) {
-                    metric.apply(source, dest)?;
-                }
-                metric.apply(&r, weighted_r)?;
-            }
-            let mut gram = ComplexMatrix::zeros(m, m)?;
-            for i in 0..m {
-                for j in 0..m {
-                    gram[(i, j)] = if self.metric.is_some() {
-                        (0.5 * (dot(&dr[i], &weighted[j]) + dot(&dr[j], &weighted[i]))).into()
-                    } else {
-                        dot(&dr[i], &dr[j]).into()
-                    };
-                }
-            }
-            let (values, vectors) = hermitian_eigh(&gram)?;
-            let largest = values.iter().copied().fold(0.0, f64::max);
-            let rhs: Vec<_> = dr
-                .iter()
-                .map(|d| {
-                    dot(
-                        d,
-                        if self.metric.is_some() {
-                            weighted_r
-                        } else {
-                            &r
-                        },
-                    )
-                })
-                .collect();
-            let mut gamma = vec![0.0; m];
-            for (k, &value) in values.iter().enumerate() {
-                if value > 1e-12 * largest {
-                    let projection: f64 =
-                        (0..m).map(|i| vectors[(i, k)].re * rhs[i]).sum::<f64>() / value;
-                    for i in 0..m {
-                        gamma[i] += vectors[(i, k)].re * projection;
-                    }
-                }
-            }
-            for j in 0..m {
-                for (i, n) in next.iter_mut().enumerate() {
-                    *n -= gamma[j] * (dx[j][i] + self.beta * dr[j][i]);
-                }
-            }
-            let rr_fit = dot(
-                &r,
-                if self.metric.is_some() {
-                    weighted_r.as_slice()
-                } else {
-                    r.as_slice()
-                },
-            );
-            fit = Some(FitSummary::new(&values, largest, gamma, &rhs, rr_fit));
         }
         drop(glue_span);
-        let mut coulomb = (None, false);
-        if self.guard.is_some()
-            && self.metric.is_none()
-            && let Some(f) = fit.as_mut()
-        {
-            let (ratio, refit) = self.coulomb_guard(input, &r, &mut next, f)?;
-            coulomb = (Some(ratio), refit);
-        }
+        let coulomb = (None, false);
+
         let glue_span = self
             .glue_profile
             .map(|p| p.span(Gc::GlueSerialNormsCalls, Gc::GlueSerialNormsNanos));
@@ -794,10 +577,9 @@ mod tests {
         let y0 = [0.9, 1.1, 0.95, 1.05];
         let x1 = [1.1, 0.9, 1.15, 0.85];
         let y1 = [0.95, 1.05, 1.0, 1.0];
-        for incremental in [false, true] {
+        for _incremental in [true] {
             for beta in [0.2, 0.5, 0.8] {
                 let mut mixer = PulayMixer::new(beta, 6).unwrap();
-                mixer.set_incremental(incremental);
                 let first = mixer.mix(&x0, &y0, 1.0).unwrap();
                 for i in 0..4 {
                     assert!((first[i] - (x0[i] + beta * (y0[i] - x0[i]))).abs() < 1e-14);
@@ -943,7 +725,8 @@ impl PulayMixer {
             .zip(state.seed_dr.iter().cloned())
             .collect();
         self.mean = state.mean;
-        if let Some(inc) = &mut self.incremental {
+        {
+            let inc = &mut self.incremental;
             inc.forget(self.pairs.len(), self.seeds.len());
         }
         Ok(())
@@ -1141,95 +924,10 @@ mod incremental_tests {
         }
         y
     }
-    #[derive(Debug, Clone)]
-    struct Weights(Vec<f64>);
-    impl ResidualMetric for Weights {
-        fn duplicate(&self) -> Box<dyn ResidualMetric> {
-            Box::new(self.clone())
-        }
-        fn apply(&mut self, r: &[f64], out: &mut [f64]) -> Result<(), SolverError> {
-            for ((v, r), w) in out.iter_mut().zip(r).zip(&self.0) {
-                *v = r * w;
-            }
-            Ok(())
-        }
-    }
-    fn run(incremental: bool, metric: bool, history: usize, script: &[u8]) -> Vec<Vec<u64>> {
-        let n = 17;
-        let mut p = PulayMixer::new(0.4, history).unwrap();
-        if metric {
-            p.set_metric(Box::new(Weights(
-                (0..n).map(|i| 1.0 + i as f64 * 0.1).collect(),
-            )));
-        }
-        p.set_incremental(incremental);
-        let mut x: Vec<f64> = (0..n)
-            .map(|i| 1.0 + 0.3 * ((i * 7 % 5) as f64 - 2.0) / 2.0)
-            .collect();
-        let mean = x.iter().sum::<f64>() / n as f64;
-        let mut out = Vec::new();
-        let mut saved = None;
-        for &op in script {
-            match op {
-                b'm' => {
-                    x = p.mix(&x, &map(&x), mean).unwrap();
-                    out.push(x.iter().map(|v| v.to_bits()).collect());
-                }
-                b'c' => saved = Some(p.checkpoint()),
-                b'r' => p.restore(saved.as_ref().unwrap(), n).unwrap(),
-                b'z' => p.reset(),
-                b's' => {
-                    p.reset();
-                    let dx: Vec<Vec<f64>> = (0..3)
-                        .map(|k| {
-                            (0..n)
-                                .map(|i| 1e-3 * ((i + k) % 4) as f64 - 1.5e-3)
-                                .collect()
-                        })
-                        .collect();
-                    let dr: Vec<Vec<f64>> = (0..3)
-                        .map(|k| {
-                            (0..n)
-                                .map(|i| 2e-3 * ((i * k + 1) % 3) as f64 - 2e-3)
-                                .collect()
-                        })
-                        .collect();
-                    p.seed_differences(&dx, &dr, mean).unwrap();
-                }
-                _ => unreachable!(),
-            }
-        }
-        out
-    }
-    #[test]
-    fn incremental_update_is_bit_identical_to_the_plain_update() {
-        // Window filling and sliding, checkpoint/restore with the same pair
-        // count, reset, seeds that age out; l2 and a metric; capacities 2 and 6.
-        let scripts: [&[u8]; 4] = [
-            b"mmmmmmmmmmmmmm",
-            b"mmmmcmmmrmmmm",
-            b"mmmzmmmmmmm",
-            b"smmmmmmmmsmmm",
-        ];
-        for script in scripts {
-            for metric in [false, true] {
-                for history in [2, 6] {
-                    let plain = run(false, metric, history, script);
-                    let fast = run(true, metric, history, script);
-                    assert_eq!(
-                        plain,
-                        fast,
-                        "script {:?} metric {metric} history {history}",
-                        std::str::from_utf8(script).unwrap()
-                    );
-                }
-            }
-        }
-    }
+
     #[test]
     fn incremental_update_keeps_one_difference_per_history_entry() {
         let mut p = PulayMixer::new(0.4, 6).unwrap();
-        p.set_incremental(true);
         let n = 9;
         let mut x: Vec<f64> = (0..n).map(|i| 1.0 + 0.1 * (i as f64 - 4.0) / 4.0).collect();
         let mean = x.iter().sum::<f64>() / n as f64;
@@ -1238,26 +936,12 @@ mod incremental_tests {
         }
         // Process-wide counters are shared with concurrent tests; the cache
         // sizes are exact: six differences, a 6 x 6 Gram, at most one spare.
-        let inc = p.incremental.as_ref().unwrap();
+        let inc = &p.incremental;
         assert_eq!(inc.diffs.len(), 6);
         assert_eq!(inc.gram.len(), 36);
         assert!(inc.spare.len() <= 1);
     }
 
-    /// Per-entry weights (a stand-in for the Coulomb metric's 4 pi / G^2).
-    #[derive(Debug, Clone)]
-    struct Weights4([f64; 4]);
-    impl ResidualMetric for Weights4 {
-        fn duplicate(&self) -> Box<dyn ResidualMetric> {
-            Box::new(self.clone())
-        }
-        fn apply(&mut self, r: &[f64], out: &mut [f64]) -> Result<(), SolverError> {
-            for ((v, r), w) in out.iter_mut().zip(r).zip(self.0) {
-                *v = r * w;
-            }
-            Ok(())
-        }
-    }
     /// Two zero-mean modes: u (entries 0, 1) is screened (output fixed, linear
     /// mixing at 0.5 halves it), v (entries 2, 3) is over-responding (output
     /// deviation -3 v, linear mixing at 0.5 flips its sign: charge sloshing).
@@ -1298,48 +982,5 @@ mod incremental_tests {
         assert!(d.step_norm / d.residual_norm > 0.9);
         p.reset();
         assert!(p.last_step().is_none());
-    }
-    #[test]
-    fn coulomb_guard_trace_is_inert_and_on_refits_only_a_predicted_growth() {
-        let run = |guard: Option<bool>, incremental: bool| {
-            let mut p = PulayMixer::new(0.5, 6).unwrap();
-            p.set_incremental(incremental);
-            if let Some(refit) = guard {
-                p.set_coulomb_guard(Box::new(Weights4([1.0, 1.0, 1e6, 1e6])), refit);
-            }
-            let mut x = start();
-            let mut steps = Vec::new();
-            for _ in 0..2 {
-                x = p.mix(&x, &sloshing(&x), 1.0).unwrap();
-                steps.push((x.clone(), p.last_step().unwrap().clone()));
-            }
-            steps
-        };
-        for incremental in [false, true] {
-            let plain = run(None, incremental);
-            let trace = run(Some(false), incremental);
-            let on = run(Some(true), incremental);
-            for ((a, _), (b, t)) in plain.iter().zip(&trace) {
-                let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-                assert_eq!(bits(a), bits(b));
-                assert!(!t.coulomb_refit);
-            }
-            // Step 2: the L2 fit predicts an almost tripled v residual (the
-            // predicted v residual is 4v - 8v gamma; the metric weights v by
-            // 1e6, so the ratio is |1 - 2 gamma| up to the u part), trace
-            // records it, on refits.
-            let gamma = trace[1].1.coefficients[0];
-            let ratio = trace[1].1.coulomb_predicted_ratio.unwrap();
-            assert!((ratio - (1.0 - 2.0 * gamma)).abs() < 1e-3, "ratio {ratio}");
-            assert!(ratio > 2.5);
-            assert!(on[1].1.coulomb_refit && !on[0].1.coulomb_refit);
-            // The refit coefficient removes the predicted v growth: the next
-            // input has |v| no larger than the current one, the L2 step had 3x.
-            let v = |x: &[f64]| (x[2] - x[3]).abs() / 2.0;
-            let x1 = &plain[0].0;
-            assert!(v(&on[1].0) <= 1.01 * v(x1), "{} vs {}", v(&on[1].0), v(x1));
-            assert!(v(&plain[1].0) > 2.0 * v(x1));
-            assert!((on[1].1.coefficients[0] - 0.5).abs() < 0.05);
-        }
     }
 }

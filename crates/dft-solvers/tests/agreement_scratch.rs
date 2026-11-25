@@ -3,7 +3,7 @@ use dft_mpi::{Collective, simulate};
 use dft_numerics::real::RealMatrix;
 use dft_solvers::distributed_davidson::{
     DistributedRealOperator, DistributedTuning, release_workspace, scratch_allocation_stats,
-    set_scratch_allocation_profile, set_start_gram_override,
+    set_scratch_allocation_profile,
 };
 use dft_solvers::{BandTolerances, RealDavidson, SolverError};
 use std::time::Duration;
@@ -51,12 +51,10 @@ impl DistributedRealOperator for Diagonal {
 fn warm_growth_shrink_and_failed_then_healthy_solves() {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        // Rank 3 is empty for the small shape. Test both workspace families,
-        // including the existing root-eigenvalue broadcast scratch.
-        for lean in [false, true] {
+        // Rank 3 is empty for the small shape. Exercise the frozen workspace.
+        {
             simulate(4, |comm| {
                 release_workspace();
-                set_start_gram_override(Some(true));
                 set_scratch_allocation_profile(true);
                 let mut healthy = std::collections::BTreeMap::new();
                 for (n, bands, fault, growth) in [
@@ -99,9 +97,6 @@ fn warm_growth_shrink_and_failed_then_healthy_solves() {
                         false,
                         6,
                         DistributedTuning {
-                            workspace: true,
-                            lean_algebra: lean,
-                            eigen_root: true,
                             ..DistributedTuning::from_env()
                         },
                     );

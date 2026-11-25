@@ -533,7 +533,7 @@ impl RealDavidson {
         preconditioner: crate::DavidsonPreconditioner,
     ) -> Result<AdvancedSubspace, SolverError> {
         let options = ResearchOptions::from_env();
-        if !options.lean || SecondVector::from_env() != SecondVector::Off {
+        if !options.lean {
             return Err(SolverError::InvalidParameter(
                 "advance requires the lean Ritz-change Davidson",
             ));
@@ -617,7 +617,6 @@ impl RealDavidson {
     /// unchanged certification. In narrow iterations `history` holds, for
     /// standard solves, the largest residual of the corrected roots and, for
     /// strict solves, the largest of the explicit residuals and the estimates.
-    /// B1 is inactive while `BAANDI_SECOND_VECTOR` is set.
     #[allow(clippy::too_many_arguments)]
     pub fn solve_research(
         &self,
@@ -668,9 +667,8 @@ impl RealDavidson {
         self.ensure_workspace(n, capacity, &pool, workspace)?;
         // C3a: returned projections belong to exactly one solve.
         workspace.as_mut().unwrap().returned_projections = false;
-        // Lean Davidson (work order phase B): Ritz-value solves only, never with
-        // the experimental second vector (as B1).
-        if options.lean && ritz && SecondVector::from_env() == SecondVector::Off {
+        // Lean Davidson (work order phase B): Ritz-value solves only.
+        if options.lean && ritz {
             return lean::solve(
                 self,
                 op,
@@ -713,16 +711,15 @@ impl RealDavidson {
             b6: b6_scratch,
             ..
         } = workspace.as_mut().unwrap();
-        // B6 (`BAANDI_B6=on`, default off): cache P^T V per basis column so the
+        // Frozen cached-projector certificate: cache P^T V per basis column so the
         // return certificate skips its first projector product.
-        let mut b6 = B6Cache::activate(b6_scratch, op, capacity, self.bands, options.b6);
+        let mut b6 = B6Cache::activate(b6_scratch, op, capacity, self.bands);
         projection.narrow = options.narrow_proj;
         let timers = Timers::new(options.stage_timers);
-        let second_vector = SecondVector::from_env();
-        let b1_active = options.b1.acts_on(ritz) && second_vector == SecondVector::Off;
+        let b1_active = options.b1.acts_on(ritz);
         let sketching = b1_active && !ritz;
         // B1 strict margin and sketch rows (0.5 and 128 by default).
-        let margin = options.b1_margin;
+        let margin = crate::davidson_stages::B1_DEFAULT_MARGIN;
         let sketch_rows = options.b1_sketch_rows();
         if b1_active {
             b1_add(B1Count::Solves, 1);
@@ -817,12 +814,7 @@ impl RealDavidson {
             sk.refresh(gemm, basis, products)?;
             timers.stop(t, Stage::Sketch);
         }
-        let mut previous_corrections = if second_vector == SecondVector::PreviousCorrection {
-            vec![0.; n * self.bands]
-        } else {
-            Vec::new()
-        };
-        let mut has_previous = vec![false; self.bands];
+
         let mut max_basis_dimension = 0;
         for iteration in 1..=self.max_iterations {
             let iteration_clock = timers.start();
@@ -906,14 +898,9 @@ impl RealDavidson {
                         b1.set
                             .extend((0..self.bands).filter(|&j| est[j] >= margin * threshold(j)));
                     }
-                    // Default gate: fewer than half the bands; B1-NARROW: any
-                    // proper subset. Corrections are a subset of the set, so a
+                    // Frozen gate: fewer than half the bands. Corrections are a subset, so a
                     // narrow iteration never restarts.
-                    let small = if options.b1_narrow {
-                        b1.set.len() < self.bands
-                    } else {
-                        2 * b1.set.len() < self.bands
-                    };
+                    let small = 2 * b1.set.len() < self.bands;
                     narrow = !b1.set.is_empty() && small && basis.cols() + b1.set.len() <= capacity;
                 }
                 if narrow {
@@ -1124,25 +1111,7 @@ impl RealDavidson {
                 &values[..self.bands],
             )?;
             timers.stop(t, Stage::Precondition);
-            if second_vector != SecondVector::Off {
-                add_second_vector(
-                    second_vector,
-                    n,
-                    SecondVectorContext {
-                        selected,
-                        converged,
-                        residuals,
-                        strict_bands: policy.strict_bands,
-                        bands: self.bands,
-                        values: &values[..self.bands],
-                        diagonal,
-                        residual_block,
-                    },
-                    corrections,
-                    previous_corrections.as_mut_slice(),
-                    has_previous.as_mut_slice(),
-                )?;
-            }
+
             if !trusted || basis.cols() + corrections.cols() > capacity {
                 if narrow {
                     return Err(SolverError::Application(
@@ -1298,121 +1267,18 @@ fn precondition_block(
 }
 
 /// Lowest kinetic coordinate units; ties retain ORC half-list order (0, cos, sin).
-/// The diagonal is kinetic, not the full Hamiltonian diagonal.
-/// Experimental (docs/roadmap/second-vector-plan.md): fill the free slot of an
-/// odd-sized correction block. Off unless `BAANDI_SECOND_VECTOR=v1|v2|v3`.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SecondVector {
-    Off,
-    /// Previous correction of the selected band with the largest residual.
-    PreviousCorrection,
-    /// Preconditioned residual of the converged band with the largest residual.
-    ConvergedBand,
-    /// Unpreconditioned residual of the worst strict band.
-    WorstResidual,
-    /// As `WorstResidual`, but only when the correction block has exactly one
-    /// column (the single-column tail); never in wider blocks.
-    WorstResidualTail,
-}
-static SECOND_VECTOR_COLUMNS: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-/// Number of second-vector columns inserted so far in this process (for the run
-/// report: lets a measurement check that the gate itself fired).
+/// Retired second-vector experiment: no columns are inserted.
 pub fn second_vector_columns() -> usize {
-    SECOND_VECTOR_COLUMNS.load(std::sync::atomic::Ordering::Relaxed)
-}
-impl SecondVector {
-    fn from_env() -> Self {
-        match dft_numerics::switches::choice(dft_numerics::switches::Id::SECOND_VECTOR) {
-            "v1" => Self::PreviousCorrection,
-            "v2" => Self::ConvergedBand,
-            "v3" => Self::WorstResidual,
-            "v4" => Self::WorstResidualTail,
-            _ => Self::Off,
-        }
-    }
-}
-struct SecondVectorContext<'a> {
-    selected: &'a [usize],
-    converged: &'a [bool],
-    residuals: &'a [f64],
-    strict_bands: usize,
-    bands: usize,
-    values: &'a [f64],
-    diagonal: &'a [f64],
-    residual_block: &'a RealMatrix,
-}
-fn add_second_vector(
-    variant: SecondVector,
-    n: usize,
-    c: SecondVectorContext<'_>,
-    corrections: &mut RealMatrix,
-    previous: &mut [f64],
-    has_previous: &mut [bool],
-) -> Result<(), SolverError> {
-    let k = c.selected.len();
-    // V1 remembers this iteration's corrections for the next one.
-    if variant == SecondVector::PreviousCorrection {
-        let stored: Vec<(usize, usize)> = c.selected.iter().copied().enumerate().collect();
-        let mut extra: Option<usize> = None;
-        if k % 2 == 1 && k < c.bands {
-            extra = c
-                .selected
-                .iter()
-                .copied()
-                .filter(|&j| has_previous[j])
-                .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b]));
-        }
-        let mut column_extra = None;
-        if let Some(j) = extra {
-            column_extra = Some(previous[j * n..(j + 1) * n].to_vec());
-        }
-        for (slot, j) in stored {
-            previous[j * n..(j + 1) * n]
-                .copy_from_slice(&corrections.as_slice()[slot * n..(slot + 1) * n]);
-            has_previous[j] = true;
-        }
-        if let Some(col) = column_extra {
-            SECOND_VECTOR_COLUMNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            corrections.reshape_within_storage(n, k + 1)?;
-            corrections.as_mut_slice()[k * n..(k + 1) * n].copy_from_slice(&col);
-        }
-        return Ok(());
-    }
-    if k.is_multiple_of(2) || k >= c.bands {
-        return Ok(());
-    }
-    if variant == SecondVector::WorstResidualTail && k != 1 {
-        return Ok(());
-    }
-    let chosen = match variant {
-        SecondVector::ConvergedBand => (0..c.bands)
-            .filter(|&j| c.converged[j])
-            .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b])),
-        SecondVector::WorstResidual | SecondVector::WorstResidualTail => {
-            (0..c.strict_bands.min(c.bands))
-                .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b]))
-        }
-        _ => None,
-    };
-    let Some(j) = chosen else {
-        return Ok(());
-    };
-    corrections.reshape_within_storage(n, k + 1)?;
-    SECOND_VECTOR_COLUMNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dst = &mut corrections.as_mut_slice()[k * n..(k + 1) * n];
-    let r = column(c.residual_block, j);
-    match variant {
-        SecondVector::ConvergedBand => {
-            for ((dst, &r), &d) in dst.iter_mut().zip(r).zip(c.diagonal) {
-                *dst = precondition(r, d, c.values[j])?;
-            }
-        }
-        _ => dst.copy_from_slice(r),
-    }
-    Ok(())
+    0
 }
 
+fn finite(x: &[f64]) -> Result<(), LinalgError> {
+    if x.iter().all(|x| x.is_finite()) {
+        Ok(())
+    } else {
+        Err(LinalgError::NonFinite)
+    }
+}
 pub fn free_electron_initial_guess(
     kinetic: &[f64],
     bands: usize,
@@ -1426,13 +1292,6 @@ pub fn free_electron_initial_guess(
         x[(i, j)] = 1.;
     }
     Ok(x)
-}
-fn finite(x: &[f64]) -> Result<(), LinalgError> {
-    if x.iter().all(|x| x.is_finite()) {
-        Ok(())
-    } else {
-        Err(LinalgError::NonFinite)
-    }
 }
 fn column(x: &RealMatrix, j: usize) -> &[f64] {
     &x.as_slice()[j * x.rows()..(j + 1) * x.rows()]
@@ -1588,10 +1447,9 @@ impl B6Cache {
         op: &dyn RealLinearOperator,
         capacity: usize,
         bands: usize,
-        enabled: bool,
     ) -> Option<&'a mut B6Cache> {
         let count = op.projector_count();
-        if !enabled || count == 0 {
+        if count == 0 {
             return None;
         }
         if slot
@@ -1685,12 +1543,12 @@ pub(crate) fn upper_border_product(
     products: &RealMatrix,
     from: usize,
     to: usize,
-    mut out: dft_numerics::real::RealMatrixMut<'_>,
+    out: dft_numerics::real::RealMatrixMut<'_>,
 ) -> Result<(), LinalgError> {
     let n = basis.rows();
     let _lane = lane_profile::span(lane_profile::Op::BorderProduct, n, to, to - from, from);
-    if !dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_UPPER_BORDER) {
-        return ws.multiply_slices_into(
+    {
+        ws.multiply_slices_into(
             site,
             basis.as_slice(),
             n,
@@ -1701,26 +1559,8 @@ pub(crate) fn upper_border_product(
             to - from,
             n,
             out,
-        );
+        )
     }
-    for first in (from..to).step_by(64) {
-        let end = (first + 64).min(to);
-        let width = end - first;
-        let _lane = lane_profile::span(lane_profile::Op::UpperBorderTile, n, end, width, from);
-        ws.multiply_slices_into(
-            site,
-            basis.as_slice(),
-            n,
-            end,
-            n,
-            RealOp::Transpose,
-            &products.as_slice()[first * n..],
-            width,
-            n,
-            out.as_mut().submatrix_mut(0, first - from, end, width),
-        )?;
-    }
-    Ok(())
 }
 
 fn reduced_matrix_into(
@@ -1891,27 +1731,8 @@ fn rotation_pair(
     rotated_products: &mut RealMatrix,
 ) -> Result<(), LinalgError> {
     let (n, m) = (basis.rows(), basis.cols());
-    let columns = dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_ROTATE_COLUMNS);
-    let _lane = lane_profile::span(
-        lane_profile::Op::RotationPair,
-        n,
-        m,
-        k,
-        usize::from(columns),
-    );
-    if columns {
-        gemm.multiply_column_groups(basis.as_slice(), n, m, n, c, k, m, vectors.as_mut_slice())?;
-        gemm.multiply_column_groups(
-            products.as_slice(),
-            n,
-            m,
-            n,
-            c,
-            k,
-            m,
-            rotated_products.as_mut_slice(),
-        )
-    } else {
+    let _lane = lane_profile::span(lane_profile::Op::RotationPair, n, m, k, 0);
+    {
         gemm.rotate_pair_slices(
             basis.as_slice(),
             products.as_slice(),
@@ -2057,34 +1878,16 @@ struct Projection {
     projected: RealMatrix,
     output: RealMatrix,
     column: Vec<f64>,
-    /// Panel-wise block Gram-Schmidt (default on MKL builds, `BAANDI_MGS` overrides).
-    blocked: bool,
-    /// WIDE-DOT (opt-in `BAANDI_WIDE_DOT=on`, default off): the in-block MGS
-    /// dot products use eight lane accumulators (`dot_wide`), rounding class.
-    wide: bool,
     /// ORTHO-DGKS (opt-in `BAANDI_ORTHO=dgks`, default off; rounding class):
     /// the second projection pass against the basis runs only when a column of
     /// the block lost more than 1 - 1/sqrt(2) of its norm in the first pass (or
     /// a column was dropped). Skipping it saves two of the four streams of the
     /// basis per append.
     dgks: Option<f64>,
-    /// ORTHO-BLOCK (P48D, `BAANDI_ORTHO_BLOCK=on`, default off; rounding class):
-    /// panel Gram-Schmidt of the correction block with the shape-rule panel
-    /// width `ortho_panel_width(n)` on every build (overrides `BAANDI_MGS`).
-    block_ortho: bool,
     /// NARROW-PROJ (`ResearchOptions::narrow_proj`, set per solve): blocks of
     /// at most `NARROW_WIDTH` columns use the streaming dot and fused update
     /// kernels of the GEMM workspace instead of the panel GEMMs.
     narrow: bool,
-    /// PROJECT-WIDE (`BAANDI_PROJECT_WIDE=on`, default off; rounding class on
-    /// MKL builds, bit-identical on pure builds where both routes forward to the
-    /// same product): the long apply X -= Q S of the basis projection and the
-    /// MGS-B cross-panel apply take `multiply_slices_wide_into`, so they reach
-    /// the per-panel dgemm for any block width (only the fixed 256-row panel
-    /// bound applies) instead of falling back to the pure kernel once
-    /// rows x columns exceeds capacity^2. Shapes only; the fixed panels keep the
-    /// result independent of the thread count.
-    project_wide: bool,
 }
 /// DGKS keep ratio: one pass suffices when every column kept at least this
 /// fraction of its unit input norm (`BAANDI_ORTHO=dgks`, parsed in the switches
@@ -2137,18 +1940,8 @@ impl Projection {
             overlap: RealMatrix::zeros(cap, cap)?,
             projected: RealMatrix::zeros(n, cap)?,
             output: RealMatrix::zeros(n, cap)?,
-            // Blocked Gram-Schmidt is the default on MKL builds only (dev08
-            // evidence MGS-B R2); `BAANDI_MGS=classic` or `blocked` overrides.
-            blocked: match dft_numerics::switches::choice(dft_numerics::switches::Id::MGS) {
-                "blocked" => true,
-                "classic" => false,
-                _ => dft_numerics::MKL_BACKEND,
-            },
-            wide: dft_numerics::switches::on(dft_numerics::switches::Id::WIDE_DOT),
             dgks: dgks_keep(),
-            block_ortho: dft_numerics::switches::on(dft_numerics::switches::Id::ORTHO_BLOCK),
             narrow: false,
-            project_wide: dft_numerics::switches::on(dft_numerics::switches::Id::PROJECT_WIDE),
             column: vec![0.; n],
         })
     }
@@ -2255,11 +2048,7 @@ impl Projection {
                 // PROJECT-WIDE: the apply has the flops of the overlap product
                 // above; the wide route takes it through the per-panel dgemm at
                 // any width (MKL builds), the default keeps the square bound.
-                let apply = if self.project_wide {
-                    RealGemmWorkspace::multiply_slices_wide_into
-                } else {
-                    RealGemmWorkspace::multiply_slices_into
-                };
+                let apply = { RealGemmWorkspace::multiply_slices_into };
                 apply(
                     ws,
                     dft_numerics::GemmSite::ProjectionApply,
@@ -2291,9 +2080,9 @@ impl Projection {
             let mut min_len = f64::INFINITY;
             // ORTHO-BLOCK (P48D) replaces the fixed 16-column panel (and the
             // classic sweep) by the shape-rule width; otherwise MGS-B or classic.
-            let panel = if self.block_ortho {
+            let panel = if !dft_numerics::MKL_BACKEND {
                 Some(ortho_panel_width(n))
-            } else if self.blocked {
+            } else if dft_numerics::MKL_BACKEND {
                 Some(BLOCK_COLUMNS)
             } else {
                 None
@@ -2330,7 +2119,7 @@ impl Projection {
                         // bound (MKL builds; same fixed 256-row panels, so the
                         // result does not depend on the thread count). MGS-B keeps
                         // its original call unless PROJECT-WIDE is on.
-                        let apply = if self.block_ortho || self.project_wide {
+                        let apply = if !dft_numerics::MKL_BACKEND || (false) {
                             RealGemmWorkspace::multiply_slices_wide_into
                         } else {
                             RealGemmWorkspace::multiply_slices_into
@@ -2369,7 +2158,7 @@ impl Projection {
                         self.column.copy_from_slice(column(&self.normalized, jj));
                         for _ in 0..2 {
                             for k in panel_start..kept {
-                                let p = mgs_dot(self.wide, &self.column, column(&self.output, k));
+                                let p = mgs_dot(true, &self.column, column(&self.output, k));
                                 for (dst, &src) in
                                     self.column.iter_mut().zip(column(&self.output, k))
                                 {
@@ -2398,7 +2187,7 @@ impl Projection {
                     self.column.copy_from_slice(column(&self.normalized, j));
                     for _ in 0..2 {
                         for k in 0..kept {
-                            let p = mgs_dot(self.wide, &self.column, column(&self.output, k));
+                            let p = mgs_dot(true, &self.column, column(&self.output, k));
                             for (dst, &src) in self.column.iter_mut().zip(column(&self.output, k)) {
                                 *dst -= p * src;
                             }
@@ -2696,7 +2485,7 @@ impl Random {
 mod tests {
     use super::*;
     #[test]
-    fn column_rotation_matches_pair_and_scalar_oracle() {
+    fn default_rotation_matches_scalar_oracle() {
         for n in [1, 257, 513] {
             let (m, k) = (37, 65); // both 32-column groups and the tail
             let v = Random(17).block(n, m).unwrap();
@@ -2718,11 +2507,7 @@ mod tests {
                     reference_h.as_mut_slice(),
                 )
                 .unwrap();
-                let config = dft_numerics::switches::RunConfig::from_pairs(&[(
-                    "davidson_rotate_columns",
-                    "on",
-                )])
-                .unwrap();
+                let config = dft_numerics::switches::RunConfig::from_input(&[]).unwrap();
                 let _scope = config.enter();
                 let mut x = RealMatrix::zeros(n, k).unwrap();
                 let mut hx = x.clone();
@@ -2760,13 +2545,11 @@ mod tests {
     }
 
     #[test]
-    fn upper_border_tiles_preserve_retained_entries_and_pool_independence() {
+    fn default_border_preserves_entries_and_pool_independence() {
         // A non-multiple of the 256-row reduction panel, two full column
         // tiles and a tail; asymmetric V^T HV so accidentally mirroring the
         // lower triangle instead of retaining the upper cannot pass.
-        let config =
-            dft_numerics::switches::RunConfig::from_pairs(&[("davidson_upper_border", "on")])
-                .unwrap();
+        let config = dft_numerics::switches::RunConfig::from_input(&[]).unwrap();
         let _scope = config.enter();
         let (n, m) = (257, 137);
         let v = Random(17).block(n, m).unwrap();
@@ -2823,12 +2606,12 @@ mod tests {
     #[test]
     fn dgks_projection_stays_orthonormal() {
         let n = 301;
-        for blocked in [false, true] {
+        for blocked in [dft_numerics::MKL_BACKEND] {
             for (mix, expect_repeat) in [(0.0, false), (0.999, true)] {
                 let mut ws =
                     RealGemmWorkspace::with_pool(n, 24, WorkerPool::new(1).unwrap()).unwrap();
                 let mut projection = Projection::new(n, 24).unwrap();
-                projection.blocked = blocked;
+
                 let q = projection
                     .run(&Random(3).block(n, 12).unwrap(), None, &mut ws)
                     .unwrap();
@@ -2877,7 +2660,7 @@ mod tests {
     fn project_variant(
         x: &RealMatrix,
         q: Option<&RealMatrix>,
-        variant: (bool, bool),
+        _variant: (bool, bool),
         threads: usize,
         dgks: Option<f64>,
     ) -> (RealMatrix, f64) {
@@ -2886,7 +2669,7 @@ mod tests {
         let pool = WorkerPool::new(threads).unwrap();
         let mut ws = RealGemmWorkspace::with_pool(n, cap, pool.clone()).unwrap();
         let mut projection = Projection::with_pool(n, cap, pool).unwrap();
-        (projection.blocked, projection.block_ortho) = variant;
+
         projection.dgks = dgks;
         let out = projection.run(x, q, &mut ws).unwrap();
         let mut both = RealMatrix::zeros(n, q.map_or(0, |q| q.cols()) + out.cols()).unwrap();
@@ -3086,95 +2869,6 @@ mod tests {
                     .all(|(a, b)| a.to_bits() == b.to_bits()),
                 "T={threads}"
             );
-        }
-    }
-    /// One projection with MGS-B (`blocked`) or the classic sweep and the
-    /// PROJECT-WIDE flag; returns the output and the defect of [q, output].
-    fn project_wide_variant(
-        x: &RealMatrix,
-        q: &RealMatrix,
-        blocked: bool,
-        wide: bool,
-        threads: usize,
-    ) -> (RealMatrix, f64) {
-        let n = x.rows();
-        let cap = 96;
-        let pool = WorkerPool::new(threads).unwrap();
-        let mut ws = RealGemmWorkspace::with_pool(n, cap, pool.clone()).unwrap();
-        let mut projection = Projection::with_pool(n, cap, pool).unwrap();
-        projection.blocked = blocked;
-        projection.block_ortho = false;
-        projection.dgks = Some(0.1);
-        projection.project_wide = wide;
-        let out = projection.run(x, Some(q), &mut ws).unwrap();
-        let both = append(q, &out).unwrap();
-        let defect = orthogonality_defect(&both);
-        (out, defect)
-    }
-    /// PROJECT-WIDE in `Projection::run_into` (basis apply and MGS-B cross-panel
-    /// apply): default off with the environment unset; same kept-column counts
-    /// as the default route on random, nearly and exactly dependent blocks, defect
-    /// inside the 1e-12 contraction gate, random outputs equal to rounding (and
-    /// bitwise on pure builds), and bit-identical at 1, 2, 4 and 8 workers.
-    #[test]
-    fn project_wide_projection_rounding_class_and_thread_independent() {
-        // n = 2048 keeps 8 panels and m n k = 3e6 multiply-adds, above the
-        // parallel threshold of the panel products.
-        let n = 2048;
-        {
-            use dft_numerics::switches::{Id, Source, manifest};
-            let entry = &manifest()[Id::PROJECT_WIDE as usize];
-            let projection = Projection::new(n, 8).unwrap();
-            if entry.source == Source::Default {
-                assert!(!projection.project_wide, "PROJECT_WIDE must default off");
-            }
-        }
-        let pool = WorkerPool::new(1).unwrap();
-        let mut ws = RealGemmWorkspace::with_pool(n, 96, pool.clone()).unwrap();
-        let q = Projection::with_pool(n, 96, pool)
-            .unwrap()
-            .run(&Random(71).block(n, 30).unwrap(), None, &mut ws)
-            .unwrap();
-        for (name, x) in ortho_inputs(n, 50) {
-            for blocked in [false, true] {
-                let tag = format!("{name} blocked={blocked}");
-                let (off, d0) = project_wide_variant(&x, &q, blocked, false, 1);
-                let (on, d1) = project_wide_variant(&x, &q, blocked, true, 1);
-                assert_eq!(on.cols(), off.cols(), "{tag}");
-                assert!(d1 <= 1e-12, "{tag}: defect {d1:e} (off {d0:e})");
-                if name == "random" {
-                    let diff = on
-                        .as_slice()
-                        .iter()
-                        .zip(off.as_slice())
-                        .fold(0_f64, |a, (x, y)| a.max((x - y).abs()));
-                    assert!(diff <= 1e-12, "{tag}: max |on - off| {diff:e}");
-                }
-                if !dft_numerics::MKL_BACKEND {
-                    assert!(
-                        on.as_slice()
-                            .iter()
-                            .zip(off.as_slice())
-                            .all(|(a, b)| a.to_bits() == b.to_bits()),
-                        "{tag}: pure builds must be bit-identical"
-                    );
-                }
-                if !matches!(name, "random" | "near-1e-12" | "exact") {
-                    continue;
-                }
-                for threads in [2, 4, 8] {
-                    let (other, _) = project_wide_variant(&x, &q, blocked, true, threads);
-                    assert_eq!(other.cols(), on.cols(), "{tag} T={threads}");
-                    assert!(
-                        other
-                            .as_slice()
-                            .iter()
-                            .zip(on.as_slice())
-                            .all(|(a, b)| a.to_bits() == b.to_bits()),
-                        "{tag} T={threads}"
-                    );
-                }
-            }
         }
     }
     /// WIDE-DOT agrees with the four-lane dot to rounding for every tail length.

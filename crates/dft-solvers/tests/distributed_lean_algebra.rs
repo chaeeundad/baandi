@@ -1,22 +1,6 @@
-//! MPI-OVERLAP-DAVIDSON (`BAANDI_M2_LEAN_ALGEBRA=on`): the serial lean algebra
-//! on the distributed stick-row solver (docs/design/mpi-overlap-davidson.md).
-//! Synthetic operators, 1 to 4 simulated ranks with an interleaved row
-//! partition:
-//! - eigenvalues agree with the orthonormal (panel Gram-Schmidt) path within
-//!   the strict class (1e-10 Ha, Ritz-change tolerance 1e-11) on a cubic-like,
-//!   an exactly degenerate (two identical blocks) and a skewed spectrum, cold
-//!   and warm, capacities 3 and 6 per band (contractions included); returned
-//!   vectors orthonormal to 1e-11 and reported residuals equal to the true
-//!   residuals;
-//! - every rank returns the same bits and a fixed rank count is bit-reproducible;
-//! - at most two border tree sums per iteration (S border with the residual
-//!   norms before H is applied, H border after), fewer tree sums per solve
-//!   than the orthonormal path, no H column applied to a rejected block;
-//! - near-dependent corrections (the ill-conditioned fixture of the serial lean
-//!   test) take the same rank decisions as the serial lean solver: the same
-//!   appends, stage-1 re-projections, stage-2 fallbacks, iterations and H
-//!   columns (no wasted application), with both fallback stages exercised (stage 2 down to the random
-//!   block on an exactly diagonal operator).
+//! Frozen distributed lean algebra: dense-oracle eigenvalues, independent
+//! residuals, rank independence and repeated default solves on cubic-like,
+//! degenerate and skewed spectra; unchanged rank decisions versus serial lean.
 use dft_mpi::{Collective, SimRank, simulate};
 use dft_numerics::{pool::WorkerPool, real::RealMatrix};
 use dft_solvers::distributed_davidson::{
@@ -179,11 +163,10 @@ impl DistributedRealOperator for RowsOp<'_> {
     }
 }
 
-fn tuning(lean: bool) -> DistributedTuning {
+fn tuning() -> DistributedTuning {
     // The adopted MPI defaults (serial order, dgemm route, slice loops,
     // workspace, selected roots, fused panel Gram-Schmidt) plus the switch.
     DistributedTuning {
-        lean_algebra: lean,
         ..DistributedTuning::from_env()
     }
 }
@@ -274,14 +257,7 @@ struct Run {
 }
 
 /// Cold solve of `a`, then a warm solve of `b` from the cold eigenvectors.
-fn solve(
-    ranks: usize,
-    a: &RealMatrix,
-    b: &RealMatrix,
-    bands: usize,
-    per_band: usize,
-    lean: bool,
-) -> Vec<Run> {
+fn solve(ranks: usize, a: &RealMatrix, b: &RealMatrix, bands: usize, per_band: usize) -> Vec<Run> {
     let solver = RealDavidson {
         bands,
         tolerance: 1e-11,
@@ -293,7 +269,7 @@ fn solve(
         strict_bands: bands - 1,
         buffer_tolerance: 1e-9,
     };
-    let t = tuning(lean);
+    let t = tuning();
     simulate(ranks, |sim: &SimRank| {
         let traced = Trace {
             inner: sim,
@@ -353,7 +329,7 @@ fn tree_sums() -> u64 {
 }
 
 #[test]
-fn lean_algebra_agrees_with_orthonormal_path() {
+fn frozen_lean_algebra_agrees_with_dense_oracle() {
     let _guard = serial();
     type Fixture = fn(usize, f64) -> RealMatrix;
     let fixtures: [(&str, Fixture, usize, usize); 3] = [
@@ -368,11 +344,11 @@ fn lean_algebra_agrees_with_orthonormal_path() {
         for per_band in [3, 6] {
             for ranks in 1..=4 {
                 let sums0 = tree_sums();
-                let plain = solve(ranks, &a, &b, bands, per_band, false);
+                let plain = solve(ranks, &a, &b, bands, per_band);
                 let sums1 = tree_sums();
                 let stats0 = lean_algebra_stats();
                 let w0 = work_counts();
-                let lean = solve(ranks, &a, &b, bands, per_band, true);
+                let lean = solve(ranks, &a, &b, bands, per_band);
                 let w1 = work_counts();
                 let stats1 = lean_algebra_stats();
                 let sums2 = tree_sums();
@@ -478,12 +454,12 @@ fn lean_algebra_agrees_with_orthonormal_path() {
                     d(|s| s.border_reductions) <= 2 * iterations * ranks as u64 + extra,
                     "{tag}"
                 );
-                // Fewer tree sums than the orthonormal path.
+                // Repeated default solves perform identical reduction work.
                 let (plain_sums, lean_sums) = (sums1 - sums0, sums2 - sums1);
-                assert!(lean_sums < plain_sums, "{tag}: {lean_sums} vs {plain_sums}");
+                assert_eq!(lean_sums, plain_sums, "{tag}: default repeatability");
                 eprintln!(
                     "LEAN-ALGEBRA {tag}: iterations {}+{} / {}+{}, H columns {}+{} / {}+{}, \
-                     tree sums {lean_sums} / {plain_sums} (lean / orthonormal, all ranks)",
+                     tree sums {lean_sums} / {plain_sums} (default repeats, all ranks)",
                     lean[0].cold.iterations,
                     lean[0].warm.iterations,
                     plain[0].cold.iterations,
@@ -538,8 +514,8 @@ fn lean_algebra_agrees_with_orthonormal_path() {
                 );
             }
             // A fixed rank count is bit-reproducible.
-            let first = solve(3, &a, &b, bands, per_band, true);
-            let again = solve(3, &a, &b, bands, per_band, true);
+            let first = solve(3, &a, &b, bands, per_band);
+            let again = solve(3, &a, &b, bands, per_band);
             assert_eq!(bits(&first[0].warm), bits(&again[0].warm), "{name}");
             assert_eq!(bits(&first[0].cold), bits(&again[0].cold), "{name}");
         }
@@ -617,7 +593,7 @@ fn cold_lean(ranks: usize, a: &RealMatrix, bands: usize, per_band: usize) -> Rea
                 true,
                 false,
                 per_band,
-                tuning(true),
+                tuning(),
             )
             .unwrap()
     });
@@ -692,7 +668,7 @@ fn rank_decisions_match_the_serial_lean_solver() {
                         true,
                         false,
                         6,
-                        tuning(true),
+                        tuning(),
                         &mut x,
                         &mut kept,
                         true,
@@ -769,7 +745,7 @@ fn strict_solves_are_unchanged() {
         strict_bands: 6,
         buffer_tolerance: 1e-9,
     };
-    let run = |lean: bool| {
+    let run = || {
         simulate(2, |sim: &SimRank| {
             let mut op = RowsOp::new(&a, sim.rank(), 2);
             let d = op.diagonal();
@@ -784,14 +760,14 @@ fn strict_solves_are_unchanged() {
                         false,
                         true,
                         4,
-                        tuning(lean),
+                        tuning(),
                     )
                     .unwrap(),
             )
         })
     };
     let s0 = lean_algebra_stats();
-    assert_eq!(run(true), run(false));
+    assert_eq!(run(), run());
     assert_eq!(lean_algebra_stats().solves, s0.solves);
 }
 

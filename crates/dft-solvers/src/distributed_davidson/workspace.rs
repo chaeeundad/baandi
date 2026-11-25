@@ -1,21 +1,7 @@
-//! F06 (`BAANDI_M2_WORKSPACE=on`): the distributed Davidson on a persistent
-//! per-rank workspace. Same arithmetic, in the same order, as `solve_core`
-//! (bit-identical at a fixed rank count); what changes is storage only:
-//! - basis and H products live in buffers of `capacity` columns, new columns are
-//!   written in place (no copy of the whole basis per iteration);
-//! - the reduced matrix is kept with the fixed leading dimension `capacity` and
-//!   only its new border is written (no per-iteration zero matrix and no clone of
-//!   the previous one); the dense solver reads a packed m x m copy;
-//! - the fresh products, the lowest coefficient columns and the Gram operands
-//!   are passed as views (slices), not copies;
-//! - Ritz vectors, residuals, corrections, orthonormalization scratch, the Gram
-//!   partial sums, the GEMM, EVD and B5 workspaces and the root broadcast buffer
-//!   are reused across iterations and across solves (one workspace per thread,
-//!   that is per MPI rank or per simulated rank).
-//!
-//! Buffers grow only; every growth is counted (`workspace_stats`). The classic
-//! (non-serial) orthonormalization order still allocates inside (it is not the
-//! default, `BAANDI_M2_ORTHO=serial` is), and so does the M1 apply.
+//! Frozen legacy distributed Davidson with a persistent per-rank workspace.
+//! Basis, products, reduced border, residual and orthogonalization storage grow
+//! only and are reused across solves. The reduced eigenproblem is replicated.
+//! `workspace_stats` records growth; dense-solver internals may allocate scratch.
 use super::*;
 use crate::distributed::{
     column_norms_squared_into, gram_slices, project_out_slices, rotate_slices_with,
@@ -43,11 +29,11 @@ pub struct WorkspaceStats {
 // solves, warm solves, growths, growth bytes
 static WS_COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
-// `BAANDI_M2_START=gram` (summed over ranks): starts taken as the basis after
+// frozen Gram start (summed over ranks): starts taken as the basis after
 // the Gram check, starts that failed it (panel Gram-Schmidt instead).
 static START_COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
 
-/// (taken, declined) Gram-checked starts of `BAANDI_M2_START=gram`, summed over
+/// (taken, declined) Gram-checked starts of frozen Gram start, summed over
 /// the ranks of this process.
 pub fn start_gram_stats() -> (u64, u64) {
     (
@@ -272,12 +258,10 @@ pub struct DistributedDavidsonWorkspace {
     /// Pool used when the operator supplies none, with its thread count.
     own_pool: Option<(usize, Arc<WorkerPool>)>,
     eig: Option<(usize, RealEighWorkspace)>,
-    b5: Option<((usize, usize), Bordered, RealGemmWorkspace)>,
     agreement: Vec<f64>,
     previous: Vec<f64>,
     cold_diagonal: Vec<f64>,
     gathered_diagonal: Vec<f64>,
-    eigen_buffer: Vec<f64>,
     basis: RealMatrix,
     products: RealMatrix,
     /// Reduced matrix, leading dimension `held_ld`.
@@ -299,12 +283,11 @@ pub struct DistributedDavidsonWorkspace {
     norm_partial: Vec<f64>,
     converged: Vec<bool>,
     selected: Vec<usize>,
-    sel_coeff: RealMatrix,
     sel_values: Vec<f64>,
     sel_norms: Vec<f64>,
     band_residuals: Vec<f64>,
     ortho: OrthoScratch,
-    /// MPI-OVERLAP-DAVIDSON lean algebra state (`BAANDI_M2_LEAN_ALGEBRA=on`).
+    /// MPI-OVERLAP-DAVIDSON lean algebra state (frozen for Ritz-change solves).
     lean: Option<Box<lean::LeanState>>,
 }
 
@@ -314,12 +297,10 @@ impl DistributedDavidsonWorkspace {
             gemm: None,
             own_pool: None,
             eig: None,
-            b5: None,
             agreement: Vec::new(),
             previous: Vec::new(),
             cold_diagonal: Vec::new(),
             gathered_diagonal: Vec::new(),
-            eigen_buffer: Vec::new(),
             basis: empty(),
             products: empty(),
             held: Vec::new(),
@@ -340,7 +321,6 @@ impl DistributedDavidsonWorkspace {
             norm_partial: Vec::new(),
             converged: Vec::new(),
             selected: Vec::new(),
-            sel_coeff: empty(),
             sel_values: Vec::new(),
             sel_norms: Vec::new(),
             band_residuals: Vec::new(),
@@ -377,12 +357,11 @@ fn residual_into<C: Collective>(
     hv: &RealMatrix,
     v: &RealMatrix,
     lambdas: &[f64],
-    lean: bool,
     out: &mut RealMatrix,
     norms: &mut Vec<f64>,
     partial: &mut Vec<f64>,
 ) -> Result<(), SolverError> {
-    residual_cols(comm, hv, v, None, lambdas, lean, out, norms, partial)
+    residual_cols(comm, hv, v, None, lambdas, out, norms, partial)
 }
 
 /// `residual_into` with output column `slot` taken from input column
@@ -394,7 +373,6 @@ fn residual_cols<C: Collective>(
     v: &RealMatrix,
     map: Option<&[usize]>,
     lambdas: &[f64],
-    lean: bool,
     out: &mut RealMatrix,
     norms: &mut Vec<f64>,
     partial: &mut Vec<f64>,
@@ -404,7 +382,7 @@ fn residual_cols<C: Collective>(
     let (nl, cols) = (v.rows(), lambdas.len());
     fit(out, nl, cols)?;
     let src = |slot: usize| map.map_or(slot, |m| m[slot]);
-    if lean {
+    {
         for (j, &lambda) in lambdas.iter().enumerate() {
             let (h, x) = (column_of(hv, src(j)), column_of(v, src(j)));
             for ((r, &h), &x) in out.as_mut_slice()[j * nl..(j + 1) * nl]
@@ -413,13 +391,6 @@ fn residual_cols<C: Collective>(
                 .zip(x)
             {
                 *r = h - lambda * x;
-            }
-        }
-    } else {
-        for (j, &lambda) in lambdas.iter().enumerate() {
-            let c = src(j);
-            for i in 0..nl {
-                out[(i, j)] = hv[(i, c)] - lambda * v[(i, c)];
             }
         }
     }
@@ -498,7 +469,7 @@ fn panel_gs_into<C: Collective>(
                 v,
                 local,
                 sums,
-                tuning.panel_gs,
+                PanelGs::Fused,
                 tuning.dgks,
             )?;
             if len.is_finite() {
@@ -543,12 +514,7 @@ fn ortho_into<C: Collective>(
         1,
     );
 
-    if !tuning.serial_ortho {
-        let r = orthonormalize(comm, gemm, against, block, tuning.wide_gemm)?;
-        fit(out, r.rows(), r.cols())?;
-        out.as_mut_slice().copy_from_slice(r.as_slice());
-        return Ok(());
-    }
+    {}
     let rows = block.rows();
     fit(&mut o.x, rows, block.cols())?;
     o.x.as_mut_slice().copy_from_slice(block.as_slice());
@@ -779,29 +745,12 @@ fn solve_on<C: Collective>(
     }
     // MPI-OVERLAP-DAVIDSON: Ritz-change solves run the lean algebra; its
     // stage-2 fallback needs all reduced eigenvectors, so the reduced problem
-    // is solved replicated on that path (`BAANDI_M2_EIGEN=root` is ignored).
-    let lean_mode = tuning.lean_algebra && ritz;
-    let root_mode = tuning.eigen_root && comm.size() > 1 && !lean_mode;
-    let solves_here = !root_mode || comm.rank() == 0;
-    if solves_here && ws.eig.as_ref().map(|(c, _)| *c) != Some(capacity) {
+    // is solved replicated on that path.
+    let lean_mode = ritz;
+
+    if ws.eig.as_ref().map(|(c, _)| *c) != Some(capacity) {
         grown(3 * capacity * capacity * 8);
         ws.eig = Some((capacity, RealEighWorkspace::new(capacity)?));
-    }
-    let use_b5 = tuning.bordered && solves_here;
-    let b5_key = (capacity, Arc::as_ptr(&pool) as usize);
-    if use_b5 && ws.b5.as_ref().map(|(k, _, _)| *k) != Some(b5_key) {
-        grown(6 * capacity * capacity * 8);
-        ws.b5 = Some((
-            b5_key,
-            Bordered::new(capacity),
-            RealGemmWorkspace::with_pool(capacity.max(1), capacity.max(1), pool.clone())?,
-        ));
-    }
-    if let Some((_, b, _)) = ws.b5.as_mut() {
-        b.invalidate();
-    }
-    if root_mode {
-        fit_vec(&mut ws.eigen_buffer, 1 + bands + capacity * bands);
     }
     if ws.held.len() < capacity * capacity {
         grown((capacity * capacity - ws.held.len()) * 8);
@@ -812,7 +761,7 @@ fn solve_on<C: Collective>(
     for m in [&mut ws.basis, &mut ws.products] {
         reserve(m, nl * capacity)?;
     }
-    for m in [&mut ws.reduced, &mut ws.coefficients, &mut ws.sel_coeff] {
+    for m in [&mut ws.reduced, &mut ws.coefficients] {
         reserve(m, capacity * capacity)?;
     }
     for m in [&mut ws.block, &mut ws.partial] {
@@ -844,8 +793,7 @@ fn solve_on<C: Collective>(
     let DistributedDavidsonWorkspace {
         gemm,
         eig,
-        b5,
-        eigen_buffer,
+
         previous,
         cold_diagonal,
         gathered_diagonal,
@@ -869,7 +817,6 @@ fn solve_on<C: Collective>(
         norm_partial,
         converged,
         selected,
-        sel_coeff,
         sel_values,
         sel_norms,
         band_residuals,
@@ -991,11 +938,11 @@ fn solve_on<C: Collective>(
             k.declined = !kept_taken;
         }
     }
-    // `BAANDI_M2_START=gram`: an orthonormal start (Gram defect <= 1e-12, the
+    // frozen Gram start: an orthonormal start (Gram defect <= 1e-12, the
     // restart contraction rule; replicated decision from one reduction) is the
     // basis as it stands; otherwise the panel Gram-Schmidt below.
     let mut gram_taken = false;
-    if !kept_taken && start_gram() && start_local.cols() > 0 && start_local.cols() <= bands {
+    if !kept_taken && start_local.cols() > 0 && start_local.cols() <= bands {
         let w = start_local.cols();
         fit(defect, w, w)?;
         fit(partial, w, w)?;
@@ -1090,12 +1037,11 @@ fn solve_on<C: Collective>(
                 ld: capacity,
                 applications,
                 factored: lean_factored,
-                use_b5,
             },
             lean::Bufs {
                 gemm,
                 eig,
-                b5,
+
                 basis,
                 products,
                 held,
@@ -1123,7 +1069,7 @@ fn solve_on<C: Collective>(
     }
 
     let threshold = |j: usize| {
-        if j < policy.strict_bands - usize::from(ritz) {
+        if j < policy.strict_bands {
             solver.tolerance
         } else {
             policy.buffer_tolerance
@@ -1141,8 +1087,7 @@ fn solve_on<C: Collective>(
     let mut reduced_width = 0usize;
     let mut max_basis = 0usize;
     let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
-    // F05 (`BAANDI_M2_SELECTED_ROOTS=on`): Ritz-change (standard) solves only.
-    let selected_mode = tuning.selected_roots && ritz;
+    // Ritz-change solves returned through the frozen lean path above.
     band_residuals.clear();
     band_residuals.resize(bands, 0.0);
     let precondition = |d: f64, lambda: f64, r: f64| {
@@ -1197,200 +1142,14 @@ fn solve_on<C: Collective>(
         let t0 = dft_numerics::stage_clock::start();
         record_solve(m, fresh);
         let mut status: Result<(), SolverError> = Ok(());
-        if solves_here && let Some((_, eig)) = eig.as_mut() {
-            status = solve_reduced(
-                eig,
-                if use_b5 {
-                    b5.as_mut().map(|(_, b, g)| (b, g))
-                } else {
-                    None
-                },
-                reduced,
-                prefix,
-                values,
-                coefficients,
-            );
-        }
-        if root_mode {
-            let buffer = &mut eigen_buffer[..1 + bands + m * bands];
-            if comm.rank() == 0 {
-                buffer[0] = if status.is_ok() { 0.0 } else { 1.0 };
-                buffer[1..1 + bands].copy_from_slice(&values[..bands]);
-                buffer[1 + bands..].copy_from_slice(&coefficients.as_slice()[..m * bands]);
-            }
-            comm.bcast_f64(buffer, 0).map_err(comm_error)?;
-            if comm.rank() != 0 {
-                if buffer[0] != 0.0 {
-                    status = Err(SolverError::Application(
-                        "reduced eigenproblem failed on rank 0".into(),
-                    ));
-                } else {
-                    values[..bands].copy_from_slice(&buffer[1..1 + bands]);
-                    coefficients.as_mut_slice()[..m * bands].copy_from_slice(&buffer[1 + bands..]);
-                }
-            }
-            SOLVE_COUNTS[3].fetch_add(1, Ordering::Relaxed);
+        if let Some((_, eig)) = eig.as_mut() {
+            status = solve_reduced(eig, reduced, prefix, values, coefficients);
         }
         status?;
         stage_add(1, t0);
         let mut trusted = true;
-        let mut full_rotated = false;
         let maximum;
-        if selected_mode {
-            // F05: convergence from the Ritz-value change first; Ritz vectors,
-            // H images and residuals of the unconverged roots only. All bands
-            // are rotated only at return and at a restart (below).
-            let t0 = dft_numerics::stage_clock::start();
-            converged.clear();
-            converged.extend(
-                (0..bands).map(|j| iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)),
-            );
-            previous.copy_from_slice(&values[..bands]);
-            let finished = converged.iter().all(|&b| b)
-                || (iteration == solver.max_iterations
-                    && converged[..policy.strict_bands].iter().all(|&b| b));
-            stage_add(STAGE_PRECONDITION, t0);
-            if finished || iteration == solver.max_iterations {
-                let t0 = dft_numerics::stage_clock::start();
-                rotate_ritz(
-                    gemm,
-                    basis,
-                    products,
-                    &coefficients.as_slice()[..m * bands],
-                    bands,
-                    vectors,
-                    rotated,
-                    wide,
-                )?;
-                stage_add(2, t0);
-                let t0 = dft_numerics::stage_clock::start();
-                residual_into(
-                    comm,
-                    rotated,
-                    vectors,
-                    &values[..bands],
-                    tuning.lean,
-                    residual,
-                    norms,
-                    norm_partial,
-                )?;
-                stage_add(3, t0);
-                let maximum = norms.iter().copied().fold(0.0, f64::max);
-                history.push(maximum);
-                if !finished {
-                    return Err(SolverError::NotConverged {
-                        iterations: iteration,
-                        max_residual: maximum,
-                        residuals: norms.clone(),
-                    });
-                }
-                let t0 = dft_numerics::stage_clock::start();
-                keep_return(kept.as_mut(), vectors, rotated, ritz, nl, bands)?;
-                // MPI-LAZY-ORBITALS: without `gather` the rows stay on their
-                // ranks (`x_local`); the solution carries a 0 x bands placeholder.
-                let full = if gather {
-                    gather_full(comm, layout, vectors)?
-                } else {
-                    RealMatrix::new(0, bands, Vec::new())?
-                };
-                stage_add(9, t0);
-                return Ok(RealEigenSolution {
-                    eigenvalues: values[..bands].to_vec(),
-                    eigenvectors: full,
-                    residuals: norms.clone(),
-                    converged: converged.clone(),
-                    buffer,
-                    residuals_certified: false,
-                    iterations: iteration,
-                    history,
-                    operator_applications: applications,
-                    restarts,
-                    contracted_restarts: contractions,
-                    certification_attempts: certificates,
-                    max_basis_dimension: max_basis,
-                });
-            }
-            if iteration == 1 && basis.cols() == n {
-                history.push(0.0);
-                continue;
-            }
-            let t0 = dft_numerics::stage_clock::start();
-            selected.clear();
-            selected.extend(
-                (0..bands)
-                    .filter(|&j| !converged[j])
-                    .take(bands.min(capacity - bands)),
-            );
-            let k = selected.len();
-            fit(sel_coeff, m, k)?;
-            sel_values.clear();
-            for (slot, &j) in selected.iter().enumerate() {
-                sel_coeff.as_mut_slice()[slot * m..(slot + 1) * m]
-                    .copy_from_slice(&coefficients.as_slice()[j * m..(j + 1) * m]);
-                sel_values.push(values[j]);
-            }
-            stage_add(STAGE_PRECONDITION, t0);
-            // A restart follows in this iteration: rotate all bands once (the
-            // contraction basis) and take the selected residuals from it.
-            full_rotated = basis.cols() + k > capacity;
-            let t0 = dft_numerics::stage_clock::start();
-            if full_rotated {
-                rotate_ritz(
-                    gemm,
-                    basis,
-                    products,
-                    &coefficients.as_slice()[..m * bands],
-                    bands,
-                    vectors,
-                    rotated,
-                    wide,
-                )?;
-            } else {
-                rotate_ritz(
-                    gemm,
-                    basis,
-                    products,
-                    sel_coeff.as_slice(),
-                    k,
-                    vectors,
-                    rotated,
-                    wide,
-                )?;
-            }
-            stage_add(2, t0);
-            let t0 = dft_numerics::stage_clock::start();
-            residual_cols(
-                comm,
-                rotated,
-                vectors,
-                full_rotated.then_some(&selected[..]),
-                sel_values,
-                tuning.lean,
-                residual,
-                sel_norms,
-                norm_partial,
-            )?;
-            stage_add(3, t0);
-            for (slot, &j) in selected.iter().enumerate() {
-                band_residuals[j] = sel_norms[slot];
-            }
-            let t0 = dft_numerics::stage_clock::start();
-            maximum = sel_norms.iter().copied().fold(0.0, f64::max);
-            history.push(maximum);
-            // Corrections: residual column `slot` belongs to root selected[slot].
-            fit(corrections, nl, k)?;
-            for (slot, &j) in selected.iter().enumerate() {
-                let r = column_of(residual, slot);
-                for ((c, &d), &r) in corrections.as_mut_slice()[slot * nl..(slot + 1) * nl]
-                    .iter_mut()
-                    .zip(diag_local)
-                    .zip(r)
-                {
-                    *c = precondition(d, values[j], r);
-                }
-            }
-            stage_add(STAGE_PRECONDITION, t0);
-        } else {
+        {
             let t0 = dft_numerics::stage_clock::start();
             rotate_ritz(
                 gemm,
@@ -1409,15 +1168,13 @@ fn solve_on<C: Collective>(
                 rotated,
                 vectors,
                 &values[..bands],
-                tuning.lean,
                 residual,
                 norms,
                 norm_partial,
             )?;
             stage_add(3, t0);
             let mut certified = false;
-            if !ritz
-                && (certify || iteration == solver.max_iterations)
+            if (certify || iteration == solver.max_iterations)
                 && (meets_policy(norms)
                     || (iteration == solver.max_iterations && meets_strict(norms)))
             {
@@ -1430,7 +1187,6 @@ fn solve_on<C: Collective>(
                     actual,
                     vectors,
                     &values[..bands],
-                    tuning.lean,
                     residual,
                     norms,
                     norm_partial,
@@ -1442,13 +1198,7 @@ fn solve_on<C: Collective>(
             maximum = norms.iter().copied().fold(0.0, f64::max);
             history.push(maximum);
             converged.clear();
-            converged.extend((0..bands).map(|j| {
-                if ritz {
-                    iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
-                } else {
-                    norms[j] <= threshold(j)
-                }
-            }));
+            converged.extend((0..bands).map(|j| norms[j] <= threshold(j)));
             previous.copy_from_slice(&values[..bands]);
             let finished = converged.iter().all(|&b| b)
                 || (iteration == solver.max_iterations
@@ -1456,14 +1206,7 @@ fn solve_on<C: Collective>(
             stage_add(STAGE_PRECONDITION, t0);
             if finished {
                 let t0 = dft_numerics::stage_clock::start();
-                keep_return(
-                    kept.as_mut(),
-                    vectors,
-                    rotated,
-                    ritz && !certified,
-                    nl,
-                    bands,
-                )?;
+                keep_return(kept.as_mut(), vectors, rotated, false, nl, bands)?;
                 // MPI-LAZY-ORBITALS: without `gather` the rows stay on their
                 // ranks (`x_local`); the solution carries a 0 x bands placeholder.
                 let full = if gather {
@@ -1495,9 +1238,7 @@ fn solve_on<C: Collective>(
                     residuals: norms.clone(),
                 });
             }
-            if ritz && iteration == 1 && basis.cols() == n {
-                continue;
-            }
+
             // Corrections for the unconverged roots (row-local preconditioning).
             let t0 = dft_numerics::stage_clock::start();
             selected.clear();
@@ -1508,7 +1249,7 @@ fn solve_on<C: Collective>(
             );
             fit(corrections, nl, selected.len())?;
             for (k, &j) in selected.iter().enumerate() {
-                if tuning.lean {
+                {
                     let r = column_of(residual, j);
                     for ((c, &d), &r) in corrections.as_mut_slice()[k * nl..(k + 1) * nl]
                         .iter_mut()
@@ -1517,11 +1258,6 @@ fn solve_on<C: Collective>(
                     {
                         *c = precondition(d, values[j], r);
                     }
-                } else {
-                    for i in 0..nl {
-                        corrections[(i, k)] =
-                            precondition(diag_local[i], values[j], residual[(i, j)]);
-                    }
                 }
             }
             stage_add(STAGE_PRECONDITION, t0);
@@ -1529,21 +1265,7 @@ fn solve_on<C: Collective>(
         if !trusted || basis.cols() + corrections.cols() > capacity {
             restarts += 1;
             reduced_width = 0;
-            if selected_mode && !full_rotated {
-                // Restart: X and H X of all bands (the contraction basis).
-                let t0 = dft_numerics::stage_clock::start();
-                rotate_ritz(
-                    gemm,
-                    basis,
-                    products,
-                    &coefficients.as_slice()[..m * bands],
-                    bands,
-                    vectors,
-                    rotated,
-                    wide,
-                )?;
-                stage_add(2, t0);
-            }
+
             // `restart` stage: the Gram defect and the contraction copy; a
             // re-orthonormalization is counted as `orthonormalize` and its
             // application as `apply_total` (exclusive stages).
@@ -1615,11 +1337,7 @@ fn solve_on<C: Collective>(
             return Err(SolverError::NotConverged {
                 iterations: iteration,
                 max_residual: maximum,
-                residuals: if selected_mode {
-                    band_residuals.clone()
-                } else {
-                    norms.clone()
-                },
+                residuals: { norms.clone() },
             });
         }
         fit(extra_products, nl, extra.cols())?;

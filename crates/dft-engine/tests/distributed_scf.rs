@@ -371,9 +371,8 @@ fn m2_tuned_solver_matches_threads_only() {
     let _serial = serial();
     use dft_solvers::distributed_davidson::{DistributedTuning, set_tuning_override};
     let tuned = DistributedTuning {
-        serial_ortho: true,
         wide_gemm: true,
-        lean: true,
+
         ..DistributedTuning::from_env()
     };
     for (standard, limit) in [(false, 1e-10)] {
@@ -414,99 +413,21 @@ fn m2_tuned_solver_matches_threads_only() {
     }
 }
 
-/// `BAANDI_M2_PANEL_GS=pythag|fused` (docs/performance/profile-2026-11-16-mpi.md):
-/// on the default distributed stack the SCF energy stays within the accuracy
-/// classes of the threads-only run (strict 1e-10 Ha, standard 5e-9 Ha), ranks
-/// agree bit for bit, a fixed rank count is bit-reproducible, and the in-panel
-/// reductions fall (fused: fewer tree sums than classic). Cubic and skewed
-/// cells, 2 and 3 ranks, strict and standard.
-#[test]
-fn m2_panel_gs_variants_keep_classes() {
-    let _serial = serial();
-    use dft_solvers::distributed_davidson::{
-        DistributedTuning, PanelGs, reduction_stats, set_tuning_override,
-    };
-    let base = DistributedTuning::from_env();
-    let tree_sums = || -> u64 { reduction_stats().1.iter().map(|s| s.calls).sum() };
-    for (standard, limit) in [(false, 1e-10)] {
-        for kind in 0..2 {
-            let serial = run_m2_profile(kind, None, standard);
-            for ranks in [2usize, 3] {
-                let mut calls = Vec::new();
-                for mode in [PanelGs::Classic, PanelGs::Pythag, PanelGs::Fused] {
-                    // The panel Gram-Schmidt is bypassed by the lean algebra
-                    // (default on since b1c95a6) on Ritz-change solves: test
-                    // the orthonormal path the switch acts on.
-                    let tuning = DistributedTuning {
-                        panel_gs: mode,
-                        lean_algebra: false,
-                        ..base
-                    };
-                    let go = || {
-                        simulate(ranks, |comm: &SimRank| {
-                            set_tuning_override(Some(tuning));
-                            let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
-                            set_tuning_override(None);
-                            r
-                        })
-                    };
-                    let before = tree_sums();
-                    let results = go();
-                    calls.push(tree_sums() - before);
-                    let again = go();
-                    for (r, res) in results.iter().enumerate() {
-                        let de = (res.total_hartree() - serial.total_hartree()).abs();
-                        println!(
-                            "panel_gs {mode:?} standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha, Davidson {} vs {}",
-                            total_davidson(res),
-                            total_davidson(&serial)
-                        );
-                        assert!(de < limit, "{mode:?} kind {kind} P={ranks}: dE {de:e}");
-                        assert_eq!(
-                            res.total_hartree().to_bits(),
-                            results[0].total_hartree().to_bits(),
-                            "ranks disagree"
-                        );
-                        assert_eq!(
-                            res.total_hartree().to_bits(),
-                            again[r].total_hartree().to_bits(),
-                            "not bit-reproducible at fixed rank count"
-                        );
-                    }
-                }
-                println!("tree sums classic/pythag/fused: {calls:?}");
-                assert!(
-                    calls[2] < calls[0],
-                    "fused must reduce the tree sums: {calls:?}"
-                );
-            }
-        }
-    }
-}
-
-/// MPI-SCALING-GAP (docs/performance/mpi-scaling-gap.md): `M2_STICKS=mirror`
-/// (mirror-paired stick partition, no mirror exchanges) and `M2_START=gram`
-/// (orthonormal starts taken after one Gram reduction), alone and together, stay
-/// within the accuracy classes of the threads-only run (strict 1e-10 Ha,
-/// standard 5e-9 Ha); ranks agree bit for bit and a fixed rank count is
-/// bit-reproducible. Cubic and skewed cells, 2 and 3 ranks, strict and standard.
+/// Shared mirror-stick policy keeps the strict accuracy class and rank identity.
 #[test]
 fn m2_scaling_gap_switches_keep_classes() {
     let _serial = serial();
-    use dft_solvers::distributed_davidson::set_start_gram_override;
     use dft_solvers::distributed_fft::set_mirror_sticks_override;
     for (standard, limit) in [(false, 1e-10)] {
         for kind in 0..2 {
             let serial = run_m2_profile(kind, None, standard);
             for ranks in [2usize, 3] {
-                for (mirror, gram) in [(true, false), (false, true), (true, true)] {
+                for mirror in [false, true] {
                     let go = || {
                         simulate(ranks, |comm: &SimRank| {
                             set_mirror_sticks_override(Some(mirror));
-                            set_start_gram_override(Some(gram));
                             let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
                             set_mirror_sticks_override(None);
-                            set_start_gram_override(None);
                             r
                         })
                     };
@@ -515,7 +436,7 @@ fn m2_scaling_gap_switches_keep_classes() {
                     for (r, res) in results.iter().enumerate() {
                         let de = (res.total_hartree() - serial.total_hartree()).abs();
                         println!(
-                            "sticks mirror={mirror} start gram={gram} standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha"
+                            "sticks mirror={mirror} standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha"
                         );
                         assert!(de < limit, "kind {kind} P={ranks}: dE {de:e}");
                         assert_eq!(
@@ -535,95 +456,17 @@ fn m2_scaling_gap_switches_keep_classes() {
     }
 }
 
-/// MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md):
-/// on top of the entry-cost stack, `M2_EIGEN=root` (rank 0 solves, broadcast)
-/// gives bit-identical energies and densities to the replicated solve, and
-/// `M2_B5=on` (bordered update) stays within the accuracy classes of the
-/// threads-only run (strict 1e-10 Ha, standard 5e-9 Ha); ranks agree bit for
-/// bit and a fixed rank count is bit-reproducible. Cubic and skewed cells, 2 and
-/// 3 ranks, strict and standard.
+/// Frozen workspace preserves energy/density bits and work on repeated SCFs.
 #[test]
-fn m2_reduced_eigen_switches_keep_classes() {
-    let _serial = serial();
-    use dft_solvers::distributed_davidson::{DistributedTuning, set_tuning_override};
-    let stack = DistributedTuning {
-        serial_ortho: true,
-        wide_gemm: true,
-        lean: true,
-        ..DistributedTuning::from_env()
-    };
-    let arm = |tuning: DistributedTuning, kind: usize, ranks: usize, standard: bool| {
-        simulate(ranks, |comm: &SimRank| {
-            set_tuning_override(Some(tuning));
-            let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
-            set_tuning_override(None);
-            r
-        })
-    };
-    let density_bits = |r: &ScfResult| r.density.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    for (standard, limit) in [(false, 1e-10)] {
-        for kind in 0..2 {
-            let serial = run_m2_profile(kind, None, standard);
-            for ranks in [2usize, 3] {
-                let replicated = arm(stack, kind, ranks, standard);
-                let root = DistributedTuning {
-                    eigen_root: true,
-                    ..stack
-                };
-                let rooted = arm(root, kind, ranks, standard);
-                for (a, b) in rooted.iter().zip(&replicated) {
-                    assert_eq!(
-                        a.total_hartree().to_bits(),
-                        b.total_hartree().to_bits(),
-                        "root broadcast changed the energy"
-                    );
-                    assert_eq!(density_bits(a), density_bits(b));
-                }
-                let b5 = DistributedTuning {
-                    bordered: true,
-                    eigen_root: true,
-                    ..stack
-                };
-                let bordered = arm(b5, kind, ranks, standard);
-                let again = arm(b5, kind, ranks, standard);
-                for (r, res) in bordered.iter().enumerate() {
-                    let de = (res.total_hartree() - serial.total_hartree()).abs();
-                    println!(
-                        "B5+root standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha, Davidson {} vs {}",
-                        total_davidson(res),
-                        total_davidson(&serial)
-                    );
-                    assert!(de < limit, "kind {kind} P={ranks}: dE {de:e}");
-                    assert_eq!(
-                        res.total_hartree().to_bits(),
-                        bordered[0].total_hartree().to_bits(),
-                        "ranks disagree"
-                    );
-                    assert_eq!(
-                        res.total_hartree().to_bits(),
-                        again[r].total_hartree().to_bits(),
-                        "not bit-reproducible at fixed rank count"
-                    );
-                }
-            }
-        }
-    }
-}
-
-/// F06 (`BAANDI_M2_WORKSPACE=on`): the distributed solver on its persistent
-/// per-rank workspace (reused across the solves of the whole SCF) gives energies
-/// and densities bit-identical to the allocating path; cubic and skewed cells,
-/// strict and standard, 2 and 3 ranks, on the adopted stack from the switches.
-#[test]
-fn m2_workspace_is_bit_identical_in_scf() {
+fn m2_workspace_is_reproducible_in_scf() {
     let _serial = serial();
     use dft_solvers::distributed_davidson::{
         DistributedTuning, release_workspace, set_tuning_override, workspace_stats,
     };
     let stack = DistributedTuning::from_env();
-    let arm = |workspace: bool, kind: usize, ranks: usize, standard: bool| {
+    let arm = |kind: usize, ranks: usize, standard: bool| {
         simulate(ranks, |comm: &SimRank| {
-            set_tuning_override(Some(DistributedTuning { workspace, ..stack }));
+            set_tuning_override(Some(DistributedTuning { ..stack }));
             let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
             set_tuning_override(None);
             release_workspace();
@@ -635,8 +478,8 @@ fn m2_workspace_is_bit_identical_in_scf() {
     for standard in [false] {
         for kind in 0..2 {
             for ranks in [2usize, 3] {
-                let off = arm(false, kind, ranks, standard);
-                let on = arm(true, kind, ranks, standard);
+                let off = arm(kind, ranks, standard);
+                let on = arm(kind, ranks, standard);
                 for (a, b) in on.iter().zip(&off) {
                     assert_eq!(
                         a.total_hartree().to_bits(),

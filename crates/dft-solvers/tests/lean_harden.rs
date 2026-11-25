@@ -3,7 +3,6 @@ use dft_mpi::{Collective, simulate};
 use dft_numerics::real::RealMatrix;
 use dft_solvers::distributed_davidson::{
     DistributedKeptStart, DistributedRealOperator, DistributedStart, DistributedTuning,
-    set_start_gram_override,
 };
 use dft_solvers::{BandTolerances, RealDavidson, SolverError};
 use std::time::Duration;
@@ -56,7 +55,6 @@ fn run(
     fault: u8,
 ) -> Vec<Result<dft_solvers::real_davidson::RealEigenSolution, SolverError>> {
     simulate(ranks, |comm| {
-        set_start_gram_override(Some(true));
         let mut op = Diagonal {
             n,
             rows: (0..n).filter(|r| r % ranks == comm.rank()).collect(),
@@ -73,7 +71,8 @@ fn run(
         if fault == 3 && comm.rank() == 1 {
             local = RealMatrix::zeros(0, start.cols()).unwrap();
         }
-        let result = RealDavidson {
+
+        RealDavidson {
             bands,
             tolerance: 1e-13,
             max_iterations: 100,
@@ -93,15 +92,12 @@ fn run(
             false,
             6,
             DistributedTuning {
-                lean_algebra: true,
                 ..DistributedTuning::from_env()
             },
             &mut RealMatrix::zeros(0, 0).unwrap(),
             &mut DistributedKeptStart::new(),
             true,
-        );
-        set_start_gram_override(None);
-        result
+        )
     })
 }
 fn check(sol: &dft_solvers::real_davidson::RealEigenSolution) {

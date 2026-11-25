@@ -282,8 +282,7 @@ impl CollinearProblem {
                             species,
                             &p.options,
                             bands,
-                            dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
-                                .then_some(&*p.pool),
+                            Some(&*p.pool),
                             None,
                         )?);
                     }

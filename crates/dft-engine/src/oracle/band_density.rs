@@ -5,26 +5,6 @@ use dft_physics::data::*;
 use dft_physics::density::{FusedOperator, FusedPlan, SplitPairDensity};
 use std::sync::Arc;
 
-/// DENSITY-PAIR (opt-in `BAANDI_DENSITY_PAIR=on`, default off): on a real Gamma
-/// solve (Hermitian-completed eigenvectors) two occupied bands share one inverse
-/// transform of `c_a + i c_b`; each band keeps its own contribution grid (read by
-/// the certificate screen), so only the rounding of the per-band values changes.
-/// Pairs are fixed as (0,1), (2,3), ... and worker ranges are even-aligned, so the
-/// result does not depend on the thread count. Rounding class, not bit-identical.
-fn density_pair() -> bool {
-    // RUN-CONFIG: read from the run's configuration (thread scope or process),
-    // not cached per process; called once per construction / step / audit.
-    dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_PAIR)
-}
-/// DENSITY-REDUCE (opt-in `BAANDI_DENSITY_REDUCE=on`, default off): the band sum
-/// runs over fixed grid blocks (pool-parallel) with every point still summed in
-/// ascending band order, and contributions of zero-occupation bands (exact +0
-/// grids) are neither cleared again nor added. Bit-identical to the default.
-fn density_reduce() -> bool {
-    // RUN-CONFIG: read from the run's configuration (thread scope or process),
-    // not cached per process; called once per construction / step / audit.
-    dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_REDUCE)
-}
 /// Grid points per reduction block (fixed; independent of the thread budget).
 const REDUCE_BLOCK: usize = 4096;
 
@@ -33,8 +13,6 @@ pub(crate) struct BandDensity {
     pool: Arc<WorkerPool>,
     density: Array3<f64>,
     threads: usize,
-    pair: bool,
-    reduce: bool,
 }
 struct Worker {
     first: usize,
@@ -52,19 +30,9 @@ impl BandDensity {
         threads: usize,
         pool: Arc<WorkerPool>,
     ) -> Result<Self, ScfError> {
-        Self::with_switches(grid, bands, threads, pool, density_pair(), density_reduce())
-    }
-    pub(crate) fn with_switches(
-        grid: &FftGridSpec,
-        bands: usize,
-        threads: usize,
-        pool: Arc<WorkerPool>,
-        pair: bool,
-        reduce: bool,
-    ) -> Result<Self, ScfError> {
         // Pair mode: ranges in whole pairs so a pair never spans two workers.
-        let units = if pair { bands.div_ceil(2) } else { bands };
-        let scale = if pair { 2 } else { 1 };
+        let units = bands.div_ceil(2);
+        let scale = 2;
         let count = threads.max(1).min(units);
         let mut workers = Vec::with_capacity(count);
         for i in 0..count {
@@ -75,11 +43,7 @@ impl BandDensity {
                 fft: FusedPlan::new(grid.dims(), grid.g_to_fft())?,
                 contributions: (first..end).map(|_| Array3::zeros(grid.dims())).collect(),
                 live: vec![true; end - first],
-                phi: if pair {
-                    vec![Complex64::default(); grid.g_to_fft().len()]
-                } else {
-                    Vec::new()
-                },
+                phi: vec![Complex64::default(); grid.g_to_fft().len()],
             });
         }
         Ok(Self {
@@ -87,8 +51,6 @@ impl BandDensity {
             pool,
             density: Array3::zeros(grid.dims()),
             threads,
-            pair,
-            reduce,
         })
     }
     pub(crate) fn compute(
@@ -110,10 +72,7 @@ impl BandDensity {
         volume: f64,
         hermitian: bool,
     ) -> Result<&Array3<f64>, ScfError> {
-        let mode = Mode {
-            pair: self.pair && hermitian,
-            reduce: self.reduce,
-        };
+        let mode = Mode { pair: hermitian };
         let workers = &mut self.workers;
 
         if workers.len() == 1 {
@@ -123,7 +82,7 @@ impl BandDensity {
                 .install(|| transform(workers, coefficients, occupations, grid, volume, mode))?;
         }
         let density = &mut self.density;
-        if self.reduce {
+        {
             let live: Vec<&[f64]> = self
                 .workers
                 .iter()
@@ -136,13 +95,6 @@ impl BandDensity {
                 self.pool.install(|| reduce_blocks(out, 0, &live, true));
             } else {
                 reduce_blocks(out, 0, &live, false);
-            }
-        } else {
-            density.fill(0.0);
-            for worker in &self.workers {
-                for contribution in &worker.contributions {
-                    density.zip_mut_with(contribution, |n, c| *n += c);
-                }
             }
         }
         if density.iter().any(|n: &f64| !n.is_finite()) {
@@ -197,7 +149,6 @@ fn reduce_blocks(out: &mut [f64], offset: usize, parts: &[&[f64]], parallel: boo
 #[derive(Clone, Copy)]
 struct Mode {
     pair: bool,
-    reduce: bool,
 }
 fn check(band: usize, c: &[Complex64], grid: &FftGridSpec) -> Result<(), ScfError> {
     if c.len() != grid.g_to_fft().len() || c.iter().any(|z| !z.re.is_finite() || !z.im.is_finite())
@@ -228,24 +179,7 @@ fn transform(
 ) -> Result<(), ScfError> {
     if workers.len() == 1 {
         let worker = &mut workers[0];
-        if !mode.pair && !mode.reduce {
-            for (local, contribution) in worker.contributions.iter_mut().enumerate() {
-                let band = worker.first + local;
-                let c = &coefficients[band];
-                check(band, c, grid)?;
-                contribution.fill(0.0);
-                let clock = dft_numerics::work_timers::start();
-                worker.fft.accumulate_density(
-                    c,
-                    occupations[band],
-                    volume,
-                    contribution.as_slice_mut().unwrap(),
-                )?;
-                // A zero weight skips the transform.
-                record_density(clock.filter(|_| occupations[band] != 0.0), 1);
-            }
-            return Ok(());
-        }
+        {}
         let count = worker.contributions.len();
         let mut local = 0;
         while local < count {
@@ -286,7 +220,7 @@ fn transform(
                 continue;
             }
             let contribution = &mut worker.contributions[local];
-            if mode.reduce && w == 0.0 {
+            if w == 0.0 {
                 // Exact zero grid; clear only once after a nonzero weight.
                 if worker.live[local] {
                     contribution.fill(0.0);
@@ -424,7 +358,7 @@ mod tests {
     /// DENSITY-PAIR (rounding class, thread-count independent) and
     /// DENSITY-REDUCE (bit-identical) against the default path.
     #[test]
-    fn pair_and_reduce_switches() {
+    fn paired_density_is_thread_independent() {
         let cell =
             Cell::from_user_rows_bohr([[4.1, 0.3, 0.], [0., 3.9, 0.2], [0.1, 0., 4.4]]).unwrap();
         let basis = PlaneWaveBasis::new(&cell, Hartree(3.0)).unwrap();
@@ -460,17 +394,9 @@ mod tests {
             &[0., 2., 2., 2., 2., 0., 0., 0., 0.],
         ];
         for occupations in sets {
-            let mut plain = BandDensity::with_switches(
-                &grid,
-                bands,
-                1,
-                WorkerPool::new(1).unwrap(),
-                false,
-                false,
-            )
-            .unwrap();
+            let mut plain = BandDensity::new(&grid, bands, 1, WorkerPool::new(1).unwrap()).unwrap();
             let expected = plain
-                .compute_with(&coefficients, occupations, &grid, volume, true)
+                .compute_with(&coefficients, occupations, &grid, volume, false)
                 .unwrap()
                 .clone();
             let mut expected_integrals = vec![0.; bands];
@@ -479,16 +405,10 @@ mod tests {
             let scale = expected.iter().fold(0_f64, |a, b| a.max(b.abs()));
             let mut pair_bits = None;
             for threads in [1, 2, 3, 4, 8] {
-                for (pair, reduce) in [(false, true), (true, false), (true, true)] {
-                    let mut pool = BandDensity::with_switches(
-                        &grid,
-                        bands,
-                        threads,
-                        WorkerPool::new(threads).unwrap(),
-                        pair,
-                        reduce,
-                    )
-                    .unwrap();
+                {
+                    let mut pool =
+                        BandDensity::new(&grid, bands, threads, WorkerPool::new(threads).unwrap())
+                            .unwrap();
                     // Repeated calls with changing weights exercise the zero-grid reuse.
                     for _ in 0..2 {
                         pool.compute_with(&coefficients, &[1.; 9], &grid, volume, true)
@@ -497,7 +417,7 @@ mod tests {
                             .compute_with(&coefficients, occupations, &grid, volume, true)
                             .unwrap()
                             .clone();
-                        if pair {
+                        {
                             let worst = actual
                                 .iter()
                                 .zip(&expected)
@@ -510,13 +430,8 @@ mod tests {
                             for (a, b) in integrals.iter().zip(&expected_integrals) {
                                 assert!((a - b).abs() <= 1e-13 * b.abs().max(1.));
                             }
-                        } else {
-                            assert_eq!(bits(&expected), bits(&actual), "reduce {threads}");
-                            let mut integrals = vec![0.; bands];
-                            pool.weighted_integrals(&field, &mut integrals);
-                            assert_eq!(integrals, expected_integrals);
                         }
-                        // Non-Hermitian callers never pair: identical to the default.
+                        // Non-Hermitian callers never pair: preserve the complex fallback bits.
                         let complex = pool
                             .compute_with(&coefficients, occupations, &grid, volume, false)
                             .unwrap()

@@ -3986,3 +3986,59 @@ all `crates/**/*.rs` excluding target, 205595 -> 196470 physical lines;
 the 1914-line legacy Davidson example are removed. Each retired test and its
 reason is listed in `/tmp/r10bc-cont/test-migration.md`; no comparison tolerance
 was relaxed. New changes remain uncommitted for review.
+
+## R11B-ORACLE-SWITCHES — D3 oracle switch retirement (2026-11-25)
+
+Code retirement at frozen defaults, not an optimization or timing claim. Source
+commit `1535810f4d6abffbe36483dd82c174ece6664b61`; readers, retained boundaries and verification are recorded in
+[switch-retirement.md](switch-retirement.md#r11b-freeze-oracle-only-switches-d3).
+No QE source or new QE comparison was used.
+
+| Switch | Disposition | Evidence / lesson |
+| --- | --- | --- |
+| `INIT_OWNED_STATES` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `CERT_SCREEN` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `POTENTIAL_REUSE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `MIX_GROWTH_RESET` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `MIX_CELL_KERKER` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `EMPTY_LOOSE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `BUFFER_TOL` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `DENSITY_PAIR` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `DENSITY_REDUCE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `NL_ENERGY_REAL` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `ATOMIC_LOCAL_BLOCK` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `ATOMIC_REAL` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `PHASE_THREADS` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `MIX_COULOMB_GUARD` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_LIGHT_STATE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_LAZY_SERIAL` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `IMPORT_CHECK` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_DENSITY` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_ORTHO` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_LEAN` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_EIGEN` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_B5` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_WORKSPACE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_SELECTED_ROOTS` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_PANEL_GS` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_START` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_LEAN_ALGEBRA` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `M2_LAYOUT_CACHE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `B1_NARROW` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `B1_MARGIN` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `B1_ROWS` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `B6` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `SECOND_VECTOR` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `MGS` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `ORTHO_BLOCK` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `WIDE_DOT` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `PROJECT_WIDE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `DAVIDSON_ROTATE_COLUMNS` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `DAVIDSON_UPPER_BORDER` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `LEAN_BORDER` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `DAVIDSON_PACKED_REDUCE` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `MIX_INCREMENTAL` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `MKL_NONLOCAL` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `APPLY_LEAN` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `HAPPLY_OVERLAP` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+| `HAPPLY_FOLD` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |

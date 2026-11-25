@@ -7092,3 +7092,576 @@ fn g3_k_start_does_not_require_a_gamma_band_space() {
         assert!(state.blocks[0].basis.vectors().len() >= 3);
     });
 }
+
+#[test]
+fn g4_spin_metric_uniform_and_unpolarized_limits() {
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let global = [0., 2., 5., 9.];
+            let indices: Vec<_> = (0..4).filter(|i| i % ranks == comm.rank()).collect();
+            let g2: Vec<_> = indices.iter().map(|&i| global[i]).collect();
+            let mask = vec![true; g2.len()];
+            let mut metric = Metric::spin(comm, 17., &g2, &mask, 8).unwrap();
+            let mut scalar = Metric::new(17., &g2, &mask, ranks, 8).unwrap();
+            let charge: Vec<_> = indices
+                .iter()
+                .map(|&i| c(if i == 0 { 0. } else { 0.01 * i as f64 }))
+                .collect();
+            let mut stacked = charge.clone();
+            stacked.extend(vec![c(0.); g2.len()]);
+            assert!(
+                (metric.norm(comm, &stacked).unwrap() - scalar.norm(comm, &charge).unwrap()).abs()
+                    < 1e-14
+            );
+            stacked.fill(c(0.));
+            for (j, &i) in indices.iter().enumerate() {
+                if i == 0 {
+                    stacked[g2.len() + j] = c(0.03);
+                }
+            }
+            let expected = 4. * PI * 17. / 2. * 0.03_f64.powi(2);
+            assert!((metric.norm(comm, &stacked).unwrap() - expected).abs() < 1e-14);
+        });
+    }
+}
+
+#[test]
+fn g4_scalar_fd_gamma_legacy() {
+    assert!(g4_fixture("scalar", false, &[1], &[1e-12]).is_empty());
+}
+
+#[test]
+#[ignore = "release matrix: cargo test --release -p dft-engine --test refscf g4_synthetic_matrix -- --ignored --nocapture"]
+fn g4_synthetic_matrix() {
+    let mut failures = Vec::new();
+    for mode in ["scalar", "fixed"] {
+        for mesh in [false, true] {
+            failures.extend(g4_fixture(mode, mesh, &[1, 3, 8], &[1e-8, 1e-12]));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+#[test]
+#[ignore = "G4B expected acceptance failure: cargo test --release -p dft-engine --test refscf g4b_moment_acceptance -- --ignored --nocapture"]
+fn g4b_moment_acceptance() {
+    let mut failures = Vec::new();
+    for mode in ["free", "moment"] {
+        for mesh in [false, true] {
+            failures.extend(g4_fixture(mode, mesh, &[1, 3, 8], &[1e-8, 1e-12]));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn g4_fixture(mode: &str, mesh: bool, ranks: &[usize], thresholds: &[f64]) -> Vec<String> {
+    g4_fixture_profile(mode, mesh, ranks, thresholds, Profile::default())
+}
+
+#[test]
+#[ignore = "diagnostic only: cargo test --release -p dft-engine --test refscf g4_free_moment_tight_short_history -- --ignored --nocapture"]
+fn g4_free_moment_tight_short_history() {
+    // This diagnoses the default-history failures, not a replacement for the
+    // default-profile acceptance matrix or a change of the accuracy bounds.
+    let mut failures = Vec::new();
+    for mesh in [false, true] {
+        failures.extend(g4_fixture_profile(
+            "free",
+            mesh,
+            &[1, 3, 8],
+            &[1e-12],
+            Profile {
+                history: 4,
+                beta: 0.5,
+                ..Default::default()
+            },
+        ));
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn g4_fixture_profile(
+    mode: &str,
+    mesh: bool,
+    ranks: &[usize],
+    thresholds: &[f64],
+    profile: Profile,
+) -> Vec<String> {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+        finite_temperature::FiniteTProblem,
+        refscf::electronic::{self, Policy},
+        refstart::StartInput,
+    };
+    use dft_geometry::{
+        Atom, Cell,
+        kpoints::{KPoint, monkhorst_pack},
+    };
+    use dft_physics::occupations::Constraint;
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let functional = if mode == "scalar" {
+        Functional::LdaPz
+    } else {
+        Functional::LdaPw
+    };
+    let pp = common::potential_with_atomic_start(
+        1.,
+        1.,
+        true,
+        161,
+        if mode == "scalar" { "SLA PZ" } else { "SLA PW" },
+    );
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = if mesh {
+        monkhorst_pack([2; 3], [0.; 3]).unwrap()
+    } else {
+        vec![KPoint {
+            fractional: [0.; 3],
+            weight: 1.,
+        }]
+    };
+    let sector = SpinSector {
+        n_up: 1,
+        n_down: 0,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: Some(0.3),
+    };
+    let policy = match mode {
+        "scalar" => Policy::FermiDirac {
+            theta_ha: 0.01,
+            band_cap: 12,
+        },
+        "fixed" => Policy::FixedSpin(sector.clone()),
+        _ => Policy::SpinFermiDirac {
+            sector: sector.clone(),
+            theta_ha: 0.01,
+            constraint: if mode == "moment" {
+                Constraint::FixedMoment(0.3)
+            } else {
+                Constraint::Total
+            },
+            band_cap: 12,
+        },
+    };
+    let options = ScfOptions {
+        functional,
+        cutoff_hartree: 2.5,
+        bands: Some(if mode == "fixed" { 4 } else { 12 }),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Atomic,
+        max_iterations: 400,
+        // The legacy mixer imposes the output channel means even on a damped
+        // proposal. At free moment that can make a minority channel negative.
+        // A full linear step preserves the positive FD output; the reference
+        // driver's Broyden policy and all certificate tolerances stay fixed.
+        mixing: if mode == "free" {
+            dft_engine::Mixing::Linear { beta: 1.0 }
+        } else {
+            dft_engine::Mixing::default()
+        },
+        residual_eigen_schedule: false,
+        initial_eigen_tolerance: 1e-10,
+        eigen_tolerance: 1e-10,
+        density_tolerance: 1e-10,
+        energy_tolerance: 1e-11,
+        ..ScfOptions::strict_reference()
+    };
+    let (oracle_energy, oracle_moment, oracle_mu, oracle_occupations) = if mode == "scalar" {
+        let r = FiniteTProblem::new(
+            &cell,
+            &atoms,
+            &potentials,
+            options.clone(),
+            &points,
+            0.01,
+            12,
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        assert!(r.converged);
+        (
+            r.thermodynamics.free_energy_ha,
+            0.,
+            r.occupations
+                .evaluation
+                .unwrap()
+                .roots
+                .map(|r| r.map(|r| r.mu_ha)),
+            Some(r.occupations.occupations().to_vec()),
+        )
+    } else {
+        let p = if mode == "fixed" {
+            CollinearProblem::new(&cell, &atoms, &potentials, options.clone(), &points, sector)
+        } else {
+            CollinearProblem::new_fermi_dirac(
+                &cell,
+                &atoms,
+                &potentials,
+                options.clone(),
+                &points,
+                sector,
+                0.01,
+                if mode == "moment" {
+                    Constraint::FixedMoment(0.3)
+                } else {
+                    Constraint::Total
+                },
+                12,
+            )
+        };
+        let r = p.unwrap().run().unwrap();
+        assert!(
+            r.converged,
+            "legacy {mode} mesh={mesh} moment={} last={:?} cert={:?}",
+            r.moment_mu_b,
+            r.history.last(),
+            r.finite_certificate
+        );
+        (
+            r.thermodynamics
+                .map_or(r.energy.total_hartree(), |e| e.free_energy_ha),
+            r.moment_mu_b,
+            r.finite_occupations.as_ref().map_or([None; 2], |f| {
+                f.evaluation.unwrap().roots.map(|r| r.map(|r| r.mu_ha))
+            }),
+            r.finite_occupations
+                .as_ref()
+                .map(|f| f.occupations().to_vec()),
+        )
+    };
+    let options = ScfOptions {
+        standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+        verification: dft_engine::Verification::FixedPoint,
+        ..options
+    };
+    let mut failures = Vec::new();
+    for &threshold in thresholds {
+        for &rank in ranks {
+            let results = dft_mpi::simulate(rank, |comm| {
+                let result = electronic::run_with(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    Profile {
+                        threshold_ry: threshold,
+                        ..profile
+                    },
+                    &points,
+                    policy.clone(),
+                    comm,
+                );
+                let r = match result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Some(format!(
+                            "{mode} mesh={mesh} ranks={rank} threshold={threshold:e} Ry: {e}"
+                        ));
+                    }
+                };
+                if !r.converged {
+                    return Some(format!(
+                        "{mode} mesh={mesh} ranks={rank} threshold={threshold:e} Ry: exhausted"
+                    ));
+                }
+                assert!(r.verification.as_ref().unwrap().passed());
+                let delta = (r.thermodynamics.free_energy_ha - oracle_energy).abs();
+                let moment = (r.moment_mu_b - oracle_moment).abs();
+                let mu = r.occupations.map_or(0., |e| {
+                    e.roots
+                        .iter()
+                        .zip(oracle_mu)
+                        .filter_map(|(a, b)| a.zip(b))
+                        .map(|(a, b)| (a.mu_ha - b).abs())
+                        .fold(0., f64::max)
+                });
+                let occupation_change: f64 = oracle_occupations.as_ref().map_or(0., |old| {
+                    let nb = r.blocks[0][0].occupations.len();
+                    r.blocks
+                        .iter()
+                        .flatten()
+                        .flat_map(|b| &b.occupations)
+                        .zip(old)
+                        .enumerate()
+                        .map(|(i, (a, b))| points[(i / nb) % points.len()].weight * (a - b).abs())
+                        .sum()
+                });
+                if comm.rank() == 0 {
+                    println!(
+                        "G4 mode={mode} mesh={mesh} ranks={rank} threshold={threshold:e} Ry F={:.17e} Ha dF={delta:e} Ha dM={moment:e} mu_B dmu={mu:e} Ha docc={occupation_change:e} e iterations={} M={:.12e} mu_B verification_attempts={}",
+                        r.thermodynamics.free_energy_ha,
+                        r.history.len(),
+                        r.moment_mu_b,
+                        r.verification.as_ref().unwrap().attempts.len()
+                    );
+                }
+                assert!((r.channel_electrons.iter().sum::<f64>() - 1.).abs() < 1e-10);
+                // Collect accuracy failures after all collectives so one bad
+                // cell does not hide the remaining rank/threshold evidence.
+                (delta > if threshold < 1e-8 { 1e-10 } else { 5e-9 }
+                    || moment >= 1e-4 || mu >= 1e-4 || occupation_change > 1e-4).then(|| format!(
+                    "{mode} mesh={mesh} ranks={rank} threshold={threshold:e} Ry: dF={delta:e} Ha dM={moment:e} mu_B dmu={mu:e} Ha docc={occupation_change:e} e"
+                ))
+            });
+            failures.extend(results.into_iter().take(1).flatten());
+        }
+    }
+    failures
+}
+
+#[test]
+#[ignore = "external UPF/release: DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf g4_si_gap -- --ignored --nocapture"]
+fn g4_si_gap() {
+    use dft_engine::{
+        GammaReal, OccupationPolicy, ScfOptions, ScfProblem, SpeciesPotential,
+        finite_temperature::FiniteTProblem,
+        refscf::electronic::{self, Policy},
+        refstart::StartInput,
+    };
+    use dft_geometry::kpoints::{KPoint, monkhorst_pack};
+    let pp = dft_upf::parse_upf(
+        &std::fs::read_to_string(std::env::var("DFT_SI_UPF").expect("DFT_SI_UPF required"))
+            .unwrap(),
+    )
+    .unwrap();
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = common::cell();
+    let atoms = common::atoms();
+    for mesh in [false, true] {
+        let points = if mesh {
+            monkhorst_pack([2; 3], [0.; 3]).unwrap()
+        } else {
+            vec![KPoint {
+                fractional: [0.; 3],
+                weight: 1.,
+            }]
+        };
+        let tight = ScfOptions {
+            cutoff_hartree: 4.,
+            bands: Some(8),
+            gamma_real: GammaReal::Off,
+            max_iterations: 200,
+            eigen_tolerance: 1e-10,
+            density_tolerance: 1e-10,
+            energy_tolerance: 1e-11,
+            ..ScfOptions::strict_reference()
+        };
+        let integer = ScfProblem::with_kpoints(
+            &cell,
+            &atoms,
+            &potentials,
+            tight.clone(),
+            &points,
+            OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-7,
+            },
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        let finite = FiniteTProblem::new(&cell, &atoms, &potentials, tight, &points, 1e-4, 8)
+            .unwrap()
+            .run()
+            .unwrap();
+        assert!(integer.certified && finite.converged);
+        assert!((integer.total_hartree() - finite.thermodynamics.free_energy_ha).abs() < 1e-10);
+        let options = ScfOptions {
+            cutoff_hartree: 4.,
+            bands: Some(8),
+            gamma_real: GammaReal::Off,
+            max_iterations: 200,
+            ..Default::default()
+        };
+        for threshold in [1e-8, 1e-12] {
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let run = electronic::run_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile {
+                            threshold_ry: threshold,
+                            ..Default::default()
+                        },
+                        &points,
+                        Policy::FermiDirac {
+                            theta_ha: 1e-4,
+                            band_cap: 8,
+                        },
+                        comm,
+                    )
+                    .unwrap();
+                    assert!(run.converged && run.verification.as_ref().unwrap().passed());
+                    let delta_integer =
+                        (run.thermodynamics.free_energy_ha - integer.total_hartree()).abs();
+                    let delta_fd = (run.thermodynamics.free_energy_ha
+                        - finite.thermodynamics.free_energy_ha)
+                        .abs();
+                    let limit = if threshold == 1e-8 { 5e-9 } else { 1e-10 };
+                    assert!(
+                        delta_integer <= limit && delta_fd <= limit,
+                        "Si mesh={mesh} ranks={ranks} d_integer={delta_integer:e} d_fd={delta_fd:e}"
+                    );
+                    if comm.rank() == 0 {
+                        println!(
+                            "G4 Si mesh={mesh} ranks={ranks} threshold={threshold:e} Ry F={:.17e} Ha d_integer={delta_integer:e} Ha d_fd={delta_fd:e} Ha TS={:e} Ha",
+                            run.thermodynamics.free_energy_ha, run.thermodynamics.entropy_term_ha
+                        );
+                    }
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn g4_rejections_and_unverified_delivery() {
+    use dft_engine::{
+        Functional, ScfOptions, SpeciesPotential, Verification,
+        collinear::SpinSector,
+        refscf::electronic::{self, Policy},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    use dft_physics::occupations::Constraint;
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.; 3])];
+    let pp = common::potential_with_atomic_start(1., 1., false, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 2.5,
+        bands: Some(12),
+        verification: Verification::Off,
+        ..Default::default()
+    };
+    let run = |options: &ScfOptions, policy| {
+        electronic::run_with(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options,
+            },
+            Profile::default(),
+            &points,
+            policy,
+            &Serial,
+        )
+    };
+    let good = run(
+        &options,
+        Policy::FermiDirac {
+            theta_ha: 0.01,
+            band_cap: 12,
+        },
+    )
+    .unwrap();
+    assert!(good.converged && good.verification.is_none());
+    assert!(good.blocks[0][0].occupations[0] > 0.99 && good.blocks[0][0].occupations[0] < 1.01);
+    let verified = run(
+        &ScfOptions {
+            verification: Verification::FixedPoint,
+            ..options.clone()
+        },
+        Policy::FermiDirac {
+            theta_ha: 0.01,
+            band_cap: 12,
+        },
+    )
+    .unwrap();
+    assert!(verified.verification.as_ref().unwrap().passed());
+    assert_eq!(verified.history.len(), good.history.len());
+    assert_eq!(verified.density, good.density);
+    assert_eq!(
+        verified.thermodynamics.free_energy_ha.to_bits(),
+        good.thermodynamics.free_energy_ha.to_bits()
+    );
+    assert_eq!(
+        verified.blocks[0][0].eigenvalues_ha,
+        good.blocks[0][0].eigenvalues_ha
+    );
+    assert_eq!(
+        verified.blocks[0][0].occupations,
+        good.blocks[0][0].occupations
+    );
+    assert_eq!(
+        verified.blocks[0][0].orbitals.as_slice(),
+        good.blocks[0][0].orbitals.as_slice()
+    );
+    assert_eq!(
+        verified.occupations.unwrap().roots[0]
+            .unwrap()
+            .mu_ha
+            .to_bits(),
+        good.occupations.unwrap().roots[0].unwrap().mu_ha.to_bits()
+    );
+    assert!(
+        run(
+            &options,
+            Policy::FermiDirac {
+                theta_ha: 0.,
+                band_cap: 12
+            }
+        )
+        .is_err()
+    );
+    assert!(
+        run(
+            &options,
+            Policy::FermiDirac {
+                theta_ha: 0.5,
+                band_cap: 12
+            }
+        )
+        .is_err()
+    );
+    let sector = SpinSector {
+        n_up: 1,
+        n_down: 0,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: None,
+    };
+    assert!(run(&options, Policy::FixedSpin(sector.clone())).is_err());
+    let pw = ScfOptions {
+        functional: Functional::LdaPw,
+        allow_functional_override: true,
+        ..options.clone()
+    };
+    assert!(
+        run(
+            &pw,
+            Policy::SpinFermiDirac {
+                sector: sector.clone(),
+                theta_ha: 0.01,
+                constraint: Constraint::FixedMoment(1.),
+                band_cap: 12
+            }
+        )
+        .is_err()
+    );
+    let pbe = ScfOptions {
+        functional: Functional::Pbe,
+        ..pw
+    };
+    assert!(run(&pbe, Policy::FixedSpin(sector)).is_err());
+}

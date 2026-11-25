@@ -69,6 +69,24 @@ pub struct Broyden {
     gram_metric: Option<u64>,
 }
 impl Broyden {
+    /// ONEPATH-3 charge/magnetization history. TF must not freeze a free
+    /// uniform moment: retain plain screening for that spin-only mode.
+    pub(super) fn spin(
+        profile: Profile,
+        g2: &[f64],
+        smooth: &[bool],
+        volume: f64,
+        electrons: f64,
+    ) -> Result<Self, Error> {
+        let mut mixer = Self::new(profile, &g2.repeat(2), &smooth.repeat(2), volume, electrons)?;
+        for (i, &g) in g2.iter().enumerate() {
+            if g == 0. {
+                mixer.screening[g2.len() + i] = 1.;
+            }
+        }
+        Ok(mixer)
+    }
+
     pub fn new(
         profile: Profile,
         g2: &[f64],

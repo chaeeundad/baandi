@@ -11,6 +11,8 @@ pub mod broyden;
 pub mod delivered;
 pub mod density;
 pub mod driver;
+pub mod electronic;
+mod electronic_map;
 pub mod k_driver;
 mod k_kept;
 mod k_map;

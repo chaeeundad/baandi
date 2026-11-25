@@ -617,6 +617,9 @@ table! {
 
     FORCE_BAND_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G5: one projector/derivative GEMM over all bands per k for nonlocal forces; unmeasured, default off";
+    REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4B: enable unqualified reference collinear Fermi-Dirac moment policies for development";
+
 }
 
 struct Resolved {

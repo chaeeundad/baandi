@@ -2634,3 +2634,58 @@ in [verwarm-dev08-request.md](../performance/lanes/RSCF/verwarm-dev08-request.md
 The Mac fixtures exercise cubic, skew, elongated, synthetic nonlocal and
 actual failed-verification recovery on 1/3/8 simulated ranks. They are small
 internal oracles, not a physical Si128 SCF or MPI/MKL speed evidence.
+
+## PBE
+
+G2 enables unpolarized PBE in `refstart` and reference map fields. This
+supersedes the historical PBE rejection in Start above. The existing CLI
+unpolarized/fixed-occupation guard remains; collinear PBE is G4. Original
+PW92, explicit density floors and NLCC remain outside this G2 change.
+
+`dft_physics::gga::distributed` uses the run-owned `StartFields` plan through
+an owned Fourier-field interface. Both initialization and each uncached field
+evaluation reuse their existing normalized rho(G), before its Hartree
+multiplier. For each Cartesian component the helper multiplies by iG and
+inverts into owned real slabs. As in the serial GGA evaluator, each even-axis
+Nyquist Miller component is zeroed **before** conversion with the reciprocal
+cell matrix. The derivative is real and skew-adjoint on skew as well as
+orthogonal grids; the Hartree Nyquist convention is unchanged.
+
+The existing xcx GgaXPbe/GgaCPbe library evaluates rho and sigma=|grad rho|^2
+on the owned points. Flux is 2*(vsigma_x+vsigma_c)*grad rho and
+Vxc=vrho_x+vrho_c-div(flux). Each flux component takes a forward transform,
+iG multiplication into a reciprocal divergence sum, followed by one shared
+inverse. This is algebraically equivalent to serial componentwise inverses,
+with floating-point rounding differences. Thus, given rho(G), the gradient
+costs three inverse transforms and divergence costs three forward transforms
+plus one inverse (seven transforms total). The density forward and Hartree inverse are shared
+with the ordinary field evaluation. No full-grid payload gather occurs in
+this helper or its start/map callers. Only scalar error/energy reductions and
+the existing FFT transposes communicate. Even empty slab owners participate
+in every collective; local library failures are agreed before later FFTs.
+
+The density policy is the existing serial PBE policy: negative/nonfinite
+input fails collectively; n <= 1e-10 Bohr^-3 has zero local library inputs.
+Gradients use the unscreened density and the divergence can be nonzero at a
+screened point. No LDA absolute-density rule is imposed on PBE. Start density
+clipping/normalization remains in the pre-existing atomic start. Prolonged
+or mixed PBE density is not silently repaired. Field-sized buffers and xcx
+outputs are allocated at the field-evaluation boundary, not per orbital/H
+application; all payloads scale with owned slabs/sticks. Existing StartMemory
+counters do not include these transient GGA arrays and are not PBE RSS bounds.
+
+Energy is dv*sum(n*exc), summed locally then reduced together with Hartree
+and the valence potential integral. Double counting uses the **complete**
+Vxc including divergence. The existing band form, Harris–Foulkes expression
+and exact discrete XC functional remainder therefore apply unchanged; no
+local-density Hessian approximation is introduced. LEAN_ENERGY cache,
+continuing-map deferral, candidate/delivery audit and fresh verification
+semantics are unchanged. G1 integration must supply n_valence+n_core and its
+Fourier coefficients to this helper for XC only, while retaining valence
+Hartree and valence-only potential integrals. It must not reuse valence-only
+rho(G) for the combined-density gradient.
+
+Validation and pending MPI8 measurements are recorded in
+[the G2 request](../performance/lanes/RSCF/g2-pbe-dev08-request.md). Synthetic
+Si diamond geometry is explicitly not a physical Si PBE pseudopotential
+validation; no Si.pz-vbc functional override is used here.

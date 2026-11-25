@@ -93,6 +93,24 @@ pub struct StartFields {
     fft: DistributedPairFft,
     dims: [usize; 3],
 }
+impl<K: Collective> dft_physics::gga::distributed::Fields<K> for StartFields {
+    type Error = ScfError;
+    fn dims(&self) -> [usize; 3] {
+        self.dims
+    }
+    fn reciprocal_indices(&self) -> &[usize] {
+        self.reciprocal_indices()
+    }
+    fn plane_points(&self) -> usize {
+        self.fft.plane_points()
+    }
+    fn forward(&mut self, comm: &K, n: &[f64]) -> Result<Vec<C>, ScfError> {
+        self.forward(comm, n)
+    }
+    fn inverse(&mut self, comm: &K, n: &[C]) -> Result<Vec<f64>, ScfError> {
+        self.inverse(comm, n)
+    }
+}
 impl StartFields {
     fn new<K: Collective>(dims: [usize; 3], comm: &K) -> Result<Self, ScfError> {
         let indices: Vec<_> = (0..dims[0])
@@ -244,8 +262,8 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
 
 /// Build the final-cutoff cold start, collective on `comm` (including size 1).
 /// Atomic charge/orbitals are required, never silently replaced with uniform
-/// density or random waves. Currently LDA-PZ and library LDA-PW without NLCC;
-/// PBE, core charge and frozen-strain inputs fail explicitly before setup.
+/// density or random waves. LDA-PZ, library LDA-PW and distributed PBE;
+/// core charge and frozen-strain inputs fail explicitly before setup.
 /// Randomization rule: none. Atomic columns retain species/orbital/atom/m
 /// order; missing bands are completed by deterministic kinetic-ordered ORC
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
@@ -287,7 +305,6 @@ fn start_inner<K: Collective>(
         || atoms.is_empty()
         || potentials.is_empty()
         || o.strain_reference.is_some()
-        || o.functional == Functional::Pbe
         || o.pw92_prefactor != crate::Pw92Prefactor::Modified
     {
         return Err(ScfError::InvalidInput(
@@ -561,7 +578,10 @@ fn start_inner<K: Collective>(
     drop(vh_hat);
     // Prolongation is not clipped or rescaled. Signed Fourier roundoff uses
     // the same absolute-density LDA evaluation as a reference SCF map.
-    let xc = if warm_orbitals.is_some() {
+    let xc = if o.functional == Functional::Pbe {
+        dft_physics::gga::distributed::evaluate(&mut fields, comm, cell, &density, &density_g)
+            .map(|x| x.potential)
+    } else if warm_orbitals.is_some() {
         local_xc(
             o.functional,
             &density.iter().map(|v| v.abs()).collect::<Vec<_>>(),
@@ -699,7 +719,7 @@ fn local_xc(functional: Functional, n: &[f64]) -> Result<Vec<f64>, ScfError> {
         .into_raw_vec_and_offset()
         .0),
         Functional::Pbe => Err(ScfError::InvalidInput(
-            "reference start: PBE requires distributed gradients",
+            "reference start: PBE must use the distributed GGA evaluator",
         )),
     }
 }

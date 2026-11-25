@@ -30,7 +30,7 @@ fn sum<K: Collective>(comm: &K, values: &[f64]) -> Result<Vec<f64>, ScfError> {
     comm.tree_sum_f64(values, &mut out).map_err(numerical)?;
     Ok(out)
 }
-/// Full-box Hartree and plane-local LDA, in the same convention as refstart.
+/// Full-box Hartree and LDA / distributed PBE, in the same convention as refstart.
 /// All local errors are agreed before the next transform/collective.
 pub(super) fn fields<K: Collective>(
     state: &mut StartState,
@@ -42,6 +42,19 @@ pub(super) fn fields<K: Collective>(
     let dims = state.grid.dims();
     let dv = cell.volume_bohr3() / dims.iter().product::<usize>() as f64;
     let mut coeff = state.fields.forward(comm, density)?;
+    // Reuse rho(G) before the Poisson multiplier overwrites it. GGA owns only
+    // this rank's slabs/sticks and follows the serial signed-density policy.
+    let pbe = if functional == Functional::Pbe {
+        Some(dft_physics::gga::distributed::evaluate(
+            &mut state.fields,
+            comm,
+            cell,
+            density,
+            &coeff,
+        )?)
+    } else {
+        None
+    };
     let b = cell.reciprocal_columns_inverse_bohr();
     for (v, &g) in coeff.iter_mut().zip(state.fields.reciprocal_indices()) {
         let ijk = [g / (dims[1] * dims[2]), g / dims[2] % dims[1], g % dims[2]];
@@ -61,7 +74,9 @@ pub(super) fn fields<K: Collective>(
     }
     let mut hxc = state.fields.inverse(comm, &coeff)?;
     let eh = 0.5 * dv * density.iter().zip(&hxc).map(|(n, v)| n * v).sum::<f64>();
-    let xc = if density.is_empty() {
+    let xc = if let Some(x) = pbe {
+        Ok((x.potential, x.energy, 0.))
+    } else if density.is_empty() {
         Ok((Vec::new(), 0., 0.))
     } else {
         let n = Array3::from_shape_vec(
@@ -73,7 +88,9 @@ pub(super) fn fields<K: Collective>(
             Functional::LdaPz => dft_physics::xc::evaluate(&n, dv * n.len() as f64),
             Functional::LdaPw => dft_physics::spin::unpolarized_pw(&n, dv * n.len() as f64),
             Functional::Pbe => {
-                return Err(ScfError::InvalidInput("reference map: PBE unsupported"));
+                return Err(ScfError::InvalidInput(
+                    "reference map: PBE must use the distributed GGA evaluator",
+                ));
             }
         };
         x.map(|x| {

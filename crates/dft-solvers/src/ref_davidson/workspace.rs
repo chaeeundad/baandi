@@ -1383,16 +1383,19 @@ mod single_gemm_tests {
                     record.summarize();
                     let stats = record.resets;
                     for r in &record.iterations[..trip + 1] {
-                        let refresh_products = r
-                            .gemms
-                            .iter()
-                            .filter(|g| {
-                                matches!(g.stage, "border_s" | "border_h" | "refresh_transform")
-                            })
-                            .count();
-                        // Triangular borders are unconditional since R11A (REF_DAV_TRIANGLE retired):
-                        // one GEMMT per border instead of the square layout's two calls each.
-                        assert_eq!(refresh_products, if r.resets.ideal > 0 { 0 } else { 2 });
+                        // One S and one H border per refresh, whichever kernel computed it:
+                        // the square GEMM ("border_s"/"border_h") or, when the MKL GEMMT
+                        // adapter is taken, the triangular call ("*_gemmt"). The kernel
+                        // choice depends on the backend, so count borders by role.
+                        let count = |names: &[&str]| {
+                            r.gemms.iter().filter(|g| names.contains(&g.stage)).count()
+                        };
+                        let borders_s = count(&["border_s", "border_s_gemmt"]);
+                        let borders_h = count(&["border_h", "border_h_gemmt"]);
+                        let transforms = count(&["refresh_transform"]);
+                        let expected = usize::from(r.resets.ideal == 0);
+                        assert_eq!((borders_s, borders_h), (expected, expected));
+                        assert_eq!(transforms, 2 * expected);
                         assert_eq!(r.h_columns, 0);
                         assert_eq!(r.reduced_solves, 0);
                     }

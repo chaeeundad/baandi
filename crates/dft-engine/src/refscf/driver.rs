@@ -6,6 +6,7 @@ pub use dft_solvers::ref_rmm::{
 };
 
 use super::memory::{self, Component as Mem, bytes, observe};
+use super::stepper::{Boundary, StepKind, StepReport, Stepper};
 use super::{
     broyden::{Broyden, Diagnostics, PredictionScratch},
     density::DensityPlan,
@@ -95,11 +96,27 @@ pub struct Run {
     pub peak_payload_bytes_per_rank: Vec<usize>,
 }
 pub fn run(input: StartInput<'_>, profile: Profile) -> Result<Run, ScfError> {
-    if let Some(comm) = crate::parallel::SharedComm::active() {
-        run_inner(input, profile, &comm, Some(comm.clone()))
-    } else {
-        run_with(input, profile, &Serial)
-    }
+    stepper(input, profile).run_to_end()
+}
+/// Select the active communicator once and retain it through delivery.
+pub fn stepper(input: StartInput<'_>, profile: Profile) -> Stepper<'_, Run> {
+    let comm = crate::parallel::SharedComm::active();
+    Stepper::new(move |boundary| async move {
+        if let Some(comm) = comm {
+            run_inner(input, profile, &comm, Some(comm.clone()), &boundary).await
+        } else {
+            run_inner(input, profile, &Serial, None, &boundary).await
+        }
+    })
+}
+pub fn stepper_with<'a, K: Collective>(
+    input: StartInput<'a>,
+    profile: Profile,
+    comm: &'a K,
+) -> Stepper<'a, Run> {
+    Stepper::new(
+        move |boundary| async move { run_inner(input, profile, comm, None, &boundary).await },
+    )
 }
 /// Identical parsed input on every rank; also supports simulated collectives.
 pub fn run_with<K: Collective>(
@@ -107,7 +124,7 @@ pub fn run_with<K: Collective>(
     profile: Profile,
     comm: &K,
 ) -> Result<Run, ScfError> {
-    run_inner(input, profile, comm, None)
+    stepper_with(input, profile, comm).run_to_end()
 }
 
 /// Continue an owned coarse seed through fresh fine-stage setup and verified
@@ -119,6 +136,18 @@ pub fn run_seeded_with<K: Collective>(
     comm: &K,
     seed: super::ladder::Seed,
 ) -> Result<Run, ScfError> {
+    Stepper::new(move |boundary| async move {
+        run_seeded_continuation(input, profile, comm, seed, &boundary).await
+    })
+    .run_to_end()
+}
+pub(super) async fn run_seeded_continuation<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    comm: &K,
+    seed: super::ladder::Seed,
+    boundary: &Boundary,
+) -> Result<Run, ScfError> {
     let StageRun::Fine(run) = run_stage(
         input,
         profile,
@@ -127,7 +156,9 @@ pub fn run_seeded_with<K: Collective>(
         Some(seed),
         false,
         Instant::now(),
-    )?
+        boundary,
+    )
+    .await?
     else {
         unreachable!()
     };
@@ -136,11 +167,12 @@ pub fn run_seeded_with<K: Collective>(
 
 // Only run() can attach the exact owned communicator to a lazy result.
 // Generic borrowed run_with() retains its eager public delivery contract.
-fn run_inner<K: Collective>(
+pub(super) async fn run_inner<K: Collective>(
     input: StartInput<'_>,
     profile: Profile,
     comm: &K,
     owned_comm: Option<crate::parallel::SharedComm>,
+    boundary: &Boundary,
 ) -> Result<Run, ScfError> {
     let start = Instant::now();
     use super::ladder::{FRACTION, MAX_COARSE_MAPS, THRESHOLD_RATIO};
@@ -169,7 +201,9 @@ fn run_inner<K: Collective>(
             None,
             true,
             start,
-        )?
+            boundary,
+        )
+        .await?
         else {
             unreachable!()
         };
@@ -178,7 +212,10 @@ fn run_inner<K: Collective>(
     } else {
         (None, None)
     };
-    let StageRun::Fine(mut run) = run_stage(input, profile, comm, owned_comm, seed, false, start)?
+    let StageRun::Fine(mut run) = run_stage(
+        input, profile, comm, owned_comm, seed, false, start, boundary,
+    )
+    .await?
     else {
         unreachable!()
     };
@@ -195,7 +232,7 @@ enum StageRun {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_stage<K: Collective>(
+async fn run_stage<K: Collective>(
     input: StartInput<'_>,
     profile: Profile,
     comm: &K,
@@ -203,6 +240,7 @@ fn run_stage<K: Collective>(
     seed: Option<super::ladder::Seed>,
     coarse: bool,
     start: Instant,
+    boundary: &Boundary,
 ) -> Result<StageRun, ScfError> {
     let stage_start = Instant::now();
     let memory_scope = memory::Scope::begin();
@@ -382,6 +420,7 @@ fn run_stage<K: Collective>(
     let mut field_cache = None;
     let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
     let mut kept = super::kept_hx::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
+    boundary.ready().await;
     for iteration in 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
@@ -399,6 +438,7 @@ fn run_stage<K: Collective>(
         }
         let requested = ethr;
         let mut redo = false;
+        let mut reported_columns = 0;
         let mut calls = Vec::new();
         let mut timings = PhaseTimings::default();
         let (mut map_s, mut transform_s, mut metric_s) = (0., 0., 0.);
@@ -442,6 +482,17 @@ fn run_stage<K: Collective>(
             let dr2 = metric.norm(comm, &f)?;
             metric_s += clock.elapsed().as_secs_f64();
             if iteration == 1 && !redo && dr2 < ethr * state.electrons.max(1.) {
+                let mut report = StepReport::new(
+                    iteration,
+                    StepKind::Ordinary,
+                    dr2,
+                    step.energy.total_hartree(),
+                    ethr,
+                    calls.iter().map(|c| c.h_columns).sum(),
+                );
+                report.stage = if coarse { "coarse" } else { "fine" };
+                reported_columns = report.h_columns;
+                boundary.emit(report).await;
                 ethr = next_ethr_ry(ethr, dr2, state.electrons);
                 redo = true;
                 kept.invalidate();
@@ -503,6 +554,20 @@ fn run_stage<K: Collective>(
             timings.energy += elapsed;
             map_s += elapsed.as_secs_f64();
         }
+        let mut map_report = StepReport::new(
+            iteration,
+            if redo {
+                StepKind::Retry
+            } else {
+                StepKind::Ordinary
+            },
+            dr2,
+            step.energy.total_hartree(),
+            ethr,
+            calls.iter().map(|c| c.h_columns).sum::<usize>() - reported_columns,
+        );
+        map_report.stage = if coarse { "coarse" } else { "fine" };
+        map_report.reused = reused_from.is_some();
         let mut verification_energy = None;
         let mut verification_warm = None;
         let mut actual_error_ha = None;
@@ -512,6 +577,7 @@ fn run_stage<K: Collective>(
             && !skipped
             && let Some(report) = &mut verification
         {
+            boundary.emit(map_report).await;
             let qe_before = qe_scope.as_ref().map(|s| s.snapshot());
             verification_start_s = Some(start.elapsed().as_secs_f64());
             let clock = Instant::now();
@@ -612,6 +678,15 @@ fn run_stage<K: Collective>(
                 attempt.threshold_ha = VerificationEnergy::THRESHOLD_HA;
                 verification_energy = Some(energy);
             }
+            map_report = StepReport::new(
+                iteration,
+                StepKind::Verification,
+                error * 2.,
+                check.energy.total_hartree(),
+                tol,
+                current_calls.iter().map(|c| c.h_columns).sum(),
+            );
+            map_report.stage = if coarse { "coarse" } else { "fine" };
             if reuse && !attempt.passed && iteration < o.max_iterations {
                 pending = Some((check, tol, iteration));
             }
@@ -722,6 +797,10 @@ fn run_stage<K: Collective>(
             variational = step.energy.band_form;
             vh = step.energy.hartree;
             vx = step.energy.xc;
+            if map_report.kind != StepKind::Verification {
+                let energy = step.energy.total_hartree();
+                map_report.energy_ha = energy.is_finite().then_some(energy);
+            }
         }
         let mut sums = [0.; 3];
         if let Some(local) = fused_local {
@@ -831,7 +910,11 @@ fn run_stage<K: Collective>(
             variational_hartree_ha: vh,
             variational_xc_ha: vx,
         });
+        map_report.safe_point = failure.is_none();
         if finish || failure.is_some() || iteration == o.max_iterations {
+            if !coarse {
+                boundary.publish(map_report);
+            }
             let verified = verification.as_ref().is_none_or(VerificationReport::passed);
             let converged = stopped && verified && failure.is_none();
             let failed = failure.is_some();
@@ -870,7 +953,7 @@ fn run_stage<K: Collective>(
                     indices: state.fields.reciprocal_indices().to_vec(),
                     density_g,
                 };
-                return Ok(StageRun::Coarse(
+                let delivered = StageRun::Coarse(
                     Box::new(seed),
                     super::ladder::Report {
                         kept_hx: kept.report(comm)?,
@@ -880,7 +963,9 @@ fn run_stage<K: Collective>(
                         coarse_threshold_ry: profile.threshold_ry,
                         coarse_stopped: stopped,
                     },
-                ));
+                );
+                boundary.emit(map_report).await;
+                return Ok(delivered);
             }
             if trim_memory {
                 kept.release_storage();
@@ -1050,6 +1135,7 @@ fn run_stage<K: Collective>(
         n.copy_from_slice(&next_planes);
         state.orbitals = step.solve.eigenvectors;
         records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
+        boundary.emit(map_report).await;
     }
     unreachable!("positive budget checked")
 }

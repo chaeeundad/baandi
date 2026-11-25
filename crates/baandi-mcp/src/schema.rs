@@ -37,13 +37,32 @@ input!(Control {
     observed_state_version: u64 => integer(), observed_policy_revision: u64 => integer(),
     max_iteration: usize => integer(), reason: String => json!({"type":"string","maxLength":512})
 });
-input!(Policy {
-    calc_id: String => label(), request_id: String => label(),
-    observed_state_version: u64 => integer(), observed_policy_revision: u64 => integer(),
-    max_iteration: usize => integer(), reason: String => json!({"type":"string","maxLength":512}),
-    mixing_beta: f64 => json!({"type":"number"})
-});
-impl From<Policy> for (Control, f64) {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Policy {
+    pub calc_id: String,
+    pub request_id: String,
+    pub observed_state_version: u64,
+    pub observed_policy_revision: u64,
+    pub max_iteration: usize,
+    pub reason: String,
+    pub mixing_beta: Option<f64>,
+    pub mixing_history: Option<usize>,
+    pub threshold_ry: Option<f64>,
+    pub verification: Option<bool>,
+}
+impl Policy {
+    pub fn schema() -> Value {
+        let mut s = Control::schema();
+        s["properties"]["mixing_beta"] = json!({"type":"number"});
+        s["properties"]["mixing_history"] = json!({"type":"integer","minimum":0});
+        s["properties"]["threshold_ry"] = json!({"type":"number"});
+        s["properties"]["verification"] = json!({"type":"boolean"});
+        s["anyOf"] = json!([{"required":["mixing_beta"]},{"required":["mixing_history"]},{"required":["threshold_ry"]},{"required":["verification"]}]);
+        s
+    }
+}
+impl From<Policy> for (Control, dft_engine::refscf::runtime::PolicyPatch) {
     fn from(p: Policy) -> Self {
         (
             Control {
@@ -54,7 +73,12 @@ impl From<Policy> for (Control, f64) {
                 max_iteration: p.max_iteration,
                 reason: p.reason,
             },
-            p.mixing_beta,
+            dft_engine::refscf::runtime::PolicyPatch {
+                beta: p.mixing_beta,
+                history: p.mixing_history,
+                threshold_ry: p.threshold_ry,
+                verification: p.verification,
+            },
         )
     }
 }
@@ -67,12 +91,12 @@ pub fn tools() -> Value {
         ),
         (
             "step",
-            "Advance one complete SCF iteration",
+            "Advance one reference SCF map (ordinary, retry or verification)",
             Calculation::schema(),
         ),
         (
             "run",
-            "Advance a bounded number of complete iterations",
+            "Advance a bounded number of reference SCF maps",
             Run::schema(),
         ),
         (
@@ -92,7 +116,7 @@ pub fn tools() -> Value {
         ),
         (
             "propose_policy_change",
-            "Propose mixing beta; requires separate host approval",
+            "Propose reference mixing beta/history, threshold_ry or verification; requires separate host approval",
             Policy::schema(),
         ),
         (
@@ -119,7 +143,8 @@ pub fn tools() -> Value {
     json!(specs.into_iter().map(|(name, description, schema)| json!({"name":name,"description":description,"inputSchema":schema})).collect::<Vec<_>>())
 }
 /// Validate exactly the small JSON Schema vocabulary generated above. Scientific
-/// constraints deliberately remain in Runtime, including rejection auditing.
+/// numerical constraints remain in the reference runtime; the adapter audits
+/// its outcome after host approval.
 pub fn validate(schema: &Value, value: &Value) -> bool {
     match schema["type"].as_str() {
         Some("object") => {
@@ -127,10 +152,23 @@ pub fn validate(schema: &Value, value: &Value) -> bool {
                 return false;
             };
             let props = schema["properties"].as_object().unwrap();
-            object.len() == props.len()
-                && props
+            object
+                .iter()
+                .all(|(key, v)| props.get(key).is_some_and(|s| validate(s, v)))
+                && schema["required"]
+                    .as_array()
+                    .unwrap()
                     .iter()
-                    .all(|(key, s)| object.get(key).is_some_and(|v| validate(s, v)))
+                    .all(|k| object.contains_key(k.as_str().unwrap()))
+                && schema.get("anyOf").is_none_or(|alternatives| {
+                    alternatives.as_array().unwrap().iter().any(|a| {
+                        a["required"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .all(|k| object.contains_key(k.as_str().unwrap()))
+                    })
+                })
         }
         Some("string") => value.as_str().is_some_and(|s| {
             s.len() >= schema["minLength"].as_u64().unwrap_or(0) as usize
@@ -144,6 +182,7 @@ pub fn validate(schema: &Value, value: &Value) -> bool {
             n >= schema["minimum"].as_u64().unwrap_or(0)
                 && n <= schema["maximum"].as_u64().unwrap_or(u64::MAX)
         }),
+        Some("boolean") => value.is_boolean(),
         Some("number") => value.as_f64().is_some_and(f64::is_finite),
         _ => false,
     }

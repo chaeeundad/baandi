@@ -259,3 +259,51 @@ The final scoped gate,
 `CHECK_SCCACHE=0 BAANDI_TEST_TMP="$PWD/target/tmp" scripts/check.sh baandi-py`,
 exited **0**: build/test/fmt/clippy all PASS (2 s). It remains a zero-Rust-test
 crate gate; the separate native suite supplies the binding acceptance.
+
+
+## R8d reference stepping (2026-11-25)
+
+`tests/test_reference.py` now exercises the reference runtime through native
+`initialize`, `step`, `status`, `iteration` and `run`. `step` returns all fields
+of an owned `StepReport`. Reference status names are Created, Initialized,
+Converged, Exhausted and Failed; legacy status names and step strings remain.
+The explicit `density()` accessor returns `(shape, values)` in ndarray iteration
+order, in Bohr^-3; it copies only on request and requires reference delivery.
+
+The same-build native check passed six tests; the existing external Si/CLI test
+was skipped (its external input variables were not provided). Gamma and k211
+synthetic one-atom cases compare stepping, partially stepped `run()` and fresh
+`run()` bit-for-bit: total energy, all eigenvalues and all density values, plus
+forces for stepped versus fresh delivery. They take 8 maps / 7 iterations and
+7 maps / 6 iterations respectively, including verification. New evidence is
+`tests/r8d-reference-evidence.json`; these are not QE or real-material claims.
+The extension-absent invocation skips all seven tests cleanly.
+
+Reproduction from the worktree root (no wheel installation is required):
+
+```sh
+cargo build -p baandi-py --features python-extension
+mkdir -p target/tmp/r8d-native/baandi
+cp python/baandi/__init__.py target/tmp/r8d-native/baandi/__init__.py
+cp target/debug/lib_baandi.dylib target/tmp/r8d-native/baandi/_baandi.so
+PYTHONPATH="$PWD/target/tmp/r8d-native" \
+BAANDI_R8D_EVIDENCE="$PWD/crates/baandi-py/tests/r8d-reference-evidence.json" \
+python3 -m unittest discover -s crates/baandi-py/tests -p test_reference.py -v
+```
+
+The dylib copy is the macOS native-development route; this run does not claim
+installed-wheel, cross-platform or external Si acceptance. The module must be
+built for the Python interpreter used to load it.
+
+R8d verification exits were all 0: `cargo check --workspace --tests`,
+`cargo test -p baandi-py` (no native tests in the Rust harness),
+`cargo test -p baandi-mcp` (13 server tests),
+`cargo test -p dft-cli --test driver_routing` (8 tests), `cargo fmt --check`,
+`cargo clippy -p baandi-py -p baandi-mcp --all-targets -- -D warnings`, and
+`cargo clippy -p baandi-py --features python-extension --all-targets -- -D warnings`.
+`BAANDI_TEST_TMP="$PWD/target/tmp" CHECK_SCCACHE=0 CHECK_TEST_JOBS=2
+scripts/check.sh fast baandi-py baandi-mcp` exited 0 with build, test, fmt,
+clippy, production-check and production-clippy PASS (110 s total). Its optional
+`ps` load probe was denied by the sandbox; verification gates still completed.
+Root README/dashboard integration is left to the orchestrator because those
+files are outside this ticket's OWNED_FILES. Existing legacy evidence is retained.

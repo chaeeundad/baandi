@@ -121,7 +121,7 @@
   "l08-session": {
     "command": "session",
     "mode": "classic",
-    "reference_reason": "SESSION",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

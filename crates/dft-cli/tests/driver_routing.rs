@@ -43,7 +43,6 @@ fn reason(key: &str) -> &'static str {
         "VARIABLE_CELL" => route::VARIABLE_CELL,
         "EXTRAPOLATION" => route::EXTRAPOLATION,
         "CHECKPOINT" => route::CHECKPOINT,
-        "SESSION" => route::SESSION,
         "LEGACY_INPUT" => route::LEGACY_INPUT,
         "COMPAT" => route::COMPAT,
         "ATOMIC_DATA" => route::ATOMIC_DATA,

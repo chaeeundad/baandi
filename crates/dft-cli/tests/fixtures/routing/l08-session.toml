@@ -1,6 +1,6 @@
-# expected_driver = legacy
-# expected_reason = Python Session and MCP use ScfProblem/ScfSession directly; this TOML describes the equivalent model, not their API request
-# command = Python Session.step/status/iteration; MCP registered ScfProblem
+# expected_driver = reference
+# expected_reason = R8d Python and MCP drive the reference stepper/runtime
+# command = Python Session.step/status/iteration; MCP registered ReferenceInput
 # expected_parse = ok
 # switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides
 # upf_requirements = NC; nonzero PP_RHOATOM and s/p PP_PSWFC; functional matches XC

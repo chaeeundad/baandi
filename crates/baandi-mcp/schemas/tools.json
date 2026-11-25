@@ -34,7 +34,7 @@
     "name": "create_calculation"
   },
   {
-    "description": "Advance one complete SCF iteration",
+    "description": "Advance one reference SCF map (ordinary, retry or verification)",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -53,7 +53,7 @@
     "name": "step"
   },
   {
-    "description": "Advance a bounded number of complete iterations",
+    "description": "Advance a bounded number of reference SCF maps",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
@@ -141,9 +141,31 @@
     "name": "get_events"
   },
   {
-    "description": "Propose mixing beta; requires separate host approval",
+    "description": "Propose reference mixing beta/history, threshold_ry or verification; requires separate host approval",
     "inputSchema": {
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "mixing_beta"
+          ]
+        },
+        {
+          "required": [
+            "mixing_history"
+          ]
+        },
+        {
+          "required": [
+            "threshold_ry"
+          ]
+        },
+        {
+          "required": [
+            "verification"
+          ]
+        }
+      ],
       "properties": {
         "calc_id": {
           "maxLength": 128,
@@ -158,6 +180,10 @@
         },
         "mixing_beta": {
           "type": "number"
+        },
+        "mixing_history": {
+          "minimum": 0,
+          "type": "integer"
         },
         "observed_policy_revision": {
           "maximum": 18446744073709551615,
@@ -178,6 +204,12 @@
           "minLength": 1,
           "pattern": "^[!-~]+$",
           "type": "string"
+        },
+        "threshold_ry": {
+          "type": "number"
+        },
+        "verification": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -186,8 +218,7 @@
         "observed_state_version",
         "observed_policy_revision",
         "max_iteration",
-        "reason",
-        "mixing_beta"
+        "reason"
       ],
       "type": "object"
     },

@@ -1468,9 +1468,13 @@ mod single_gemm_tests {
         for ranks in [1, 3, 8] {
             for correlated in [false, true] {
                 dft_mpi::simulate(ranks, |c| {
-                    let _scope = RunConfig::from_pairs(&[("ref_dav_ideal_reset", "on")])
-                        .unwrap()
-                        .enter();
+                    let _scope = RunConfig::from_pairs(&[
+                        ("ref_dav_ideal_reset", "on"),
+                        // GEMM-count contract below is the square-border layout.
+                        ("ref_dav_triangle", "off"),
+                    ])
+                    .unwrap()
+                    .enter();
                     let op = Operator {
                         dim: 7,
                         rows: (c.rank()..7).step_by(ranks).collect(),

@@ -3449,3 +3449,293 @@ G4B acceptance test. Sandbox `ps`/priority diagnostics do not skip any gate.
 All five ticket TEST_COMMANDS were rerun after routing changes and exit 0.
 Post-decision logs and exit codes are saved under
 `target/tmp/g4-validation/architect-*`.
+
+### G4B diagnosis before candidate changes (2026-11-25)
+
+The unchanged arithmetic was instrumented with an optional, preallocated,
+in-memory `electronic::Trace`. It survives a rejected mixing update. Adapters
+write it only after return. `G4B_TRACE_DIR` on the G4 acceptance tests writes
+one CSV per policy/mesh/rank/threshold, including every ordinary, first-map
+redo and fresh verification map. Each row records charge/nonuniform-spin/
+uniform-spin terms (Ry), absolute errors against the independently converged
+strict legacy oracle (F in Ha, M in mu_B, mu in Ha, k-weighted occupation L1
+in electrons), number/moment residuals, history condition, individual Gram
+diagonals and maximum absolute pair cosine. Zero condition means no history
+solve at that map, not a perfectly conditioned history.
+
+Baseline command (exit 101, expected scientific acceptance failure):
+`G4B_TRACE_DIR="$PWD/target/tmp/g4b" cargo test --release -p dft-engine --test refscf g4b_moment_acceptance -- --ignored --nocapture`.
+The first invocation used a relative trace path and failed to write from the
+crate test working directory; the absolute-path rerun produced all 24 traces.
+
+Representative one-rank baseline rows (all bounds unchanged):
+
+| Policy/map | charge Ry | spin Ry | uniform Ry | abs(dF) Ha | abs(dM) mu_B | abs(dmu) Ha | occupation L1 electrons |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Free Gamma standard, delivered 7 | 7.20513483e-12 | 1.24654425e-9 | 5.51814786e-9 | 1.11671672e-8 | 1.48839490e-4 | 2.13525967e-4 | 1.48839490e-4 |
+| Free Gamma verification 7 | 8.00092706e-13 | 1.38348208e-10 | 6.16972293e-10 | 1.28744398e-9 | 5.03946931e-5 | 7.29032180e-5 | 5.03946931e-5 |
+| Free mesh standard, delivered 11 | 3.20209006e-10 | 9.70878042e-10 | 5.15123959e-9 | 2.48298660e-9 | 3.39224954e-4 | 1.02320082e-5 | 3.39224954e-4 |
+| Fixed moment mesh standard, delivered 4 | 2.01173880e-9 | 4.58689136e-9 | 0 | 6.45450964e-10 | 4.82947016e-15 | 1.19614857e-6 | 1.40829865e-4 |
+
+The standard estimator and its fresh-map check accept before the delivered
+state meets the oracle bounds. A verification map's better energy does not
+repair the candidate it certifies. Free-moment error is predominantly in the
+uniform term: this is not evidence that short-wavelength under-weighting is
+the only problem. Local XC stiffness is therefore a candidate, not a promised
+bound or a substitute for kinetic/occupation response.
+
+Tight Gamma rejects at iteration 10 with condition 1.54081746e16, pair squared
+norms spanning 3.71200062e-10 to 2.61055520e-3 Ry, and maximum pair cosine
+0.9999957651. Its true F error decreased from 6.60563657e-9 (map 8) through
+1.20780239e-9 (map 9) to 8.94843921e-11 Ha (map 10). Tight mesh rejects at
+13 with condition 8.85736543e14 and cosine 0.9999959382; true F error decreases
+2.48298660e-9 -> 6.39018824e-10 -> 4.06599754e-12 Ha at maps 11–13.
+These are near-dependent, widely scaled secants on a converging tail, not
+an observed persistent stall. Both failures are free-moment runs: the uniform
+spin mode is retained, so fixed-M/zero-mode projection cannot explain them.
+The same metric/projection succeeds for the constrained tight cases.
+
+Both paths call `FermiDirac::new(theta)` with electron tolerance 1e-13 times
+the requested sector count and the same normalized k weights. Both occupation
+residual definitions are sum_ski w_k abs(f_new-f_old), with no second capacity
+factor. Fixed-M mesh map 4 has number residual -1.50990331e-14 electrons and
+moment residual -2.22044605e-15 electrons. Its occupation-oracle discrepancy
+is redistribution between states, not failed channel-number solves. No
+occupation-root tolerance/definition fix is justified.
+
+### G4B candidate contracts
+
+Two independent switches are appended to the registry, both default off:
+`REFSCF_SPIN_STIFFNESS` and `REFSCF_HISTORY_CONDITIONING`. They apply only to
+`Policy::SpinFermiDirac`; scalar FD, fixed sectors and closed-shell reference
+drivers ignore both. The existing development-routing switch is separate.
+
+The stiffness candidate **adds**, in Ha,
+`E_xc,m = (1/2) integral |f_mm[n,m]| (m_out-m_in)^2 dr`, where
+`f_mm = d[(v_up-v_down)/2]/dm` at fixed total n. The signed XC curvature alone
+is frequently negative and cannot be a positive stop metric; its absolute
+value prevents cancellation of positive residual errors. This is not the
+full thermodynamic spin stiffness (kinetic and occupation response are absent),
+nor an energy-error bound. Unlike Coulomb weights it does not attenuate short
+wavelengths by 1/G^2, as motivated in ONEPATH-3 section 2. The old uniform and
+nonuniform spin metric remain present; the new term also sees uniform errors.
+
+The same existing polarized LDA-PW evaluator supplies potentials. Because its
+public adapter exposes first derivatives only, the candidate uses two point-local
+potential evaluations at fixed n with relative displacement cbrt(f64 epsilon).
+This balances central-difference truncation and cancellation without a fitted
+material scale. At polarization endpoints it uses the feasible one-sided span;
+zero total density contributes zero, with the evaluator's existing vacuum
+screening unchanged. Spin-neutral NLCC is included before differentiation.
+Scratch channels and finite-difference buffers are constructed once. No new
+XC library, fitted coefficient, or parameterization is introduced. This has
+not been timed on dev08. A separate energy second-difference test checks the
+curvature including NLCC and the exact zero-residual limit.
+
+Ordinary maps, first-map redo, eigenvalue-tolerance ratchet, and independent
+verification all use the augmented energy. The coefficient 2 converts this
+Ha term to the driver's Ry estimator. Verification still delivers the original
+candidate, never its fresh-map output. The history metric itself is unchanged.
+The existing `dr2_ry` and verification `coulomb_error_ha` fields carry the
+augmented estimator when stiffness is selected; opt-in traces separate all
+three Coulomb terms from `stiffness_ha`.
+History conditioning follows proposed ADR 0045: repeatedly remove the oldest
+pair until rcond > sqrt(p*epsilon), with every removal's pre-drop condition
+recorded. Nonfinite/backend errors still reject. The off branch retains the
+original ring/cache, numerical singularity rejection and arithmetic. Candidate
+drop metadata is kept separate from legacy `Diagnostics` to preserve existing
+closed-shell scientific-record bytes.
+
+<details>
+<summary>G4B baseline per-map oracle trace (one rank)</summary>
+
+All energies below are Ha except the three explicitly labelled Ry estimator terms.
+`v` denotes a verification map and `r` a first-map redo. Number residuals
+are signed electrons; all oracle differences are absolute. `none` means no
+history solve. Rank 3/8 raw traces use the same CSV schema and reproduce the
+same failure classifications.
+
+`free-false-1-1e-8` (false=Gamma, true=2x2x2):
+
+| Map | charge Ry | spin Ry | uniform Ry | dF Ha | dM mu_B | dmu Ha | occupation L1 e | number residual e | moment residual e | condition |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.3235082e-02 | 3.9155794e-03 | 3.7876821e-03 | 6.1965369e-03 | 4.4956251e-01 | 2.4030228e-02 | 4.4956251e-01 | 3.9968029e-14 | 0.0000000e+00 | none |
+| 2 | 1.2369928e-03 | 2.2095545e-03 | 6.1471134e-03 | 2.7909261e-03 | 2.1199955e-01 | 2.1989185e-02 | 2.1199955e-01 | -2.5535130e-14 | 0.0000000e+00 | 1.0000000e+00 |
+| 3 | 1.2310136e-05 | 5.1810333e-04 | 2.1606033e-03 | 4.3232237e-04 | 5.1120059e-02 | 1.5739322e-02 | 5.1120059e-02 | 3.2418512e-14 | 0.0000000e+00 | 5.1001306e+00 |
+| 4 | 4.1632326e-07 | 3.8087689e-06 | 1.2713068e-05 | 9.4647901e-06 | 4.8388337e-03 | 5.0663546e-03 | 4.8388337e-03 | 9.8365760e-14 | 0.0000000e+00 | 7.6807899e+04 |
+| 5 | 3.6799854e-08 | 2.0729494e-07 | 5.5836008e-07 | 8.0756648e-07 | 1.3057703e-03 | 1.7186156e-03 | 1.3057703e-03 | 5.9952043e-15 | 0.0000000e+00 | 4.9028961e+05 |
+| 6 | 5.7346577e-10 | 1.6044258e-08 | 5.9976612e-08 | 1.0988022e-07 | 4.7113130e-04 | 6.5897632e-04 | 4.7113130e-04 | 5.2402527e-14 | 0.0000000e+00 | 1.5326664e+09 |
+| 7 | 7.2051348e-12 | 1.2465443e-09 | 5.5181479e-09 | 1.1167167e-08 | 1.4883949e-04 | 2.1352597e-04 | 1.4883949e-04 | -7.4051876e-14 | 0.0000000e+00 | none |
+| 7v | 8.0009271e-13 | 1.3834821e-10 | 6.1697229e-10 | 1.2874440e-09 | 5.0394693e-05 | 7.2903218e-05 | 5.0394693e-05 | -4.2077453e-14 | 0.0000000e+00 | none |
+
+`free-true-1-1e-8` (false=Gamma, true=2x2x2):
+
+| Map | charge Ry | spin Ry | uniform Ry | dF Ha | dM mu_B | dmu Ha | occupation L1 e | number residual e | moment residual e | condition |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.6931249e-02 | 1.3319731e-03 | 9.7308869e-05 | 6.3406180e-04 | 2.8944067e-01 | 7.1549080e-03 | 2.8944067e-01 | 3.3306691e-14 | 0.0000000e+00 | none |
+| 2 | 1.4756016e-03 | 2.5103014e-04 | 1.6369230e-04 | 5.2263677e-04 | 2.5046186e-01 | 5.5643635e-03 | 2.5046186e-01 | -4.4630966e-14 | 0.0000000e+00 | 1.0000000e+00 |
+| 3 | 7.3666932e-06 | 4.0388411e-05 | 1.9066726e-04 | 3.7799832e-04 | 1.9565727e-01 | 2.8708069e-03 | 1.9565727e-01 | 8.7707619e-14 | 0.0000000e+00 | 1.5610154e+04 |
+| 4 | 1.5650241e-06 | 5.7685184e-06 | 1.6415290e-05 | 5.9312926e-06 | 1.5835623e-02 | 6.7887990e-04 | 1.5835623e-02 | -5.7398530e-14 | 0.0000000e+00 | 1.9161523e+04 |
+| 5 | 1.9305577e-06 | 9.7098373e-06 | 4.8011577e-05 | 3.2492398e-05 | 4.2860517e-02 | 1.0714152e-03 | 4.2860517e-02 | -2.6090241e-14 | 0.0000000e+00 | 3.2068882e+05 |
+| 6 | 1.8885315e-05 | 7.1726964e-05 | 3.7346945e-04 | 1.0071455e-04 | 5.7792276e-02 | 2.7012407e-03 | 5.7792276e-02 | -9.7699626e-14 | 0.0000000e+00 | 1.0048662e+06 |
+| 7 | 4.6422470e-08 | 6.7169390e-08 | 3.6418560e-07 | 1.8628746e-07 | 2.9541355e-03 | 8.3593298e-05 | 2.9541355e-03 | -6.6613381e-15 | 0.0000000e+00 | 1.7341828e+08 |
+| 8 | 2.0532277e-06 | 6.3517323e-06 | 3.3673278e-05 | 1.3112401e-05 | 2.3173170e-02 | 8.0972468e-04 | 2.3173170e-02 | -9.0927266e-14 | 0.0000000e+00 | 7.9409653e+08 |
+| 9 | 8.1952641e-09 | 2.8696223e-08 | 1.5082269e-07 | 7.3313500e-08 | 1.8504234e-03 | 5.5734743e-05 | 1.8504234e-03 | 2.3980817e-14 | 0.0000000e+00 | 3.1317227e+10 |
+| 10 | 6.4513042e-09 | 2.2457072e-08 | 1.1845131e-07 | 5.7447603e-08 | 1.6371697e-03 | 4.9355691e-05 | 1.6371697e-03 | 6.5503158e-14 | 0.0000000e+00 | 1.6208509e+10 |
+| 11 | 3.2020901e-10 | 9.7087804e-10 | 5.1512396e-09 | 2.4829866e-09 | 3.3922495e-04 | 1.0232008e-05 | 3.3922495e-04 | 2.3314684e-14 | 0.0000000e+00 | none |
+| 11v | 1.2096351e-10 | 2.9274760e-10 | 1.5135261e-09 | 7.4004038e-10 | 1.8503542e-04 | 5.5215213e-06 | 1.8503542e-04 | 9.1260333e-14 | 0.0000000e+00 | none |
+
+`free-false-1-1e-12` (false=Gamma, true=2x2x2):
+
+| Map | charge Ry | spin Ry | uniform Ry | dF Ha | dM mu_B | dmu Ha | occupation L1 e | number residual e | moment residual e | condition |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.3235082e-02 | 3.9155794e-03 | 3.7876821e-03 | 6.1965369e-03 | 4.4956251e-01 | 2.4030228e-02 | 4.4956251e-01 | 3.9968029e-14 | 0.0000000e+00 | none |
+| 2 | 1.2369928e-03 | 2.2095545e-03 | 6.1471134e-03 | 2.7909261e-03 | 2.1199955e-01 | 2.1989185e-02 | 2.1199955e-01 | -2.5535130e-14 | 0.0000000e+00 | 1.0000000e+00 |
+| 3 | 1.2310136e-05 | 5.1810333e-04 | 2.1606033e-03 | 4.3232237e-04 | 5.1120059e-02 | 1.5739322e-02 | 5.1120059e-02 | 3.2418512e-14 | 0.0000000e+00 | 5.1001306e+00 |
+| 4 | 4.1632326e-07 | 3.8087689e-06 | 1.2713068e-05 | 9.4647901e-06 | 4.8388337e-03 | 5.0663546e-03 | 4.8388337e-03 | 9.8365760e-14 | 0.0000000e+00 | 7.6807899e+04 |
+| 5 | 3.6799854e-08 | 2.0729494e-07 | 5.5836008e-07 | 8.0756648e-07 | 1.3057703e-03 | 1.7186156e-03 | 1.3057703e-03 | 5.9952043e-15 | 0.0000000e+00 | 4.9028961e+05 |
+| 6 | 5.7346577e-10 | 1.6044258e-08 | 5.9976612e-08 | 1.0988022e-07 | 4.7113130e-04 | 6.5897632e-04 | 4.7113130e-04 | 5.2402527e-14 | 0.0000000e+00 | 1.5326664e+09 |
+| 7 | 7.2051348e-12 | 1.2465443e-09 | 5.5181479e-09 | 1.1167167e-08 | 1.4883949e-04 | 2.1352597e-04 | 1.4883949e-04 | -7.4051876e-14 | 0.0000000e+00 | 6.3616801e+10 |
+| 8 | 3.5912092e-13 | 6.7525053e-10 | 3.2240916e-09 | 6.6056366e-09 | 1.1436010e-04 | 1.6445106e-04 | 1.1436010e-04 | -5.9952043e-15 | 0.0000000e+00 | 2.7464826e+14 |
+| 9 | 2.0368932e-14 | 1.2134984e-10 | 5.7664756e-10 | 1.2078024e-09 | 4.8807055e-05 | 7.0571067e-05 | 4.8807055e-05 | -1.7430501e-14 | 0.0000000e+00 | 3.3797604e+14 |
+| 10 | 6.4070256e-15 | 9.0505600e-12 | 4.2129715e-11 | 8.9484392e-11 | 1.3270633e-05 | 1.9245216e-05 | 1.3270633e-05 | 2.8865799e-15 | 0.0000000e+00 | 1.5408175e+16 |
+
+`free-true-1-1e-12` (false=Gamma, true=2x2x2):
+
+| Map | charge Ry | spin Ry | uniform Ry | dF Ha | dM mu_B | dmu Ha | occupation L1 e | number residual e | moment residual e | condition |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.6931249e-02 | 1.3319731e-03 | 9.7308869e-05 | 6.3406180e-04 | 2.8944067e-01 | 7.1549080e-03 | 2.8944067e-01 | 3.3306691e-14 | 0.0000000e+00 | none |
+| 2 | 1.4756016e-03 | 2.5103014e-04 | 1.6369230e-04 | 5.2263677e-04 | 2.5046186e-01 | 5.5643635e-03 | 2.5046186e-01 | -4.4630966e-14 | 0.0000000e+00 | 1.0000000e+00 |
+| 3 | 7.3666932e-06 | 4.0388411e-05 | 1.9066726e-04 | 3.7799832e-04 | 1.9565727e-01 | 2.8708069e-03 | 1.9565727e-01 | 8.7707619e-14 | 0.0000000e+00 | 1.5610154e+04 |
+| 4 | 1.5650241e-06 | 5.7685184e-06 | 1.6415290e-05 | 5.9312926e-06 | 1.5835623e-02 | 6.7887990e-04 | 1.5835623e-02 | -5.7398530e-14 | 0.0000000e+00 | 1.9161523e+04 |
+| 5 | 1.9305577e-06 | 9.7098373e-06 | 4.8011577e-05 | 3.2492398e-05 | 4.2860517e-02 | 1.0714152e-03 | 4.2860517e-02 | -2.6090241e-14 | 0.0000000e+00 | 3.2068882e+05 |
+| 6 | 1.8885315e-05 | 7.1726964e-05 | 3.7346945e-04 | 1.0071455e-04 | 5.7792276e-02 | 2.7012407e-03 | 5.7792276e-02 | -9.7699626e-14 | 0.0000000e+00 | 1.0048662e+06 |
+| 7 | 4.6422470e-08 | 6.7169390e-08 | 3.6418560e-07 | 1.8628746e-07 | 2.9541355e-03 | 8.3593298e-05 | 2.9541355e-03 | -6.6613381e-15 | 0.0000000e+00 | 1.7341828e+08 |
+| 8 | 2.0532277e-06 | 6.3517323e-06 | 3.3673278e-05 | 1.3112401e-05 | 2.3173170e-02 | 8.0972468e-04 | 2.3173170e-02 | -9.0927266e-14 | 0.0000000e+00 | 7.9409653e+08 |
+| 9 | 8.1952641e-09 | 2.8696223e-08 | 1.5082269e-07 | 7.3313500e-08 | 1.8504234e-03 | 5.5734743e-05 | 1.8504234e-03 | 2.3980817e-14 | 0.0000000e+00 | 3.1317227e+10 |
+| 10 | 6.4513042e-09 | 2.2457072e-08 | 1.1845131e-07 | 5.7447603e-08 | 1.6371697e-03 | 4.9355691e-05 | 1.6371697e-03 | 6.5503158e-14 | 0.0000000e+00 | 1.6208509e+10 |
+| 11 | 3.2020901e-10 | 9.7087804e-10 | 5.1512396e-09 | 2.4829866e-09 | 3.3922495e-04 | 1.0232008e-05 | 3.3922495e-04 | 2.3314684e-14 | 0.0000000e+00 | 6.3329716e+12 |
+| 12 | 8.4194946e-11 | 2.4951534e-10 | 1.3267481e-09 | 6.3901882e-10 | 1.7201978e-04 | 5.1870260e-06 | 1.7201978e-04 | -4.3520743e-14 | 0.0000000e+00 | 2.9077805e+13 |
+| 13 | 5.7279610e-13 | 1.5843602e-12 | 8.4368893e-12 | 4.0659975e-12 | 1.3721568e-05 | 4.1260821e-07 | 1.3721568e-05 | 7.5939255e-14 | 0.0000000e+00 | 8.8573654e+14 |
+
+`moment-true-1-1e-8` (false=Gamma, true=2x2x2):
+
+| Map | charge Ry | spin Ry | uniform Ry | dF Ha | dM mu_B | dmu Ha | occupation L1 e | number residual e | moment residual e | condition |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1.7312773e-02 | 1.0425507e-03 | 0.0000000e+00 | 2.7145670e-05 | 8.9928065e-14 | 4.3788586e-03 | 1.2750801e-02 | -2.4646951e-14 | -8.4932061e-14 | none |
+| 2 | 1.6466514e-03 | 1.0518008e-04 | 0.0000000e+00 | 7.0911379e-06 | 4.5963233e-14 | 2.6235463e-03 | 4.4693890e-03 | 5.8175686e-14 | 5.1236793e-14 | 1.0000000e+00 |
+| 3 | 6.3719273e-08 | 9.0788841e-08 | 0.0000000e+00 | 1.0360689e-08 | 3.8635761e-14 | 2.6819822e-05 | 4.5406926e-04 | -4.7517545e-14 | -3.6137759e-14 | 2.8666642e+04 |
+| 4 | 2.0117388e-09 | 4.5868914e-09 | 0.0000000e+00 | 6.4545096e-10 | 4.8294702e-15 | 1.1961486e-06 | 1.4082987e-04 | -1.5099033e-14 | -2.2204460e-15 | none |
+| 4v | 1.5940804e-12 | 3.0261548e-10 | 0.0000000e+00 | 4.7009618e-11 | 5.0515148e-14 | 7.6496600e-07 | 4.5284302e-05 | 2.0650148e-14 | -4.8849813e-14 | none |
+
+</details>
+
+### G4B candidate measurements (Mac, 2026-11-25)
+
+The complete 48-comparison matrix was rerun in each arm, with the production
+beta=0.7/history=8 and unchanged acceptance bounds. Each arm also reran all
+12 Si2 FD comparisons with the same external UPF/hash stated above.
+
+| Stiffness | Conditioning | Pass / 48 | Rejected runs | Remaining failures |
+| --- | --- | ---: | ---: | --- |
+| off | off | 33 | 6 | All standard free-moment cases; fixed-M standard mesh occupations; tight free-moment singular histories |
+| on | off | 39 | 6 | Standard free-moment mesh M/occupations; tight free-moment singular histories |
+| off | on | 45 | 0 | Fixed-M standard mesh occupations |
+| on | on | **48** | **0** | **None in this matrix** |
+
+The stiffness-only mesh maximum moment error is 1.7145382127e-4 mu_B;
+conditioning-only fixed-M mesh occupation error remains 1.4082986520e-4
+electrons. No third number-root switch was added, because both paths already
+use the same root tolerance and occupation definition. The combination, not
+either individual change, meets every registered bound.
+
+Maxima over Gamma/mesh and ranks 1/3/8 with both candidates:
+
+| Policy | threshold Ry | abs(dF) Ha | abs(dM) mu_B | abs(dmu) Ha | occupation L1 electrons |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| scalar | 1e-08 | 4.5800058190e-11 | 0.0000000000e+00 | 8.5941571258e-07 | 7.8777769115e-07 |
+| scalar | 1e-12 | 6.6752159356e-15 | 0.0000000000e+00 | 9.1950014824e-08 | 7.5100252097e-07 |
+| fixed | 1e-08 | 1.9797810613e-10 | 1.9984014443e-15 | 0.0000000000e+00 | 0.0000000000e+00 |
+| fixed | 1e-12 | 1.6253665081e-13 | 1.7763568394e-15 | 0.0000000000e+00 | 0.0000000000e+00 |
+| free | 1e-08 | 1.8569937255e-09 | 8.6988030765e-05 | 8.7483935304e-05 | 8.6988030765e-05 |
+| free | 1e-12 | 7.1997963147e-14 | 3.8134513081e-07 | 5.5365723445e-07 | 3.8134513122e-07 |
+| moment | 1e-08 | 6.2009231083e-11 | 4.9626969201e-14 | 3.4210137784e-06 | 4.3497456097e-05 |
+| moment | 1e-12 | 1.9394208461e-14 | 3.1363800446e-14 | 8.2458214146e-09 | 3.0991102276e-07 |
+
+All Si2 FD arms pass 12/12, with maximum abs(dF) against strict legacy FD
+3.2998670463e-10 Ha standard and 4.9737991503e-14 Ha tight. These are internal
+legacy oracles; no new QE reference or speed claim is made.
+
+With both candidates, the one-rank free-moment Gamma run drops 2 pairs at
+standard and 3 at tight; mesh drops 4 and 7. Fixed-M Gamma/mesh each drop zero
+pairs at standard and 2 at tight. For example Gamma map 6 removes two oldest
+pairs at pre-drop conditions 1.48102953e9 and 2.70393441e8. Every event is
+retained in `Iteration.history_conditioning` and optional trace CSV; there
+is no silent restart. Largest retained one-rank free-Gamma tight condition
+is 2.82427134e7. Standard Gamma's accepted-map stiffness term is
+3.6385331062e-9 Ha; fixed-M mesh's is 8.6041613751e-11 Ha after one extra map.
+
+The qualified paths are bit-identical with candidates off/on: all 24
+scalar-FD/fixed-sector synthetic fingerprints and all 12 Si2 fingerprints
+match byte for byte. The stream includes density/orbital f64 bits, eigenvalues,
+occupations, energy ledger, chemical potentials, every scientific iteration,
+inner-solver record, and verification record, excluding wall clocks only.
+Closed-shell Gamma at ranks 1/3/8 matches the pre-candidate diagnostic build
+and both final switch arms byte for byte, including scientific history and
+orbitals. SHA-256 values:
+
+| Ranks | SHA-256 |
+| --- | --- |
+| 1 | `9afed278586f803a836e19d46470789de0c6e337c7ad59474bef8f2cdaef729d` |
+| 3 | `6f329ff3360630d73610dfbb0931de7c3f9d7626159b5315ec8aadc63a49ba5e` |
+| 8 | `0cc15ffcf4d25a1ddfff91c9c4740a0a900d8b4bc463f276c5d9da6f11cee57f` |
+
+Reproduce the passing arm (absolute trace/output paths must already exist):
+
+```sh
+BAANDI_REFSCF_SPIN_STIFFNESS=on BAANDI_REFSCF_HISTORY_CONDITIONING=on \
+DFT_SI_UPF=/absolute/Si.pz-vbc.UPF \
+cargo test --release -p dft-engine --test refscf g4 -- --include-ignored --nocapture --test-threads=1
+```
+
+This exits 0 (8 test functions), including the short-history diagnostic and
+manufactured oldest-pair/zero-history test in addition to the full matrix.
+Either single candidate and the both-off arm exit 101 on the explicitly
+ignored acceptance test; each still runs all 48 comparisons and all Si2 cases.
+`G4B_TRACE_DIR` additionally exports map-wise CSVs after return, and
+`G4B_FINGERPRINT_DIR` exports the scientific streams. Logs, all four-arm traces,
+command exit records and the machine-readable summary are under ignored
+`target/tmp/g4b/`. Representative baseline traces above persist in this document.
+
+The scope is one synthetic spin system plus scalar Si2 FD, simulated ranks,
+pure Rust on Mac. Real MPI/MKL and multi-material qualification on dev08
+remain the orchestrator's gate. Defaults remain off; ADR 0045 is proposed.
+Dashboard/registry, performance ledger and generated README evidence are
+outside this ticket's explicit owned files and are left for the orchestrator.
+
+### Routing handoff and ownership boundary
+
+The measured combination requires the CLI predicate in
+`crates/dft-cli/src/run.rs::reference_spin_fd_fallback` to require all three
+flags: `REFSCF_SPIN_FD_MOMENT`, `REFSCF_SPIN_STIFFNESS`, and
+`REFSCF_HISTORY_CONDITIONING`. The ticket owns only the switch-count edit in
+CLI tests, not `src/run.rs`. A concrete unified patch, including a focused
+8-combination routing test and the existing end-to-end test's three-switch
+input, is prepared at `target/tmp/g4b/routing.patch`. An explicit ownership
+extension was requested; this out-of-scope patch has not been applied or
+claimed as tested. Until it is applied, the existing development selector
+alone still bypasses legacy routing. All three flags remain default off.
+
+
+Verification actually executed: `cargo check --workspace --tests` exits 0;
+`cargo test -p dft-engine --test refscf` exits 0 (79 passed, 20 ignored);
+the LDA-PW energy-second-difference kernel unit test exits 0; the release
+passing-arm G4 command above exits 0. `cargo fmt --check` and
+`cargo clippy -p dft-engine -p dft-numerics --all-targets -- -D warnings`
+exit 0 after fixing two lint-only iterator suggestions. The full
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g4b-spin-moment CHECK_TEST_JOBS=2 scripts/check.sh`
+exits 0: build/test/fmt/Clippy all pass, 984 passed, 0 failed, 213 ignored
+across 98 binaries. The sandbox denies the optional `ps` load probe; the
+script continues and runs every gate. No git metadata was written and all
+changes are uncommitted. The routing patch remains a separate, unapplied
+ownership handoff, so these checks do not qualify that CLI change.

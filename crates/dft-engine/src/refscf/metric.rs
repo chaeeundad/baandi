@@ -101,6 +101,44 @@ impl Metric {
         metric.weights.extend(spin);
         Ok(metric)
     }
+    /// Diagnostic decomposition in Ry, without changing the production norm.
+    /// The three entries are charge, nonuniform spin, and uniform spin.
+    pub fn spin_terms<K: Collective>(
+        &mut self,
+        comm: &K,
+        f: &[C],
+        g2: &[f64],
+    ) -> Result<[f64; 3], Error> {
+        if f.len() != self.weights.len()
+            || f.len() != 2 * g2.len()
+            || self.local.len() < 3
+            || self.counts.len() != comm.size()
+        {
+            return Err(invalid("spin diagnostic shape"));
+        }
+        let mut local = [0.; 3];
+        for (i, (v, w)) in f.iter().zip(&self.weights).enumerate() {
+            let term = if i < g2.len() {
+                0
+            } else if g2[i - g2.len()] == 0. {
+                2
+            } else {
+                1
+            };
+            local[term] += w * v.norm_sqr();
+        }
+        self.counts.fill(3);
+        let gathered = &mut self.gathered[..3 * comm.size()];
+        comm.allgatherv_f64(&local, &self.counts, gathered)
+            .map_err(numerical)?;
+        let mut out = [0.; 3];
+        for row in gathered.as_chunks::<3>().0 {
+            for (a, b) in out.iter_mut().zip(row) {
+                *a += b;
+            }
+        }
+        Ok(out)
+    }
     /// Immutable geometry identity for the mixer's exact Gram cache. A new
     /// metric invalidates it even when the vector lengths happen to agree.
     pub(super) fn identity(&self) -> u64 {

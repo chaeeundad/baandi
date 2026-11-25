@@ -7142,7 +7142,7 @@ fn g4_synthetic_matrix() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 #[test]
-#[ignore = "G4B expected acceptance failure: cargo test --release -p dft-engine --test refscf g4b_moment_acceptance -- --ignored --nocapture"]
+#[ignore = "G4B qualification requires REFSCF_SPIN_STIFFNESS=on and REFSCF_HISTORY_CONDITIONING=on; both-off intentionally fails the unchanged bounds"]
 fn g4b_moment_acceptance() {
     let mut failures = Vec::new();
     for mode in ["free", "moment"] {
@@ -7343,7 +7343,9 @@ fn g4_fixture_profile(
     for &threshold in thresholds {
         for &rank in ranks {
             let results = dft_mpi::simulate(rank, |comm| {
-                let result = electronic::run_with(
+                let trace_dir = std::env::var_os("G4B_TRACE_DIR");
+                let mut trace = electronic::Trace::default();
+                let result = electronic::run_with_trace(
                     StartInput {
                         cell: &cell,
                         atoms: &atoms,
@@ -7357,7 +7359,64 @@ fn g4_fixture_profile(
                     &points,
                     policy.clone(),
                     comm,
+                    trace_dir.as_ref().map(|_| &mut trace),
                 );
+                if comm.rank() == 0
+                    && let Some(dir) = trace_dir
+                {
+                    let mut text = String::from(
+                        "iteration,verification,redo,charge_Ry,spin_Ry,uniform_Ry,dF_Ha,dM_muB,dmu_Ha,docc_e,number_residual_e,moment_residual_e,condition,max_pair_cosine,pair_norm2_Ry,stiffness_Ha,dropped_pairs,dropped_conditions\n",
+                    );
+                    use std::fmt::Write;
+                    for t in trace.records() {
+                        let mu = t
+                            .chemical_potentials_ha
+                            .iter()
+                            .zip(oracle_mu)
+                            .filter_map(|(a, b)| a.zip(b))
+                            .map(|(a, b)| (a - b).abs())
+                            .fold(0., f64::max);
+                        let docc = oracle_occupations.as_ref().map_or(0., |old| {
+                            t.occupations
+                                .iter()
+                                .zip(old)
+                                .enumerate()
+                                .map(|(i, (a, b))| {
+                                    points[(i / 12) % points.len()].weight * (a - b).abs()
+                                })
+                                .sum::<f64>()
+                        });
+                        writeln!(
+                            text,
+                            "{},{},{},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},{:e},\"{:?}\",{:e},{},\"{:?}\"",
+                            t.iteration,
+                            t.verification,
+                            t.redo,
+                            t.estimator_terms_ry[0],
+                            t.estimator_terms_ry[1],
+                            t.estimator_terms_ry[2],
+                            (t.free_energy_ha - oracle_energy).abs(),
+                            (t.moment_mu_b - oracle_moment).abs(),
+                            mu,
+                            docc,
+                            t.electron_residual,
+                            t.moment_residual.unwrap_or(0.),
+                            t.condition.unwrap_or(0.),
+                            t.history_max_cosine,
+                            t.history_pair_norm2_ry,
+                            t.stiffness_ha,
+                            t.dropped_pairs,
+                            t.dropped_conditions
+                        )
+                        .unwrap();
+                    }
+                    std::fs::write(
+                        std::path::Path::new(&dir)
+                            .join(format!("{mode}-{mesh}-{rank}-{threshold:e}.csv")),
+                        text,
+                    )
+                    .unwrap();
+                }
                 let r = match result {
                     Ok(r) => r,
                     Err(e) => {
@@ -7370,6 +7429,9 @@ fn g4_fixture_profile(
                     return Some(format!(
                         "{mode} mesh={mesh} ranks={rank} threshold={threshold:e} Ry: exhausted"
                     ));
+                }
+                if comm.rank() == 0 {
+                    g4b_dump(&r, format!("{mode}-{mesh}-{rank}-{threshold:e}.txt"));
                 }
                 assert!(r.verification.as_ref().unwrap().passed());
                 let delta = (r.thermodynamics.free_energy_ha - oracle_energy).abs();
@@ -7504,6 +7566,9 @@ fn g4_si_gap() {
                         comm,
                     )
                     .unwrap();
+                    if comm.rank() == 0 {
+                        g4b_dump(&run, format!("si-{mesh}-{ranks}-{threshold:e}.txt"));
+                    }
                     assert!(run.converged && run.verification.as_ref().unwrap().passed());
                     let delta_integer =
                         (run.thermodynamics.free_energy_ha - integer.total_hartree()).abs();
@@ -7664,4 +7729,135 @@ fn g4_rejections_and_unverified_delivery() {
         ..pw
     };
     assert!(run(&pbe, Policy::FixedSpin(sector)).is_err());
+}
+
+#[test]
+fn g4b_conditioning_preserves_newest_pair_and_off_rejects() {
+    let profile = Profile {
+        history: 3,
+        ..Default::default()
+    };
+    let mut metric = Metric::new(1., &[1., 1.], &[true; 2], 1, 350).unwrap();
+    let mut mix = Broyden::new(profile, &[1., 1.], &[true; 2], 1., 1.).unwrap();
+    mix.condition_history();
+    let x0 = [C::new(0., 0.); 2];
+    let x1 = [C::new(1., 0.), C::new(2., 0.)];
+    let x2 = [C::new(2., 0.), C::new(3., 0.)];
+    let f0 = [C::new(1., 0.), C::new(0., 0.)];
+    let f1 = [C::new(0., 0.); 2];
+    let f2 = [C::new(-1., 0.), C::new(1e-6, 0.)];
+    let mut next = [C::default(); 2];
+    mix.update(&Serial, &mut metric, &x0, &f0, &mut next)
+        .unwrap();
+    mix.update(&Serial, &mut metric, &x1, &f1, &mut next)
+        .unwrap();
+    let d = mix
+        .update(&Serial, &mut metric, &x2, &f2, &mut next)
+        .unwrap();
+    assert_eq!(
+        (mix.conditioning_diagnostics().dropped_pairs, d.occupancy),
+        (1, 1)
+    );
+    assert!(mix.conditioning_diagnostics().dropped_conditions[0] > 1e12);
+    assert_eq!(d.condition, Some(1.));
+    // The remaining newest df=-f2, so gamma=-1 and x_tilde=x1.
+    for i in 0..2 {
+        assert!((next[i] - x1[i]).norm() < 1e-13);
+    }
+    // Exact duplicate/zero pairs are also removed down to the linear step.
+    let d = mix
+        .update(&Serial, &mut metric, &x2, &f2, &mut next)
+        .unwrap();
+    assert_eq!(
+        (mix.conditioning_diagnostics().dropped_pairs, d.occupancy),
+        (2, 0)
+    );
+    for i in 0..2 {
+        assert_eq!(next[i], x2[i] + profile.beta * f2[i]);
+    }
+    let mut legacy = Broyden::new(profile, &[1., 1.], &[true; 2], 1., 1.).unwrap();
+    legacy
+        .update(&Serial, &mut metric, &x2, &f2, &mut next)
+        .unwrap();
+    assert!(matches!(
+        legacy.update(&Serial, &mut metric, &x2, &f2, &mut next),
+        Err(Error::Singular { .. })
+    ));
+}
+
+// Stable complete scientific result stream, excluding wall clocks only.
+fn g4b_fingerprint(run: &dft_engine::refscf::electronic::Run) -> String {
+    use std::fmt::Write;
+    let mut out = format!(
+        "{:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+        run.converged,
+        run.energy,
+        run.thermodynamics,
+        run.occupations,
+        run.channel_electrons,
+        run.moment_mu_b,
+        run.absolute_moment_mu_b
+    );
+    for density in &run.density {
+        for x in density {
+            write!(out, " {:016x}", x.to_bits()).unwrap();
+        }
+    }
+    for b in run.blocks.iter().flatten() {
+        for x in b
+            .eigenvalues_ha
+            .iter()
+            .chain(&b.occupations)
+            .chain(&b.residuals_ha)
+        {
+            write!(out, " {:016x}", x.to_bits()).unwrap();
+        }
+        for x in b.orbitals.as_slice() {
+            write!(out, " {:016x}{:016x}", x.re.to_bits(), x.im.to_bits()).unwrap();
+        }
+    }
+    for h in &run.history {
+        let mut calls = h.calls.clone();
+        for (_, _, c) in &mut calls {
+            c.inner_clocks = None;
+        }
+        write!(
+            out,
+            " {:?} {:?}",
+            (
+                h.iteration,
+                h.dr2_ry,
+                h.ethr_ry,
+                h.first_iteration_redo,
+                h.energy_ha,
+                h.entropy_term_ha,
+                h.free_energy_ha,
+                h.moment_mu_b,
+                h.residual_guard_ha,
+                h.mixing,
+                h.history_conditioning,
+                h.mixing_fraction
+            ),
+            calls
+        )
+        .unwrap();
+    }
+    let mut verification = run.verification.clone();
+    if let Some(v) = &mut verification {
+        for a in &mut v.attempts {
+            a.wall = std::time::Duration::ZERO;
+        }
+    }
+    let mut calls = run.verification_calls.clone();
+    for (_, _, c) in &mut calls {
+        c.inner_clocks = None;
+    }
+    write!(out, " {verification:?} {calls:?}").unwrap();
+    out
+}
+
+fn g4b_dump(run: &dft_engine::refscf::electronic::Run, name: String) {
+    if let Some(dir) = std::env::var_os("G4B_FINGERPRINT_DIR") {
+        std::fs::write(std::path::Path::new(&dir).join(name), g4b_fingerprint(run)).unwrap();
+    }
 }

@@ -620,6 +620,10 @@ table! {
     REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4B: enable unqualified reference collinear Fermi-Dirac moment policies for development";
 
+    REFSCF_SPIN_STIFFNESS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4B candidate: add absolute local LDA-PW spin curvature residual energy for collinear FD only";
+    REFSCF_HISTORY_CONDITIONING: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4B candidate: oldest-first history pruning at rcond <= sqrt(p*epsilon), collinear FD only; proposed ADR 0045";
 }
 
 struct Resolved {

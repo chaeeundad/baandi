@@ -148,7 +148,9 @@ fn reference_spin_fd_fallback(config: &Config) -> bool {
         return false;
     }
     let rc = RunConfig::current();
-    let enabled = rc.on(Id::REFSCF_SPIN_FD_MOMENT);
+    let enabled = rc.on(Id::REFSCF_SPIN_FD_MOMENT)
+        && rc.on(Id::REFSCF_SPIN_STIFFNESS)
+        && rc.on(Id::REFSCF_HISTORY_CONDITIONING);
     rc.note_path(
         Id::REFSCF_SPIN_FD_MOMENT,
         if enabled { "reference" } else { "legacy" },
@@ -4259,7 +4261,28 @@ mod tests {
                 assert_eq!(result["reference_driver_fallback_reason"], G4B_FALLBACK);
                 assert_eq!(result["scf"]["driver"], "legacy");
                 assert!(result.get("reference_scf").is_none());
-                text.push_str("[performance]\nrefscf_spin_fd_moment='on'\n");
+                // Only the measured three-switch combination may route to reference.
+                let route_config = Config::parse(&text).unwrap();
+                for mask in 0..8 {
+                    let scope = dft_numerics::switches::RunConfig::from_pairs(&[
+                        (
+                            "refscf_spin_fd_moment",
+                            if mask & 1 != 0 { "on" } else { "off" },
+                        ),
+                        (
+                            "refscf_spin_stiffness",
+                            if mask & 2 != 0 { "on" } else { "off" },
+                        ),
+                        (
+                            "refscf_history_conditioning",
+                            if mask & 4 != 0 { "on" } else { "off" },
+                        ),
+                    ])
+                    .unwrap();
+                    let _guard = scope.enter();
+                    assert_eq!(reference_spin_fd_fallback(&route_config), mask != 7);
+                }
+                text.push_str("[performance]\nrefscf_spin_fd_moment='on'\nrefscf_spin_stiffness='on'\nrefscf_history_conditioning='on'\n");
                 fs::write(&input, text).unwrap();
             }
             let dest = dir.join(name);

@@ -19,3 +19,15 @@ tests; the reference path keeps its accuracy classes, verification and rank-coun
 
 Generality evidence for speed defaults (AGENTS.md "Generality rule"): from G1/G2 on, every speed screen adds
 at least one non-Si NLCC/PBE system (e.g. MgO, GaAs, SiC with PseudoDojo files; never committed).
+
+## Evidence (dev08, MPI8, one run per arm; legacy pulay vs reference broyden vs strict legacy oracle)
+
+| Stage | Case | E_ref - E_legacy (Ha) | E_ref - E_oracle (Ha) | Notes |
+|---|---|---|---|---|
+| G1 | Mg atom, LDA-PZ NLCC (Mg.pz-n-vbc) | +3.6e-10 | +4.4e-10 | both verified; core electrons identical (gen 2432530) |
+| G2 | si32 PBE (Si.pbe-rrkj, old label accepted at e3a75a5) | -1.2e-10 | +3.3e-11 | rerun without override differs by -2.8e-14 |
+| G2B | MgO 8 atoms, PseudoDojo PBE, O with NLCC | +6.1e-10 | +7.3e-10 | occupied eigenvalues 3.8e-6 Ha |
+| G3 | Si2 4x4x4 unshifted (36 k) | +1.3e-10 | +1.9e-10 | per-k occupied eigenvalues <= 3.7e-6 Ha |
+| G3 | Si2 2x2x2 shifted (4 k) | +1.3e-10 | +2.1e-10 | E_ref - E_QE(k222s_c) = +2.56e-6 Ha, the archived cross-code offset of this input |
+
+All within the standard class (5e-9 Ha). Evidence: dev08 /data/sig-dft/gen/RESULT.md and /data/sig-dft/gen4/RESULT.md (binary e3a75a5, sha256 183df05a...5a49).

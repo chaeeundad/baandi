@@ -72,14 +72,14 @@
   "l03-bands": {
     "command": "bands",
     "mode": "classic",
-    "reference_reason": "NSCF",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
   "l03-dos": {
     "command": "dos",
     "mode": "classic",
-    "reference_reason": "NSCF",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

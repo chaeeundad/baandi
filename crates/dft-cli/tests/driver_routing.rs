@@ -40,7 +40,6 @@ fn reason(key: &str) -> &'static str {
     match key {
         "G4D_FALLBACK" => route::G4D_FALLBACK,
         "G4B_FALLBACK" => route::G4B_FALLBACK,
-        "NSCF" => route::NSCF,
         "VARIABLE_CELL" => route::VARIABLE_CELL,
         "EXTRAPOLATION" => route::EXTRAPOLATION,
         "CHECKPOINT" => route::CHECKPOINT,
@@ -314,7 +313,13 @@ fn command_boundaries_and_input_switch_provenance() {
         .enter();
     let config = Config::parse(text).unwrap();
     let pp = dft_upf::parse_upf(&atomic("gamma-lda")).unwrap();
-    for command in [Command::Run, Command::Relax, Command::Explain] {
+    for command in [
+        Command::Run,
+        Command::Relax,
+        Command::Explain,
+        Command::Bands,
+        Command::Dos,
+    ] {
         let selection = route::select(&config, Mode::Classic, command, &[&pp]);
         assert_eq!(selection.driver, Driver::Reference);
         assert_eq!(selection.source, Source::Input);

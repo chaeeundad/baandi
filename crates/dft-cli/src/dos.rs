@@ -68,17 +68,7 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         d.max_iterations,
     )?;
     let edge = edges(&result)?;
-    let spectra: Vec<Vec<f64>> = result
-        .solutions
-        .iter()
-        .map(|k| {
-            k.solution
-                .eigenvalues
-                .iter()
-                .map(|e| ev(e - edge.vbm))
-                .collect()
-        })
-        .collect();
+    let spectra = result.spectra_ev(edge.vbm);
     let min = spectra
         .iter()
         .flatten()
@@ -101,19 +91,51 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         .map(|i| window[0] + (window[1] - window[0]) * i as f64 / intervals as f64)
         .collect();
     let weights: Vec<_> = points.iter().map(|p| p.weight).collect();
-    let rows =
+    let mut rows =
         dft_engine::gaussian_dos(&spectra, &weights, &energy, sigma).map_err(|e| err(1, e))?;
+    // The engine's scalar DOS includes degeneracy two. Explicit spin bands
+    // each carry one state; convert that normalization at the output boundary.
+    let spin_rows = if result.polarized() {
+        for row in &mut rows {
+            row[1] *= 0.5;
+            row[2] *= 0.5;
+        }
+        let mut channels = Vec::new();
+        for channel in &result.eigenvalues {
+            let values: Vec<Vec<_>> = channel
+                .iter()
+                .map(|k| k.iter().map(|e| ev(e - edge.vbm)).collect())
+                .collect();
+            let mut channel_rows = dft_engine::gaussian_dos(&values, &weights, &energy, sigma)
+                .map_err(|e| err(1, e))?;
+            for row in &mut channel_rows {
+                row[1] *= 0.5;
+                row[2] *= 0.5;
+            }
+            channels.push(channel_rows);
+        }
+        Some(channels)
+    } else {
+        None
+    };
     let mut csv = String::from(
         "# energy eV relative to sampled VBM; DOS states/eV/cell including spin factor 2; integral states/cell\nenergy_eV,dos_states_per_eV_per_cell,integrated_dos\n",
     );
     let mut dat = String::from(
         "# energy_eV_relative_to_VBM DOS_states_per_eV_per_cell integrated_states_per_cell (spin factor 2)\n",
     );
+    if result.polarized() {
+        csv = csv.replace(
+            "including spin factor 2",
+            "summed over explicit up/down channels",
+        );
+        dat = dat.replace("(spin factor 2)", "(sum of explicit up/down channels)");
+    }
     let mut agr = agr_header("Energy relative to VBM (eV)", "DOS (states/eV/cell)");
     let upper_dos = rows.iter().map(|r| r[1]).fold(0.0, f64::max).max(1e-12);
     agr.push_str(&agr_world(window[0], window[1], 0.0, 1.05 * upper_dos));
     agr.push_str("@target G0.S0\n@type xy\n");
-    let mut doscar = ctx.vasp_header(false);
+    let mut doscar = ctx.vasp_header(false, result.polarized());
     writeln!(
         doscar,
         "{:.16e} {:.16e} {} 0.0 1.0",
@@ -122,15 +144,35 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         rows.len()
     )
     .unwrap();
-    for r in &rows {
+    for (index, r) in rows.iter().enumerate() {
         writeln!(csv, "{:.16e},{:.16e},{:.16e}", r[0], r[1], r[2]).unwrap();
         writeln!(dat, "{:.16e} {:.16e} {:.16e}", r[0], r[1], r[2]).unwrap();
-        writeln!(doscar, "{:.16e} {:.16e} {:.16e}", r[0], r[1], r[2]).unwrap();
+        if let Some(channels) = &spin_rows {
+            // Public DOSCAR layout: https://vasp.at/wiki/DOSCAR (ISPIN=2).
+            writeln!(
+                doscar,
+                "{:.16e} {:.16e} {:.16e} {:.16e} {:.16e}",
+                r[0],
+                channels[0][index][1],
+                channels[1][index][1],
+                channels[0][index][2],
+                channels[1][index][2]
+            )
+            .unwrap();
+        } else {
+            writeln!(doscar, "{:.16e} {:.16e} {:.16e}", r[0], r[1], r[2]).unwrap();
+        }
         writeln!(agr, "{:.16e} {:.16e}", r[0], r[1]).unwrap();
     }
     agr.push_str("&\n");
     let mut meta = ctx.metadata(&result, &edge, &scf);
     meta["gaussian"] = json!({"sigma_ev":sigma,"formula":"sum_kn 2*w_k/(sigma*sqrt(2*pi))*exp(-(E-e_kn)^2/(2*sigma^2))","integrated_dos":"analytic Gaussian CDF from minus infinity","spin_degeneracy":2,"window_ev":window,"spacing_ev":(window[1]-window[0])/intervals as f64,"total_states":2*spectra[0].len()});
+    if result.polarized() {
+        meta["gaussian"]["spin_degeneracy"] = json!(1);
+        meta["gaussian"]["total_states"] = json!(2 * result.bands());
+        meta["gaussian"]["formula"] =
+            json!("sum_skn w_k/(sigma*sqrt(2*pi))*exp(-(E-e_skn)^2/(2*sigma^2))");
+    }
     meta["dos_kgrid"] = json!(grid);
     meta["time_reversal"] = json!(true);
     meta["kshift"] = json!(ctx.config.basis.kshift.unwrap_or([0.0; 3]));

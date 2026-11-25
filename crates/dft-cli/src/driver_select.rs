@@ -82,7 +82,6 @@ pub const STRICT: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
 pub const G4D_FALLBACK: &str =
     "reference driver: free-moment collinear FD with PBE not yet qualified, G4D";
 pub const G4B_FALLBACK: &str = "reference driver: collinear Fermi-Dirac not yet qualified, G4B";
-pub const NSCF: &str = "L3: fixed-density bands/DOS requires the legacy NSCF driver";
 pub const VARIABLE_CELL: &str =
     "L4: variable-cell relaxation requires legacy frozen-strain support";
 pub const EXTRAPOLATION: &str = "L5: relaxation density extrapolation requires the legacy driver";
@@ -148,9 +147,6 @@ fn l2(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
             && switches::on(Id::REFSCF_SPIN_STIFFNESS)
             && switches::on(Id::REFSCF_HISTORY_CONDITIONING))
 }
-fn l3(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
-    matches!(command, Command::Bands | Command::Dos)
-}
 fn l4(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
     c.relax
         .as_ref()
@@ -213,7 +209,6 @@ type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
 const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l1, G4D_FALLBACK),
     (l2, G4B_FALLBACK),
-    (l3, NSCF),
     (l4, VARIABLE_CELL),
     (l5, EXTRAPOLATION),
     (l6, CHECKPOINT),

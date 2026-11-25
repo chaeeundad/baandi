@@ -30,12 +30,6 @@ pub(super) fn execute(
     let sector = config.spin_sector(target).map_err(|e| error(1, e))?;
     let gamma_real_fallback_reason;
     let mut spin_share = None;
-    // ONEPATH-3: standard profile, verification and per-step estimates.
-    let standard_record: (
-        Option<dft_engine::StandardProfile>,
-        Option<dft_engine::VerificationReport>,
-        Vec<Option<f64>>,
-    );
     let force_result;
     let stress_result;
     let (
@@ -70,11 +64,6 @@ pub(super) fn execute(
         let r = problem.run().map_err(engine_error)?;
         spin_share = Some(super::spin_run::spin_share_json(&r.spin_share));
         gamma_real_fallback_reason = r.gamma_real_fallback_reason.clone();
-        standard_record = (
-            r.standard,
-            r.verification.clone(),
-            r.history.iter().map(|h| h.standard_error_ha).collect(),
-        );
         force_result = requested_forces(
             config,
             &prepared.cell,
@@ -145,11 +134,6 @@ pub(super) fn execute(
         }
         let r = problem.run().map_err(engine_error)?;
         gamma_real_fallback_reason = r.gamma_real_fallback_reason.clone();
-        standard_record = (
-            r.standard,
-            r.verification.clone(),
-            r.standard_errors_ha.iter().map(|e| Some(*e)).collect(),
-        );
         force_result = requested_forces(
             config,
             &prepared.cell,
@@ -322,13 +306,7 @@ pub(super) fn execute(
         result["state_contracts"]["stress"] = stress_json(&stress);
         fs::write(out.join("stress.txt"), stress_table(&stress)).map_err(|e| error(1, e))?;
     }
-    super::driver_standard_json(
-        &mut result,
-        standard_record.0,
-        standard_record.1.as_ref(),
-        &standard_record.2,
-        converged,
-    );
+
     if let (Some(r), Value::Object(extra)) = (result.as_object_mut(), path_record) {
         r.extend(extra);
     }
@@ -346,6 +324,9 @@ pub(super) fn execute(
 use crate::test_fixtures as fixtures;
 #[test]
 fn finite_cli_and_fixed_rejection() {
+    let scope =
+        dft_numerics::switches::RunConfig::from_pairs(&[("reference_strict", "on")]).unwrap();
+    let _guard = scope.enter();
     let dir = std::env::temp_dir().join(format!(
         "p17b-cli-{}-{}",
         std::process::id(),
@@ -374,7 +355,9 @@ kpoints=[[0.0,0.0,0.0]]
 [xc]
 functional="lda-pz"
 [scf]
-driver="legacy"
+driver="reference"
+[performance]
+reference_strict=true
 [occupations]
 mode="fermi_dirac"
 smearing_ha=0.01
@@ -387,12 +370,8 @@ band_cap=12
     let result: Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     assert_eq!(result["occupations"]["policy"], "fermi_dirac");
-    // ONEPATH-3: FD runs take the standard path with the fixed-point
-    // verification (the strict certificate is the BAANDI_REFERENCE_STRICT
-    // reference, exercised by tests/all/onepath_spin_metals.rs).
-    assert_eq!(result["single_path"]["status"], "applied");
-    assert_eq!(result["verified"], true);
-    assert_eq!(result["verification"]["passed"], true);
+    assert_eq!(result["single_path"]["status"], "reference_strict");
+    assert_eq!(result["convergence"]["certificate"]["passed"], true);
     assert_eq!(result["forces"]["status"], "unavailable");
     let extension = &result["state_contracts"];
     let schema: Value = serde_json::from_str(include_str!(
@@ -488,11 +467,11 @@ band_cap=12
                 .len(),
             roots
         );
-        assert_eq!(spin["verified"], true);
+        assert_eq!(spin["convergence"]["certificate"]["passed"], true);
         assert!(
-            spin["verification"]["attempts"][0]["spin_density_residual"].is_number(),
+            spin["convergence"]["certificate"]["spin_density_residual"].is_number(),
             "{}",
-            spin["verification"]
+            spin["convergence"]["certificate"]
         );
         assert!(
             std::process::Command::new("python3")

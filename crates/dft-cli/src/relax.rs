@@ -362,9 +362,6 @@ impl Context {
             )
             .map_err(|e| error(4, e))?;
         }
-        if let Some(floor) = self.config.xc.density_floor {
-            p.set_density_floor(floor).map_err(|e| error(4, e))?;
-        }
         Ok(p)
     }
     fn evaluate(
@@ -640,7 +637,7 @@ impl Context {
                 potentials: &self.refs(),
                 options: &self.opts,
                 electronic: dft_engine::ElectronicState::Fixed(&state),
-                density_floor: self.config.xc.density_floor,
+                density_floor: None,
                 symmetry: &ops,
             })
             .map_err(|e| error(4, e))?
@@ -657,7 +654,7 @@ impl Context {
                 potentials: &refs,
                 options: &self.opts,
                 electronic: dft_engine::ElectronicState::Fixed(&state),
-                density_floor: self.config.xc.density_floor,
+                density_floor: None,
                 symmetry: &ops,
             };
             let stress = if self.opts.strain_reference.is_none() {

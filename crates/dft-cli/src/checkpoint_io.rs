@@ -1877,11 +1877,6 @@ fn context(
             "checkpoint.occupation_policy: v1 fixed-occupation checkpoint cannot be resumed under fermi_dirac; start a new run",
         ));
     }
-    if config.xc.density_floor.is_some() {
-        return Err(invalid(
-            "xc.density_floor: checkpoint v1 cannot encode the XC floor policy; use run without checkpoint/restart",
-        ));
-    }
     let cell = config.cell()?;
     let atoms: Vec<_> = config
         .system
@@ -1908,8 +1903,8 @@ fn context(
         crate::driver_select::select(&config, crate::driver_select::Mode::Classic, command, &upfs);
     // Existing v1 artifacts always resume through their legacy arithmetic.
     if selection.reference() {
-        selection.driver = crate::driver_select::Driver::LegacyStandard;
-        selection.reason = Some(crate::driver_select::CHECKPOINT);
+        selection.driver = crate::driver_select::Driver::StrictOracle;
+        selection.reason = Some(crate::driver_select::STRICT);
     }
     selection.announce();
     let opts = crate::run::options_for(&config, selection)?;

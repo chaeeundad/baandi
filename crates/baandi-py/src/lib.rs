@@ -85,13 +85,8 @@ impl Options {
     }
     #[getter(mixing_beta)]
     fn beta(&self) -> f64 {
-        self.mixing_beta.unwrap_or(if self.driver == "reference" {
-            0.7
-        } else if self.reference_strict {
-            0.3
-        } else {
-            0.5
-        })
+        self.mixing_beta
+            .unwrap_or(if !self.reference_strict { 0.7 } else { 0.3 })
     }
     #[setter(mixing_beta)]
     fn set_beta(&mut self, beta: f64) {
@@ -100,7 +95,7 @@ impl Options {
     #[getter(mixing_history)]
     fn history(&self) -> usize {
         self.mixing_history
-            .unwrap_or(if self.driver == "reference" { 8 } else { 6 })
+            .unwrap_or(if !self.reference_strict { 8 } else { 6 })
     }
     #[setter(mixing_history)]
     fn set_history(&mut self, history: usize) {
@@ -109,16 +104,13 @@ impl Options {
 }
 impl Options {
     fn engine(&self) -> PyResult<ScfOptions> {
-        if !matches!(self.driver.as_str(), "reference" | "legacy") {
-            return Err(value_error("driver must be 'reference' or 'legacy'"));
+        if !matches!(self.driver.as_str(), "reference") {
+            return Err(value_error("unknown driver value; expected 'reference'"));
         }
-        if self.driver == "legacy" && self.kgrid != [1; 3] {
-            return Err(value_error("non-Gamma kgrid requires driver='reference'"));
+        if self.reference_strict && self.kgrid != [1; 3] {
+            return Err(value_error("non-Gamma kgrid requires the reference driver"));
         }
-        if self.driver == "reference" && self.reference_strict {
-            return Err(value_error("reference_strict requires driver='legacy'"));
-        }
-        if self.driver == "reference" {
+        if !self.reference_strict {
             self.profile()?;
         }
         if self.max_iterations == 0
@@ -166,7 +158,7 @@ impl Options {
             },
             ..base
         };
-        if self.driver == "reference" {
+        if !self.reference_strict {
             options.start_density = dft_engine::StartDensity::Atomic;
             options.start_wavefunctions = dft_engine::StartWavefunctions::Atomic;
             options.gamma_real = if self.kgrid == [1; 3] {
@@ -394,7 +386,7 @@ impl Session {
             ));
         }
         let settings = options.cloned().unwrap_or_else(Options::new);
-        let reference = settings.driver == "reference";
+        let reference = !settings.reference_strict;
         let options = settings.engine()?;
         let points = kpoints::reduce_time_reversal(
             &kpoints::monkhorst_pack(settings.kgrid, [0.; 3]).map_err(value_error)?,

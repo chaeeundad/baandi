@@ -13,13 +13,10 @@ fn preconditioner_wire_and_config_contract() {
         let decoded =
             ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).unwrap();
         assert_eq!(decoded.preconditioner, kind);
-        let c: crate::config::Scf =
-            toml::from_str(&format!("preconditioner = {:?}", kind.name())).unwrap();
-        assert_eq!(c.preconditioner().unwrap(), kind);
+        assert!(
+            toml::from_str::<crate::config::Scf>(&format!("preconditioner = {:?}", kind.name()))
+                .is_err()
+        );
     }
-    let c: crate::config::Scf = toml::from_str("").unwrap();
-    assert_eq!(c.preconditioner().unwrap(), Kind::Default);
-    let c: crate::config::Scf = toml::from_str("preconditioner = 'unknown'").unwrap();
-    assert!(c.preconditioner().is_err());
     assert!(Kind::decode("unknown".into(), &[], &mut 0).is_err());
 }

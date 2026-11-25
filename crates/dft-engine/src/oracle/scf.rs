@@ -7,8 +7,7 @@ pub use dft_solvers::DavidsonPreconditioner;
 pub use start_density::StartDensity;
 #[path = "convergence.rs"]
 pub(crate) mod convergence;
-use convergence::CoulombMetric;
-pub use convergence::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
+pub use crate::model::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
 #[path = "collinear.rs"]
 pub mod collinear;
 /// Compatibility exports for reference prolongation.
@@ -39,8 +38,6 @@ use dft_solvers::{
     kerker::{Kerker, MixerHistory, PreconditionedPulay},
     mixing::{LinearMixer, PulayMixer},
 };
-#[cfg(test)]
-use dft_upf::Pseudopotential;
 use session::{CompletionMode, ScfSession, StepStatus};
 use std::time::{Duration, Instant};
 
@@ -65,12 +62,6 @@ pub struct ScfProblem {
     force_real_rebuild: bool,
     #[cfg(test)]
     force_energy_identity: bool,
-    /// Test hook: the next this-many verifications fail regardless of the criterion.
-    #[cfg(test)]
-    pub(crate) force_verification_failures: usize,
-    /// Test hook: the VERIFY-REUSE mode regardless of the environment.
-    #[cfg(test)]
-    pub(crate) force_verify_reuse: Option<session::VerifyReuse>,
     force_model: crate::force_identity::ModelDescription,
     /// RUN-CONFIG: the run's switch configuration (the calling thread's at
     /// construction; `set_run_config` replaces it) and the session switches
@@ -79,11 +70,6 @@ pub struct ScfProblem {
     pub(crate) sw: session::SessionSwitches,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
-    coulomb: Option<CoulombMetric>,
-    /// `BAANDI_STOP_METRIC=kept` (ticket MPI-REMAINING): Fourier coefficients
-    /// of the latest map's input and output densities for the stop-rule
-    /// estimate; None when the switch is off or there is no Coulomb metric.
-    stop_kept: Option<StopKept>,
     /// `BAANDI_M2_GRID=on` (ticket M2-GRID, default off): slab plan of the
     /// distributed full-grid stages, built at the first eligible map.
     grid_dist: Option<crate::grid_dist::GridPlan>,
@@ -188,54 +174,6 @@ fn ordered_solves_at<T: Send, R: Send>(
     let mut results = left?;
     results.extend(right?);
     Ok(results)
-}
-
-/// Kept Fourier coefficients of one map's densities for the standard
-/// stop-rule estimate (`BAANDI_STOP_METRIC=kept`, ticket MPI-REMAINING). Each
-/// side stores the density it was computed from; `matches` compares those bits
-/// with the densities handed to the estimate, so a stale or foreign entry is
-/// never used (the estimate then transforms the residual as before). A side is
-/// usable only when its density needed no clamping (the coefficients of the
-/// checked density then equal those of the raw density).
-pub(crate) struct StopKept {
-    input: Vec<f64>,
-    input_hat: Array3<Complex64>,
-    input_ok: bool,
-    output: Vec<f64>,
-    output_hat: Array3<Complex64>,
-    output_ok: bool,
-    /// M2-GRID: the distributed plan holds the owned coefficients of `input`
-    /// (set by the distributed potential) and of `output` (distributed audit).
-    dist_input: bool,
-    dist_output: bool,
-    /// M2-OWNED: epochs of the owned (input, output) densities the plan's
-    /// kept coefficients belong to (None: full densities, compared by bits).
-    owned_tags: (Option<u64>, Option<u64>),
-}
-static STOP_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static STOP_FFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// (stop-rule estimates from kept coefficients, estimates that transformed
-/// the residual: one forward and one inverse full-grid FFT each) since process
-/// start; ticket MPI-REMAINING.
-pub fn stop_metric_counters() -> [u64; 2] {
-    use std::sync::atomic::Ordering::Relaxed;
-    [STOP_KEPT.load(Relaxed), STOP_FFT.load(Relaxed)]
-}
-thread_local! {
-    static STOP_METRIC_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-}
-/// Override `BAANDI_STOP_METRIC` (true = kept) for problems constructed on the
-/// calling thread (simulated ranks in tests); `None` restores the environment.
-pub fn set_stop_metric_override(kept: Option<bool>) {
-    STOP_METRIC_OVERRIDE.with(|o| o.set(kept));
-}
-fn stop_metric_kept(run: dft_numerics::switches::RunConfig) -> bool {
-    STOP_METRIC_OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| run.choice(dft_numerics::switches::Id::STOP_METRIC) == "kept")
-}
-fn unclamped(n: &Array3<f64>) -> bool {
-    n.iter().all(|v| v.to_bits() == v.max(0.0).to_bits())
 }
 
 // BREAKTHROUGH-4 (`BAANDI_EWALD_CACHE=on`, default off): constructions on the
@@ -453,94 +391,6 @@ fn ewald_energy(
     EWALD_LAST.with(|l| *l.borrow_mut() = Some((key, e.clone())));
     Ok(e)
 }
-fn same_bits(kept: &[f64], n: &Array3<f64>) -> bool {
-    kept.len() == n.len()
-        && kept
-            .iter()
-            .zip(n.iter())
-            .all(|(a, b)| a.to_bits() == b.to_bits())
-}
-impl StopKept {
-    fn new(dims: [usize; 3]) -> Self {
-        Self {
-            input: Vec::new(),
-            input_hat: Array3::zeros(dims),
-            input_ok: false,
-            output: Vec::new(),
-            output_hat: Array3::zeros(dims),
-            output_ok: false,
-            dist_input: false,
-            dist_output: false,
-            owned_tags: (None, None),
-        }
-    }
-    fn set_input(&mut self, n: &Array3<f64>) {
-        self.input.clear();
-        self.input.extend(n.iter());
-        self.input_ok = unclamped(n);
-        self.dist_input = false;
-        self.owned_tags.0 = None;
-    }
-    /// M2-GRID: the input density whose owned coefficients the plan keeps.
-    fn set_input_dist(&mut self, n: &Array3<f64>) {
-        self.input.clear();
-        self.input.extend(n.iter());
-        self.input_ok = false;
-        self.dist_input = true;
-        self.owned_tags.0 = None;
-    }
-    /// M2-GRID: the output density whose owned coefficients the plan keeps.
-    fn set_output_dist(&mut self, n: &Array3<f64>) {
-        self.output.clear();
-        self.output.extend(n.iter());
-        self.output_ok = false;
-        self.dist_output = true;
-        self.owned_tags.1 = None;
-    }
-    /// M2-OWNED: the plan keeps the coefficients of the owned input density
-    /// of this epoch (no full-grid copy; the epoch identifies the density).
-    fn set_input_owned(&mut self, epoch: u64) {
-        self.input.clear();
-        self.input_ok = false;
-        self.dist_input = true;
-        self.owned_tags.0 = Some(epoch);
-    }
-    /// M2-OWNED: as `set_input_owned` for the output density.
-    fn set_output_owned(&mut self, epoch: u64) {
-        self.output.clear();
-        self.output_ok = false;
-        self.dist_output = true;
-        self.owned_tags.1 = Some(epoch);
-    }
-    fn matches_dist(&self, input: &Array3<f64>, output: &Array3<f64>) -> bool {
-        self.dist_input
-            && self.dist_output
-            && self.owned_tags == (None, None)
-            && !input.is_empty()
-            && same_bits(&self.input, input)
-            && same_bits(&self.output, output)
-    }
-    fn matches_owned(&self, input: u64, output: u64) -> bool {
-        self.dist_input && self.dist_output && self.owned_tags == (Some(input), Some(output))
-    }
-    fn set_output(&mut self, n: &Array3<f64>, hat: Array3<Complex64>) {
-        self.dist_output = false;
-        self.owned_tags.1 = None;
-        self.output.clear();
-        self.output.extend(n.iter());
-        self.output_ok = hat.shape() == self.output_hat.shape() && unclamped(n);
-        if self.output_ok {
-            self.output_hat = hat;
-        }
-    }
-    fn matches(&self, input: &Array3<f64>, output: &Array3<f64>) -> bool {
-        self.input_ok
-            && self.output_ok
-            && same_bits(&self.input, input)
-            && same_bits(&self.output, output)
-    }
-}
-
 /// Cluster matrix sums sum_r conj(psi_i) dV psi_j of the certificate pre-screen,
 /// one serial sum per entry, entries split over the pool (order-independent).
 fn cluster_entries(psi: &[&[Complex64]], delta: &[f64], entries: &mut [(usize, usize, Complex64)]) {
@@ -715,52 +565,9 @@ impl ScfProblem {
         {
             gamma_real.fallback(options.gamma_real, reason)?;
         }
-        if options.standard_density_forcing
-            && (options.standard.is_none() || options.standard_stall_guard)
-        {
-            return Err(ScfError::InvalidInput(
-                "standard_density_forcing requires standard and stall guard off",
-            ));
-        }
-        if options.standard_stall_guard && options.standard.is_none() {
-            return Err(ScfError::InvalidInput(
-                "standard_stall_guard requires the standard profile",
-            ));
-        }
-        if options.verification != Verification::Off && options.standard.is_none() {
-            return Err(ScfError::InvalidInput(
-                "verification requires the standard profile; the strict profile always runs its certificate",
-            ));
-        }
-        if options
-            .standard
-            .is_some_and(|p| !p.threshold_ha.is_finite() || p.threshold_ha <= 0.0)
-        {
-            return Err(ScfError::InvalidInput(
-                "positive finite standard_threshold_ha required",
-            ));
-        }
-        // ONEPATH-3: the standard profile (with its verification) runs collinear
-        // spin and Fermi-Dirac drivers; the Hartree mixing metric and the
-        // experimental stall guard / density forcing stay closed-shell only.
-        if channel.is_some() && options.hartree_mixing {
-            return Err(ScfError::InvalidInput(
-                "Hartree mixing metric currently requires closed-shell fixed occupations (not collinear spin or Fermi-Dirac smearing runs); use the default l2 mixing metric",
-            ));
-        }
-        if channel.is_some() && (options.standard_stall_guard || options.standard_density_forcing) {
-            return Err(ScfError::InvalidInput(
-                "standard_stall_guard and standard_density_forcing apply to closed-shell fixed occupations only (not collinear spin or Fermi-Dirac smearing runs); remove them",
-            ));
-        }
-        if options.standard.is_some()
-            && !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson)
-        {
-            return Err(ScfError::InvalidInput("standard profile requires Davidson"));
-        }
+
         if options.locking == dft_solvers::locking::Locking::Auto
-            && (options.standard.is_some()
-                || !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson))
+            && !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson)
         {
             return Err(ScfError::InvalidInput("locking requires strict Davidson"));
         }
@@ -1142,10 +949,6 @@ impl ScfProblem {
                 }
             })
             .collect();
-        let coulomb = options
-            .standard
-            .map(|_| CoulombMetric::with_sphere(cell, &density_basis, grid.dims()))
-            .transpose()?;
         let force_model = crate::force_identity::ModelDescription::new(
             cell,
             atoms,
@@ -1160,10 +963,6 @@ impl ScfProblem {
             force_real_rebuild: false,
             #[cfg(test)]
             force_energy_identity: false,
-            #[cfg(test)]
-            force_verification_failures: 0,
-            #[cfg(test)]
-            force_verify_reuse: None,
             gamma_real_exclusion,
             reused_fields: None,
             screen_ffts: Vec::new(),
@@ -1172,13 +971,10 @@ impl ScfProblem {
             atomic_species,
             atomic_start,
             force_model,
-            stop_kept: (coulomb.is_some() && stop_metric_kept(run))
-                .then(|| StopKept::new(grid.dims())),
             run,
             sw: session::SessionSwitches::resolve(run),
             grid_dist: None,
             owned: Default::default(),
-            coulomb,
             cell: cell.clone(),
             states,
             grid,
@@ -1369,66 +1165,13 @@ impl ScfProblem {
         self.step_with_occupations(n, initial, tolerance, certify, None)
     }
 
-    /// The standard stop-rule Coulomb estimate E_H[output - input] (Ha), None
-    /// without the standard profile. With `BAANDI_STOP_METRIC=kept` and kept
-    /// coefficients of exactly these two densities, a Parseval sum without a
-    /// transform; otherwise the residual is transformed (forward and back).
-    pub(crate) fn stop_error(
-        &mut self,
-        input: &Array3<f64>,
-        output: &Array3<f64>,
-    ) -> Result<Option<f64>, ScfError> {
-        let Some(metric) = self.coulomb.as_mut() else {
-            return Ok(None);
-        };
-        // M2-GRID: owned coefficients of both densities on the slab plan
-        // (replicated conditions; one small allgatherv).
-        if self
-            .stop_kept
-            .as_ref()
-            .is_some_and(|k| k.matches_dist(input, output))
-            && let Some(comm) = crate::m2::active()
-            && let Some(plan) = self.grid_dist.as_mut().filter(|p| p.stop_ready())
-        {
-            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.run
-                .count(dft_numerics::switches::RunCounter::StopKept, 1);
-            return plan.stop_error(&comm).map(Some);
-        }
-        if let Some(kept) = self.stop_kept.as_ref().filter(|k| k.matches(input, output)) {
-            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.run
-                .count(dft_numerics::switches::RunCounter::StopKept, 1);
-            return metric
-                .error_reciprocal(&kept.input_hat, &kept.output_hat)
-                .map(Some);
-        }
-        STOP_FFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.run
-            .count(dft_numerics::switches::RunCounter::StopFft, 1);
-        metric.error(input, output).map(Some)
-    }
-
     /// Hartree and XC fields of an input density and the effective local
     /// potential built from them (ionic + Hartree + XC), in Ha.
     fn input_fields(
         &mut self,
         n: &Array3<f64>,
     ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>), ScfError> {
-        let h = match self.stop_kept.as_mut() {
-            Some(kept) => {
-                kept.input_ok = false;
-                let h = hartree::evaluate_keeping_density(
-                    n,
-                    &self.cell,
-                    &mut self.fft,
-                    &mut kept.input_hat,
-                )?;
-                kept.set_input(n);
-                h
-            }
-            None => hartree::evaluate(n, &self.cell, &mut self.fft)?,
-        };
+        let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
         // M2d: pointwise LDA XC split over ranks (bit-identical potential).
         let m2_xc = crate::m2::active().and_then(|comm| {
             crate::m2::xc(
@@ -1641,7 +1384,7 @@ impl ScfProblem {
             .ok_or(ScfError::InvalidInput("M2 owned density without grid path"))?;
         let dims = self.grid.dims();
         if self.grid_dist.as_ref().map(|p| p.dims()) != Some(dims) {
-            let weights = self.coulomb.as_ref().map(|c| c.weights());
+            let weights = None;
             self.grid_dist = Some(crate::grid_dist::GridPlan::new(
                 &comm,
                 dims,
@@ -1761,60 +1504,6 @@ impl ScfProblem {
         Ok(-max[0])
     }
 
-    /// M2-OWNED stop-rule estimate of an owned (input, output) pair: the kept
-    /// owned coefficients when the plan's epochs are exactly these; otherwise
-    /// (a clamped density) both densities are materialized and transformed.
-    pub(crate) fn stop_error_owned(
-        &mut self,
-        input: &crate::grid_dist::Owned,
-        output: &crate::grid_dist::Owned,
-    ) -> Result<Option<f64>, ScfError> {
-        if self.coulomb.is_none() {
-            return Ok(None);
-        }
-        if self
-            .stop_kept
-            .as_ref()
-            .is_some_and(|k| k.matches_owned(input.epoch, output.epoch))
-            && let Some(comm) = crate::m2::active()
-            && let Some(plan) = self.grid_dist.as_mut().filter(|p| p.stop_ready())
-        {
-            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            return plan.stop_error(&comm).map(Some);
-        }
-        let (a, b) = (
-            self.materialize_owned(input)?,
-            self.materialize_owned(output)?,
-        );
-        STOP_FFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.coulomb
-            .as_mut()
-            .expect("checked")
-            .error(&a, &b)
-            .map(Some)
-    }
-
-    /// Stop-rule estimate of a map: the owned pair (the problem's owned input
-    /// and `owned`) when the map kept its densities owned, else the full pair.
-    pub(crate) fn stop_error_step(
-        &mut self,
-        input: &Array3<f64>,
-        output: &Array3<f64>,
-        owned: Option<&crate::grid_dist::Owned>,
-    ) -> Result<Option<f64>, ScfError> {
-        let Some(out) = owned else {
-            return self.stop_error(input, output);
-        };
-        let n = self
-            .owned
-            .input
-            .take()
-            .ok_or(ScfError::InvalidInput("M2 owned stop rule without input"))?;
-        let r = self.stop_error_owned(&n, out);
-        self.owned.input = Some(n);
-        r
-    }
-
     /// Session metrics of a map: (residual `density_distance(output, input)`,
     /// output sum, input sum, output minimum); the full-array arithmetic of
     /// the session, or `owned_metrics` for an owned pair. Collective when owned.
@@ -1888,7 +1577,7 @@ impl ScfProblem {
         };
         let dims = self.grid.dims();
         if self.grid_dist.as_ref().map(|p| p.dims()) != Some(dims) {
-            let weights = self.coulomb.as_ref().map(|c| c.weights());
+            let weights = None;
             self.grid_dist = Some(crate::grid_dist::GridPlan::new(
                 &comm,
                 dims,
@@ -1951,12 +1640,7 @@ impl ScfProblem {
             )?;
             (effective, energies)
         };
-        if let Some(kept) = self.stop_kept.as_mut() {
-            match owned_input.as_ref() {
-                Some(o) => kept.set_input_owned(o.epoch),
-                None => kept.set_input_dist(n),
-            }
-        }
+
         if owned_input.is_some() {
             self.owned.input = owned_input;
         }
@@ -3121,14 +2805,7 @@ impl ScfProblem {
                             (w, _) => w,
                         };
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            if self.options.standard.is_some() {
-                                solver.solve_ritz_changes(
-                                    &state.hamiltonian,
-                                    warm.or(guess.as_ref()),
-                                    Some(&preconditioner),
-                                    policy,
-                                )
-                            } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                            if self.options.locking == dft_solvers::locking::Locking::Auto {
                                 solver.solve_locked(
                                     &state.hamiltonian,
                                     warm.or(guess.as_ref()),
@@ -3204,14 +2881,7 @@ impl ScfProblem {
                         let solution = if let Some(solution) = real_solution {
                             solution
                         } else {
-                            if self.options.standard.is_some() {
-                                solver.solve_ritz_changes(
-                                    &state.hamiltonian,
-                                    initial.map(|v| &v[i]).or(guess.as_ref()),
-                                    Some(&preconditioner),
-                                    policy,
-                                )
-                            } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                            if self.options.locking == dft_solvers::locking::Locking::Auto {
                                 solver.solve_locked(
                                     &state.hamiltonian,
                                     initial.map(|v| &v[i]).or(guess.as_ref()),
@@ -3280,10 +2950,7 @@ impl ScfProblem {
         let occupations = &self.occupations;
         let finite = finite.as_deref();
         let volume = self.cell.volume_bohr3();
-        let allow_density_fusion = crate::band_density::fusion_allowed(
-            self.options.standard.is_some(),
-            self.options.threads,
-        );
+        let allow_density_fusion = crate::band_density::fusion_allowed(false, self.options.threads);
         let mut orbitals = ordered_solves(
             &mut self.states,
             self.options.threads,
@@ -3432,13 +3099,7 @@ impl ScfProblem {
         } else {
             None
         };
-        let mut shared_audit = if let Some(terms) = dist_terms {
-            if let Some(kept) = self.stop_kept.as_mut() {
-                match owned_out.as_ref() {
-                    Some(o) => kept.set_output_owned(o.epoch),
-                    None => kept.set_output_dist(&output),
-                }
-            }
+        let shared_audit = if let Some(terms) = dist_terms {
             energy::SharedAudit::from_distributed(terms.values(), self.ionic_g[[0, 0, 0]].re)
         } else {
             energy::prepare_shared(
@@ -3464,9 +3125,7 @@ impl ScfProblem {
                 self.core_density.as_ref(),
             )?
         };
-        if !dist_fields && let Some(kept) = self.stop_kept.as_mut() {
-            kept.set_output(&output, shared_audit.take_density_reciprocal());
-        }
+
         // B2: Fermi-Dirac occupations fall back to the explicit audit.
         let identity = self.energy_identity && finite.is_none();
         // M2d: nonlocal energy from the distributed projections (one tree_sum).
@@ -3576,10 +3235,6 @@ impl ScfProblem {
     pub fn set_run_config(&mut self, run: dft_numerics::switches::RunConfig) {
         self.run = run;
         self.sw = session::SessionSwitches::resolve(run);
-        let want = self.coulomb.is_some() && stop_metric_kept(run);
-        if want != self.stop_kept.is_some() {
-            self.stop_kept = want.then(|| StopKept::new(self.grid.dims()));
-        }
     }
     /// Original success-only API; exhausted budgets remain errors.
     pub fn run(self) -> Result<ScfResult, ScfError> {
@@ -3655,16 +3310,12 @@ pub(crate) fn band_tolerances(
     tolerance: f64,
     options: &ScfOptions,
 ) -> BandTolerances {
-    let intermediate = empty_loose()
-        && options.standard.is_none()
-        && tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
+    let intermediate = empty_loose() && tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
     BandTolerances {
         strict_bands: (occupied_count + usize::from(!intermediate))
             .min(bands)
             .max(1),
-        buffer_tolerance: if options.standard.is_some() {
-            StandardProfile::empty_threshold(tolerance)
-        } else if intermediate {
+        buffer_tolerance: if intermediate {
             tolerance.max(buffer_loose_floor())
         } else {
             tolerance.max(1e-5)
@@ -4241,10 +3892,6 @@ mod threading_tests {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "verification_tests.rs"]
-mod verification_tests;
 
 #[cfg(test)]
 mod bands_fit_tests {

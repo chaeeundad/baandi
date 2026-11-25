@@ -28,13 +28,10 @@ Optional SCF fields and defaults:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `max_iterations` | 200 | positive integer budget |
-| `mixing` | `"pulay"` | `"pulay"` (history 6) or `"linear"` |
-| `mixing_beta` | 0.3 | finite positive coefficient; values >1 are permitted and may diverge |
-| `energy_tolerance_ha` | 1e-8 | absolute direct-energy change in Ha |
-| `density_residual_tolerance` | 1e-7 | L2 residual per electron, Bohr^(-3/2) |
+| `mixing` | `"broyden"` | `"plain"`, `"broyden"`, or alias `"pulay"`; history 8 |
+| `mixing_beta` | 0.7 | finite coefficient in (0, 1] |
 | `nbands` | omitted | occupied + `extra_bands`; explicit value takes precedence |
 | `extra_bands` | 4 | unoccupied bands when `nbands` is omitted |
-| `eigen_tolerance` | 1e-8 | occupied eigen residual in Ha |
 | `seed` | 2026 | unsigned 64-bit deterministic initialization seed |
 
 Tolerances must be finite and positive. Electron count is the sum of atomic
@@ -234,8 +231,6 @@ continues to use the legacy structs):
 | Section | Unit-string form | Legacy form it replaces |
 | --- | --- | --- |
 | `basis` | `cutoff = "30 Ry"` | `ecutwfc_ry = 30.0` |
-| `scf` | `energy_tolerance = "2e-8 Ry"` | `energy_tolerance_ha = 1e-8` |
-| `scf` | `eigen_tolerance_energy = "1e-8 Ha"` | `eigen_tolerance = 1e-8` |
 | `system` | `lattice_vectors_with_units` (3×3 strings, one vector per row) | both `lattice_vectors` and `lattice_unit` |
 
 For example, a general cell can use:
@@ -355,9 +350,6 @@ numbers retain their existing behavior; all existing physical constraints apply.
 | `basis.kgrid[i]`, `basis.fft_grid[i]` | integer expression, count |
 | `scf.max_iterations`, `scf.nbands`, `scf.extra_bands`, `scf.seed` | integer expression, count/seed |
 | `scf.mixing_beta` | float expression, dimensionless |
-| `scf.density_residual_tolerance` | float expression, Bohr^(-3/2) |
-| `scf.energy_tolerance_ha`, `scf.eigen_tolerance` | float expression, Ha |
-| `scf.energy_tolerance`, `scf.eigen_tolerance_energy` | expression plus energy unit, resolved Ha |
 
 `cartesian` is an alternative to `fractional`; specifying both is an error.
 Names, species labels, paths, enums and booleans are not evaluated. Their existing
@@ -663,97 +655,20 @@ the numerical fixture arrays are unchanged. Missing/unsupported UPFs and functio
 mismatches now fail run's preflight with exit 1, rather than the previous late-stage
 exit 5/2. Zero threads and mixing beta above one are rejected before solver setup.
 Output I/O failures still use exit 5; numerical failures still use exit 4.
-### Optional Kerker–Pulay density mixing (P10D)
+### Density mixing
 
-The default remains `mixing = "pulay"`, beta 0.3, six history differences.
-For an explicit reciprocal-space preconditioner:
+Production accepts `scf.mixing = "plain" | "broyden" | "pulay"` (the last is
+an alias), `mixing_beta`, `mixing_history`, and `reference_preconditioning =
+"plain" | "tf"`. The legacy `linear` and `kerker-pulay` values and the
+`mixing_q0_inverse_bohr` and `mixing_metric` keys are no longer accepted.
 
-```toml
-[scf]
-mixing = "kerker-pulay"
-mixing_beta = 0.3
-mixing_history = 6
-mixing_q0_inverse_bohr = 1.0
-```
+### Oracle cutoff ladder compatibility
 
-`mixing_q0_inverse_bohr` is required for this strategy, in Bohr^-1 (not inverse
-Angstrom); there is no fitted/default screening length. It must be positive and
-finite with a representable nonzero square. The residual multiplier is
-|G|^2/(|G|^2+q0^2), with |G| from the cell's reciprocal basis; its G=0 coefficient
-is zero. A larger q0 damps more wavelengths and can slow insulating/vacuum
-regions. The example is illustrative, not a recommended universal parameter.
-The Pulay least-squares fit uses the filtered residual. Convergence and the
-fixed-point certificate always use the original, unfiltered density residual.
+`scf.cutoff_ladder = "off"` disables the strict oracle's historical coarse
+initialization. Omission retains that frozen oracle default. The production
+reference path accepts `off` as a no-op. `on` is an unknown value and
+`cutoff_ladder_fraction` is an unknown key.
 
-`mixing_history` accepts a positive integer (number of differences), defaults
-to six for both Pulay strategies, and is rejected for `linear`. A q0 key is
-rejected for other strategies rather than ignored. Both new numeric keys
-support the existing expression-input mechanism. Effective method, beta,
-history and q0 are stored in run metadata. No beta/q0 fitting or silent SCF retry occurs. For Kerker–Pulay only, an
-infeasible proposal with no secant history uses one raw convex linear step with
-beta=min(requested beta,1). This deterministic positivity recovery prevents
-repeated filtering/damping from trapping density on the boundary. It keeps
-charge and the sampled history pair; it does not clip density. Remaining
-feasibility damping and divergence errors apply as before.
-
-Iteration records add `density_contraction` (raw SCF residual/current-to-previous
-ratio, null initially or after a zero residual), `mixing_history_used` (number
-of differences presented to a proposal, null when no proposal was made) and
-`mixing_resets` (cumulative feasibility resets, excluding initialization).
-`mixing_raw_recovery` records the raw convex recovery step described above.
-History size is not retained numerical rank. `mixing_history_used` describes
-the proposal before any feasibility reset; `mixer_reset` identifies that reset.
-A small filtered residual never proves convergence. Density samples are in
-electrons/Bohr^3; the existing normalized SCF residual is in Bohr^-3/2.
-No metallic convergence is supported or implied.
-### Optional cutoff ladder (C1)
-
-`[scf] cutoff_ladder = "on"` (default `"off"`; `BAANDI_CUTOFF_LADDER=on|off|<fraction>`
-overrides the file) runs the first part of `dft-cli run` at a reduced cutoff
-`cutoff_ladder_fraction` x ecutwfc (default 0.5, open interval (0, 1)) on the
-smaller FFT grid that cutoff implies, until the coarse density residual is at or
-below 1e-4 Bohr^-3/2 (at most 30 coarse iterations), then prolongs density
-(Fourier zero padding) and orbitals (copy by Miller index) exactly into the full
-basis and finishes with the unchanged strict SCF at the full cutoff. History,
-work counters, energy audit and certificate in `results.json` are the
-full-cutoff ones; the `cutoff_ladder` block reports the coarse stage (`used`,
-`fallback_reason`, grids, plane waves, iterations, H vectors and their
-full-grid equivalents, seconds). Eligible only for one exact Gamma point on the
-real path with fixed uniform occupations, strict profile, no symmetry projector
-or strain reference, outside observe/agent modes; otherwise the ordinary SCF runs
-and the reason is recorded. Evidence: `docs/performance/requests/c1-cutoff-ladder.md`.
-Experiment switches (default off; `docs/performance/requests/ladder-standard-secant.md`):
-`BAANDI_CUTOFF_LADDER_STANDARD=on` makes the standard profile eligible (coarse
-stage in the standard profile, unchanged full-cutoff standard session; the first
-fine step uses the tolerance the coarse ratchet would use next, or the cap with
-`BAANDI_LADDER_STANDARD_SEED=cap`); `BAANDI_LADDER_SECANT=on|<h>` (on means 4)
-seeds the full-cutoff Pulay mixer with the last h coarse difference pairs,
-prolonged like the density. The block then also reports `standard`,
-`standard_seed_ha`, `secant_requested`, `secant_seeded` and `secant_fallback`.
-D1 hand-off scan switches (work order 2026-11-14 phase D; defaults reproduce the
-adopted ladder bit for bit): `BAANDI_LADDER_COARSE_STOP=<x>` (coarse stop level of
-the density residual, Bohr^-3/2, in (0, 1), default 1e-4);
-`BAANDI_LADDER_COARSE_RULE=fixed|atomic` (atomic: stop at the larger of that level
-and the distance between the full-cutoff and the prolonged coarse atomic start
-densities, available only with `scf.start_density = "atomic"`, otherwise the
-fixed level applies); `BAANDI_LADDER_FIRST_TOL=auto|cap|coarse|next` (first fine
-eigen tolerance: auto = standard per `BAANDI_LADDER_STANDARD_SEED`, strict cold
-1e-2; cap = both cold; coarse = the last coarse step's requested tolerance; next =
-the coarse schedule's next tolerance); the coarse fraction is
-`BAANDI_CUTOFF_LADDER=<fraction>`. The block reports `coarse_stop_rule`,
-`coarse_stop_level`, `atomic_truncation_distance`,
-`handoff_to_final_density_distance` (converged fine density against the handed-off
-density, the measured coarse-to-fine difference), `first_tolerance`,
-`strict_seed_ha`, `fine_scf_steps`, `fine_h_vectors`, `fine_certificate_h_vectors`,
-`coarse_fine_step_equivalents` (coarse full-grid H equivalents over the mean
-recorded fine H per step), `coarse_wall_fine_step_equivalents`,
-`total_step_equivalents` and `total_h_full_grid_equivalents`.
-`BAANDI_STANDARD_RESIDUAL_GUARD=on` (default ON since 2026-11-13, any standard run, ladder or
-not) adds a second condition to the standard-class stop: the second-order
-band-energy bound sum_k w_k sum_occupied f_i |r_i|^2 (Ha, residual norms of the
-latest eigensolve, coefficient 1/Ha; derivation at
-`StandardProfile::residual_energy_bound`) must also be below the class
-threshold. It can only delay a stop; off is bit-identical to before.
 ### P7PC band accuracy fields
 
 `results.json.band_accuracy` describes the legacy first-k eigenvalue list.
@@ -932,18 +847,9 @@ that tolerance for every system. Production grid/cutoff defaults are unchanged.
 
 ## P13D bulk NC XC floor
 
-For unpolarized `run`, `[xc] density_floor = 1e-10` selects an XC-only floor
-in electrons/Bohr^3. Values must be finite and positive. NLCC inputs default to
-this value; legacy inputs without NLCC or this key keep the existing evaluator.
-PBE gradients use the clipped combined valence-plus-core density; the chain-rule
-mask is applied after assembling the potential. Conserved density is unchanged.
-`energies.xc_floor` reports input/output clipped negative charge per iteration.
-Converged charge above max(1e-3 electrons, 1e-4 times valence electrons) is a
-numerical failure, with a cutoff/grid/dataset diagnostic. `band_gap` records the
-sampled direct and indirect gaps in Ha for floor-enabled results.
-`initial_density` identifies the existing uniform start; atomic tables are not
-used. Explicit polarized floor inputs and floor-ledger checkpoints are rejected.
-See [bulk smoke evidence and limitations](validation/materials-smoke.md).
+`xc.density_floor` is no longer an input key. The strict oracle retains its
+historical NLCC-only floor internally; production uses its reference XC policy.
+Historical floor measurements remain in [bulk smoke evidence](validation/materials-smoke.md).
 
 ### Standard convergence profile (ADR 0035)
 
@@ -974,17 +880,8 @@ No strict fixed-point certificate solve runs for standard (the fixed-point
 verification of the next section is a different, standard-class check). Results
 and checkpoint provenance explicitly label it `standard` and `certified: false`; results include
 thresholds, Hartree residuals, redo flags and total work (including discarded
-redo solves). `spectral_guard="final"` remains an independent opt-in audit and
-cannot turn a standard result into a certified result. Standard does not
-establish spectral completeness with the guard off.
-
-The independent `[scf] mixing_metric = "l2" | "hartree"` switch defaults to L2.
-Hartree changes Pulay's Gram matrix and right-hand side, not its update formula;
-it also works with Kerker-Pulay (the metric sees the filtered residual). Linear
-mixing has no least-squares fit, so this setting has no effect there. Exact
-checkpoints retain the profile, metric, ratchet history and redo records; warm
-starts record their source profile but run under the explicitly selected new
-configuration. Existing NLCC/XC-floor/checkpoint restrictions still apply.
+redo solves). `scf.spectral_guard` is no longer accepted. Standard does not establish
+spectral completeness.
 
 `python3 -I scripts/equal_accuracy.py --output-dir /fresh/path` runs strict,
 two tight references, three standard thresholds and strict/Hartree E4.
@@ -1012,20 +909,24 @@ again at the next stop; the delivered state is always the converged step's own
 `[scf] verify = "fixed_point" | "off"`: default `fixed_point`; `off` skips the
 verification (its result is the former explicit standard profile, bit for bit).
 
-`scf.driver = "reference" | "legacy"` selects the requested SCF driver. Stage R2
-defaults to the reference production driver. Precedence is `BAANDI_REFERENCE_STRICT=on` (the strict
-oracle), then `scf.driver`, then `BAANDI_REFERENCE_SCF`, then the reference default.
-`BAANDI_REFERENCE_SCF=off` requests the deprecated legacy standard driver,
-which is scheduled for removal in R10.
-An explicit `legacy` therefore overrides `REFERENCE_SCF=on`; STRICT overrides both.
-After UPF parsing, the shared selector checks declared legacy-only features:
-unqualified spin FD (G4B/G4D), bands/DOS, variable-cell relaxation, density
-extrapolation, checkpoint/restart, runtime stepping, explicit legacy SCF controls,
-original PW92 prefactor and missing reference atomic-start data. It records a
-fallback before engine construction; reference errors are never caught and retried.
-Invalid legacy inputs still reject (for example locking on the standard path).
+`scf.driver = "reference"` is accepted as a no-op. Production always uses
+Reference unless `BAANDI_REFERENCE_STRICT=on` requests StrictOracle, or a
+free-moment collinear Fermi-Dirac PBE input requires the recorded
+`G4D_FALLBACK` strict oracle. The latter is still unqualified on the reference
+path. `scf.driver = "legacy"` is an unknown value. `REFERENCE_SCF` is no longer
+a registered switch. There is no legacy standard driver and no retry on engine errors.
+
+Legacy-only keys are ordinary unknown-key errors, including `xc.density_floor`,
+`scf.mixing_q0_inverse_bohr`, `mixing_metric`, `spectral_guard`, `locking`,
+`preconditioner`, `davidson_capacity_per_band`, `energy_tolerance_ha`,
+`density_residual_tolerance`, `eigen_tolerance`, `standard_stall_guard`,
+`standard_density_forcing`, and `cutoff_ladder_fraction`. The energy-unit
+aliases of the removed tolerances are also unknown. `start_density` and
+`start_wavefunctions` accept only `"atomic"`; omitted oracle settings preserve
+its historical defaults. These errors also apply with the strict switch on.
+
 Every selection prints one JSON-bearing stderr line. Result metadata includes
-`scf.driver` (`reference`, `legacy`, `strict_oracle`), `scf.driver_reason` (nullable)
+`scf.driver` (`reference`, `strict_oracle`), `scf.driver_reason` (nullable)
 and `scf.driver_source` (`default`, `env`, `input`). Source describes the winning
 request even when a feature requires fallback. `reference_driver_fallback_reason`
 is retained. Bands/DOS also write `results.json`; checkpoint/restart write a
@@ -1036,8 +937,7 @@ STRICT takes precedence and retains residual certification.
 
 `BAANDI_REFERENCE_STRICT=on|off` (default `off`) forces the strict reference path
 with its fixed-point certificate for accuracy gates and tests; the standard-only
-keys of the input (`standard_threshold_ha`, `verify`, `standard_stall_guard`,
-`standard_density_forcing`) are then ignored, which the result records
+keys of the input (`standard_threshold_ha`, `verify`) are then ignored, which the result records
 (`single_path.status = "reference_strict"`).
 
 Every result carries `single_path` (`status`: `applied` or `reference_strict`
@@ -1131,19 +1031,11 @@ the standard path. These runs use the complex Davidson
 FD as before). Forces and stress of a verified spin or FD state are available
 with the standard preconditions. Still unsupported (input errors, unchanged):
 relaxation with spin or FD, the observe/agent modes with spin or FD, the
-Hartree mixing metric with spin or FD, and (new, previously unreachable)
-`standard_stall_guard` / `standard_density_forcing` with spin or FD. The opt-in
-`BAANDI_STANDARD_STOP=confirm` rule applies to closed-shell runs only.
+legacy Hartree mixing, stall-guard and density-forcing input keys.
 
-**No strict fallback remains (ONEPATH-4, user decision 2026-11-16).** The strict
-path is reached only through `BAANDI_REFERENCE_STRICT=on` (engine:
+The strict oracle is selected by G4D fallback or through `BAANDI_REFERENCE_STRICT=on` (engine:
 `ScfOptions::strict_reference()`; Python: `Options.reference_strict = True`).
 
-- `scf.locking = "auto"` is an input error on the default path: locking is an
-  experimental option of the strict residual Davidson (hard locking with a
-  residual certificate), and the standard path's Ritz-change Davidson retests
-  every root and has no locking. The message names the reference switch, under
-  which the input runs as before.
 - The observe/agent runtime modes (`run --observe`, `run --agent`) run the
   standard path with the verification exactly like a classic run, with the same
   `results.json` records (`single_path.status = "applied"`, `verified`,

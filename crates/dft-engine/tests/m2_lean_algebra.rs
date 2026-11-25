@@ -44,7 +44,7 @@ fn run(kind: usize, pp: &dft_upf::Pseudopotential) -> ScfResult {
             cutoff_hartree: 3.,
             bands: Some(6),
             threads: 1,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()

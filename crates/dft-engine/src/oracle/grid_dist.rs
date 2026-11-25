@@ -889,16 +889,9 @@ impl GridPlan {
         Ok(terms)
     }
 
-    /// True when both kept coefficient sets belong to unclamped densities of
-    /// the latest potential / audit (replicated after the gathers).
-    pub(crate) fn stop_ready(&self) -> bool {
-        !self.stop_weights.is_empty()
-            && self.input_hat.len() == self.kernel.len()
-            && self.output_hat.len() == self.kernel.len()
-    }
-
     /// Coulomb estimate N sum_G w(G) |out(G) - in(G)|^2 from the kept owned
     /// coefficients, canonical stick order. Collective.
+    #[cfg(test)]
     pub(crate) fn stop_error<K: Collective>(&mut self, comm: &K) -> Result<f64, ScfError> {
         self.stick_vals.clear();
         self.stick_vals.resize(self.local_sticks, 0.0);
@@ -1196,7 +1189,6 @@ mod tests {
                 t.values().map(f64::to_bits),
                 t_owned.values().map(f64::to_bits)
             );
-            assert!(plan.stop_ready());
             let stop = plan.stop_error(comm).unwrap();
             (eff, e, t, stop)
         });

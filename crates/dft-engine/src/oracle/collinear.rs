@@ -198,11 +198,6 @@ impl CollinearProblem {
         problem.finite = Some(finite);
         Ok(problem)
     }
-    /// Test hook (ADR 0043 V5): the next `n` verification attempts fail.
-    #[cfg(test)]
-    pub(crate) fn force_verification_failures(&mut self, n: usize) {
-        self.channels[0].force_verification_failures = n;
-    }
     pub fn grid_dimensions(&self) -> [usize; 3] {
         self.channels[0].grid.dims()
     }
@@ -429,14 +424,7 @@ impl CollinearProblem {
                 });
                 // ONEPATH-3: the standard profile uses the Ritz-change stopping
                 // rule of the closed-shell standard path (complex solver).
-                let solution = if p.options.standard.is_some() {
-                    solver.solve_ritz_changes(
-                        &state.hamiltonian,
-                        guess,
-                        Some(&work.preconditioner),
-                        policy,
-                    )?
-                } else {
+                let solution = {
                     p.options
                         .eigensolver
                         .solve_with_band_tolerances_and_certification(
@@ -599,37 +587,6 @@ impl CollinearProblem {
         }
         Ok(audit)
     }
-    /// ONEPATH-3 residual guard of the latest solve: sum over spin channels and
-    /// k points of w_k sum_i f_i ||r_i||^2 with the occupations that built
-    /// this solve's density (fixed sector or Fermi-Dirac; capacity 1 per spin).
-    fn residual_estimate(&self) -> f64 {
-        let finite = self.finite.as_ref();
-        StandardProfile::residual_energy_estimate_blocks((0..2).flat_map(|s| {
-            let p = &self.channels[s];
-            p.states
-                .iter()
-                .zip(&self.blocks[s])
-                .enumerate()
-                .map(move |(k, (state, w))| {
-                    (
-                        state.point.weight,
-                        w.solution.as_ref().unwrap().residuals.as_slice(),
-                        finite.map_or(p.occupations.as_slice(), |f| f.block(s, k)),
-                    )
-                })
-        }))
-    }
-    fn spin_error(
-        &mut self,
-        input: &[Array3<f64>; 2],
-        output: &[Array3<f64>; 2],
-    ) -> Result<f64, ScfError> {
-        self.channels[0]
-            .coulomb
-            .as_mut()
-            .expect("standard Coulomb metric")
-            .spin_error(input, output)
-    }
     fn strict_residuals(&self) -> [f64; 2] {
         std::array::from_fn(|s| {
             self.blocks[s]
@@ -699,19 +656,10 @@ impl CollinearProblem {
         let mut previous_residual: f64 = 0.1;
         let mut best: f64 = f64::INFINITY;
         let mut growing = 0;
-        // ONEPATH-3 standard path state: previous tolerance and estimate drive
-        // the ratchet; verification attempts are collected over the run.
-        let standard = o.standard;
-        let mut verification = VerificationReport::default();
-        let mut previous_standard: Option<(f64, f64)> = None;
         for iteration in 1..=o.max_iterations {
             let mut finite_certificate = None;
             let mut final_certificate = None;
-            let mut tolerance = if standard.is_some() {
-                previous_standard.map_or(StandardProfile::CAP_HA, |(t, e)| {
-                    StandardProfile::ratchet(t, e, electrons)
-                })
-            } else if o.residual_eigen_schedule {
+            let tolerance = if o.residual_eigen_schedule {
                 (0.1 * previous_residual)
                     .min(1e-2)
                     .max(0.1 * o.eigen_tolerance)
@@ -719,31 +667,12 @@ impl CollinearProblem {
                 (o.initial_eigen_tolerance * o.eigen_tolerance_decay.powf((iteration - 1) as f64))
                     .max(0.1 * o.eigen_tolerance)
             };
-            let mut energy = self
+            let energy = self
                 .map(&density, &mut output, tolerance)
                 .map_err(|error| {
                     ScfError::Numerical(format!("collinear SCF iteration {iteration}: {error}"))
                 })?;
-            let mut standard_error_ha = None;
-            let mut standard_redo = false;
-            if standard.is_some() {
-                let mut e = self.spin_error(&density, &output)?;
-                // First-iteration redo of the closed-shell standard path.
-                if iteration == 1 && e < tolerance * electrons.max(1.0) {
-                    standard_redo = true;
-                    tolerance = StandardProfile::ratchet(tolerance, e, electrons);
-                    energy = self
-                        .map(&density, &mut output, tolerance)
-                        .map_err(|error| {
-                            ScfError::Numerical(format!(
-                                "collinear SCF iteration {iteration}: {error}"
-                            ))
-                        })?;
-                    e = self.spin_error(&density, &output)?;
-                }
-                standard_error_ha = Some(e);
-                previous_standard = Some((tolerance, e));
-            }
+
             let finite_evaluation = self.finite.as_ref().and_then(|f| f.evaluation);
             let free_energy =
                 energy.total_hartree() - finite_evaluation.map_or(0.0, |f| f.entropy_term_ha);
@@ -788,21 +717,7 @@ impl CollinearProblem {
                     && ((charge[0] - charge[1]) - self.sector.moment()).abs()
                         <= 1e-10 * electrons.max(1.0)
             };
-            let candidate = if let Some(p) = standard {
-                // ONEPATH-3 stop rule: collinear Coulomb estimate below the
-                // threshold, the residual guard (default on) and the number
-                // conditions of the strict driver.
-                let e = standard_error_ha.expect("standard estimate");
-                e < p.threshold_ha
-                    && numbers_ok
-                    && (!dft_numerics::switches::on(
-                        dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD,
-                    ) || StandardProfile::residual_guard(
-                        true,
-                        self.residual_estimate(),
-                        p.threshold_ha,
-                    ))
-            } else {
+            let candidate = {
                 charge_residual <= o.density_tolerance
                     && spin_residual <= o.density_tolerance
                     && strict.iter().all(|r| *r <= o.eigen_tolerance)
@@ -817,29 +732,14 @@ impl CollinearProblem {
                 charge_density_residual: charge_residual,
                 spin_density_residual: spin_residual,
                 mixing_fraction: 1.0,
-                standard_error_ha,
+                standard_error_ha: None,
                 requested_eigen_tolerance: tolerance,
-                standard_redo,
+                standard_redo: false,
             });
             let mut passed = false;
             let mut unable_to_verify = false;
             let mut rescued = false;
-            if candidate && standard.is_some() && o.verification == Verification::Off {
-                // Unverified standard stop (`scf.verify = "off"`): converged,
-                // never certified; the sampled gaps of a fixed sector still apply.
-                if self.finite.is_none() {
-                    for gap in self.gaps().into_iter().flatten() {
-                        let required = 1e-7_f64.max(2.0 * o.eigen_tolerance);
-                        if gap <= required {
-                            return Err(ScfError::NonInsulating {
-                                gap_hartree: gap,
-                                required_hartree: required,
-                            });
-                        }
-                    }
-                }
-                passed = true;
-            } else if candidate {
+            if candidate {
                 let candidate_gaps = if self.finite.is_some() {
                     [None; 2]
                 } else {
@@ -857,13 +757,7 @@ impl CollinearProblem {
                         w.saved = w.solution.take();
                     }
                 }
-                // Standard path (ADR 0043 V1): the verification map at the
-                // next ratchet tolerance; strict: the certificate at 0.1 x tau.
-                let verification_clock = Instant::now();
-                let fresh_tolerance = match (standard, standard_error_ha) {
-                    (Some(_), Some(e)) => StandardProfile::ratchet(tolerance, e, electrons),
-                    _ => 0.1 * o.eigen_tolerance,
-                };
+                let fresh_tolerance = 0.1 * o.eigen_tolerance;
                 let fresh = self
                     .map(&output, &mut check, fresh_tolerance)
                     .map_err(|error| {
@@ -894,40 +788,7 @@ impl CollinearProblem {
                     }
                 }
                 let de = (fresh.total_hartree() - energy.total_hartree()).abs();
-                if let Some(p) = standard {
-                    let attempt = self.standard_attempt(StandardCheck {
-                        threshold_ha: p.threshold_ha,
-                        iteration,
-                        eigen_tolerance_ha: fresh_tolerance,
-                        delivered: &output,
-                        fresh_output: &check,
-                        charge_residual: nr,
-                        spin_residual: mr,
-                        eigen_change,
-                        energy_change: de,
-                        fresh_energy: fresh.total_hartree(),
-                        free_energy,
-                        saved_evaluation: finite_evaluation,
-                        saved_occupations: saved_occupations.as_deref(),
-                        fresh_charge,
-                        counts,
-                        residuals,
-                        clock: verification_clock,
-                    })?;
-                    passed = attempt.passed;
-                    if passed {
-                        for gap in gaps.into_iter().chain(candidate_gaps).flatten() {
-                            let required = 1e-7_f64.max(2.0 * o.eigen_tolerance);
-                            if gap <= required {
-                                return Err(ScfError::NonInsulating {
-                                    gap_hartree: gap,
-                                    required_hartree: required,
-                                });
-                            }
-                        }
-                    }
-                    verification.attempts.push(attempt);
-                } else {
+                {
                     passed = nr <= o.density_tolerance
                         && mr <= o.density_tolerance
                         && de <= o.energy_tolerance
@@ -1071,9 +932,8 @@ impl CollinearProblem {
                 return Ok(CollinearResult {
                     spin_share: self.spin_share,
                     atomic_start,
-                    standard,
-                    verification: (standard.is_some() && o.verification != Verification::Off)
-                        .then(|| verification.clone()),
+                    standard: None,
+                    verification: None,
                     gamma_real_used: false,
                     gamma_real_fallback_reason: self.channels[0]
                         .states
@@ -1177,146 +1037,6 @@ impl CollinearProblem {
             previous_residual = charge_residual.max(spin_residual);
         }
         unreachable!()
-    }
-}
-/// Inputs of one standard verification attempt (ONEPATH-3), computed from the
-/// stop step (delivered state) and the verification map at its output.
-struct StandardCheck<'a> {
-    threshold_ha: f64,
-    iteration: usize,
-    eigen_tolerance_ha: f64,
-    delivered: &'a [Array3<f64>; 2],
-    fresh_output: &'a [Array3<f64>; 2],
-    charge_residual: f64,
-    spin_residual: f64,
-    eigen_change: f64,
-    energy_change: f64,
-    fresh_energy: f64,
-    free_energy: f64,
-    saved_evaluation: Option<dft_physics::occupations::Evaluation>,
-    saved_occupations: Option<&'a [f64]>,
-    fresh_charge: [f64; 2],
-    counts: [f64; 2],
-    residuals: [f64; 2],
-    clock: Instant,
-}
-impl CollinearProblem {
-    /// ADR 0043 V2/V3 for two spin channels and (optionally) Fermi-Dirac
-    /// occupations: pass on the collinear Coulomb estimate of F(rho) - rho and
-    /// the residual guard of the verification solve below the threshold, plus
-    /// the number/edge validity checks of the strict certificate. Strict
-    /// certificate criteria are information only.
-    fn standard_attempt(&mut self, c: StandardCheck<'_>) -> Result<VerificationAttempt, ScfError> {
-        let o = self.channels[0].options.clone();
-        let electrons = self.channels[0].electrons;
-        let number = 1e-10 * electrons.max(1.0);
-        let coulomb_error_ha = self.spin_error(c.delivered, c.fresh_output)?;
-        let residual_bound_ha =
-            dft_numerics::switches::on(dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD)
-                .then(|| self.residual_estimate());
-        let weight = self.channels[0].cell.volume_bohr3() / c.delivered[0].len() as f64;
-        let delivered_moment = (c.delivered[0].sum() - c.delivered[1].sum()) * weight;
-        let moment_change = (c.fresh_charge[0] - c.fresh_charge[1] - delivered_moment).abs();
-        let (valid, energy_ok, occupations_ok, occupation_change, mu_change) = if let Some(f) =
-            &self.finite
-        {
-            let fresh = f.evaluation.expect("verification number solve");
-            let nk = self.channels[0].states.len();
-            let change = c
-                .saved_occupations
-                .expect("saved occupations")
-                .iter()
-                .zip(f.occupations())
-                .enumerate()
-                .map(|(i, (a, b))| {
-                    self.channels[0].states[(i / f.bands) % nk].point.weight * (a - b).abs()
-                })
-                .sum::<f64>();
-            let mu_change = c.saved_evaluation.map(|saved| {
-                saved
-                    .roots
-                    .iter()
-                    .zip(&fresh.roots)
-                    .filter_map(|(a, b)| a.zip(*b))
-                    .map(|(a, b)| (a.mu_ha - b.mu_ha).abs())
-                    .fold(0.0, f64::max)
-            });
-            let valid = fresh.electron_residual.abs() <= number
-                && fresh.moment_residual.unwrap_or(0.0).abs() <= number
-                && (c.fresh_charge[0] + c.fresh_charge[1] - electrons).abs() <= number
-                && match f.constraint() {
-                    Constraint::Total => true,
-                    Constraint::FixedMoment(m) => {
-                        (c.fresh_charge[0] - c.fresh_charge[1] - m).abs() <= number
-                    }
-                }
-                && fresh.edge_max_fraction <= 1e-8
-                && fresh.edge_electrons <= number;
-            (
-                valid,
-                (c.fresh_energy - fresh.entropy_term_ha - c.free_energy).abs()
-                    <= o.energy_tolerance,
-                change <= 1e-8 * electrons.max(1.0),
-                Some(change),
-                mu_change,
-            )
-        } else {
-            let valid = c
-                .fresh_charge
-                .iter()
-                .zip(c.counts)
-                .all(|(a, b)| (a - b).abs() <= number)
-                && (c.fresh_charge[0] + c.fresh_charge[1] - electrons).abs() <= number
-                && (c.fresh_charge[0] - c.fresh_charge[1] - self.sector.moment()).abs() <= number;
-            (
-                valid,
-                c.energy_change <= o.energy_tolerance,
-                c.eigen_change <= 1e-7,
-                None,
-                None,
-            )
-        };
-        if !coulomb_error_ha.is_finite() || !c.charge_residual.is_finite() {
-            return Err(ScfError::NonFinite);
-        }
-        #[allow(unused_mut)]
-        let mut passed = coulomb_error_ha < c.threshold_ha
-            && residual_bound_ha.is_none_or(|b| b < c.threshold_ha)
-            && valid;
-        #[cfg(test)]
-        if self.channels[0].force_verification_failures > 0 {
-            self.channels[0].force_verification_failures -= 1;
-            passed = false;
-        }
-        let strict_criteria_met = c.charge_residual <= o.density_tolerance
-            && c.spin_residual <= o.density_tolerance
-            && energy_ok
-            && occupations_ok
-            && c.residuals.iter().all(|r| *r <= o.eigen_tolerance);
-        let solutions = || {
-            self.blocks
-                .iter()
-                .flatten()
-                .map(|w| w.solution.as_ref().unwrap())
-        };
-        Ok(VerificationAttempt {
-            iteration: c.iteration,
-            passed,
-            coulomb_error_ha,
-            threshold_ha: c.threshold_ha,
-            eigen_tolerance_ha: c.eigen_tolerance_ha,
-            residual_bound_ha,
-            density_residual: c.charge_residual,
-            occupied_eigenvalue_change_ha: c.eigen_change,
-            strict_criteria_met,
-            davidson_iterations: solutions().map(|s| s.iterations).sum(),
-            operator_applications: solutions().map(|s| s.operator_applications).sum(),
-            wall: c.clock.elapsed(),
-            spin_density_residual: Some(c.spin_residual),
-            occupation_change_electrons: occupation_change,
-            chemical_potential_change_ha: mu_change,
-            moment_change: Some(moment_change),
-        })
     }
 }
 fn spin_distances(a: &[Array3<f64>; 2], b: &[Array3<f64>; 2], weight: f64, n: f64) -> (f64, f64) {

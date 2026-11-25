@@ -97,7 +97,7 @@ fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
         let out = format!("reuse-{mode}-{}", extra.1);
         let o = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             // R6C: these counters belong to the legacy driver.
-            .env("BAANDI_REFERENCE_SCF", "off")
+            .env("BAANDI_REFERENCE_STRICT", "on")
             .env("BAANDI_DAVIDSON", "lean")
             .env("BAANDI_REUSE_PSI", mode)
             .env("BAANDI_EWALD_FAST", "off")
@@ -1249,7 +1249,7 @@ fn spin_share_results_include_shared_and_fallback_counts() {
         fs::write(c.dir.join("spin.toml"), input).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             // R6C: these counters belong to the legacy driver.
-            .env("BAANDI_REFERENCE_SCF", "off")
+            .env("BAANDI_REFERENCE_STRICT", "on")
             .current_dir(&c.dir)
             .args(["run", "spin.toml", "--output-dir", name])
             .env("BAANDI_SPIN_SHARE", mode)
@@ -1322,7 +1322,7 @@ fn verification_schedule_json_is_lazy_and_optional() {
         let dest = case.dir.join(mode);
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             // R6C: these counters belong to the legacy driver.
-            .env("BAANDI_REFERENCE_SCF", "off")
+            .env("BAANDI_REFERENCE_STRICT", "on")
             .current_dir(&case.dir)
             .env("BAANDI_REFERENCE_STRICT", "off")
             .env("BAANDI_VERIFY_SCHEDULE", mode)

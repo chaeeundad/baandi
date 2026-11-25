@@ -211,8 +211,7 @@ fn solve(
     selection: dft_cli::driver_select::Selection,
 ) -> Result<Map, RunError> {
     match selection.driver {
-        dft_cli::driver_select::Driver::LegacyStandard
-        | dft_cli::driver_select::Driver::StrictOracle => {
+        dft_cli::driver_select::Driver::StrictOracle => {
             let starts = warm.map(std::slice::from_ref);
             let s = problem
                 .step_kpoints_with_certification(n, starts, ethr / 2., selection.strict())
@@ -307,20 +306,13 @@ pub fn execute(args: &Arguments) -> Result<(), RunError> {
     );
     selection.announce();
     let mut opts = run::options_for(&config, selection)?;
-    // The map diagnostic supplies its own threshold; STRICT keeps residual certification.
-    if !selection.strict() {
-        opts.standard = Some(dft_engine::StandardProfile {
-            threshold_ha: profile.threshold_ry / 2.,
-        });
-    }
+    // This diagnostic uses the oracle only for the shared map data.
+    opts.standard = None;
+    opts.verification = dft_engine::Verification::Off;
     opts.gamma_real = dft_engine::GammaReal::On;
     opts.start_wavefunctions = dft_engine::StartWavefunctions::Atomic;
     let mut problem = ScfProblem::new(&prepared.cell, &atoms, &refs, opts).map_err(fail)?;
-    if let Some(floor) = config
-        .xc
-        .density_floor
-        .or_else(|| problem.core_density().map(|_| 1e-10))
-    {
+    if let Some(floor) = problem.core_density().map(|_| 1e-10) {
         problem.set_density_floor(floor).map_err(fail)?;
     }
     let dims = problem.grid_dimensions();

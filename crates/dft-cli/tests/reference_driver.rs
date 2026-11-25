@@ -228,13 +228,13 @@ fn broyden_reference_inputs_and_verified_records() {
     fs::write(dir.join("in.toml"), format!("{text}driver='legacy'\n")).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
         .current_dir(&dir)
-        .env("BAANDI_REFERENCE_SCF", "off")
+        .env("BAANDI_REFERENCE_STRICT", "on")
         .env("BAANDI_REFERENCE_STRICT", "off")
         .args(["run", "in.toml", "--output-dir", "rejected"])
         .output()
         .unwrap();
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("mixing"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown scf.driver value"));
     fs::remove_dir_all(dir).unwrap();
 }
 

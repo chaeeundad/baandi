@@ -245,15 +245,9 @@ fn silicon_comparison(controls: &str, commands: &[&str]) {
     let case = Case::new(&pp, true);
     for &command in commands {
         let (reference, _) = case.success(command, "reference", controls, "", false);
-        let (legacy, _) = case.success(
-            command,
-            "legacy",
-            &format!("driver='legacy'\n{controls}"),
-            "",
-            false,
-        );
+        let (legacy, _) = case.success(command, "legacy", controls, "", true);
         route(&reference, "reference");
-        route(&legacy, "legacy");
+        route(&legacy, "strict_oracle");
         println!(
             "Si2 {command}: max eigenvalue difference {:.12e} Ha",
             compare(&reference, &legacy, 0)
@@ -272,7 +266,7 @@ fn spin_channels_and_legacy_pin() {
     )
     .unwrap();
     for command in ["bands", "dos"] {
-        let (scalar, _) = case.success(command, "legacy", "driver='legacy'\n", "", false);
+        let (scalar, _) = case.success(command, "oracle", "", "", true);
         let (spin, out) = case.success(
             command,
             "spin",
@@ -280,7 +274,7 @@ fn spin_channels_and_legacy_pin() {
             "[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
             false,
         );
-        route(&scalar, "legacy");
+        route(&scalar, "strict_oracle");
         route(&spin, "reference");
         read_spin(&out, command);
         assert_eq!(spin["band_data"]["shape"][0], 2);
@@ -354,9 +348,9 @@ fn polarized_density_is_not_collapsed() {
     let (failure, _) = case.run(
         "bands",
         "unsupported-legacy-spin",
-        "driver='legacy'\n",
+        "",
         "[spin]\nmode='collinear'\nn_up=1\nn_down=0\n",
-        false,
+        true,
     );
     assert_eq!(failure.status.code(), Some(1));
     assert!(
@@ -398,14 +392,8 @@ fn silicon_tight_dos_per_k_oracle() {
             base.split("[bands]").next().unwrap()
         );
         fs::write(&base_path, text).unwrap();
-        let (legacy, _) = case.success(
-            "bands",
-            &format!("legacy-{k}"),
-            &format!("driver='legacy'\n{controls}"),
-            "",
-            false,
-        );
-        route(&legacy, "legacy");
+        let (legacy, _) = case.success("bands", &format!("legacy-{k}"), controls, "", true);
+        route(&legacy, "strict_oracle");
         for (band, value) in reference["band_data"]["eigenvalues_ha"][0][k]
             .as_array()
             .unwrap()

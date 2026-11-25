@@ -4,14 +4,24 @@ const DIAMOND: &str = include_str!("../../../examples/si_lda.toml");
 
 #[test]
 fn symmetry_grid_explicit_and_automatic_both_drivers() {
-    for driver in ["legacy", "reference"] {
+    for driver in ["strict_oracle", "reference"] {
+        let scope = dft_numerics::switches::RunConfig::from_pairs(&[(
+            "reference_strict",
+            if driver == "strict_oracle" {
+                "on"
+            } else {
+                "off"
+            },
+        )])
+        .unwrap();
+        let _guard = scope.enter();
         for group in ["mesh", "crystal"] {
             for mesh in [
                 "kpoints = [[0.0, 0.0, 0.0]]",
                 "kgrid=[4,4,4]\nkshift=[0.5,0.5,0.5]",
             ] {
                 let input = format!(
-                    "{}\n[symmetry]\nmode='auto'\ndensity_group='{group}'\n[scf]\ndriver='{driver}'\n",
+                    "{}\n[symmetry]\nmode='auto'\ndensity_group='{group}'\n[scf]\ndriver='reference'\n",
                     DIAMOND.replace("kpoints = [[0.0, 0.0, 0.0]]", mesh)
                 );
                 let auto = Config::parse(&input).unwrap();
@@ -77,7 +87,17 @@ fn symmetry_grid_run_records_both_drivers() {
     );
     pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>", &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>", array(&|r| r * (-0.6 * r * r).exp())));
     fs::write(dir.join("synthetic.xml"), pp).unwrap();
-    for driver in ["legacy", "reference"] {
+    for driver in ["strict_oracle", "reference"] {
+        let scope = dft_numerics::switches::RunConfig::from_pairs(&[(
+            "reference_strict",
+            if driver == "strict_oracle" {
+                "on"
+            } else {
+                "off"
+            },
+        )])
+        .unwrap();
+        let _guard = scope.enter();
         for explicit in [false, true] {
             let base = DIAMOND
                 .replace("/absolute/path/to/Si.UPF", "synthetic.xml")
@@ -92,7 +112,7 @@ fn symmetry_grid_run_records_both_drivers() {
                 base
             };
             let text = format!(
-                "{base}\n[symmetry]\nmode='auto'\n[scf]\ndriver='{driver}'\nnbands=3\nmax_iterations=2\nverify='off'\n"
+                "{base}\n[symmetry]\nmode='auto'\n[scf]\ndriver='reference'\nnbands=3\nmax_iterations=2\nverify='off'\n"
             );
             let config = Config::parse(&text).unwrap();
             let expected = config.prepare().unwrap().grid.dims();
@@ -100,8 +120,14 @@ fn symmetry_grid_run_records_both_drivers() {
             let out = format!("{driver}-{explicit}");
             let result = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
                 .current_dir(&dir)
-                .env("BAANDI_REFERENCE_SCF", "off")
-                .env("BAANDI_REFERENCE_STRICT", "off")
+                .env(
+                    "BAANDI_REFERENCE_STRICT",
+                    if driver == "strict_oracle" {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                )
                 .args(["run", "in.toml", "--output-dir", &out])
                 .output()
                 .unwrap();

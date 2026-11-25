@@ -36,7 +36,7 @@ fn options(functional: Functional) -> ScfOptions {
         bands: Some(6),
         threads: 1,
         functional,
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn problem(pp: &dft_upf::Pseudopotential, functional: Functional) -> ScfProblem {
@@ -55,7 +55,6 @@ fn problem(pp: &dft_upf::Pseudopotential, functional: Functional) -> ScfProblem 
 /// (grid, mix, local fields, local density) on this rank thread around `f`.
 fn with_arm<T>(comm: &SimRank, arm: (bool, bool, bool, bool), f: impl FnOnce() -> T) -> T {
     parallel::set_m2_override(Some(true));
-    dft_engine::set_stop_metric_override(Some(true));
     dft_engine::grid_dist::set_override(Some(arm.0));
     dft_engine::mix_dist::set_override(Some(arm.1));
     dft_engine::grid_dist::set_owned_override(Some((arm.2, arm.3)));
@@ -66,7 +65,6 @@ fn with_arm<T>(comm: &SimRank, arm: (bool, bool, bool, bool), f: impl FnOnce() -
     dft_engine::grid_dist::set_owned_override(None);
     dft_engine::mix_dist::set_override(None);
     dft_engine::grid_dist::set_override(None);
-    dft_engine::set_stop_metric_override(None);
     parallel::set_m2_override(None);
     out
 }

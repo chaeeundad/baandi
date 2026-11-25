@@ -10,8 +10,6 @@ use serde_json::{Value, json};
 pub enum Driver {
     #[serde(rename = "reference")]
     Reference,
-    #[serde(rename = "legacy")]
-    LegacyStandard,
     #[serde(rename = "strict_oracle")]
     StrictOracle,
 }
@@ -58,29 +56,7 @@ impl Selection {
     pub(crate) fn reference_mixing(self) -> bool {
         self.reference() || matches!(self.reason, Some(G4D_FALLBACK))
     }
-    /// A reference selection with an eligibility reason is a rejected explicit
-    /// request, never permission to execute a different driver.
-    pub fn validate(self, config: &Config) -> Result<(), crate::config::ConfigError> {
-        if self.reference()
-            && self.source == Source::Input
-            && let Some(reason) = self.reason
-        {
-            let mut keys = legacy_keys(config);
-            if spin_fd(config) {
-                keys.extend(["spin.mode", "occupations.mode"]);
-                if config.xc.functional.engine() == dft_engine::Functional::Pbe {
-                    keys.push("xc.functional");
-                }
-            }
-            return Err(crate::config::ConfigError::Invalid(format!(
-                "explicit reference driver request cannot be honored: {reason}; legacy-only keys/features: {}; remove the conflicting controls or explicitly select scf.driver = \"legacy\"",
-                if keys.is_empty() {
-                    reason.to_string()
-                } else {
-                    keys.join(", ")
-                }
-            )));
-        }
+    pub fn validate(self, _config: &Config) -> Result<(), crate::config::ConfigError> {
         Ok(())
     }
     pub fn json(self) -> Value {
@@ -94,8 +70,9 @@ impl Selection {
             .as_object_mut()
             .unwrap()
             .extend(self.json().as_object().unwrap().clone());
-        if self.driver == Driver::LegacyStandard && self.reason.is_some() {
+        if self.reason == Some(G4D_FALLBACK) {
             result["reference_driver_fallback_reason"] = json!(self.reason);
+            result["execution"]["reference_driver_fallback_reason"] = json!(self.reason);
         }
     }
     pub fn announce(self) {
@@ -106,12 +83,6 @@ impl Selection {
 pub const STRICT: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
 pub const G4D_FALLBACK: &str =
     "reference driver: free-moment collinear FD with PBE not yet qualified, G4D";
-pub const VARIABLE_CELL: &str =
-    "L4: variable-cell relaxation requires legacy frozen-strain support";
-pub const EXTRAPOLATION: &str = "L5: relaxation density extrapolation requires the legacy driver";
-pub const CHECKPOINT: &str = "L6: checkpoint/restart v1 requires the legacy session";
-pub const LEGACY_INPUT: &str = "L9: explicit legacy-only SCF controls";
-
 fn source(id: Id) -> Source {
     match RunConfig::current().source(id) {
         switches::Source::Input => Source::Input,
@@ -128,27 +99,22 @@ pub fn requested(config: &Config) -> Selection {
             source: source(Id::REFERENCE_STRICT),
         };
     }
-    if let Some(driver) = config.scf.as_ref().and_then(|s| s.driver.as_deref()) {
-        return Selection {
-            driver: if driver == "reference" {
-                Driver::Reference
-            } else {
-                Driver::LegacyStandard
-            },
-            reason: None,
-            source: Source::Input,
-        };
-    }
     Selection {
-        driver: if switches::on(Id::REFERENCE_SCF) {
-            Driver::Reference
-        } else {
-            Driver::LegacyStandard
-        },
+        driver: Driver::Reference,
         reason: None,
-        source: source(Id::REFERENCE_SCF),
+        source: if config
+            .scf
+            .as_ref()
+            .and_then(|s| s.driver.as_deref())
+            .is_some()
+        {
+            Source::Input
+        } else {
+            Source::Default
+        },
     }
 }
+
 fn spin_fd(c: &Config) -> bool {
     c.collinear() && matches!(c.finite_temperature(), Ok(Some(_)))
 }
@@ -161,74 +127,6 @@ fn l1(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
         )
 }
 
-fn l9(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    !legacy_keys(c).is_empty()
-}
-/// Keep the eligibility predicate and diagnostic key inventory together.
-fn legacy_keys(c: &Config) -> Vec<&'static str> {
-    let mut keys = Vec::new();
-    if c.xc.density_floor.is_some() {
-        keys.push("xc.density_floor");
-    }
-    if let Some(s) = &c.scf {
-        for (present, key) in [
-            (
-                matches!(s.mixing.as_deref(), Some("linear" | "kerker-pulay")),
-                "scf.mixing",
-            ),
-            (
-                s.mixing_q0_inverse_bohr.is_some(),
-                "scf.mixing_q0_inverse_bohr",
-            ),
-            (s.mixing_metric.is_some(), "scf.mixing_metric"),
-            (s.spectral_guard.is_some(), "scf.spectral_guard"),
-            (s.locking.is_some(), "scf.locking"),
-            (s.preconditioner.is_some(), "scf.preconditioner"),
-            (
-                s.davidson_capacity_per_band.is_some(),
-                "scf.davidson_capacity_per_band",
-            ),
-            (
-                s.start_density.as_deref() == Some("uniform"),
-                "scf.start_density",
-            ),
-            (
-                s.start_wavefunctions
-                    .as_deref()
-                    .is_some_and(|v| v != "atomic"),
-                "scf.start_wavefunctions",
-            ),
-            (s.energy_tolerance_ha.is_some(), "scf.energy_tolerance_ha"),
-            (
-                s.density_residual_tolerance.is_some(),
-                "scf.density_residual_tolerance",
-            ),
-            (s.eigen_tolerance.is_some(), "scf.eigen_tolerance"),
-            (s.standard_stall_guard.is_some(), "scf.standard_stall_guard"),
-            (
-                s.standard_density_forcing.is_some(),
-                "scf.standard_density_forcing",
-            ),
-            // "off" is reference behaviour; only an explicit ladder is legacy-only.
-            (
-                s.cutoff_ladder.as_deref() == Some("on"),
-                "scf.cutoff_ladder",
-            ),
-            (
-                s.cutoff_ladder_fraction.is_some(),
-                "scf.cutoff_ladder_fraction",
-            ),
-        ] {
-            if present {
-                keys.push(key);
-            }
-        }
-    }
-    keys
-}
-
-type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
-const LEGACY_ONLY: &[(Predicate, &str)] = &[(l1, G4D_FALLBACK), (l9, LEGACY_INPUT)];
 /// An empty UPF slice is a preliminary input-only decision. Commands must pass
 /// every parsed potential for the final decision before engine construction.
 pub fn select(
@@ -249,21 +147,16 @@ pub fn select(
             driver: if reference {
                 Driver::Reference
             } else {
-                Driver::LegacyStandard
+                Driver::StrictOracle
             },
             reason: None,
             source: Source::Input,
         };
     }
     if selection.reference() {
-        if let Some((_, reason)) = LEGACY_ONLY
-            .iter()
-            .find(|(predicate, _)| predicate(config, mode, command, upfs))
-        {
-            if selection.source != Source::Input {
-                selection.driver = Driver::LegacyStandard;
-            }
-            selection.reason = Some(reason);
+        if l1(config, mode, command, upfs) {
+            selection.driver = Driver::StrictOracle;
+            selection.reason = Some(G4D_FALLBACK);
         }
         if spin_fd(config) {
             RunConfig::current().note_path(
@@ -271,7 +164,7 @@ pub fn select(
                 if selection.reference() {
                     "reference"
                 } else {
-                    "legacy"
+                    "strict_oracle"
                 },
                 selection.reason,
             );

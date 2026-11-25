@@ -31,7 +31,7 @@ fn options(functional: Functional, start: StartWavefunctions) -> ScfOptions {
         // Spin runs use the complex path; the unpolarized reference must too.
         gamma_real: GammaReal::Off,
         start_wavefunctions: start,
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn gamma() -> Vec<KPoint> {

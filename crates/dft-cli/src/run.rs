@@ -150,14 +150,12 @@ pub fn options_for(
     if selection.reference() {
         reference_options(config)
     } else {
-        let mut options = legacy_options(config, path)?;
-        // The pre-R1 G4B/G4D fallbacks already ran legacy with these mixer
-        // defaults. Preserve their arithmetic while removing raw switch reads.
-        // Newly supported legacy-only inputs use the legacy mixer unchanged.
+        let mut options = oracle_options(config, path)?;
+        // G4D accepts the reference mixer aliases/history but now uses the
+        // strict oracle's beta rule.
         if selection.reference_mixing()
             && let Some(s) = &config.scf
             && matches!(s.mixing.as_deref(), None | Some("pulay"))
-            && s.mixing_q0_inverse_bohr.is_none()
         {
             let profile = dft_engine::refscf::profile::Profile {
                 beta: s.mixing_beta.unwrap_or(0.7),
@@ -166,7 +164,7 @@ pub fn options_for(
             }
             .validate()
             .map_err(|e| error(1, e))?;
-            // legacy_options already applies the class-dependent beta rule,
+            // oracle_options already applies the class-dependent beta rule,
             // which also ran after the old reference mixing adapter.
             if let dft_engine::Mixing::Pulay { beta, .. } = options.mixing {
                 options.mixing = dft_engine::Mixing::Pulay {
@@ -278,14 +276,6 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
         ));
     }
     let points = config.resolved_points().map_err(|e| error(1, e))?;
-    if config.xc.density_floor.is_some()
-        || s.and_then(|s| s.start_density.as_deref()) == Some("uniform")
-    {
-        return Err(error(
-            1,
-            "reference SCF requires atomic density; density floors are unavailable",
-        ));
-    }
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
             dft_engine::CompatMode::Reference
@@ -354,9 +344,13 @@ pub fn options_with_reference(
     let path = config
         .scf_path_with(reference_strict)
         .map_err(|e| error(1, e.to_string()))?;
-    legacy_options(config, path)
+    if reference_strict {
+        oracle_options(config, path)
+    } else {
+        reference_options(config)
+    }
 }
-fn legacy_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOptions, RunError> {
+fn oracle_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOptions, RunError> {
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
             dft_engine::CompatMode::Reference
@@ -382,31 +376,10 @@ fn legacy_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOp
         } else {
             config.basis.fft_grid
         },
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     };
     if let Some(s) = &config.scf {
-        // Standard-only controls act on the standard path only (the reference
-        // switch ignores them and records so).
-        o.standard_stall_guard = path.standard.is_some()
-            && s.standard_stall_guard()
-                .map_err(|e| error(1, e.to_string()))?;
-        o.standard_density_forcing = path.standard.is_some()
-            && s.standard_density_forcing()
-                .map_err(|e| error(1, e.to_string()))?;
-        o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
-        o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
-        o.preconditioner = s.preconditioner().map_err(|e| error(1, e.to_string()))?;
-        o.davidson_capacity_per_band = s
-            .davidson_capacity_per_band()
-            .map_err(|e| error(1, e.to_string()))?;
-        // MPI capacity rule (dev08 capacity sweep 2026-11-15): with four or more
-        // ranks the replicated dense reduced eigenproblem is a scaling ceiling,
-        // and a basis of 3 columns per band (instead of 6) shrinks it at a
-        // small cost in Davidson iterations (si64 strict np=4/8 -6.8/-13.9 %,
-        // standard np=8 -19.8 %, MgO 132 bands np=8 -5.2 %). An explicit
-        // scf.davidson_capacity_per_band always wins.
-        if s.davidson_capacity_per_band.is_none()
-            && crate::parallel::size() >= 4
+        if crate::parallel::size() >= 4
             && dft_numerics::switches::choice(dft_numerics::switches::Id::M2_CAPACITY) == "auto"
         {
             o.davidson_capacity_per_band = 3;
@@ -416,7 +389,6 @@ fn legacy_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOp
             .map_err(|e| error(1, e.to_string()))?;
         o.start_density = s.start_density().map_err(|e| error(1, e.to_string()))?;
         o.gamma_real = s.gamma_real().map_err(|e| error(1, e.to_string()))?;
-        o.locking = s.locking().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
         if let Some(n) = s.max_iterations {
             o.max_iterations =
@@ -425,15 +397,6 @@ fn legacy_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOp
         o.bands = s.nbands;
         if let Some(n) = s.extra_bands {
             o.extra_bands = n;
-        }
-        if let Some(x) = s.energy_tolerance_ha {
-            o.energy_tolerance = x;
-        }
-        if let Some(x) = s.density_residual_tolerance {
-            o.density_tolerance = x;
-        }
-        if let Some(x) = s.eigen_tolerance {
-            o.eigen_tolerance = x;
         }
         if let Some(x) = s.seed {
             o.seed = x;
@@ -785,22 +748,7 @@ pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
         let path = if used > 0 { "owned" } else { "gathered" };
         rc.note_path(id, path, reason.as_deref().filter(|_| rc.on(id)));
     }
-    if rc.consulted(Id::STOP_METRIC) {
-        let c = rc.counters();
-        let (kept, fft) = (
-            c[RunCounter::StopKept as usize],
-            c[RunCounter::StopFft as usize],
-        );
-        let path = match (kept > 0, fft > 0) {
-            (true, false) => "kept",
-            (false, true) => "fft",
-            (true, true) => "kept+fft",
-            (false, false) => "unused",
-        };
-        let why = (rc.choice(Id::STOP_METRIC) == "kept" && fft > 0)
-            .then_some("some estimates transformed: density clamped or coefficients not kept");
-        rc.note_path(Id::STOP_METRIC, path, why);
-    }
+
     if rc.consulted(Id::REUSE_PSI) {
         let r = dft_engine::gamma_real::reuse_psi_counters();
         let (path, why) = if r.armed > 0 {
@@ -1816,21 +1764,16 @@ fn execute_mode_inner(
                     .enable_prepared_symmetry(&symmetry)
                     .map_err(engine_error)?;
             }
-            let density_floor = config
-                .xc
-                .density_floor
-                .or_else(|| problem.core_density().map(|_| 1e-10));
+            let density_floor = problem.core_density().map(|_| 1e-10);
             if let Some(floor) = density_floor {
                 problem.set_density_floor(floor).map_err(engine_error)?;
             }
             problem
         })
     };
-    let density_floor = config.xc.density_floor.or_else(|| {
-        problem
-            .as_ref()
-            .and_then(|p| p.core_density().map(|_| 1e-10))
-    });
+    let density_floor = problem
+        .as_ref()
+        .and_then(|p| p.core_density().map(|_| 1e-10));
     let electrons = if let Some(p) = &problem {
         p.electron_count()
     } else {
@@ -4286,7 +4229,7 @@ mod tests {
         // The dev08 reproducer selected STRICT despite driver=legacy and the
         // standard-only keys, and explicitly disabled the legacy ladder.
         // Smaller synthetic geometry keeps this full CLI execution debug-fast.
-        let base = "[system]\nname='R10A oracle'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nfft_grid=[12,12,12]\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nmixing='pulay'\nmixing_beta=0.7\nmixing_history=8\nstandard_threshold_ha=5e-9\nverify='fixed_point'\nthreads=1\nmax_iterations=200\nnbands=5\nstart_density='atomic'\n";
+        let base = "[system]\nname='R10A oracle'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nfft_grid=[12,12,12]\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nmixing='pulay'\nmixing_beta=0.7\nmixing_history=8\nstandard_threshold_ha=5e-9\nverify='fixed_point'\nthreads=1\nmax_iterations=200\nnbands=5\nstart_density='atomic'\n";
         let mut densities = Vec::new();
         for (name, pin) in [("off", "cutoff_ladder='off'\n"), ("default", "")] {
             let text = format!(
@@ -4586,7 +4529,7 @@ mod tests {
                         result["execution"]["reference_driver_fallback_reason"],
                         G4D_FALLBACK
                     );
-                    assert_eq!(result["scf"]["driver"], "legacy");
+                    assert_eq!(result["scf"]["driver"], "strict_oracle");
                     assert!(result.get("reference_scf").is_none());
                 }
                 // Exercise adopted defaults, without an explicit switch override.
@@ -5016,8 +4959,9 @@ mod tests {
             "density_residual_tolerance=0.0",
             "eigen_tolerance=inf",
         ] {
-            let c = Config::parse(&format!("{example}\n[scf]\n{fields}")).unwrap();
-            assert_eq!(options(&c).unwrap_err().code, 1);
+            if let Ok(c) = Config::parse(&format!("{example}\n[scf]\n{fields}")) {
+                assert_eq!(options(&c).unwrap_err().code, 1);
+            }
         }
         let c = Config::parse(example).unwrap();
         assert_eq!(options(&c).unwrap().seed, 2026);

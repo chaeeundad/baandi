@@ -14,7 +14,7 @@ fn fixture_with(threads: usize, counts: [usize; 2], seed: f64, finite: bool) -> 
         threads,
         max_iterations: 200,
         gamma_real: GammaReal::Off,
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     };
     let sector = SpinSector {
         n_up: counts[0],
@@ -272,7 +272,7 @@ fn atomic_start_sharing_preserves_lda_and_pbe_states() {
                     cutoff_hartree: 3.,
                     gamma_real: GammaReal::Off,
                     start_wavefunctions: StartWavefunctions::Atomic,
-                    ..ScfOptions::default()
+                    ..ScfOptions::strict_reference()
                 },
                 &[KPoint {
                     fractional: [0.; 3],

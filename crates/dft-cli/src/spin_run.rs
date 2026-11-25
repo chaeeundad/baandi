@@ -169,13 +169,9 @@ pub(super) fn execute(
         .history
         .iter()
         .map(|h| {
-            let mut v = json!({"iteration":h.iteration,"energy_ha":h.energy_ha,"charge_density_residual":h.charge_density_residual,"spin_density_residual":h.spin_density_residual,"mixing_fraction":h.mixing_fraction});
+            let v = json!({"iteration":h.iteration,"energy_ha":h.energy_ha,"charge_density_residual":h.charge_density_residual,"spin_density_residual":h.spin_density_residual,"mixing_fraction":h.mixing_fraction});
             // ONEPATH-3: standard-path estimate, step tolerance and redo flag.
-            if let Some(e) = h.standard_error_ha {
-                v["standard_error_ha"] = json!(e);
-                v["requested_eigen_tolerance_ha"] = json!(h.requested_eigen_tolerance);
-                v["standard_first_iteration_redo"] = json!(h.standard_redo);
-            }
+
             v
         })
         .collect();
@@ -275,16 +271,7 @@ pub(super) fn execute(
         result["state_contracts"]["stress"] = stress_json(&stress);
         fs::write(out.join("stress.txt"), stress_table(&stress)).map_err(|e| error(1, e))?;
     }
-    super::driver_standard_json(
-        &mut result,
-        r.standard,
-        r.verification.as_ref(),
-        &r.history
-            .iter()
-            .map(|h| h.standard_error_ha)
-            .collect::<Vec<_>>(),
-        r.converged,
-    );
+
     if let (Some(r), Value::Object(extra)) = (result.as_object_mut(), path_record) {
         r.extend(extra);
     }

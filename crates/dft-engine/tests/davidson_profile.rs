@@ -40,7 +40,7 @@ fn lane_trace_is_bit_identical_and_rank_local() {
                         ..if strict {
                             ScfOptions::strict_reference()
                         } else {
-                            ScfOptions::default()
+                            ScfOptions::strict_reference()
                         }
                     },
                 )

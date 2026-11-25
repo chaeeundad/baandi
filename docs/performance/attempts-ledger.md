@@ -3933,3 +3933,38 @@ Complete reader/retention inventory and validation: [switch-retirement.md](switc
 | `REFSTART_LOCAL_SHELLS` | P3t (line 3659) | retired in R11a, recreate from git `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1` if needed |
 | `REF_DAV_STACK_ROTATE` | GEN-2432530 (line 3732) | retired in R11a, recreate from git `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1` if needed |
 | `REF_DAV_SETUP_FUSED` | GEN-2432530 (line 3732) | retired in R11a, recreate from git `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1` if needed |
+
+
+## R10BC-LEGACY-STANDARD (2026-11-25): legacy standard switch retirement (blocked, incomplete)
+
+The two CLI routes are Reference and StrictOracle; the negative G4D qualification
+routes to StrictOracle with the reason recorded. L9 input keys are unknown keys.
+This is deletion work, not a performance adoption claim. No dev08 timing was run.
+The full gate is not passing yet; test migration and remaining oracle cleanup are
+pending. Shared orphan cleanup and benchmark metadata changes require an
+extension of the ticket's owned files. The uncommitted patch is not an accepted
+R10c completion; standard-only Gamma/MPI branches and test migration remain.
+
+| Removed registry switch | Reason |
+| --- | --- |
+| `REFERENCE_SCF` | Reference is the production route; strict oracle has its own switch. |
+| `STANDARD_STOP` | The legacy standard stop rule has been deleted from the oracle session. |
+| `VERIFY_REUSE` | Legacy standard verification retry/reuse has been deleted. |
+| `STOP_METRIC` | Legacy standard Coulomb stopping estimates have been deleted. |
+| `VERIFY_SCHEDULE` | Legacy standard verification scheduling has been deleted. |
+| `STOP_PREDICTOR` | Legacy standard cross-estimate verification has been deleted. |
+
+The registry shrinks from 133 to 127 entries. `STANDARD_RESIDUAL_GUARD` stays:
+`refscf/electronic.rs` still consumes it. `CERT_SCREEN` stays because the strict
+oracle consumes it; deleting that screen would change the protected arithmetic.
+
+Mac identity evidence: `reference_identity` and `oracle_identity` pass.
+Release Gamma/k222s/k222 checks against `baseline-reference.json` and
+`baseline-oracle.json` each give delta energy 0 Ha and identical density hashes
+(three reference iterations counts 7/7/7; oracle 8/10/10). The checked-in
+`bench_scf.py` exits 3 because it requires the retired `REFERENCE_SCF` metadata.
+These six comparisons used a temporary copy with only that metadata requirement
+removed; they do not establish that the required checked-in command passes.
+Local logs and records: `/tmp/r10bc/{reference,oracle}.json` and
+`/tmp/r10bc/bench-{reference,oracle}-adapted.log`. Re-run the repository command
+after its metadata contract is updated. No numerical tolerance was relaxed.

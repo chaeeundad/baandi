@@ -428,25 +428,6 @@ pub(crate) fn capture_exit(c: Capture, result: &RealEigenSolution, kept_taken: b
     with_slot(|s| s.io_seconds += clock.elapsed().as_secs_f64());
 }
 
-/// Record the outcome of the verification whose map was captured last
-/// (rank 0 rewrites the manifest; outside any timed phase).
-pub(crate) fn annotate_verification(passed: bool) {
-    if dir().is_none() {
-        return;
-    }
-    let path = with_slot(|s| s.last_manifest.take());
-    if let Some(path) = path
-        && let Ok(text) = std::fs::read_to_string(&path)
-    {
-        let text = text.replacen(
-            "\"verification_passed\": null",
-            &format!("\"verification_passed\": {passed}"),
-            1,
-        );
-        let _ = std::fs::write(&path, text);
-    }
-}
-
 /// A start injected into the next solve of a rank (replay).
 pub struct ReplayStart {
     /// This rank's rows of X (M2 path) or the full ORC block (threads path).

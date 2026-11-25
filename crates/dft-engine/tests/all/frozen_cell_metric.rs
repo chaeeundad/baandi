@@ -29,7 +29,7 @@ fn standard_scf_in_an_expanded_cell_on_the_frozen_reference_grid() {
     let standard = ScfOptions {
         cutoff_hartree: 1.5,
         bands: Some(4),
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     };
     assert!(
         standard.standard.is_some(),

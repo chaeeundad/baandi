@@ -49,7 +49,7 @@ fn run(kind: usize, pp: &dft_upf::Pseudopotential) -> ScfResult {
             bands: Some(6),
             threads: 1,
             grid_override: (kind == 2).then_some([18, 18, 12]),
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -66,7 +66,6 @@ fn ranks_run(
 ) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
-        dft_engine::set_stop_metric_override(Some(true));
         dft_engine::grid_dist::set_override(Some(arm.0));
         dft_engine::mix_dist::set_override(Some(arm.1));
         dft_engine::grid_dist::set_owned_override(Some((arm.2, arm.3)));
@@ -77,7 +76,6 @@ fn ranks_run(
         dft_engine::grid_dist::set_owned_override(None);
         dft_engine::mix_dist::set_override(None);
         dft_engine::grid_dist::set_override(None);
-        dft_engine::set_stop_metric_override(None);
         parallel::set_m2_override(None);
         r
     })
@@ -180,7 +178,6 @@ fn owned_density_boundary_materializes_on_demand() {
     let session_run = |interrupt: bool| {
         simulate(2, |comm: &SimRank| {
             parallel::set_m2_override(Some(true));
-            dft_engine::set_stop_metric_override(Some(true));
             dft_engine::grid_dist::set_override(Some(true));
             dft_engine::mix_dist::set_override(Some(true));
             dft_engine::grid_dist::set_owned_override(Some((true, true)));
@@ -202,7 +199,7 @@ fn owned_density_boundary_materializes_on_demand() {
                     cutoff_hartree: 3.,
                     bands: Some(6),
                     threads: 1,
-                    ..ScfOptions::default()
+                    ..ScfOptions::strict_reference()
                 },
             )
             .unwrap();
@@ -225,7 +222,6 @@ fn owned_density_boundary_materializes_on_demand() {
             dft_engine::grid_dist::set_owned_override(None);
             dft_engine::mix_dist::set_override(None);
             dft_engine::grid_dist::set_override(None);
-            dft_engine::set_stop_metric_override(None);
             parallel::set_m2_override(None);
             (s.result().map(|o| bits(&o.result)), charge)
         })

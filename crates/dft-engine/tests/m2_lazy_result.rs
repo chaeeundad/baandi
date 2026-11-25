@@ -44,7 +44,7 @@ fn problem(kind: usize, pp: &dft_upf::Pseudopotential) -> ScfProblem {
             cutoff_hartree: 3.,
             bands: Some(6),
             threads: 1,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -87,7 +87,7 @@ fn lazy_result_matches_the_gathered_result() {
                             cell: &cell(kind),
                             atoms: &[],
                             potentials: &[],
-                            options: &ScfOptions::default(),
+                            options: &ScfOptions::strict_reference(),
                             electronic: dft_engine::forces::ElectronicState::Fixed(&r),
                             density_floor: None,
                             symmetry: &[],

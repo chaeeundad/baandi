@@ -19,11 +19,6 @@ pub(crate) fn cell_kerker_scale(cell: &Cell, basis: &PlaneWaveBasis) -> Option<f
     (q02 > 64.0 * f64::EPSILON * cube2).then(|| q02.sqrt())
 }
 
-pub use crate::model::verify::{
-    StandardProfile, Verification, VerificationAttempt, VerificationReport, VerificationSchedule,
-    VerificationScheduleEntry,
-};
-
 /// K maps a signed density to half its Hartree potential times voxel volume.
 /// Thus r.K.r = E_H[r] in Ha. G=0 and modes outside the density sphere vanish.
 /// All FFT buffers and sphere weights are created once, outside SCF steps.
@@ -112,6 +107,7 @@ impl CoulombMetric {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn error(
         &mut self,
         input: &Array3<f64>,
@@ -138,6 +134,7 @@ impl CoulombMetric {
     /// N sum_G w(G) |d(G)|^2 for the real residual d and the symmetric weights
     /// w, so no transform is needed. Rounding class against `error` (the
     /// residual is transformed as two densities; Parseval order of summation).
+    #[cfg(test)]
     pub(crate) fn error_reciprocal(
         &self,
         input: &Array3<Complex64>,
@@ -170,6 +167,7 @@ impl CoulombMetric {
     /// E_0 = N_grid * max weight * <d_m>^2 = (Omega/2) (4 pi / G_min^2) <d_m>^2.
     /// An estimator, not an energy bound. Unpolarized limit (d_up = d_down):
     /// exactly `error` of the total densities.
+    #[cfg(test)]
     pub(crate) fn spin_error(
         &mut self,
         input: &[Array3<f64>; 2],

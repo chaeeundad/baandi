@@ -128,113 +128,113 @@
   "l09-capacity": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-density-floor": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-density-forcing": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-density-tolerance": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-eigen-tolerance": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-energy-tolerance": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-hartree-mixing": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-kerker-pulay": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-linear": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-locking": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": "scf.locking",
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-mixing-q0": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
-    "options_error": "mixing_q0_inverse_bohr requires"
+    "reference_reason": null,
+    "parse_error": "unknown",
+    "options_error": null
   },
   "l09-preconditioner": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-spectral-guard": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-stall-guard": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-uniform": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l09-wavefunctions": {
     "command": "run",
     "mode": "classic",
-    "reference_reason": "LEGACY_INPUT",
-    "parse_error": null,
+    "reference_reason": null,
+    "parse_error": "unknown",
     "options_error": null
   },
   "l10-compat": {

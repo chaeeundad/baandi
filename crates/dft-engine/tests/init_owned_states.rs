@@ -240,7 +240,7 @@ fn scf_threads(
                 cutoff_hartree: 3.,
                 bands: Some(6),
                 threads,
-                ..ScfOptions::default()
+                ..ScfOptions::strict_reference()
             },
         )
         .unwrap();
@@ -425,7 +425,7 @@ fn initial_atomic_ritz_energies_match() {
                             cutoff_hartree: 3.,
                             bands: Some(6),
                             threads: 1,
-                            ..ScfOptions::default()
+                            ..ScfOptions::strict_reference()
                         },
                     )
                     .unwrap();

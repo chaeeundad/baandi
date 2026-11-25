@@ -147,10 +147,6 @@ fn legacy_defaults_are_unchanged() {
     assert!(on(Id::SPIN_SHARE), "SPIN_SHARE defaults on");
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
     assert_eq!(
-        switches::resolve(switches::switch(Id::VERIFY_REUSE), None).0,
-        Value::Choice("half")
-    );
-    assert_eq!(
         switches::resolve(switches::switch(Id::M2_CAPACITY), None).0,
         Value::Choice("auto")
     );
@@ -177,7 +173,6 @@ fn legacy_defaults_are_unchanged() {
     let value = |id: Id| switches::resolve(switches::switch(id), None).0;
     assert_eq!(value(Id::NL_ENERGY), Value::Choice("fast"));
     assert_eq!(value(Id::B1_SKETCH), Value::Choice("count"));
-    assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(
         value(Id::PURE_GEMM),
@@ -233,7 +228,6 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_PANEL_GS), Value::Choice("fused"));
     // MPI-REMAINING grid switches stay opt-in until dev08.
     assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("on"));
-    assert_eq!(value(Id::STOP_METRIC), Value::Choice("kept"));
     // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
     assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
     // BREAKTHROUGH-3 bounded subspace SCF stays off (rejected at stage 1, ledger BT3-*).
@@ -276,9 +270,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::SERIAL_DENSITY_FUSED), Value::Choice("on"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::M2_OWNED_INPUT), Value::Choice("off"));
-    assert_eq!(value(Id::REFERENCE_SCF), Value::Choice("on"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 133);
+    assert_eq!(TABLE.len(), 127);
 }
 
 #[test]
@@ -331,18 +324,6 @@ fn glue_profile_requires_both_switches_and_scopes_its_counters() {
     assert_eq!(cfg.counters()[C::GlueDistMixCalls as usize], 1);
     assert_eq!(cfg.counters()[C::GlueDistPoints as usize], 37);
     assert_eq!(cfg.counters()[C::GlueDistMixNanos as usize], 0);
-}
-
-#[test]
-fn first_verification_schedule_is_opt_in() {
-    let switch = switches::switch(Id::VERIFY_SCHEDULE);
-    assert_eq!(switches::resolve(switch, None).0, Value::Choice("on"));
-    for mode in ["first", "first-trace"] {
-        assert_eq!(
-            switches::resolve(switch, Some(std::ffi::OsStr::new(mode))).0,
-            Value::Choice(mode)
-        );
-    }
 }
 
 // R6a adopts the measured G4B combination while retaining explicit A/B overrides.

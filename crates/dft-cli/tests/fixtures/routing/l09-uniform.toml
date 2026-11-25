@@ -1,7 +1,7 @@
 # expected_driver = rejected
 # expected_reason = reference SCF requires atomic density; density floors are unavailable (options resolution)
 # command = run
-# expected_parse = ok
+# expected_parse = error:unknown
 # switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides
 # upf_requirements = NC; nonzero PP_RHOATOM and s/p PP_PSWFC; functional matches XC
 # R0 freezes current behavior; the parse-only test does not execute this command or read UPFs.

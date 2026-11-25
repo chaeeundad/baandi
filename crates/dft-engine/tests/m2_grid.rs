@@ -48,7 +48,7 @@ fn run(kind: usize, pp: &dft_upf::Pseudopotential) -> ScfResult {
             cutoff_hartree: 3.,
             bands: Some(6),
             threads: 1,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -76,7 +76,6 @@ fn ranks_run_mix(
 ) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
-        dft_engine::set_stop_metric_override(Some(true));
         dft_engine::grid_dist::set_override(grid);
         dft_engine::mix_dist::set_override(mix);
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
@@ -85,7 +84,6 @@ fn ranks_run_mix(
         parallel::set_communicator(None);
         dft_engine::mix_dist::set_override(None);
         dft_engine::grid_dist::set_override(None);
-        dft_engine::set_stop_metric_override(None);
         parallel::set_m2_override(None);
         r
     })

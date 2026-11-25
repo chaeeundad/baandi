@@ -3202,8 +3202,7 @@ factorization handles the transferred block. Ionic fields, mixer and
 verification are rebuilt; there is no exact-replay claim. K-seed storage is
 `16 B sum_k G_k + 8 F` bytes per rank, excluding metadata. Cold initialization
 is currently constructed before injection, so this is a correctness boundary,
-not a claim to eliminate setup cost. Density extrapolation and CLI variable-cell
-relaxation wiring remain unsupported here (R7b/R7c). Reference stress cutoff scans
+not a claim to eliminate setup cost. Reference stress cutoff scans
 use independently converged reference SCFs, sequentially so MPI collectives
 cannot interleave between scans. G5B `stress_prepared` forwards the checked symmetry preparation to every
 cutoff scan, including scan-grid compatibility and the irreducible list. The
@@ -3233,7 +3232,57 @@ protocol: independent nominal-cutoff SCFs at the current cell with
 `strain_reference = None`, a common enlarged grid and +5%/+10% cutoffs; the
 estimate is not silently added to the frozen tensor. Complex ionic seeds also
 retain the reference-cell identity and reject a changed reference at injection.
-Cross-cell seed transfer and CLI cell-relaxation routing remain R7b work.
+R7b routes cell and ions_cell evaluations through `api::solve`, with the
+strained cell and frozen reference/grid. `IonicSeed::in_cell` carries the
+unchanged ordered Miller coefficients (including complex k blocks) and scales
+the fractional-grid density by Omega_old/Omega_new, conserving electron count.
+Gamma seeds use the existing owned-row injection; complex seeds validate the
+source segment and target mesh/grid before injection. Ionic fields, mixer and
+verification are rebuilt. Rebuild/polish evaluations are fresh; disk resume
+has the same explicit missing-orbital fallback as ionic relaxation.
+
+D5: port C3, retaining `start_extrapolation` and `RELAX_EXTRAPOLATION` as
+opt-in, default none. The C3-EXTRAPOLATION ledger measured six-step Si8
+SCF counts 84/76/70 and Mac wall 5.98/5.54/5.27 s (none/first/second order),
+with gains on a synthetic slab, mixed results on fcc and a regression on a
+mismatched Gaussian atomic charge. These are local observations, not a dev08
+speed adoption or a new default. The existing atomic-superposition builder
+supplies n_at without running a legacy SCF; the predictor replaces only the
+seed density with n_at(R_new) plus extrapolated bonding density, clips negative
+samples and restores charge. Delivered orbitals are retained and the next
+reference solve reorthogonalizes them. Existing history/restart and fallback
+labels remain. As before, C3 applies only to ions mode; cell modes use affine
+transfer. L4 and L5 no longer select the legacy driver.
+
+The ignored `cell_relaxation::reference_cell_protocol` test reads the stored
+P23A synthetic starts and pressures from `validation.json`, adds atomic start
+data to the same Gaussian potential, asserts actual reference/legacy routing,
+and compares trajectories at a tightened 5e-15 Ha SCF estimator threshold:
+per-step energy <= 5e-9 Ha, final lattice <= 1e-5 Bohr, pressure <= 1e-6
+Ha/Bohr^3. `reference_cell_seed_and_predictor` covers combined ion/cell,
+complex k, periodic rebuilds and ionic C3 modes. Run both with
+`cargo test --release -p dft-cli --test all cell_relaxation::reference_ -- --ignored --nocapture`.
+Local validation: `reference_cell_seed_and_predictor` passes for the
+unsymmetrized combined, complex-k and rebuild trajectories. Maximum per-step
+energy differences are 7.03e-11, 1.94e-11 and 6.07e-12 Ha respectively; maximum
+final lattice difference is 1.43e-9 Bohr and pressure difference 3.43e-12
+Ha/Bohr^3. Both C3 orders and the none arm pass their energy/provenance checks.
+The existing external Si2 k222 ionic test also passes (maximum dE 6.50e-12 Ha).
+
+**R7b acceptance is blocked:** the stored symmetric protocol fails with a
+force model-identity mismatch, because the existing reference relaxation
+adapter supplies derivative symmetry without a prepared-symmetry SCF.
+`api::solve` currently rejects a seed together with prepared symmetry, and
+`k_driver::run_seeded_with` cannot pass both to its private `run_inner`.
+Completing the port without dropping symmetry requires extending ticket
+ownership to `refscf/api.rs` and `refscf/k_driver.rs`, then wiring prepared
+symmetry and seeded solves together. The ignored protocol test is deliberately
+retained as a failing acceptance reproducer; no tolerance was relaxed.
+An exploratory full-mesh workaround was removed because it changes the
+requested symmetry behavior. Separate unsymmetrized tight-threshold trials
+also exhausted a final cutoff-scan SCF; they are not accepted protocol evidence.
+Real Si/MgO cell protocols and dev08 validation have not been rerun; the
+synthetic/ionic checks above do not replace them.
 
 R7a tests append to `refscf_forces`: missing-grid rejection, explicit ordered
 Miller/kinetic/density-support checks across cutoff-shell crossings, standard

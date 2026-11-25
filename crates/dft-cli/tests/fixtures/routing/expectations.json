@@ -86,14 +86,14 @@
   "l04-variable-cell": {
     "command": "relax",
     "mode": "classic",
-    "reference_reason": "VARIABLE_CELL",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
   "l05-extrapolation": {
     "command": "relax",
     "mode": "classic",
-    "reference_reason": "EXTRAPOLATION",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

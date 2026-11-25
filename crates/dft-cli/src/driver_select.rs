@@ -151,21 +151,6 @@ fn l2(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
 fn l3(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
     matches!(command, Command::Bands | Command::Dos)
 }
-fn l4(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    c.relax
-        .as_ref()
-        .is_some_and(|r| r.mode != crate::relax::cell::Mode::Ions)
-}
-fn l5(c: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
-    (command == Command::Relax || c.relax.is_some())
-        && match switches::text(Id::RELAX_EXTRAPOLATION) {
-            Some(v) => v != "none",
-            None => c
-                .relax
-                .as_ref()
-                .is_some_and(|r| r.start_extrapolation != crate::relax::Extrapolation::None),
-        }
-}
 fn l6(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
     matches!(command, Command::Checkpoint | Command::Restart)
 }
@@ -214,8 +199,6 @@ const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l1, G4D_FALLBACK),
     (l2, G4B_FALLBACK),
     (l3, NSCF),
-    (l4, VARIABLE_CELL),
-    (l5, EXTRAPOLATION),
     (l6, CHECKPOINT),
     (l7, RUNTIME),
     (l8, SESSION),

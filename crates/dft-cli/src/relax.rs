@@ -306,7 +306,7 @@ struct Context {
     /// ADR 0043 path of every ionic step's SCF (recorded in results.json).
     scf_path: crate::config::ScfPath,
     selection: crate::driver_select::Selection,
-    reference_seed: std::cell::RefCell<Option<dft_engine::refscf::delivered::IonicSeed>>,
+    reference_seed: std::cell::RefCell<Option<(Cell, dft_engine::refscf::delivered::IonicSeed)>>,
 }
 impl Context {
     fn position(&mut self, fractional: &[[f64; 3]]) {
@@ -399,27 +399,78 @@ impl Context {
         let reference = self.selection.reference();
         let mut reference_derivatives = None;
         let (state, n_at, provenance, start_fallback, start_clipped_fraction) = if reference {
-            if predicted.is_some() || atomic {
-                return Err(error(
-                    1,
-                    "reference relaxation: density extrapolation is not yet supported",
-                ));
-            }
             let atoms = self.atoms();
             let refs = self.refs();
             let points = self.config.resolved_points().map_err(|e| error(1, e))?;
-            let seed = if warm.is_some() {
-                self.reference_seed.borrow().clone()
+            // Reuse the existing atomic-superposition builder, without running
+            // a legacy SCF. The predictor remains an opt-in ionic start policy.
+            let n_at = if atomic {
+                self.problem_with(true)?
+                    .atomic_superposition_density()
+                    .map(|a| a.iter().copied().collect::<Vec<_>>())
             } else {
                 None
             };
-            let provenance = if seed.is_some() {
+            let mut seed = if warm.is_some() {
+                self.reference_seed
+                    .borrow()
+                    .clone()
+                    .map(|(source, seed)| {
+                        if settings.mode == cell::Mode::Ions {
+                            Ok(seed)
+                        } else {
+                            seed.in_cell(&source, &self.cell, &self.opts)
+                        }
+                    })
+                    .transpose()
+                    .map_err(|e| error(4, e))?
+            } else {
+                None
+            };
+            let mut provenance = if seed.is_some() {
                 "warm_transfer"
             } else {
                 "fresh"
             };
-            let fallback = (warm.is_some() && seed.is_none())
+            let mut fallback = (warm.is_some() && seed.is_none())
                 .then(|| "reference restart has no orbital seed; fresh atomic start".to_string());
+            let mut clipped = None;
+            if let Some((bonding, kind)) = predicted
+                && let Some(current) = seed.take()
+            {
+                let mut replacement = None;
+                match &n_at {
+                    Some(n_at) if n_at.len() == bonding.len() => {
+                        let mut start: Vec<_> =
+                            n_at.iter().zip(bonding).map(|(a, d)| a + d).collect();
+                        let total: f64 = start.iter().sum();
+                        let negative: f64 = start.iter().filter(|v| **v < 0.).sum();
+                        start.iter_mut().for_each(|v| *v = v.max(0.));
+                        let kept: f64 = start.iter().sum();
+                        if total.is_finite() && total > 0. && kept > 0. {
+                            start.iter_mut().for_each(|v| *v *= total / kept);
+                            replacement = Some(start);
+                            provenance = kind;
+                            if negative < 0. {
+                                clipped = Some(-negative / total);
+                            }
+                        } else {
+                            fallback = Some("extrapolated density not finite".into());
+                        }
+                    }
+                    Some(_) => fallback = Some("predictor size mismatch".into()),
+                    None => fallback = Some("no atomic charge density (PP_RHOATOM)".into()),
+                }
+                seed = Some(if let Some(density) = replacement {
+                    let charge = warm.unwrap().1.iter().sum::<f64>() * self.cell.volume_bohr3()
+                        / density.len() as f64;
+                    current
+                        .with_density(&density, self.cell.volume_bohr3(), charge)
+                        .map_err(|e| error(4, e))?
+                } else {
+                    current
+                });
+            }
             let mut request = dft_engine::refscf::api::Request::new(
                 crate::run::reference_profile(&self.config)?,
                 points,
@@ -451,7 +502,7 @@ impl Context {
                 )
                 .map_err(|e| error(4, e))?;
             reference_derivatives = Some(delivery.derivatives);
-            (run.outcome.result, None, provenance, fallback, None)
+            (run.outcome.result, n_at, provenance, fallback, clipped)
         } else {
             let atomic_here = atomic && warm.is_some();
             let problem = self.problem_with(atomic_here)?;
@@ -598,7 +649,19 @@ impl Context {
                 symmetry: &ops,
             };
             let stress = if self.opts.strain_reference.is_none() {
-                dft_engine::stress(&view)
+                if reference && self.config.symmetry.mode == crate::config::SymmetryMode::Auto {
+                    let prepared = dft_engine::refscf::symmetry::Prepared::new(
+                        &self.cell,
+                        &atoms,
+                        &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                        self.config.symmetry.tolerance_bohr,
+                        self.config.basis.time_reversal(),
+                    )
+                    .map_err(|e| error(4, e))?;
+                    dft_engine::stress::stress_prepared(&view, &prepared)
+                } else {
+                    dft_engine::stress(&view)
+                }
             } else {
                 dft_engine::stress::frozen_stress(&view)
             }
@@ -650,7 +713,8 @@ impl Context {
             verification: verification_summary(&state, &self.opts),
         };
         if reference && settings.warm_start {
-            *self.reference_seed.borrow_mut() = Some(
+            *self.reference_seed.borrow_mut() = Some((
+                self.cell.clone(),
                 dft_engine::refscf::api::ionic_seed(
                     dft_engine::refstart::StartInput {
                         cell: &self.cell,
@@ -661,7 +725,7 @@ impl Context {
                     &state,
                 )
                 .map_err(|e| error(4, e))?,
-            );
+            ));
         }
         Ok((frame, state.density.iter().copied().collect(), n_at))
     }

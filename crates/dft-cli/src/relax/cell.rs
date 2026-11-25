@@ -378,7 +378,11 @@ pub(super) fn execute(
     emit(&ctx, &settings, &s, out)?;
     while s.ionic.status == "running" && s.accepted_steps < settings.max_steps {
         let last = s.ionic.frames.last().unwrap().clone();
-        let source = ctx.problem()?;
+        let source = if ctx.selection.reference() {
+            None
+        } else {
+            Some(ctx.problem()?)
+        };
         let mut f = force(&last, &s.q, l, &settings, &rotations)?;
         project_ions(&mut f, &ionic_basis, symmetry_enabled);
         let mut opt = s.ionic.optimizer.clone();
@@ -432,13 +436,16 @@ pub(super) fn execute(
                 if length > settings.max_displacement_bohr * (1. + 1e-12) {
                     return Err(error(4, "candidate exceeds Cartesian displacement cap"));
                 }
-                ctx.evaluate(
+                ctx.evaluate_with(
                     x,
                     length,
                     (attempt == 0 && settings.warm_start)
-                        .then_some((&source, s.ionic.density.as_slice())),
+                        .then_some((source.as_ref(), s.ionic.density.as_slice())),
+                    None,
+                    false,
                     &settings,
                 )
+                .map(|(frame, density, _)| (frame, density))
             });
             match trial {
                 Ok((frame,density)) if enthalpy(&frame,settings.pressure_ha_bohr3)<=enthalpy(&last,settings.pressure_ha_bohr3)+settings.energy_tol_ha=>{accepted=Some((frame,density,q,attempt));break;}

@@ -6,8 +6,8 @@ use std::cell::Cell;
 // General safeguards, not material-tuned parameters. Match the existing
 // restart orthogonality contract; limit unmeasured off-diagonal drift to three
 // consecutive ideal contractions, even when all column norms remain one.
-pub(super) const ORTHOGONALITY_LIMIT: f64 = 1e-12;
-pub(super) const REFRESH_INTERVAL: usize = 4;
+pub(crate) const ORTHOGONALITY_LIMIT: f64 = 1e-12;
+pub(crate) const REFRESH_INTERVAL: usize = 4;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ResetStats {
@@ -41,7 +41,7 @@ thread_local! {
 /// resets this bounded summary. Per-solve Record counters remain complete.
 /// Publish outside the numerical loop through the existing run manifest, so
 /// CLI consumers can read fallback counts without a new serialization contract.
-pub(super) fn publish(stats: ResetStats) {
+pub(crate) fn publish(stats: ResetStats) {
     let config = RunConfig::current();
     if !config.on(Id::REF_DAV_IDEAL_RESET) {
         return;

@@ -6367,3 +6367,399 @@ fn memory_trim_case(name: &str, rows: [[f64; 3]; 3], nonlocal: bool, ranks: usiz
         );
     });
 }
+
+#[test]
+fn g3_complex_k_smoke_and_kept_state() {
+    use dft_engine::{ScfOptions, SpeciesPotential, refstart::StartInput};
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        max_iterations: 100,
+        ..Default::default()
+    };
+    let points = [
+        KPoint {
+            fractional: [0.13, -0.21, 0.07],
+            weight: 0.4,
+        },
+        KPoint {
+            fractional: [0.25; 3],
+            weight: 0.6,
+        },
+    ];
+    dft_mpi::simulate(3, |comm| {
+        let mut previous: Option<f64> = None;
+        for kept in ["off", "on"] {
+            let config =
+                dft_numerics::switches::RunConfig::from_pairs(&[("refscf_kept_hx", kept)]).unwrap();
+            let _scope = config.enter();
+            let run = dft_engine::refscf::k_driver::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &points,
+                comm,
+            )
+            .unwrap();
+            assert!(run.outcome.converged, "{}", run.exit_reason);
+            assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+            assert_eq!(run.outcome.result.k_points.len(), 2);
+            assert!((run.outcome.result.charge - 2.).abs() < 1e-12);
+            assert!(
+                run.records
+                    .iter()
+                    .all(|r| r.calls.len() == r.k_call_indices.len())
+            );
+            if kept == "on" {
+                assert!(run.kept_hx.cache_hits > 0);
+            }
+            let energy = run.outcome.result.total_hartree();
+            if let Some(old) = previous {
+                assert!((energy - old).abs() < 1e-10);
+            }
+            previous = Some(energy);
+            if comm.rank() == 0 {
+                println!(
+                    "G3 smoke kept={kept}: E={energy:.17e} Ha maps={} hits={}",
+                    run.records.len(),
+                    run.kept_hx.cache_hits
+                );
+            }
+        }
+    });
+}
+
+/// External Si UPF, never copied into the repository. Run in release:
+/// DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine
+/// --test refscf g3_k_mesh_legacy_matrix -- --ignored --nocapture
+#[test]
+#[ignore = "external Si UPF and full SCF matrix; run the documented release command"]
+fn g3_k_mesh_legacy_matrix() {
+    use dft_engine::{
+        GammaReal, OccupationPolicy, ScfOptions, ScfProblem, SpeciesPotential, refstart::StartInput,
+    };
+    use dft_geometry::{
+        Cell,
+        kpoints::{KPoint, monkhorst_pack, reduce_time_reversal},
+    };
+    let pp = dft_upf::parse_upf(
+        &std::fs::read_to_string(std::env::var("DFT_SI_UPF").expect("DFT_SI_UPF required"))
+            .unwrap(),
+    )
+    .unwrap();
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let atoms = common::atoms();
+    let cubic = common::cell();
+    let mut lattice = cubic.lattice_columns_bohr();
+    lattice[0][1] += 0.17;
+    lattice[1][2] -= 0.11;
+    let skew = Cell::from_user_rows_bohr(std::array::from_fn(|i| {
+        std::array::from_fn(|j| lattice[j][i])
+    }))
+    .unwrap();
+    for (name, cell) in [("Si2", cubic), ("skew-Si2", skew)] {
+        let meshes = [
+            (
+                "222",
+                reduce_time_reversal(&monkhorst_pack([2; 3], [0.; 3]).unwrap()).unwrap(),
+            ),
+            (
+                "222s",
+                reduce_time_reversal(&monkhorst_pack([2; 3], [0.5; 3]).unwrap()).unwrap(),
+            ),
+            (
+                "list",
+                reduce_time_reversal(&[
+                    KPoint {
+                        fractional: [0.13, -0.21, 0.07],
+                        weight: 0.2,
+                    },
+                    KPoint {
+                        fractional: [-0.13, 0.21, -0.07],
+                        weight: 0.2,
+                    },
+                    KPoint {
+                        fractional: [0.25; 3],
+                        weight: 0.6,
+                    },
+                ])
+                .unwrap(),
+            ),
+        ];
+        for (mesh, points) in meshes {
+            let base = ScfOptions {
+                cutoff_hartree: 4.,
+                bands: Some(5),
+                gamma_real: GammaReal::Off,
+                max_iterations: 180,
+                ..Default::default()
+            };
+            let strict = ScfProblem::with_kpoints(
+                &cell,
+                &atoms,
+                &potentials,
+                ScfOptions {
+                    cutoff_hartree: base.cutoff_hartree,
+                    bands: base.bands,
+                    gamma_real: GammaReal::Off,
+                    max_iterations: base.max_iterations,
+                    free_electron_initial_guess: false,
+                    ..ScfOptions::strict_reference()
+                },
+                &points,
+                OccupationPolicy::Insulator {
+                    minimum_gap_hartree: 1e-7,
+                },
+            )
+            .unwrap()
+            .run()
+            .unwrap();
+            assert!(strict.certified, "legacy {name}/{mesh}");
+            let reference = strict.total_hartree();
+            for ranks in [1, 3, 8] {
+                let answers = dft_mpi::simulate(ranks, |comm| {
+                    let mut answers = Vec::new();
+                    for threshold_ry in [1e-8, 1e-12] {
+                        let run = dft_engine::refscf::k_driver::run_with(
+                            StartInput {
+                                cell: &cell,
+                                atoms: &atoms,
+                                potentials: &potentials,
+                                options: &base,
+                            },
+                            Profile {
+                                threshold_ry,
+                                ..Default::default()
+                            },
+                            &points,
+                            comm,
+                        )
+                        .unwrap();
+                        assert!(
+                            run.outcome.converged,
+                            "{name}/{mesh} P={ranks}: {}",
+                            run.exit_reason
+                        );
+                        let r = &run.outcome.result;
+                        assert!(r.verification.as_ref().unwrap().passed());
+                        let energy = r.total_hartree();
+                        let delta = (energy - reference).abs();
+                        let cap = if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 };
+                        assert!(
+                            delta < cap,
+                            "{name}/{mesh} P={ranks} threshold={threshold_ry:e}: delta={delta:e} Ha"
+                        );
+                        assert!((r.charge - 8.).abs() < 1e-11);
+                        assert!((energy - r.energy.band_form).abs() < 1e-9);
+                        let mut eig = 0_f64;
+                        let mut occupied = 0_f64;
+                        for (k, want) in r.k_points.iter().zip(&strict.k_points) {
+                            assert_eq!(k.point, want.point);
+                            for (b, (a, z)) in k
+                                .solution
+                                .eigenvalues
+                                .iter()
+                                .zip(&want.solution.eigenvalues)
+                                .enumerate()
+                            {
+                                eig = eig.max((a - z).abs());
+                                if b < 4 {
+                                    occupied = occupied.max((a - z).abs());
+                                }
+                            }
+                        }
+                        assert!(
+                            (r.gap_hartree.unwrap() - strict.gap_hartree.unwrap()).abs()
+                                <= 2. * eig + 1e-12,
+                            "sampled indirect gap"
+                        );
+                        // Empty roots retain the reference 5e-6 Ha Ritz-change floor.
+                        assert!(eig < 5e-5, "per-k eigenvalue error={eig:e} Ha");
+                        assert!(
+                            occupied < if threshold_ry == 1e-8 { 1e-5 } else { 1e-7 },
+                            "occupied eigenvalue error={occupied:e} Ha"
+                        );
+                        if comm.rank() == 0 {
+                            println!(
+                                "G3 {name}/{mesh} P={ranks} threshold={threshold_ry:e} Ry E={energy:.17e} Ha legacy_delta={delta:e} Ha eig={eig:e} Ha occupied={occupied:e} Ha maps={}",
+                                run.records.len()
+                            );
+                        }
+                        answers.push(energy);
+                    }
+                    answers
+                });
+                for answer in &answers[1..] {
+                    assert_eq!(answer, &answers[0]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn g3_gamma_dispatch_is_bit_identical() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refstart::StartInput};
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let input = || StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            };
+            let a =
+                dft_engine::refscf::driver::run_with(input(), Profile::default(), comm).unwrap();
+            let b = dft_engine::refscf::k_driver::run_with(
+                input(),
+                Profile::default(),
+                &[KPoint {
+                    fractional: [0.; 3],
+                    weight: 1.,
+                }],
+                comm,
+            )
+            .unwrap();
+            assert_eq!(
+                nlcc_rank_rule::fingerprint(&a),
+                nlcc_rank_rule::fingerprint(&b)
+            );
+            assert_eq!(a.outcome.result.orbitals, b.outcome.result.orbitals);
+        });
+    }
+}
+
+/// The same test is injected into an archived base checkout for the G3 audit.
+#[test]
+fn g3_gamma_base_fingerprint() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refstart::StartInput};
+    use dft_geometry::{Atom, Cell};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    for ranks in [1, 3, 8] {
+        dft_mpi::simulate(ranks, |comm| {
+            let run = dft_engine::refscf::driver::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                comm,
+            )
+            .unwrap();
+            assert!(run.outcome.converged);
+            // Normalize only the additive empty Gamma k-index metadata. Every
+            // pre-existing scientific record and all numeric bits remain hashed.
+            let mut fingerprint = nlcc_rank_rule::fingerprint(&run)
+                .replace("k_call_indices: [], ", "")
+                .into_bytes();
+            for z in run.outcome.result.orbitals.as_slice() {
+                fingerprint.extend_from_slice(&z.re.to_le_bytes());
+                fingerprint.extend_from_slice(&z.im.to_le_bytes());
+            }
+            if comm.rank() == 0
+                && let Some(dir) = std::env::var_os("G3_GAMMA_DUMP_DIR")
+            {
+                std::fs::write(
+                    std::path::Path::new(&dir).join(format!("rank-{ranks}.bin")),
+                    &fingerprint,
+                )
+                .unwrap();
+            }
+            let hash = fingerprint.iter().fold(0xcbf29ce484222325_u64, |h, &b| {
+                (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+            });
+            if comm.rank() == 0 {
+                println!(
+                    "G3_GAMMA P={ranks} hash={hash:016x} E={:.17e} Ha",
+                    run.outcome.result.total_hartree()
+                );
+            }
+        });
+    }
+}
+
+#[test]
+fn g3_k_start_does_not_require_a_gamma_band_space() {
+    use dft_engine::{ScfOptions, SpeciesPotential, refstart::StartInput};
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let pp = common::potential_with_atomic_start(2., 1.8, false, 161, "SLA PZ");
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 0.35,
+        bands: Some(3),
+        ..Default::default()
+    };
+    assert_eq!(
+        dft_basis::PlaneWaveBasis::new(&cell, dft_units::Hartree(0.35))
+            .unwrap()
+            .vectors()
+            .len(),
+        1
+    );
+    dft_mpi::simulate(8, |comm| {
+        let state = dft_engine::refstart::start_kpoints(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            &[KPoint {
+                fractional: [0.25; 3],
+                weight: 1.,
+            }],
+            comm,
+        )
+        .unwrap();
+        assert_eq!(state.orbitals.cols(), 3);
+        assert!(state.blocks[0].basis.vectors().len() >= 3);
+    });
+}

@@ -13,7 +13,7 @@ const SQRT_LIMIT: f64 = 3.273390607896142e150; // 2^500
 const CHUNK: usize = 32;
 
 #[inline]
-pub(super) fn sqrt_denominator(h: f64, e: f64) -> f64 {
+pub(crate) fn sqrt_denominator(h: f64, e: f64) -> f64 {
     let x = 2.0 * (h - e);
     let z = (x - 1.0).abs();
     // Same cancellation-free rationalization as the baseline; max is a
@@ -21,7 +21,7 @@ pub(super) fn sqrt_denominator(h: f64, e: f64) -> f64 {
     0.25 * (2.0 * x.max(1.0) + 1.0 / ((1.0 + z * z).sqrt() + z))
 }
 
-pub(super) fn sqrt_safe(bounds: (f64, f64), e: f64) -> bool {
+pub(crate) fn sqrt_safe(bounds: (f64, f64), e: f64) -> bool {
     [bounds.0, bounds.1].into_iter().all(|h| {
         let z = (2.0 * (h - e) - 1.0).abs();
         z <= SQRT_LIMIT

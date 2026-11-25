@@ -168,24 +168,34 @@ pub fn reference_profile(
 fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
     let profile = reference_profile(config)?;
     let s = config.scf.as_ref();
-    let points = config.resolved_points().map_err(|e| error(1, e))?;
     if config.collinear()
         || config
             .finite_temperature()
             .map_err(|e| error(1, e))?
             .is_some()
-        || points.len() != 1
-        || points[0].fractional != [0.0; 3]
-        || config.relax.is_some()
-        || config.symmetry.mode != crate::config::SymmetryMode::Off
+    {
+        return Err(error(
+            1,
+            "reference SCF: collinear spin and Fermi-Dirac occupations require G4; fixed unpolarized occupations only",
+        ));
+    }
+    if config.symmetry.mode != crate::config::SymmetryMode::Off
+        || config.symmetry.density_group == crate::config::DensityGroup::Crystal
+    {
+        return Err(error(
+            1,
+            "reference SCF: crystal symmetry reduction requires G6; time-reversal k weights remain supported",
+        ));
+    }
+    let points = config.resolved_points().map_err(|e| error(1, e))?;
+    if config.relax.is_some()
         || config.xc.density_floor.is_some()
         || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
-        || s.and_then(|s| s.gamma_real.as_deref()) == Some("off")
         || s.and_then(|s| s.start_density.as_deref()) == Some("uniform")
     {
         return Err(error(
             1,
-            "reference SCF supports only real Gamma, integer occupations, unpolarized NC, atomic density at final cutoff; no forces/stress/relaxation",
+            "reference SCF requires atomic density; forces/stress/relaxation and density floors are unavailable",
         ));
     }
     let mut o = ScfOptions {
@@ -198,7 +208,14 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
             == crate::config::DensityGroup::Crystal,
         start_density: dft_engine::StartDensity::Atomic,
         start_wavefunctions: dft_engine::StartWavefunctions::Atomic,
-        gamma_real: dft_engine::GammaReal::On,
+        gamma_real: if points.len() == 1
+            && points[0].fractional == [0.; 3]
+            && s.and_then(|s| s.gamma_real.as_deref()) != Some("off")
+        {
+            dft_engine::GammaReal::On
+        } else {
+            dft_engine::GammaReal::Off
+        },
         functional: config.xc.functional.engine(),
         cutoff_hartree: config.basis.ecutwfc_ry / 2.0,
         grid_override: if config.symmetry.mode == crate::config::SymmetryMode::Auto {
@@ -1696,9 +1713,9 @@ fn execute_mode_inner(
         crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
         let run = if reference {
-            dft_engine::refscf::driver::run(dft_engine::refstart::StartInput {
+            dft_engine::refscf::k_driver::run(dft_engine::refstart::StartInput {
                 cell: &prepared.cell, atoms: &atoms, potentials: &refs, options: &opts,
-            }, reference_profile(&config)?).map(|run| {
+            }, reference_profile(&config)?, &points).map(|run| {
                 reference_return = Some(Instant::now());
                 reference_diagnostics = run.full_diagnostics;
                 reference_qe_clock = run.qe_clock;
@@ -1777,7 +1794,7 @@ fn execute_mode_inner(
                     "peak_bytes_per_rank":run.peak_payload_bytes_per_rank,
                     "peak_kind":if run.ladder.is_some() { "fine-stage principal array payload estimate only; coarse stage and transfer workspace excluded; not a whole-run peak or RSS" } else { "conservative principal array payload envelope; not RSS; backend/FFT/allocator storage excluded" },
                     "peak_rss_bytes_per_rank":null,
-                    "verification_calls":run.verification_calls.iter().map(reference_solve_json).collect::<Vec<_>>()
+                    "verification_calls":run.verification_calls.iter().enumerate().map(|(i,c)| {let mut v=reference_solve_json(c);if let Some(k)=run.verification_k_call_indices.get(i){v["k_index"]=json!(k);}v}).collect::<Vec<_>>()
                 }));
                 reference_records = run.records;
                 reference_status = Some((run.reference_stopped, run.exit_reason));
@@ -2156,7 +2173,13 @@ fn execute_mode_inner(
         });
     }
     result["gamma_real_used"] = json!(r.gamma_real_used);
-    let replicated_reason = if points.len() > 1 {
+    if reference && !r.gamma_real_used {
+        result["threading"]["outer_threads"] = json!(1);
+        result["threading"]["backend"] = json!(
+            "sequential k points on all ranks; G-distributed complex Hamiltonian and Davidson; shared inner worker pool"
+        );
+    }
+    let replicated_reason = if points.len() > 1 && !reference {
         Some(REPLICATED_MULTI_K.to_owned())
     } else {
         r.gamma_real_fallback_reason.as_ref().map(|reason| {
@@ -3754,7 +3777,7 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
         "active_bands_sum":r.calls.iter().flat_map(|c|&c.active_bands).sum::<usize>(),
         "reduced_problem_orders":r.calls.iter().flat_map(|c|&c.reduced_orders).collect::<Vec<_>>(),
         "restarts":r.calls.iter().map(|c|c.restarts).sum::<usize>(),
-        "calls":r.calls.iter().map(reference_solve_json).collect::<Vec<_>>(),
+        "calls":r.calls.iter().enumerate().map(|(i,c)|{let mut v=reference_solve_json(c);if let Some(k)=r.k_call_indices.get(i){v["k_index"]=json!(k);}v}).collect::<Vec<_>>(),
         "descf_ha":r.descf_ha,"descf_ry":2.*r.descf_ha,
         "variational_energy_ha":r.variational_energy_ha,"variational_energy_ry":2.*r.variational_energy_ha,
         "energies_ha":{"total":r.energy.total_hartree(),"band":r.energy.band_sum,
@@ -3803,6 +3826,71 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn reference_k_mesh_records_and_unsupported_combinations() {
+        let dir = std::env::temp_dir().join(format!("g3-k-cli-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut pp = crate::test_fixtures::gaussian_with(2., 1.8, true, 161)
+            .replace("element=\"Xx\"", "element=\"He\"");
+        let parsed = dft_upf::parse_upf(&pp).unwrap();
+        let array = |f: &dyn Fn(f64) -> f64| {
+            parsed
+                .mesh()
+                .r()
+                .iter()
+                .map(|&r| format!("{:.17e}", f(r)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let start = pp.find("<PP_RHOATOM>").unwrap() + "<PP_RHOATOM>".len();
+        let end = pp.find("</PP_RHOATOM>").unwrap();
+        pp.replace_range(
+            start..end,
+            &array(&|r| {
+                8. / (std::f64::consts::PI.sqrt() * 1.8_f64.powi(3))
+                    * r
+                    * r
+                    * (-(r / 1.8).powi(2)).exp()
+            }),
+        );
+        pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>",
+            &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>", array(&|r| r * (-0.6 * r * r).exp())));
+        fs::write(dir.join("syn.xml"), pp).unwrap();
+
+        let base = "[system]\nname='k mesh'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=2.0\nkgrid=[2,2,2]\nkshift=[0.5,0.5,0.5]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=2\ndriver='reference'\nverify='off'\n";
+        let config = Config::parse(base).unwrap();
+        assert_eq!(
+            reference_options(&config).unwrap().gamma_real,
+            dft_engine::GammaReal::Off
+        );
+        for suffix in [
+            "[spin]\nmode='collinear'\n",
+            "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\n",
+            "[symmetry]\nmode='auto'\n",
+        ] {
+            let config = Config::parse_unvalidated(&format!("{base}{suffix}")).unwrap();
+            let failure = reference_options(&config).unwrap_err();
+            assert!(failure.cause.contains("G4") || failure.cause.contains("G6"));
+        }
+        let input = dir.join("input.toml");
+        fs::write(&input, base).unwrap();
+        let out = dir.join("output");
+        execute(&input, Some(&out)).unwrap();
+        let result: Value =
+            serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+        assert_eq!(result["kpoints"]["count"], 4);
+        assert_eq!(result["gamma_real_used"], false);
+        let rows = result["reference_scf"]["iterations"]
+            .as_array()
+            .expect("reference iterations");
+        for row in rows {
+            for call in row["calls"].as_array().unwrap() {
+                assert!(call["k_index"].as_u64().is_some_and(|k| k < 4));
+            }
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn reference_lean_audit_serializes_unavailable_terms_as_null() {
         let energy = dft_engine::energy::EnergyAudit {

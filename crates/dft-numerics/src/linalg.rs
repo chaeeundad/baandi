@@ -152,6 +152,230 @@ impl RealGeneralizedFactor {
     }
 }
 
+/// Caller-owned Hermitian factor/EVD storage for complex reference Davidson.
+/// S = L L^H; squared pivots / original diagonals use the real rank criterion.
+/// Library calls are sequential. Numerical storage is reserved for every active
+/// size at construction; backend-internal packing is outside this guarantee.
+pub struct ComplexOverlapFactor {
+    capacity: usize,
+    order: usize,
+    lower: Mat<Complex64>,
+    work: Mat<Complex64>,
+    adjoint_work: Mat<Complex64>,
+    reduced: ComplexMatrix,
+    vectors: ComplexMatrix,
+    diagonal: Vec<Complex64>,
+    buffer: faer::dyn_stack::MemBuffer,
+}
+impl ComplexOverlapFactor {
+    fn check(a: &ComplexMatrix) -> Result<(), LinalgError> {
+        if a.rows() != a.cols() {
+            return Err(LinalgError::NotSquare);
+        }
+        a.validate_finite()?;
+        let scale = a.as_slice().iter().map(|v| v.norm()).fold(1_f64, f64::max);
+        let allowed = HERMITIAN_TOLERANCE * scale;
+        let mut defect = 0_f64;
+        for j in 0..a.cols() {
+            for i in 0..=j {
+                defect = defect.max((a[(i, j)] - a[(j, i)].conj()).norm());
+            }
+        }
+        if !scale.is_finite() || !defect.is_finite() {
+            return Err(LinalgError::NonFinite);
+        }
+        if defect > allowed {
+            return Err(LinalgError::NotHermitian { defect, allowed });
+        }
+        Ok(())
+    }
+    pub fn with_capacity(capacity: usize) -> Result<Self, LinalgError> {
+        let reduced = ComplexMatrix::zeros(capacity, capacity)?;
+        let mut requirements = Vec::new();
+        for n in 1..=capacity {
+            requirements.push(
+                faer::linalg::cholesky::llt::factor::cholesky_in_place_scratch::<Complex64>(
+                    n,
+                    Par::Seq,
+                    Default::default(),
+                ),
+            );
+            requirements.push(faer::linalg::evd::self_adjoint_evd_scratch::<Complex64>(
+                n,
+                faer::linalg::evd::ComputeEigenvectors::Yes,
+                Par::Seq,
+                Default::default(),
+            ));
+        }
+        Ok(Self {
+            capacity,
+            order: 0,
+            lower: Mat::zeros(capacity, capacity),
+            work: Mat::zeros(capacity, capacity),
+            adjoint_work: Mat::zeros(capacity, capacity),
+            vectors: reduced.clone(),
+            reduced,
+            diagonal: vec![Complex64::default(); capacity],
+            buffer: faer::dyn_stack::MemBuffer::new(faer::dyn_stack::StackReq::any_of(
+                &requirements,
+            )),
+        })
+    }
+    pub fn new(s: &ComplexMatrix, pivot_ratio_min: f64) -> Result<Option<Self>, LinalgError> {
+        let mut f = Self::with_capacity(s.rows())?;
+        Ok(if f.factor(s, pivot_ratio_min)? {
+            Some(f)
+        } else {
+            None
+        })
+    }
+    /// Invalidates the old factor even on rejection; use a separate trial
+    /// workspace when a rejected border must preserve the old basis factor.
+    pub fn factor(&mut self, s: &ComplexMatrix, pivot_ratio_min: f64) -> Result<bool, LinalgError> {
+        use faer::linalg::cholesky::llt::factor;
+        self.order = 0;
+        Self::check(s)?;
+        let n = s.rows();
+        if n > self.capacity || !pivot_ratio_min.is_finite() || pivot_ratio_min <= 0. {
+            return Err(LinalgError::Dimension);
+        }
+        if (0..n).any(|i| s[(i, i)].re <= 0.) {
+            return Ok(false);
+        }
+        for j in 0..n {
+            for i in 0..n {
+                self.lower[(i, j)] = s[(i, j)];
+            }
+        }
+        if n > 0
+            && (factor::cholesky_in_place(
+                self.lower.as_mut().submatrix_mut(0, 0, n, n),
+                Default::default(),
+                Par::Seq,
+                faer::dyn_stack::MemStack::new(&mut self.buffer),
+                Default::default(),
+            )
+            .is_err()
+                || (0..n).any(|i| {
+                    let ratio = self.lower[(i, i)].norm_sqr() / s[(i, i)].re;
+                    !ratio.is_finite() || ratio < pivot_ratio_min
+                }))
+        {
+            return Ok(false);
+        }
+        self.order = n;
+        Ok(true)
+    }
+    /// T = L^-H, so T^H S T = I, for exceptional rank repair only.
+    pub fn basis_transform_into(&self, out: &mut ComplexMatrix) -> Result<(), LinalgError> {
+        use faer::linalg::triangular_solve::solve_upper_triangular_in_place;
+        let n = self.order;
+        out.reshape_within_capacity(n, n)?;
+        for j in 0..n {
+            for i in 0..n {
+                out[(i, j)] = Complex64::new(f64::from(i == j), 0.);
+            }
+        }
+        solve_upper_triangular_in_place(
+            self.lower.as_ref().submatrix(0, 0, n, n).adjoint(),
+            faer::MatMut::from_column_major_slice_mut(out.as_mut_slice(), n, n),
+            Par::Seq,
+        );
+        out.validate_finite()
+    }
+    pub fn basis_transform(&self) -> Result<ComplexMatrix, LinalgError> {
+        let mut out = ComplexMatrix::zeros(self.order, self.order)?;
+        self.basis_transform_into(&mut out)?;
+        Ok(out)
+    }
+    pub fn solve_lowest_into(
+        &mut self,
+        a: &ComplexMatrix,
+        values: &mut [f64],
+        c: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        use faer::linalg::triangular_solve::{
+            solve_lower_triangular_in_place, solve_upper_triangular_in_place,
+        };
+        Self::check(a)?;
+        let n = self.order;
+        let bands = values.len();
+        if a.rows() != n || bands > n {
+            return Err(LinalgError::Dimension);
+        }
+        c.reshape_within_capacity(n, bands)?;
+        if n == 0 {
+            return Ok(());
+        }
+        let lower = self.lower.as_ref().submatrix(0, 0, n, n);
+        for j in 0..n {
+            for i in 0..n {
+                self.work[(i, j)] = a[(i, j)];
+            }
+        }
+        solve_lower_triangular_in_place(
+            lower,
+            self.work.as_mut().submatrix_mut(0, 0, n, n),
+            Par::Seq,
+        );
+        for j in 0..n {
+            for i in 0..n {
+                self.adjoint_work[(i, j)] = self.work[(j, i)].conj();
+            }
+        }
+        solve_lower_triangular_in_place(
+            lower,
+            self.adjoint_work.as_mut().submatrix_mut(0, 0, n, n),
+            Par::Seq,
+        );
+        self.reduced.reshape_within_capacity(n, n)?;
+        self.vectors.reshape_within_capacity(n, n)?;
+        for j in 0..n {
+            for i in 0..n {
+                self.reduced[(i, j)] =
+                    (self.adjoint_work[(j, i)].conj() + self.adjoint_work[(i, j)]) * 0.5;
+            }
+        }
+        self.reduced.validate_finite()?;
+        faer::linalg::evd::self_adjoint_evd(
+            faer::MatRef::from_column_major_slice(self.reduced.as_slice(), n, n),
+            faer::diag::DiagMut::from_slice_mut(&mut self.diagonal[..n]),
+            Some(faer::MatMut::from_column_major_slice_mut(
+                self.vectors.as_mut_slice(),
+                n,
+                n,
+            )),
+            Par::Seq,
+            faer::dyn_stack::MemStack::new(&mut self.buffer),
+            Default::default(),
+        )
+        .map_err(|_| LinalgError::Decomposition)?;
+        for (j, value) in values.iter_mut().enumerate() {
+            *value = self.diagonal[j].re;
+            c.column_mut(j).copy_from_slice(self.vectors.column(j));
+        }
+        solve_upper_triangular_in_place(
+            lower.adjoint(),
+            faer::MatMut::from_column_major_slice_mut(c.as_mut_slice(), n, bands),
+            Par::Seq,
+        );
+        if values.iter().any(|v| !v.is_finite()) {
+            return Err(LinalgError::NonFinite);
+        }
+        c.validate_finite()
+    }
+    pub fn solve_lowest(
+        &mut self,
+        a: &ComplexMatrix,
+        bands: usize,
+    ) -> Result<(Vec<f64>, ComplexMatrix), LinalgError> {
+        let mut values = vec![0.; bands];
+        let mut c = ComplexMatrix::zeros(self.order, bands)?;
+        self.solve_lowest_into(a, &mut values, &mut c)?;
+        Ok((values, c))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum LinalgError {
     #[error("incompatible matrix dimensions or storage length")]
@@ -213,6 +437,19 @@ impl ComplexMatrix {
             return Err(LinalgError::Dimension);
         }
         self.data.resize(len, Complex64::default());
+        self.cols = cols;
+        Ok(())
+    }
+
+    /// Change contiguous shape within reserved capacity, without allocation.
+    /// Contents are not preserved as a matrix when the leading dimension changes.
+    pub fn reshape_within_capacity(&mut self, rows: usize, cols: usize) -> Result<(), LinalgError> {
+        let len = rows.checked_mul(cols).ok_or(LinalgError::Dimension)?;
+        if len > self.data.capacity() {
+            return Err(LinalgError::Dimension);
+        }
+        self.data.resize(len, Complex64::default());
+        self.rows = rows;
         self.cols = cols;
         Ok(())
     }

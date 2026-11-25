@@ -2919,3 +2919,164 @@ Validation and pending MPI8 measurements are recorded in
 [the G2 request](../performance/lanes/RSCF/g2-pbe-dev08-request.md). Synthetic
 Si diamond geometry is explicitly not a physical Si PBE pseudopotential
 validation; no Si.pz-vbc functional override is used here.
+
+## K points
+
+G3-KPOINTS adds `refscf::k_driver::{run,run_with}` for validated weighted k
+lists. The CLI supplies its existing mesh/list resolution and time-reversal
+reduction, including summed partner weights. A single Gamma point with real
+Gamma enabled dispatches directly to the unchanged real driver. A mesh that
+contains Gamma uses the complex solver for all its points. No crystal symmetry
+or density projection is introduced. Spin and Fermi–Dirac requests remain G4;
+crystal symmetry reduction remains G6. The optional real-only RMM and cutoff
+ladder experiments are explicitly rejected on the complex path.
+
+### Complex Davidson and numerical contracts
+
+`ref_davidson_complex` shares Options, occupied/empty thresholds, the smooth
+preconditioner, guarded sqrt variant, restart guards, and accounting types
+with `ref_davidson`, including its shared workspace capacity contract. It uses
+conjugate products, fixed-tree real/imaginary
+reductions, one common ethr supplied by the density loop, and the same strict
+Ritz-change comparison. Empty bands retain max(5*ethr_Ha, 5e-6 Ha); this is
+not an eigen-residual certificate. Reduced EVD may be replicated or root-only.
+Every starting H column is applied unless an exact initial HX is supplied.
+
+The overlap factor uses the existing real `PIVOT_RATIO_MIN`:
+Cholesky pivot squared / original overlap diagonal >= eps/1e-12. Library
+Cholesky, triangular solves and Hermitian EVD live in the approved
+`dft-numerics::linalg::ComplexOverlapFactor` adapter. There is no handwritten
+factorization, triangular inverse, new dependency, or new unsafe code. The
+complex factor/EVD uses sequential faer even in an MKL build; complex GEMM
+retains its existing backend dispatch. Native MKL execution has not been tested.
+
+A rejected border preserves the old factor. Repair whitens the old basis and
+HX together, preserves the physical Ritz block, projects corrections twice,
+and removes directions at the existing 1e-12 norm threshold. Contraction
+retains the lowest requested Ritz states. Measured restart refresh is the
+baseline; the shared ideal-reset switch uses the same norm guard, four-reset
+refresh interval and permanent fallback after a guard failure. Supplied-HX,
+sqrt, restart-correction and buffer-swap variants are tested.
+
+Row blocks, Gram/rotation matrices, factor/EVD scratch and packed collective
+buffers are reserved before iteration. As with the existing adapters, opaque
+backend packing and collective internals are outside that storage guarantee.
+The real-only setup-fusion, single/wide GEMM, triangular-border, fused-append,
+stacked-rotation, lean-clear and cross-call row-cache switches retain their
+settings but report an explicit complex-adapter fallback in the run manifest.
+They do not select a different mathematical rule or silently claim the real
+optimized route. Complex per-call work and clocks describe the actual complex
+solver; unsupported QE clock breakdowns are left unavailable.
+
+### Per-k state, map, and distribution
+
+Each k point has its own Bloch basis, owned complex orbital block, operator,
+identity/epoch and kept HX. Kinetic energy and projectors use k+G; FFT support
+uses integer G. The new distributed operator applies local FFT, kinetic and
+nonlocal terms without gathering orbital blocks. All ranks participate in
+one k point at a time. K-parallel pools are a later optimization.
+
+All k points share one density grid. Atomic trial columns use the Fourier
+transforms at k+G and atom phases, with owned-row orthogonalization and
+lowest-kinetic coordinate complements. A projected Hermitian solve selects
+the requested initial states. Setup reuses the common atomic-field initializer while skipping Gamma
+orbital/projector construction and Gamma band-rank constraints. A small unused
+Gamma FFT adapter remains in the common field-state type. Complex setup/output
+memory estimates include
+all retained k blocks; named-array estimates are not RSS measurements.
+
+For each map, the driver installs the same potential in each operator layout,
+solves each k with the same ethr, and forms the density in ascending k order:
+occupation * normalized k weight * |u_nk|^2 / Omega. Time-reversal multiplicity
+is already in the weight and is applied exactly once. Band, kinetic and
+nonlocal energies use the same weights. The density functional, G=0 handling,
+Coulomb dr2, Broyden update, ethr ratchet/first-step redo and independent
+verification follow the real density loop. Verification records all k
+residuals and weighted error estimates, not a first-k proxy.
+
+Kept state compares exact X bits, operator identity and potential epoch per k.
+A hit reconstructs delta-V times X on owned planes and adds it to HX; complex
+slabs are not retained. Warm verification may borrow candidate state without
+publishing its own state. Redo invalidates all entries. Inner exhaustion is
+recorded per k and uses the same bounded six-call retry policy. Final results
+contain all k blocks; the first-k fields remain compatibility views. CLI
+ordinary and verification solve records include a zero-based `k_index` only
+for the complex path. All-rank G distribution is reported as distributed,
+not legacy replicated multi-k execution; outer k concurrency is one.
+
+### Local validation (Mac, pure Rust, 2026-11-25)
+
+No QE source was read and no QE run was performed. Legacy SCF is the independent
+oracle here; its earlier QE comparisons are not new G3 QE evidence.
+
+- Complex factor contracts: sizes 1/2/5/9 and reuse down to size 1, scales
+  1e-3/1/1e3, independent generalized residual and metric, invalid metrics,
+  and acceptance/rejection around the real pivot rule. Maximum relative
+  residual 1.2374729395027181e-14; metric defect 1.7763568394002505e-15,
+  dimensionless (both limits 1e-12).
+- Complex solver: Hermitian dense oracle, dependent starts, root/replicated
+  EVD, supplied-HX identity, switch variants, simulated ranks 1/3/8.
+- Operator: 96 cubic/skew, k, projector, width and rank combinations. Maximum
+  errors: H 6.206335383118183e-17 Ha; density 1.214306433183765e-17 e/Bohr^3;
+  nonlocal expectation 5.204170427930421e-18 Ha. Additional tests cover empty
+  owners, zero bands, delta-HX and collective rejection.
+- End-to-end synthetic k list: kept-HX off/on, verified convergence, charge,
+  cache hits and per-k records. CLI test exercises a shifted mesh with four
+  time-reversal representatives and rejects G4/G6 combinations.
+
+The external Si.pz-vbc.UPF SHA-256 is
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+It is not stored in the repository. Si2 and a skew deformation of the same
+cell use 4 Ha cutoff, 5 bands, fixed occupations and identical legacy inputs.
+Each row below covers simulated ranks 1/3/8 at 1e-8 Ry (standard) and 1e-12 Ry
+(tight). Energy limits were 5e-9 and 1e-10 Ha respectively; all independent
+verification attempts required for delivery passed.
+
+| Cell / k list | Max standard energy error (Ha) | Max tight energy error (Ha) |
+|---|---:|---:|
+| Si2 / unshifted 2x2x2 | 1.3182477331952214e-9 | 1.0125233984581428e-13 |
+| Si2 / shifted 2x2x2 | 3.1607605421868357e-11 | 2.7533531010703882e-14 |
+| Si2 / explicit weighted list | 1.858868614590392e-10 | 6.750155989720952e-14 |
+| Skew Si2 / unshifted 2x2x2 | 6.189271317680323e-11 | 2.4868995751603507e-14 |
+| Skew Si2 / shifted 2x2x2 | 1.1889333961789816e-10 | 1.056932319443149e-13 |
+| Skew Si2 / explicit weighted list | 4.0162007053368143e-10 | 7.105427357601002e-14 |
+
+Per-k occupied eigenvalue differences are at most 5.329501798226333e-6 Ha
+standard and 4.483715052364112e-8 Ha tight. Across all bands the maxima are
+1.851278131737022e-5 and 1.3706304452687501e-5 Ha: the unchanged empty-band
+Ritz threshold floor does not promise 1e-10 Ha empty eigenvalues. The largest
+rank-count delivered-energy spread is 4.154099286779456e-11 Ha standard
+(unshifted Si2), 3.730349362740526e-14 Ha tight. This is an accuracy comparison,
+not a claim of identical complex trajectories across rank counts.
+
+Reproduce the long/external-data check (ignored in the default gate):
+
+```sh
+DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine \
+  --test refscf g3_k_mesh_legacy_matrix -- --ignored --nocapture
+```
+
+Gamma dispatch is checked bit-for-bit at ranks 1/3/8, including delivered
+orbitals and scientific trajectories. The separate archived-base/main audit
+uses `g3_gamma_base_fingerprint`, normalizing only the new empty Gamma k-index
+metadata. The archived main commit
+`58260cbe2387fe39a73a2839ab1efd2ebb728bc9` and this implementation produce
+identical full fingerprint byte streams (not just matching hashes):
+
+| Ranks | Bytes | SHA-256 |
+| --- | ---: | --- |
+| 1 | 100801 | `9afed278586f803a836e19d46470789de0c6e337c7ad59474bef8f2cdaef729d` |
+| 3 | 100763 | `6f329ff3360630d73610dfbb0931de7c3f9d7626159b5315ec8aadc63a49ba5e` |
+| 8 | 100729 | `0cc15ffcf4d25a1ddfff91c9c4740a0a900d8b4bc463f276c5d9da6f11cee57f` |
+
+The final workspace `scripts/check.sh` gate exits 0: build, tests, format and
+Clippy pass; 97 test binaries report 972 passed, 0 failed and 205 ignored.
+The requested standalone workspace check, solver tests, reference SCF tests,
+CLI reference tests and Clippy checks also exit 0. The sandbox denies the
+gate's optional `ps` load probe; this does not skip any acceptance gate.
+Evidence logs and fingerprint streams are under the ignored
+`target/tmp/g3-validation/` directory. No changes are committed.
+
+Native MPI, MKL and dev08 speed measurements remain unperformed. No performance
+default changed. README generation, dashboard/session registry and the
+performance ledger remain outside this ticket's approved ownership.

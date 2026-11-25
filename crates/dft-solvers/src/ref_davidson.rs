@@ -11,9 +11,9 @@
 //! unconverged result, so the driver can retry with the returned vectors.
 
 pub(crate) mod accounting;
-mod ideal_reset;
+pub(crate) mod ideal_reset;
 pub use ideal_reset::ResetStats;
-mod stream;
+pub(crate) mod stream;
 pub mod work;
 pub(crate) mod workspace;
 pub use accounting::{
@@ -127,12 +127,7 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
     let c = Counted::new(comm, options.profile);
     let n = options.bands;
     let dim = operator.global_len();
-    let cap = if options.capacity == 0 {
-        n.saturating_mul(2)
-    } else {
-        options.capacity
-    }
-    .min(dim);
+    let cap = workspace::capacity(dim, n, options.capacity);
     let work_scope = work::Scope::new(options.profile, options.max_iterations, cap);
     let config = dft_numerics::switches::RunConfig::current();
     let fused_setup = config.on(dft_numerics::switches::Id::REF_DAV_SETUP_FUSED);

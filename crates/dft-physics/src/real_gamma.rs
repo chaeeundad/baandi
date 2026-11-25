@@ -350,30 +350,6 @@ impl RealNonlocal {
         )
     }
 
-    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on` callers): the per-column nonlocal
-    /// expectation values of `expectation_values` from projections P^T X the
-    /// caller already holds (column-major, `projector_count()` rows, one column
-    /// per entry of `out`), e.g. (P^T V) C kept by the eigensolver. The coupling
-    /// sum is the same code; with the same projections the result is bit for
-    /// bit that of `expectation_values`, with (P^T V) C equal to rounding.
-    pub fn expectation_values_from_projections(
-        &self,
-        projections: &[f64],
-        out: &mut [f64],
-    ) -> Result<(), RealGammaError> {
-        let count = self.projectors.cols();
-        if projections.len() != count * out.len() {
-            return Err(RealGammaError::Shape);
-        }
-        let _lane = self.lane.start(
-            NonlocalStage::Audit,
-            self.projectors.rows(),
-            count,
-            out.len(),
-        );
-        coupled_energies(&self.coupling, projections, count, out)
-    }
-
     /// Coupling and back product from `self.projections` (first `m` columns).
     fn add_from_projections(&mut self, y: &mut RealMatrix, m: usize) -> Result<(), RealGammaError> {
         self.image_from_projections(m)?;
@@ -612,16 +588,7 @@ impl RealHamiltonian {
         }
         self.nonlocal.expectation_values(x, out)
     }
-    /// C3a: per-column nonlocal expectation values (Ha) from projections P^T X
-    /// the caller holds; see `RealNonlocal::expectation_values_from_projections`.
-    pub fn nonlocal_expectation_values_from_projections(
-        &self,
-        projections: &[f64],
-        out: &mut [f64],
-    ) -> Result<(), RealGammaError> {
-        self.nonlocal
-            .expectation_values_from_projections(projections, out)
-    }
+
     /// Projections P^T X of the most recent `apply_block` (first `m` columns,
     /// column-major); see `RealNonlocal::last_projections`.
     pub fn last_projections(&self, m: usize) -> Result<&[f64], RealGammaError> {

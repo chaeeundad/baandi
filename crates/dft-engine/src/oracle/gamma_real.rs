@@ -100,7 +100,7 @@ static NL_AUDITS: [std::sync::atomic::AtomicU64; 2] =
 fn count_nl_audit(cached: bool) {
     NL_AUDITS[usize::from(!cached)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
-/// C3a (`BAANDI_LEAN_PROJ_CACHE`): (audits from the kept projections, audits
+/// Historical cache-audit diagnostics: (audits from the kept projections, audits
 /// with a direct P^T X product) of the threads-only real Gamma path.
 pub fn nl_audit_counters() -> (u64, u64) {
     let g = |i: usize| NL_AUDITS[i].load(std::sync::atomic::Ordering::Relaxed);
@@ -854,31 +854,15 @@ pub(crate) fn solve_real_gamma(
     };
     // NL-ENERGY-REAL: nonlocal expectation values of the returned real vectors
     // for the energy audit of this map (threads-only path).
-    // C3a (`BAANDI_LEAN_PROJ_CACHE=on`): a lean return leaves P^T X = (P^T V) C
-    // of exactly these vectors in the workspace (same operator, this solve);
-    // otherwise the projector product is formed here.
     if comm.is_none()
         && let Some(op) = op_opt
     {
         state.nl_values.resize(bands, 0.0);
-        let cached = state
-            .workspace
-            .as_ref()
-            .and_then(|ws| ws.returned_projections());
-        state.nl_valid = match cached {
-            Some(p) => {
-                count_nl_audit(true);
-                op.h.borrow()
-                    .nonlocal_expectation_values_from_projections(p, &mut state.nl_values)
-                    .is_ok()
-            }
-            None => {
-                count_nl_audit(false);
-                op.h.borrow_mut()
-                    .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
-                    .is_ok()
-            }
-        };
+        count_nl_audit(false);
+        state.nl_valid =
+            op.h.borrow_mut()
+                .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
+                .is_ok();
     }
 
     let t_unpack = dft_numerics::stage_clock::start();

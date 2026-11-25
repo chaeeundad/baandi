@@ -1,12 +1,6 @@
-//! B1 (selected-root products) and the Davidson stage timers: the switches are
-//! off by default and bit-identical when off; with B1 on, decisions, iteration
-//! counts and H work match the all-band path on fixed operators (only GEMM column
-//! grouping differs), every returned strict solution carries a fresh certificate,
-//! and results do not depend on the thread budget.
+//! Frozen B1 defaults: strict certificates, dense spectral checks and thread identity.
 use dft_numerics::{pool::WorkerPool, real::RealMatrix};
-use dft_solvers::real_davidson::{
-    B1Mode, RealEigenSolution, ResearchOptions, SketchKind, b1_counters, stage_seconds,
-};
+use dft_solvers::real_davidson::{RealEigenSolution, ResearchOptions, b1_counters, stage_seconds};
 use dft_solvers::{
     BandTolerances, DavidsonPreconditioner, RealDavidson, RealLinearOperator, SolverError,
 };
@@ -157,17 +151,6 @@ fn run(
     .unwrap()
 }
 
-fn b1(mode: B1Mode) -> ResearchOptions {
-    sketched(mode, SketchKind::Dense)
-}
-fn sketched(mode: B1Mode, sketch: SketchKind) -> ResearchOptions {
-    ResearchOptions {
-        b1: mode,
-        sketch,
-        ..ResearchOptions::default()
-    }
-}
-
 /// Debug-build tests use the kinetic fixture only (the clustered fixtures need
 /// many iterations and take minutes unoptimized); the ignored generality test
 /// runs all three in release.
@@ -185,35 +168,6 @@ fn fixtures(threads: usize, full: bool) -> Vec<(&'static str, Operator, Vec<f64>
         ("spectrum-g1", s1, d1),
         ("spectrum-g3", s3, d3),
     ]
-}
-
-/// Exactly degenerate clusters (spectrum-g3) make Ritz vectors inside a cluster
-/// non-unique, so a rounding-class change may move the trajectory by an
-/// iteration (as MKL-EVD did on 2 of 30 dev08 cells); there the counts may
-/// differ by at most 10 percent and eigenvalues agree to 1e-10 Ha.
-fn same_decisions(name: &str, base: &RealEigenSolution, b1: &RealEigenSolution, tol: f64) {
-    if name == "spectrum-g3" {
-        let near = |a: usize, b: usize| a.abs_diff(b) * 10 <= a.max(1);
-        assert!(near(base.iterations, b1.iterations), "{name}: iterations");
-        assert!(
-            near(base.operator_applications, b1.operator_applications),
-            "{name}: H columns"
-        );
-        for (a, b) in base.eigenvalues.iter().zip(&b1.eigenvalues) {
-            assert!((a - b).abs() <= 1e-10, "{name}: eigenvalue {a} vs {b}");
-        }
-        return;
-    }
-    assert_eq!(base.iterations, b1.iterations, "{name}: iterations");
-    assert_eq!(
-        base.operator_applications, b1.operator_applications,
-        "{name}: H columns"
-    );
-    assert_eq!(base.restarts, b1.restarts, "{name}: restarts");
-    assert_eq!(base.converged, b1.converged, "{name}: flags");
-    for (a, b) in base.eigenvalues.iter().zip(&b1.eigenvalues) {
-        assert!((a - b).abs() <= tol, "{name}: eigenvalue {a} vs {b}");
-    }
 }
 
 fn default_path(full: bool) {
@@ -234,45 +188,6 @@ fn default_path(full: bool) {
     }
 }
 
-fn standard_profile(full: bool) {
-    let before = b1_counters();
-    for (name, op, diag) in fixtures(1, full) {
-        let s = solver(16, 1e-10);
-        let policy = BandTolerances {
-            strict_bands: 12,
-            buffer_tolerance: 1e-8,
-        };
-        let base = run(&s, &op, &diag, policy, true, ResearchOptions::default());
-        // `strict` does not act on Ritz-change solves.
-        let strict_only = run(&s, &op, &diag, policy, true, b1(B1Mode::Strict));
-        assert_eq!(base, strict_only, "{name}");
-        let modes: &[B1Mode] = if full {
-            &[B1Mode::Standard, B1Mode::On]
-        } else {
-            &[B1Mode::On]
-        };
-        for &mode in modes {
-            let fast = run(&s, &op, &diag, policy, true, b1(mode));
-            same_decisions(name, &base, &fast, 1e-12);
-            // Returned residuals are formed on the all-band path; they differ
-            // only by rounding (operator norm up to about 60 Ha here).
-            // Inside exactly degenerate clusters (spectrum-g3) the Ritz vectors
-            // are not unique and Ritz-change convergence leaves them rotating,
-            // so rounding changes individual residual norms there; only the
-            // nondegenerate fixtures compare them.
-            if name != "spectrum-g3" {
-                for (a, b) in base.residuals.iter().zip(&fast.residuals) {
-                    assert!((a - b).abs() <= 1e-12, "{name}: {a} vs {b}");
-                }
-            }
-            assert!(!fast.residuals_certified);
-        }
-    }
-    let after = b1_counters();
-    assert!(after.narrow_iterations > before.narrow_iterations);
-    assert!(after.avoided_columns > before.avoided_columns);
-}
-
 fn strict_profile(full: bool) {
     let before = b1_counters();
     for (name, op, diag) in fixtures(1, full) {
@@ -281,36 +196,20 @@ fn strict_profile(full: bool) {
             strict_bands: 12,
             buffer_tolerance: 1e-6,
         };
-        let base = run(&s, &op, &diag, policy, false, ResearchOptions::default());
-        let standard_only = run(&s, &op, &diag, policy, false, b1(B1Mode::Standard));
-        assert_eq!(base, standard_only, "{name}");
-        let modes: &[B1Mode] = if full {
-            &[B1Mode::Strict, B1Mode::On]
-        } else {
-            &[B1Mode::Strict]
-        };
-        for (&mode, sketch) in modes
-            .iter()
-            .flat_map(|m| [(m, SketchKind::Dense), (m, SketchKind::Count)])
-        {
-            let fast = run(&s, &op, &diag, policy, false, sketched(mode, sketch));
-            same_decisions(name, &base, &fast, 1e-12);
-            assert!(fast.residuals_certified, "{name}");
-            assert_eq!(base.certification_attempts, fast.certification_attempts);
-            for (j, &r) in fast.residuals.iter().enumerate() {
-                let limit = if j < policy.strict_bands {
-                    s.tolerance
-                } else {
-                    policy.buffer_tolerance
-                };
-                assert!(r <= limit, "{name}: root {j} residual {r}");
-            }
+        let result = run(&s, &op, &diag, policy, false, ResearchOptions::default());
+        assert!(result.residuals_certified, "{name}");
+        for (j, &r) in result.residuals.iter().enumerate() {
+            let limit = if j < policy.strict_bands {
+                s.tolerance
+            } else {
+                policy.buffer_tolerance
+            };
+            assert!(r <= limit, "{name}: root {j} residual {r}");
         }
     }
     let after = b1_counters();
     assert!(after.narrow_iterations > before.narrow_iterations);
     assert!(after.sketch_estimates > before.sketch_estimates);
-    // A root flagged by its estimate never failed the explicit test.
     assert_eq!(after.sketch_disagreements, before.sketch_disagreements);
 }
 
@@ -323,37 +222,17 @@ fn thread_identity(full: bool) {
     let one = fixtures(1, full);
     let four = fixtures(4, full);
     for ((name, op1, d1), (_, op4, d4)) in one.iter().zip(&four) {
-        for (ritz, sketch) in [
-            (false, SketchKind::Dense),
-            (false, SketchKind::Count),
-            (true, SketchKind::Dense),
-        ] {
-            let a = run(&s, op1, d1, policy, ritz, sketched(B1Mode::On, sketch));
-            let b = run(&s, op4, d4, policy, ritz, sketched(B1Mode::On, sketch));
-            assert_eq!(a, b, "{name} ritz={ritz} {sketch:?}");
+        for ritz in [false, true] {
+            let a = run(&s, op1, d1, policy, ritz, ResearchOptions::default());
+            let b = run(&s, op4, d4, policy, ritz, ResearchOptions::default());
+            assert_eq!(a, b, "{name} ritz={ritz}");
         }
     }
 }
 
 #[test]
 fn default_options_are_the_default_path() {
-    // The environment switches are unset in the test process; B6 is on by default
-    // since the adoption rule (dev08 MICRO-ARM1), everything else is off.
-    assert_eq!(
-        ResearchOptions::from_env(),
-        ResearchOptions {
-            b1: B1Mode::On,
-            sketch: SketchKind::Count,
-            b5: true,
-            lean: true, // default since 2026-11-15 (BAANDI_DAVIDSON=lean)
-            ..ResearchOptions::default()
-        }
-    );
     default_path(false);
-}
-#[test]
-fn standard_profile_keeps_every_decision() {
-    standard_profile(false);
 }
 #[test]
 fn strict_profile_keeps_decisions_and_certifies_every_return() {
@@ -369,7 +248,6 @@ fn b1_results_do_not_depend_on_threads() {
 #[ignore = "release only: clustered fixtures take minutes unoptimized"]
 fn b1_generality_set() {
     default_path(true);
-    standard_profile(true);
     strict_profile(true);
     thread_identity(true);
 }
@@ -390,10 +268,7 @@ fn stage_timers_count_every_iteration_without_changing_results() {
         &diag,
         policy,
         false,
-        ResearchOptions {
-            stage_timers: true,
-            ..ResearchOptions::default()
-        },
+        ResearchOptions { stage_timers: true },
     );
     assert_eq!(base, timed);
     let after = stage_seconds();

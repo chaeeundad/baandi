@@ -379,9 +379,7 @@ fn oracle_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOp
         ..ScfOptions::strict_reference()
     };
     if let Some(s) = &config.scf {
-        if crate::parallel::size() >= 4
-            && dft_numerics::switches::choice(dft_numerics::switches::Id::M2_CAPACITY) == "auto"
-        {
+        if crate::parallel::size() >= 4 {
             o.davidson_capacity_per_band = 3;
         }
         o.start_wavefunctions = s
@@ -564,7 +562,7 @@ pub(crate) fn execution_json(
     o: &ScfOptions,
     s: Solver<'_>,
 ) -> Value {
-    use dft_numerics::switches::{self, Id, Source, Value as V};
+    use dft_numerics::switches::{self, Source, Value as V};
     let scf = config.scf.as_ref();
     let lean = dft_engine::lean_counters();
     let effective_solver = if dft_engine::parallel::distributed_solves() > 0 {
@@ -614,7 +612,7 @@ pub(crate) fn execution_json(
         "effective_solver":effective_solver,
         "real_gamma":s.gamma_real_used,
         "real_gamma_fallback_reason":s.gamma_real_fallback_reason,
-        "davidson_mode":switches::choice(Id::DAVIDSON),
+        "davidson_mode":"lean",
         "lean_solves":lean.solves,
         "solver_note":"lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
         "backend":{
@@ -656,28 +654,9 @@ fn switches_json() -> Value {
 /// engine's counters after the run (process totals: one run per CLI process),
 /// with the reason when it did not act as requested.
 pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
-    use dft_numerics::switches::{Id, RunCounter};
-    let ranks = crate::parallel::size();
-    let dist = dft_engine::parallel::distributed_solves();
+    use dft_numerics::switches::Id;
     let rows = dft_engine::parallel::distributed_rows_solves();
-    if rc.consulted(Id::MPI_M2) {
-        let (path, why) = match (dist, rows) {
-            (0, _) => (
-                "none",
-                Some(if ranks <= 1 {
-                    "one rank (threads path)"
-                } else {
-                    "no distributed eigensolve"
-                }),
-            ),
-            (_, 0) => (
-                "m1_row_block",
-                rc.on(Id::MPI_M2).then_some("M2 not eligible"),
-            ),
-            _ => ("m2_stick_rows", None),
-        };
-        rc.note_path(Id::MPI_M2, path, why);
-    }
+
     if rc.consulted(Id::M2_GRID) {
         let [potential, _, _, _, declined] = dft_engine::grid_dist::counters();
         let (path, why) = if potential > 0 {
@@ -700,25 +679,7 @@ pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
         };
         rc.note_path(Id::M2_GRID, path, why);
     }
-    if rc.consulted(Id::M2_MIX) {
-        let [_, _, built] = dft_engine::mix_dist::counters();
-        let (path, why) = if built > 0 {
-            ("distributed", None)
-        } else if !rc.on(Id::M2_MIX) {
-            ("replicated", None)
-        } else if rows == 0 {
-            (
-                "replicated",
-                Some("not the M2 path (one rank or row-block path)"),
-            )
-        } else {
-            (
-                "replicated",
-                Some("mixer not eligible (Hartree metric, Kerker or linear)"),
-            )
-        };
-        rc.note_path(Id::M2_MIX, path, why);
-    }
+
     // M2-OWNED: the owned modes' path and the reasons of every decline
     // (`owned.fields_declined.<reason>` / `owned.density_declined.<reason>`).
     let owned: std::collections::BTreeMap<String, usize> =
@@ -747,15 +708,6 @@ pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
         let reason = (!reasons.is_empty()).then(|| reasons.join(","));
         let path = if used > 0 { "owned" } else { "gathered" };
         rc.note_path(id, path, reason.as_deref().filter(|_| rc.on(id)));
-    }
-
-    if rc.consulted(Id::EWALD_CACHE) {
-        let hits = rc.counters()[RunCounter::EwaldHits as usize];
-        rc.note_path(
-            Id::EWALD_CACHE,
-            if hits > 0 { "hit" } else { "computed" },
-            None,
-        );
     }
 }
 
@@ -2103,8 +2055,8 @@ fn execute_mode_inner(
                 "second_vector_columns":dft_engine::second_vector_columns(),
                 "davidson_stages":phase(reference, &mut output_seconds, "report_collectives_with_pack", || over_ranks(davidson_stages_json()))?,
                 "b1":b1_json(),
-                "b5":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B5),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
-                "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
+                "b5":{"mode":"on","bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
+                "ortho":{"mode":"dgks:0.1 (default)","second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "algebra_stream":algebra_stream_json(),
                 "davidson_lean":davidson_lean_json(),
                 "gemm_dispatch":gemm_dispatch_json(),
@@ -2351,7 +2303,7 @@ fn execute_mode_inner(
             "replicated_reason": replicated,
             "m2": {
                 "enabled": m2_on,
-                "batched_transposes": dft_numerics::switches::on(dft_numerics::switches::Id::M2_BATCH),
+                "batched_transposes": true,
                 "counters": m2_counts.into_iter().map(|(n, v)| (n, json!(v))).collect::<serde_json::Map<_, _>>(),
                 "stages": m2_stages
                     .into_iter()
@@ -3931,25 +3883,25 @@ fn h_apply_parts_json(w: &dft_numerics::work_timers::WorkTimes) -> serde_json::V
     })
 }
 
-/// B1 selected-root counters (`BAANDI_B1`; zeros when off), cumulative.
+/// Frozen B1 selected-root counters, cumulative.
 fn b1_json() -> serde_json::Value {
     let c = dft_engine::b1_counters();
     json!({
-        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B1),
-        "sketch":dft_numerics::switches::choice(dft_numerics::switches::Id::B1_SKETCH),
+        "mode":"on",
+        "sketch":"count",
         "solves":c.solves,"narrow_iterations":c.narrow_iterations,"full_iterations":c.full_iterations,
         "narrow_columns":c.narrow_columns,"avoided_columns":c.avoided_columns,"fallbacks":c.fallbacks,
         "sketch_estimates":c.sketch_estimates,"sketch_disagreements":c.sketch_disagreements
     })
 }
 
-/// Lean Davidson (`BAANDI_DAVIDSON=lean`, work order phase B) counters and the
+/// Frozen lean Davidson (work order phase B) counters and the
 /// serial real Davidson GEMM flops by site (both paths; 2 m n k per product).
 fn davidson_lean_json() -> serde_json::Value {
     let c = dft_engine::lean_counters();
     let f = dft_engine::flop_counters();
     json!({
-        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),
+        "mode":"lean",
         "solves":c.solves,"iterations":c.iterations,"residual_columns":c.residual_columns,
         "appends":c.appends,"appended_columns":c.appended_columns,
         "reprojections":c.reprojections,"reprojection_rate":c.reprojection_rate(),
@@ -3963,12 +3915,12 @@ fn davidson_lean_json() -> serde_json::Value {
             "gram_schmidt":f.gram_schmidt as f64*1e-9,"fallback":f.fallback as f64*1e-9,
             "small":f.small as f64*1e-9,"total":f.total() as f64*1e-9},
         "eigen_full_solves":f.eigen_full,"eigen_full_m3":f.eigen_full_m3,
-        "proj_cache":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::LEAN_PROJ_CACHE),
+        "proj_cache":{"mode":"off",
             "returns":c.proj_cache_returns,"misses":c.proj_cache_misses,
             "kept_loads":c.proj_cache_kept_loads,"columns_copied":c.proj_cache_columns,
             "audits_from_cache":dft_engine::nl_audit_counters().0,
             "audits_direct":dft_engine::nl_audit_counters().1},
-        "restart_keep":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::RESTART_KEEP),
+        "restart_keep":{"mode":"off",
             "keep_contractions":c.keep_contractions,"kept_directions":c.kept_directions,
             "dropped":c.keep_dropped,"fallbacks":c.keep_fallbacks},
         "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
@@ -4003,11 +3955,9 @@ fn gemm_dispatch_json() -> serde_json::Value {
 /// (docs/performance/requests/algebra-stream.md).
 fn algebra_stream_json() -> serde_json::Value {
     let c = dft_engine::algebra_counters();
-    use dft_numerics::switches::Id;
-    let mode = |id: Id| dft_numerics::switches::text(id).unwrap_or("off");
     json!({
-        "ritz_fused":mode(Id::RITZ_FUSED),"narrow_proj":mode(Id::NARROW_PROJ),
-        "narrow_reduced":mode(Id::NARROW_REDUCED),
+        "ritz_fused":"off","narrow_proj":"off",
+        "narrow_reduced":"off",
         "fused_iterations":c.fused_iterations,"deferred_hx":c.deferred_hx,
         "narrow_projections":c.narrow_projections,"narrow_reduced_borders":c.narrow_reduced,
         "b5_parallel_updates":c.b5_parallel

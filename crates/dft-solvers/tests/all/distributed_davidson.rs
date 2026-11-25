@@ -558,7 +558,6 @@ fn serial_order_orthonormalization_matches_serial_eigenpairs() {
                     wide_gemm: true,
                     panel,
                     dgks,
-                    ..Default::default()
                 };
                 let got = check_rows_case_tuned(op, diag, bands, pol, tol, tuning);
                 for (g, c) in got.iter().zip(&classic) {

@@ -1,5 +1,5 @@
 //! Distributed Pulay mixing of the M2 path (ticket M2-GRID, 2026-11-18;
-//! `BAANDI_M2_MIX=on|off`, default off, rounding class).
+//! frozen default with numerical eligibility fallback).
 //!
 //! The replicated `PulayMixer` keeps every input density and residual of its
 //! window on every rank and forms its differences, Gram entries and the update
@@ -41,14 +41,12 @@ pub const CHUNK: usize = 4096;
 thread_local! {
     static OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
-/// Override `BAANDI_M2_MIX` for sessions initialized on the calling thread.
+/// Test override of distributed mixing for sessions initialized on the calling thread.
 pub fn set_override(on: Option<bool>) {
     OVERRIDE.with(|o| o.set(on));
 }
 pub fn requested() -> bool {
-    OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_MIX))
+    OVERRIDE.with(|o| o.get()).unwrap_or(true)
 }
 
 static COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];

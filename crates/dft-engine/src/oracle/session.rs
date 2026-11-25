@@ -304,7 +304,7 @@ impl ScfSession {
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
-            // M2-GRID (`BAANDI_M2_MIX=on`, default off): plain Pulay on the M2
+            // Frozen distributed mixer: plain Pulay on the M2
             // path keeps its window on the rank's grid block.
             Mixing::Pulay { beta, history }
                 if !self.problem.options.hartree_mixing
@@ -1476,16 +1476,13 @@ pub use crate::model::assess_fixed_point;
 /// parsing rules are those of the former per-process accessors.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SessionSwitches {
-    /// `BAANDI_EIGEN_FACTOR` (default 0.1).
+    /// Frozen residual-driven schedule factor (0.1).
     pub(crate) eigen_factor: f64,
 }
 
 impl SessionSwitches {
-    pub(crate) fn resolve(run: dft_numerics::switches::RunConfig) -> Self {
-        use dft_numerics::switches::Id;
-        Self {
-            eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
-        }
+    pub(crate) fn resolve(_run: dft_numerics::switches::RunConfig) -> Self {
+        Self { eigen_factor: 0.1 }
     }
 }
 
@@ -1496,7 +1493,6 @@ const CERT_SCREEN_MARGIN: f64 = 1.02;
 
 /// Coefficient of the residual-driven eigen tolerance schedule (tolerance =
 /// factor x density residual). Default 0.1 (the established empirical value);
-/// `BAANDI_EIGEN_FACTOR=<x>` (0.001 to 1) is an experiment switch for dev08 A/B.
 /// Strict residual eigen schedule: factor x last density residual (the
 /// normalized density L2 norm in atomic units; 0.1 is an empirical scheduling
 /// coefficient), `first` without history, clamped to [0.1 eigen_tolerance, 1e-2].

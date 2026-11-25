@@ -4042,3 +4042,26 @@ No QE source or new QE comparison was used.
 | `APPLY_LEAN` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
 | `HAPPLY_OVERLAP` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
 | `HAPPLY_FOLD` | Retired in R11b; former default frozen. | Oracle-only caller audit; see R11b verification. Preserve shared consumers and numerical fallbacks. |
+
+### R11b part 2 — frozen oracle controls (2026-11-25)
+
+No speed claim; local oracle/reference baseline identity passes 3 cases each, all seven recorded fields exact. See [reader audit and gates](switch-retirement.md#r11b-part-2-remaining-oracle-arithmetic-controls-2026-11-25).
+
+| Switch | Outcome | Evidence and lesson |
+| --- | --- | --- |
+| `EIGEN_FACTOR` | Retired; fixed 0.1. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `MPI_M2` | Retired; fixed on. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `M2_BATCH` | Retired; fixed on. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `M2_CAPACITY` | Retired; fixed auto (3 bands at >=4 ranks; otherwise 6). | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `M2_MIX` | Retired; fixed on. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `B1` | Retired; fixed on. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `B1_SKETCH` | Retired; fixed count. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `B5` | Retired; fixed on (serial). | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `RITZ_FUSED` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `NARROW_PROJ` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `NARROW_REDUCED` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `ORTHO` | Retired; fixed DGKS 0.1. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `DAVIDSON` | Retired; fixed lean for Ritz-change; orthonormal for strict. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `LEAN_PROJ_CACHE` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `RESTART_KEEP` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+| `EWALD_CACHE` | Retired; fixed on. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |

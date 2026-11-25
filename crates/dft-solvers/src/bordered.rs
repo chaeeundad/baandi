@@ -1,5 +1,5 @@
 //! B5: bordered (secular-equation) update of the reduced eigenproblem of the
-//! serial real Davidson (`BAANDI_B5=on`, default off).
+//! serial real Davidson (frozen default).
 //!
 //! When exactly one column is appended to a basis whose reduced matrix T has the
 //! eigendecomposition T = C diag(theta) C^T, the new reduced matrix in the basis
@@ -24,10 +24,8 @@
 //! Any conditioning doubt returns `false` and the caller runs the full dense
 //! solve: a root without convergence, a non-finite value, broken interlacing,
 //! or recomputed weights that differ from z by more than 1e-9 ||z||.
-use crate::davidson_stages::{AlgebraCount, algebra_add};
 use dft_numerics::{
     linalg::LinalgError,
-    pool::WorkerPool,
     real::{RealGemmWorkspace, RealMatrix, RealOp},
 };
 
@@ -57,8 +55,6 @@ pub(crate) struct Bordered {
     origin: Vec<f64>,
     tau: Vec<f64>,
     order_of: Vec<(f64, usize)>,
-    /// Coefficient product of the parallel form (n0 x m, contiguous).
-    product: Vec<f64>,
 }
 impl Bordered {
     pub(crate) fn new(capacity: usize) -> Self {
@@ -77,7 +73,6 @@ impl Bordered {
             origin: vec![0.; capacity + 1],
             tau: vec![0.; capacity + 1],
             order_of: Vec::with_capacity(capacity),
-            product: vec![0.; capacity * capacity],
         }
     }
     pub(crate) fn invalidate(&mut self) {
@@ -95,19 +90,12 @@ impl Bordered {
     /// Try the bordered update for the m x m reduced matrix `t` (its leading
     /// (m-1) x (m-1) block must be the matrix of the stored base). On success
     /// writes `values[..m]` and `coefficients` (m x m) and returns true.
-    /// With `parallel` (`BAANDI_B5=par`) the secular roots, the weights and
-    /// the eigenvector columns are computed per root on the pool (each root's
-    /// arithmetic is unchanged, so they are bit-identical to the serial form)
-    /// and the coefficient product runs in fixed column groups
-    /// (`multiply_column_groups`; bit-identical on the faer path, a fixed
-    /// different dgemm grouping on MKL). Thread-count independent.
     pub(crate) fn update(
         &mut self,
         gemm: &mut RealGemmWorkspace,
         t: &RealMatrix,
         values: &mut [f64],
         coefficients: &mut RealMatrix,
-        parallel: Option<&WorkerPool>,
     ) -> Result<bool, LinalgError> {
         let m = t.rows();
         let n0 = m - 1;
@@ -187,10 +175,7 @@ impl Bordered {
             upper,
         };
         let (origin, tau) = (&mut self.origin[..=kk], &mut self.tau[..=kk]);
-        let solved = match parallel {
-            Some(pool) => pool.install(|| roots.solve_range(0, origin, tau, true)),
-            None => roots.solve_range(0, origin, tau, false),
-        };
+        let solved = roots.solve_range(0, origin, tau);
         if !solved {
             return Ok(false);
         }
@@ -217,10 +202,7 @@ impl Bordered {
         };
         // Signed weights per pole number into the scratch `y`, then placed.
         let scratch = &mut self.y[..kk];
-        let w_ok = match parallel {
-            Some(pool) => pool.install(|| weights.range(0, scratch, true)),
-            None => weights.range(0, scratch, false),
-        };
+        let w_ok = weights.range(0, scratch);
         if !w_ok {
             return Ok(false);
         }
@@ -258,24 +240,13 @@ impl Bordered {
             n0,
         };
         let y = &mut self.y[..m * m];
-        match parallel {
-            Some(pool) => pool.install(|| vectors.columns(0, y, true)),
-            None => vectors.columns(0, y, false),
-        }
+        vectors.columns(0, y);
         if !values[..m].iter().all(|v| v.is_finite()) || !y.iter().all(|v| v.is_finite()) {
             return Ok(false);
         }
         // C' = [[C_rot, 0], [0, 1]] Y.
         coefficients.reshape_within_storage(m, m)?;
-        if parallel.is_some() {
-            algebra_add(AlgebraCount::B5Parallel);
-            let product = &mut self.product[..n0 * m];
-            gemm.multiply_column_groups(&self.rotated[..n0 * n0], n0, n0, n0, y, m, m, product)?;
-            let out = coefficients.as_mut_slice();
-            for col in 0..m {
-                out[col * m..col * m + n0].copy_from_slice(&product[col * n0..(col + 1) * n0]);
-            }
-        } else {
+        {
             gemm.multiply_slices_into(
                 dft_numerics::GemmSite::Other,
                 &self.rotated[..n0 * n0],
@@ -319,7 +290,6 @@ fn gap_of(origin: &[f64], tau: &[f64], theta: &[f64], r: usize, k: usize) -> f64
 }
 /// Pieces of a parallel range (fixed, so the split never depends on the thread
 /// count; each item's arithmetic is serial and unchanged).
-const PIECE: usize = 16;
 /// Secular roots: root r between poles r-1 and r, as origin + tau.
 struct Roots<'a> {
     d: f64,
@@ -331,23 +301,7 @@ struct Roots<'a> {
 }
 impl Roots<'_> {
     /// Roots `first..first + origin.len()`; false if any root failed.
-    fn solve_range(
-        &self,
-        first: usize,
-        origin: &mut [f64],
-        tau: &mut [f64],
-        parallel: bool,
-    ) -> bool {
-        if parallel && origin.len() > PIECE {
-            let split = (origin.len().div_ceil(PIECE) / 2) * PIECE;
-            let (ol, or) = origin.split_at_mut(split);
-            let (tl, tr) = tau.split_at_mut(split);
-            let (a, b) = WorkerPool::join(
-                || self.solve_range(first, ol, tl, true),
-                || self.solve_range(first + split, or, tr, true),
-            );
-            return a && b;
-        }
+    fn solve_range(&self, first: usize, origin: &mut [f64], tau: &mut [f64]) -> bool {
         for (i, (o, t)) in origin.iter_mut().zip(tau.iter_mut()).enumerate() {
             match self.root(first + i) {
                 Some((origin, tau)) => {
@@ -420,16 +374,7 @@ struct Weights<'a> {
 impl Weights<'_> {
     /// Signed weights of pole numbers `first..first + out.len()`; false on a
     /// non-finite or negative square.
-    fn range(&self, first: usize, out: &mut [f64], parallel: bool) -> bool {
-        if parallel && out.len() > PIECE {
-            let split = (out.len().div_ceil(PIECE) / 2) * PIECE;
-            let (l, r) = out.split_at_mut(split);
-            let (a, b) = WorkerPool::join(
-                || self.range(first, l, true),
-                || self.range(first + split, r, true),
-            );
-            return a && b;
-        }
+    fn range(&self, first: usize, out: &mut [f64]) -> bool {
         let kk = self.poles.len();
         let gap = |r: usize, k: usize| gap_of(self.origin, self.tau, self.theta, r, k);
         for (i, dst) in out.iter_mut().enumerate() {
@@ -461,18 +406,9 @@ struct Vectors<'a> {
 }
 impl Vectors<'_> {
     /// Columns `first..` of Y (n0 + 1 rows each) into `y`.
-    fn columns(&self, first: usize, y: &mut [f64], parallel: bool) {
+    fn columns(&self, first: usize, y: &mut [f64]) {
         let m = self.n0 + 1;
-        let count = y.len() / m;
-        if parallel && count > PIECE {
-            let split = (count.div_ceil(PIECE) / 2) * PIECE;
-            let (l, r) = y.split_at_mut(split * m);
-            WorkerPool::join(
-                || self.columns(first, l, true),
-                || self.columns(first + split, r, true),
-            );
-            return;
-        }
+
         for (i, dst) in y.chunks_exact_mut(m).enumerate() {
             let id = self.order_of[first + i].1;
             dst.fill(0.);
@@ -589,37 +525,10 @@ mod tests {
             let mut gemm = RealGemmWorkspace::with_pool(m, m, WorkerPool::new(1).unwrap()).unwrap();
             let mut values = vec![0.; m];
             let mut c = RealMatrix::zeros(m, m).unwrap();
-            if !b.update(&mut gemm, &t, &mut values, &mut c, None).unwrap() {
+            if !b.update(&mut gemm, &t, &mut values, &mut c).unwrap() {
                 continue;
             }
             used += 1;
-            // BAANDI_B5=par: same roots and vectors bit for bit at every pool
-            // size; the product is bit-identical on faer, a fixed different
-            // dgemm grouping on MKL.
-            for threads in [1, 3, 8] {
-                let pool = WorkerPool::new(threads).unwrap();
-                let mut pg = RealGemmWorkspace::with_pool(m, m, pool.clone()).unwrap();
-                let mut pb = Bordered::new(m);
-                pb.store(&bv, &bc);
-                let mut pv = vec![0.; m];
-                let mut pc = RealMatrix::zeros(m, m).unwrap();
-                assert!(
-                    pb.update(&mut pg, &t, &mut pv, &mut pc, Some(&pool))
-                        .unwrap()
-                );
-                assert!(
-                    pv.iter()
-                        .zip(&values)
-                        .all(|(a, b)| a.to_bits() == b.to_bits())
-                );
-                for (a, b) in pc.as_slice().iter().zip(c.as_slice()) {
-                    if dft_numerics::MKL_BACKEND {
-                        assert!((a - b).abs() <= 1e-13, "case {case}: {a} vs {b}");
-                    } else {
-                        assert_eq!(a.to_bits(), b.to_bits(), "case {case} threads {threads}");
-                    }
-                }
-            }
             let (ev, _) = symmetric_eigh(&t).unwrap();
             let norm = t.as_slice().iter().fold(1_f64, |a, &x| a.max(x.abs()));
             for (a, e) in values.iter().zip(&ev) {
@@ -647,73 +556,5 @@ mod tests {
             }
         }
         assert!(used >= 30, "bordered path used in {used} of 40 cases");
-    }
-
-    /// Cost of one bordered update against the full solve (observation only):
-    /// `cargo test --release -p dft-solvers --lib bordered_timing -- --ignored --nocapture`
-    #[test]
-    #[ignore = "timing observation, release"]
-    fn bordered_timing() {
-        let mut state = 5;
-        println!(
-            "order | full solve ms | bordered update ms | par T=4 ms | par T=8 ms (median of 7)"
-        );
-        for m in [96, 204, 306, 408] {
-            let n0 = m - 1;
-            // Ritz-like base: spread values, then one new coupled column.
-            let mut t = RealMatrix::zeros(m, m).unwrap();
-            for i in 0..n0 {
-                t[(i, i)] = 0.05 * i as f64 + 1e-3 * lcg(&mut state);
-            }
-            for i in 0..m {
-                let v = 1e-2 * lcg(&mut state);
-                t[(i, n0)] = v;
-                t[(n0, i)] = v;
-            }
-            let mut base_t = RealMatrix::zeros(n0, n0).unwrap();
-            for i in 0..n0 {
-                base_t[(i, i)] = t[(i, i)];
-            }
-            let (bv, bc) = symmetric_eigh(&base_t).unwrap();
-            let mut gemm = RealGemmWorkspace::with_pool(m, m, WorkerPool::new(1).unwrap()).unwrap();
-            let mut values = vec![0.; m];
-            let mut c = RealMatrix::zeros(m, m).unwrap();
-            let mut b = Bordered::new(m);
-            let mut eig = dft_numerics::real::RealEighWorkspace::new(m).unwrap();
-            let (mut tf, mut tb) = (Vec::new(), Vec::new());
-            let mut tp = [Vec::new(), Vec::new()];
-            let pools = [WorkerPool::new(4).unwrap(), WorkerPool::new(8).unwrap()];
-            let mut pgs: Vec<_> = pools
-                .iter()
-                .map(|p| RealGemmWorkspace::with_pool(m, m, p.clone()).unwrap())
-                .collect();
-            for _ in 0..7 {
-                let s = std::time::Instant::now();
-                eig.solve_into(&t, &mut values, &mut c).unwrap();
-                tf.push(s.elapsed().as_secs_f64() * 1e3);
-                b.store(&bv, &bc);
-                let s = std::time::Instant::now();
-                assert!(b.update(&mut gemm, &t, &mut values, &mut c, None).unwrap());
-                tb.push(s.elapsed().as_secs_f64() * 1e3);
-                for (i, pool) in pools.iter().enumerate() {
-                    b.store(&bv, &bc);
-                    let s = std::time::Instant::now();
-                    assert!(
-                        b.update(&mut pgs[i], &t, &mut values, &mut c, Some(pool))
-                            .unwrap()
-                    );
-                    tp[i].push(s.elapsed().as_secs_f64() * 1e3);
-                }
-            }
-            tf.sort_by(f64::total_cmp);
-            tb.sort_by(f64::total_cmp);
-            for t in tp.iter_mut() {
-                t.sort_by(f64::total_cmp);
-            }
-            println!(
-                "{m} | {:.3} | {:.3} | {:.3} | {:.3}",
-                tf[3], tb[3], tp[0][3], tp[1][3]
-            );
-        }
     }
 }

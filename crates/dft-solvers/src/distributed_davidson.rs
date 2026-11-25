@@ -696,16 +696,12 @@ pub struct DistributedTuning {
     /// `multiply_slices_wide_into` (per-panel dgemm at any width on MKL builds;
     /// bit-identical on pure builds).
     pub wide_gemm: bool,
-    /// DGKS keep ratio of the serial order (`BAANDI_ORTHO`); `None` = two passes.
+    /// DGKS keep ratio of the serial order (frozen oracle ratio 0.1); `None` = two passes.
     pub dgks: Option<f64>,
     /// Panel rule of the serial order: `Some(0)` = ORTHO-BLOCK shape rule on the
     /// widest local row count, `Some(w)` = fixed width w (MGS-B), `None` = the
     /// whole block as one panel (the classic sweep).
     pub panel: Option<usize>,
-    /// `BAANDI_RESTART_KEEP` (ticket BREAKTHROUGH-1-RESTART, R1-b): previous
-    /// directions kept at a contraction of the lean algebra path
-    /// (`RestartKeep`; default off = the plain restart, bit for bit).
-    pub restart_keep: crate::real_davidson::RestartKeep,
 }
 
 /// In-panel reduction scheme of the distributed panel Gram-Schmidt
@@ -725,7 +721,7 @@ pub enum PanelGs {
     Pythag,
     /// The input norm rides with the first pass's dot products; the second pass
     /// is skipped when the DGKS rule holds for the column (`|v1| >= keep |v|`,
-    /// keep = the `BAANDI_ORTHO` ratio the serial solver applies against the
+    /// keep = the DGKS ratio the serial solver applies against the
     /// basis), else `Pythag`'s second pass. About one reduction per column;
     /// rounding class.
     Fused,
@@ -743,7 +739,6 @@ impl DistributedTuning {
             wide_gemm: on(Id::M2_DGEMM),
             dgks: crate::real_davidson::dgks_keep(),
             panel,
-            restart_keep: crate::real_davidson::RestartKeep::from_env(),
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -1183,14 +1178,12 @@ impl crate::RealDavidson {
                     v
                 })
                 .collect();
-            let layout = std::sync::Arc::new(Layout {
+            std::sync::Arc::new(Layout {
                 n,
                 rank: comm.rank(),
                 counts,
                 index,
-            });
-            {}
-            layout
+            })
         };
         let cap = self
             .max_subspace

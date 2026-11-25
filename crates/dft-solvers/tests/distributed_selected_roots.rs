@@ -174,8 +174,6 @@ fn entry_stack() -> DistributedTuning {
 
         panel: Some(4),
         dgks: Some(0.1),
-
-        ..Default::default()
     }
 }
 

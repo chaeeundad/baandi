@@ -15,8 +15,7 @@
 //! M2_PROFILE_STANDARD=on runs the standard (Ritz-change) profile instead of strict.
 //! M2_PROFILE_MODE=production runs the production default (`ScfOptions::strict_reference()`:
 //! standard 5e-9 Ha, fixed-point verification, Pulay 0.5) with the CLI capacity rule
-//! (3 per band at four or more ranks unless `BAANDI_M2_CAPACITY=off` or
-//! M2_PROFILE_CAPACITY is set).
+//! (3 per band at four or more ranks unless M2_PROFILE_CAPACITY is set).
 //! M2_PROFILE_VERIFY=off drops the verification (to size its cost only).
 //! Every distributed run also prints one machine-readable line `M2SCREEN_JSON {...}`
 //! (per-rank counters and stages) read by `scripts/fast_screen_mpi.py`.
@@ -96,8 +95,7 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
         .and_then(|v| v.parse().ok())
         .unwrap_or_else(|| {
             // The CLI rule (MPI-CAPACITY-RULE) in production mode, else the default 6.
-            let auto =
-                dft_numerics::switches::choice(dft_numerics::switches::Id::M2_CAPACITY) == "auto";
+            let auto = true;
             if production && ranks >= 4 && auto {
                 3
             } else {
@@ -480,7 +478,7 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
                 "lean_factored_starts",
                 la.factored_starts - lb.factored_starts,
             ),
-            // BREAKTHROUGH-1-RESTART R1-b (`BAANDI_RESTART_KEEP`).
+            // Historical restart-history counters (retired; remain zero).
             ("lean_contractions", la.contractions - lb.contractions),
             (
                 "keep_contractions",

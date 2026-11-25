@@ -1,13 +1,13 @@
 //! Isolated ORC Davidson; no complex-path dispatch or arithmetic is changed.
 use crate::bordered::MAX_STREAK;
-use crate::davidson_stages::{
-    AlgebraCount, B1Count, B5Count, FlopSite, Stage, Timers, algebra_add, b1_add, b5_add,
-    eigen_full_add, flops_add, flops_add_raw,
-};
 pub use crate::davidson_stages::{
-    AlgebraCounters, B1Counters, B1Mode, B5Counters, FlopCounters, LeanCounters, ResearchOptions,
-    RestartKeep, SketchKind, StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters,
-    b5_counters, flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
+    AlgebraCounters, B1Counters, B5Counters, FlopCounters, LeanCounters, ResearchOptions,
+    StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters, b5_counters, flop_counters,
+    lean_counters, stage_seconds, stage_seconds_by_run_stage,
+};
+use crate::davidson_stages::{
+    B1Count, B5Count, FlopSite, Stage, Timers, b1_add, b5_add, eigen_full_add, flops_add,
+    flops_add_raw,
 };
 #[path = "lean_davidson.rs"]
 pub(crate) mod lean;
@@ -143,12 +143,6 @@ pub struct RealDavidsonWorkspace {
     /// REUSE-PSI (work order C2): X and H X of the latest lean return, kept
     /// when the caller asked for them; allocated at the first such return.
     kept: Option<KeptStart>,
-    /// C3a (`ResearchOptions::lean_proj_cache`): P^T V of the lean basis
-    /// columns, allocated at the first lean solve with the switch on.
-    lean_proj: Option<lean::ProjCache>,
-    /// C3a: `lean_proj.pc` holds P^T X of the vectors the latest solve of this
-    /// workspace returned. Cleared at the start of every solve.
-    returned_projections: bool,
 }
 /// REUSE-PSI: the returned Ritz vectors X (all bands) and their H images,
 /// formed by the return rotation of the lean solve. `armed` makes the next
@@ -163,12 +157,6 @@ pub struct KeptStart {
     pub(crate) armed: bool,
     pub(crate) vectors: RealMatrix,
     pub(crate) products: RealMatrix,
-    /// C3a: P^T X of `vectors` (projector rows `projection_count`, column-major;
-    /// `projection_count == 0`: not kept). The operator is the same for a
-    /// kept start (the engine rebuilds the workspace with the operator), so
-    /// the projectors and hence P^T X stay valid with X.
-    pub(crate) projections: Vec<f64>,
-    pub(crate) projection_count: usize,
 }
 /// Largest absolute difference between a caller's `initial` block and the kept
 /// X for which the kept start is taken (the ORC packing tolerance; a round trip
@@ -185,8 +173,6 @@ impl RealDavidsonWorkspace {
                 armed: false,
                 vectors: RealMatrix::zeros(self.n, self.bands)?,
                 products: RealMatrix::zeros(self.n, self.bands)?,
-                projections: Vec::new(),
-                projection_count: 0,
             });
         }
         if let Some(k) = self.kept.as_mut() {
@@ -194,23 +180,9 @@ impl RealDavidsonWorkspace {
             if !on {
                 k.valid = false;
                 k.armed = false;
-                k.projection_count = 0;
             }
         }
         Ok(())
-    }
-    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on`): P^T X of the vectors the latest solve
-    /// of this workspace returned (column-major, `projector_count()` rows of the
-    /// operator, one column per band), formed as (P^T V) C from the projector
-    /// products of the basis columns. `None` when that solve was not a lean
-    /// solve with the switch on, the operator exposes no projections, or the
-    /// cache was incomplete (a rotation it could not follow); the caller then
-    /// forms P^T X directly.
-    pub fn returned_projections(&self) -> Option<&[f64]> {
-        if !self.returned_projections {
-            return None;
-        }
-        self.lean_proj.as_ref().map(|c| c.pc.as_slice())
     }
     /// X and H X of the latest lean return, if kept and not consumed.
     pub fn kept_start(&self) -> Option<(&RealMatrix, &RealMatrix)> {
@@ -243,7 +215,6 @@ impl RealDavidsonWorkspace {
         if let Some(k) = self.kept.as_mut() {
             k.valid = false;
             k.armed = false;
-            k.projection_count = 0;
         }
     }
     /// Whether the kept start is armed for the next lean solve.
@@ -268,7 +239,7 @@ impl RealDavidsonWorkspace {
         k.products.as_mut_slice().copy_from_slice(hx.as_slice());
         k.valid = true;
         k.armed = true;
-        k.projection_count = 0;
+
         Ok(())
     }
 }
@@ -306,8 +277,6 @@ impl RealDavidsonWorkspace {
             b6: None,
             lean: None,
             kept: None,
-            lean_proj: None,
-            returned_projections: false,
             n,
             bands,
             capacity,
@@ -516,10 +485,8 @@ impl RealDavidson {
     /// `budget.h_columns` operator columns from the kept start (or `initial`),
     /// then the all-band Ritz vectors, values, residual norms and H images
     /// (kept in the workspace) are returned as an `AdvancedSubspace`. Nothing
-    /// in the returned state claims convergence. Requires the lean solver
-    /// (`ResearchOptions::lean`) and the Ritz-change mode; any other
-    /// configuration is an `InvalidParameter` error so the caller falls back
-    /// to the converging solve with a recorded reason.
+    /// in the returned state claims convergence. This uses the frozen lean
+    /// Ritz-change solver; invalid budgets return `InvalidParameter`.
     #[allow(clippy::too_many_arguments)]
     pub fn advance_reusing(
         &self,
@@ -533,11 +500,6 @@ impl RealDavidson {
         preconditioner: crate::DavidsonPreconditioner,
     ) -> Result<AdvancedSubspace, SolverError> {
         let options = ResearchOptions::from_env();
-        if !options.lean {
-            return Err(SolverError::InvalidParameter(
-                "advance requires the lean Ritz-change Davidson",
-            ));
-        }
         if budget.correction_blocks == 0 || budget.h_columns == 0 {
             return Err(SolverError::InvalidParameter(
                 "advance budget must allow at least one correction block and one column",
@@ -558,7 +520,7 @@ impl RealDavidson {
                 .map_err(|e| SolverError::Application(e.to_string()))?,
         };
         self.ensure_workspace(n, capacity, &pool, workspace)?;
-        workspace.as_mut().unwrap().returned_projections = false;
+
         lean::solve_with_intent(
             self,
             op,
@@ -666,9 +628,9 @@ impl RealDavidson {
         };
         self.ensure_workspace(n, capacity, &pool, workspace)?;
         // C3a: returned projections belong to exactly one solve.
-        workspace.as_mut().unwrap().returned_projections = false;
+
         // Lean Davidson (work order phase B): Ritz-value solves only.
-        if options.lean && ritz {
+        if ritz {
             return lean::solve(
                 self,
                 op,
@@ -714,37 +676,31 @@ impl RealDavidson {
         // Frozen cached-projector certificate: cache P^T V per basis column so the
         // return certificate skips its first projector product.
         let mut b6 = B6Cache::activate(b6_scratch, op, capacity, self.bands);
-        projection.narrow = options.narrow_proj;
         let timers = Timers::new(options.stage_timers);
-        let b1_active = options.b1.acts_on(ritz);
-        let sketching = b1_active && !ritz;
+        let sketching = true;
         // B1 strict margin and sketch rows (0.5 and 128 by default).
         let margin = crate::davidson_stages::B1_DEFAULT_MARGIN;
         let sketch_rows = options.b1_sketch_rows();
-        if b1_active {
+        {
             b1_add(B1Count::Solves, 1);
             if b1_scratch
                 .as_ref()
-                .is_none_or(|s| !s.matches(self.seed, sketching, options.sketch, sketch_rows))
+                .is_none_or(|s| !s.matches(self.seed, sketching, sketch_rows))
             {
                 *b1_scratch = Some(B1Scratch::new(
                     n,
                     self.bands,
                     capacity,
                     self.seed,
-                    sketching.then_some((options.sketch, sketch_rows)),
+                    sketching.then_some(sketch_rows),
                 )?);
             }
         }
-        let mut b1 = if b1_active { b1_scratch.as_mut() } else { None };
-        if options.b5 && b5_scratch.is_none() {
+        let mut b1 = { b1_scratch.as_mut() };
+        if b5_scratch.is_none() {
             *b5_scratch = Some(crate::bordered::Bordered::new(capacity));
         }
-        let mut b5 = if options.b5 {
-            b5_scratch.as_mut()
-        } else {
-            None
-        };
+        let mut b5 = { b5_scratch.as_mut() };
         if let Some(b) = b5.as_mut() {
             b.invalidate();
         }
@@ -774,7 +730,7 @@ impl RealDavidson {
             append_into(basis, &extra)?;
         }
         let threshold = |j| {
-            if j < policy.strict_bands - usize::from(ritz) {
+            if j < policy.strict_bands {
                 self.tolerance
             } else {
                 policy.buffer_tolerance
@@ -821,14 +777,7 @@ impl RealDavidson {
             max_basis_dimension = max_basis_dimension.max(basis.cols());
             let m = basis.cols();
             let t = timers.start();
-            reduced_matrix_into(
-                basis,
-                products,
-                reduced_width,
-                gemm,
-                reduced,
-                options.narrow_reduced,
-            )?;
+            reduced_matrix_into(basis, products, reduced_width, gemm, reduced)?;
             timers.stop(t, Stage::Reduced);
             let prefix = reduced_width;
             reduced_width = m;
@@ -840,13 +789,7 @@ impl RealDavidson {
                 Some(b) if prefix + 1 == m && b.order == prefix && b.streak < MAX_STREAK => {
                     let _bordered_lane =
                         lane_profile::span(lane_profile::Op::Bordered, m, prefix, m, 0);
-                    let done = b.update(
-                        gemm,
-                        reduced,
-                        &mut values[..m],
-                        coefficients,
-                        options.b5_parallel.then_some(&*pool),
-                    )?;
+                    let done = b.update(gemm, reduced, &mut values[..m], coefficients)?;
                     if !done {
                         b5_add(B5Count::Declined);
                     }
@@ -882,18 +825,7 @@ impl RealDavidson {
                 }
                 b1.set.clear();
                 if iteration < self.max_iterations {
-                    if ritz {
-                        if !(iteration == 1 && basis.cols() == n) {
-                            b1.set.extend(
-                                (0..self.bands)
-                                    .filter(|&j| {
-                                        !(iteration > 1
-                                            && (values[j] - previous[j]).abs() < threshold(j))
-                                    })
-                                    .take(self.bands.min(capacity - self.bands)),
-                            );
-                        }
-                    } else {
+                    {
                         let est = &b1.est;
                         b1.set
                             .extend((0..self.bands).filter(|&j| est[j] >= margin * threshold(j)));
@@ -917,7 +849,6 @@ impl RealDavidson {
                     // Narrow iterations never restart, so H X is never needed.
                     ritz_and_residuals(
                         FlopSite::RitzLoop,
-                        options.ritz_fused,
                         gemm,
                         basis,
                         products,
@@ -930,7 +861,7 @@ impl RealDavidson {
                         &pool,
                         timers,
                     )?;
-                    if !ritz {
+                    {
                         residuals.copy_from_slice(&b1.est);
                     }
                     for (slot, &j) in b1.set.iter().enumerate() {
@@ -938,7 +869,7 @@ impl RealDavidson {
                     }
                     // Strict: if every explicit residual passes, all roots are
                     // flagged converged; a return is decided on the full path.
-                    if !ritz && b1.set.iter().all(|&j| residuals[j] <= threshold(j)) {
+                    if b1.set.iter().all(|&j| residuals[j] <= threshold(j)) {
                         narrow = false;
                         b1_add(B1Count::Fallbacks, 1);
                     }
@@ -955,7 +886,6 @@ impl RealDavidson {
             let mut trusted = true;
             // Whether `rotated_products` holds H X of this iteration (always on
             // the unfused path; RITZ-FUSED forms it only for a contraction).
-            let mut hx_formed = false;
             if !narrow {
                 for (j, c) in column_of.iter_mut().enumerate() {
                     *c = j;
@@ -963,9 +893,8 @@ impl RealDavidson {
                 vectors.reshape_within_storage(n, self.bands)?;
                 rotated_products.reshape_within_storage(n, self.bands)?;
                 residual_block.reshape_within_storage(n, self.bands)?;
-                hx_formed = ritz_and_residuals(
+                ritz_and_residuals(
                     FlopSite::RitzLoop,
-                    options.ritz_fused,
                     gemm,
                     basis,
                     products,
@@ -986,8 +915,7 @@ impl RealDavidson {
                         .count();
                     b1_add(B1Count::Disagreements, missed);
                 }
-                if !ritz
-                    && (certify || iteration == self.max_iterations)
+                if (certify || iteration == self.max_iterations)
                     && (meets_policy(residuals)
                         || (iteration == self.max_iterations && meets_strict(residuals)))
                 {
@@ -1023,18 +951,11 @@ impl RealDavidson {
                     trusted = meets_policy(residuals);
                 }
             }
-            let maximum = match b1.as_ref() {
-                Some(b1) if narrow && ritz => {
-                    b1.set.iter().map(|&j| residuals[j]).fold(0., f64::max)
-                }
-                _ => residuals.iter().copied().fold(0., f64::max),
-            };
+            let maximum = residuals.iter().copied().fold(0., f64::max);
             history.push(maximum);
             work.residuals(iteration, residuals);
             for (j, flag) in converged.iter_mut().enumerate() {
-                *flag = if ritz {
-                    iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
-                } else if narrow {
+                *flag = if narrow {
                     // Not in the explicit set: the sketch estimate is below
                     // the margin (default half) times the threshold.
                     b1.as_ref()
@@ -1087,10 +1008,7 @@ impl RealDavidson {
                     residuals: result_residuals,
                 });
             }
-            if ritz && iteration == 1 && basis.cols() == n {
-                timers.iteration(iteration_clock, 0);
-                continue;
-            }
+
             selected.clear();
             selected.extend(
                 (0..self.bands)
@@ -1123,19 +1041,7 @@ impl RealDavidson {
                 reduced_width = 0;
                 if trusted && orthogonality_defect(vectors) <= 1e-12 {
                     contractions += 1;
-                    if !hx_formed {
-                        let t = timers.start();
-                        gemm.rotate_slices(
-                            products.as_slice(),
-                            m,
-                            &coefficients.as_slice()[..m * self.bands],
-                            self.bands,
-                            rotated_products.as_mut_slice(),
-                        )?;
-                        timers.stop(t, Stage::Rotate);
-                        flops_add(FlopSite::Contraction, n, m, self.bands);
-                        algebra_add(AlgebraCount::DeferredHx);
-                    }
+
                     std::mem::swap(basis, vectors);
                     std::mem::swap(products, rotated_products);
                     if let Some(c) = b6.as_mut() {
@@ -1528,7 +1434,7 @@ fn reduced_matrix(
     if let Some(old) = old {
         out.as_mut_slice()[..prefix * prefix].copy_from_slice(old.as_slice());
     }
-    reduced_matrix_into(v, hv, prefix, ws, &mut out, false)?;
+    reduced_matrix_into(v, hv, prefix, ws, &mut out)?;
     Ok(out)
 }
 /// Rectangular upper-border tiles. Only rows <= the global column are consumed
@@ -1569,7 +1475,6 @@ fn reduced_matrix_into(
     prefix: usize,
     ws: &mut RealGemmWorkspace,
     out: &mut RealMatrix,
-    narrow: bool,
 ) -> Result<(), LinalgError> {
     let _lane = lane_profile::span(
         lane_profile::Op::ReducedGram,
@@ -1593,18 +1498,7 @@ fn reduced_matrix_into(
     // old prefix exactly; the newly computed upper triangle defines symmetry.
     let rows = v.rows();
     flops_add(FlopSite::Reduced, m, rows, m - prefix);
-    if narrow && prefix > 0 && m - prefix <= NARROW_WIDTH {
-        // NARROW-REDUCED: one streaming dot per entry of the border.
-        algebra_add(AlgebraCount::NarrowReduced);
-        ws.narrow_transpose_into(
-            v.as_slice(),
-            rows,
-            m,
-            &hv.as_slice()[prefix * rows..m * rows],
-            m - prefix,
-            out.as_mut().subcols_mut(prefix, m - prefix),
-        )?;
-    } else {
+    {
         upper_border_product(
             ws,
             dft_numerics::GemmSite::Reduced,
@@ -1746,14 +1640,10 @@ fn rotation_pair(
 }
 
 /// Ritz vectors X = V C and residuals R = H V C - X diag(values) with their
-/// norms. RITZ-FUSED (`fused`): one pass over V and HV without storing H X
-/// (bit-identical; returns false, H X not formed). Otherwise, or when the
-/// research rotation kernel declines the fused form: the pair rotation into
-/// `vectors` and `rotated_products`, then the residual (returns true).
+/// norms, using the frozen pair rotation followed by the residual.
 #[allow(clippy::too_many_arguments)]
 fn ritz_and_residuals(
     site: FlopSite,
-    fused: bool,
     gemm: &mut RealGemmWorkspace,
     basis: &RealMatrix,
     products: &RealMatrix,
@@ -1765,7 +1655,7 @@ fn ritz_and_residuals(
     norms: &mut [f64],
     pool: &WorkerPool,
     timers: Timers,
-) -> Result<bool, SolverError> {
+) -> Result<(), SolverError> {
     let _lane = lane_profile::span(
         lane_profile::Op::RotateResidual,
         basis.rows(),
@@ -1779,25 +1669,7 @@ fn ritz_and_residuals(
     // V C and (H V) C.
     flops_add(site, basis.rows(), m, 2 * k);
     let t = timers.start();
-    if fused
-        && gemm.rotate_residual_slices(
-            basis.as_slice(),
-            products.as_slice(),
-            m,
-            c,
-            k,
-            values,
-            vectors.as_mut_slice(),
-            residual_block.as_mut_slice(),
-        )?
-    {
-        timers.stop(t, Stage::Rotate);
-        algebra_add(AlgebraCount::Fused);
-        let t = timers.start();
-        residual_norms(residual_block, norms, pool)?;
-        timers.stop(t, Stage::Residual);
-        return Ok(false);
-    }
+
     rotation_pair(gemm, basis, products, c, k, vectors, rotated_products)?;
     timers.stop(t, Stage::Rotate);
     let t = timers.start();
@@ -1810,28 +1682,7 @@ fn ritz_and_residuals(
         pool,
     )?;
     timers.stop(t, Stage::Residual);
-    Ok(true)
-}
-/// Column norms of a residual block, the same per-column `norm` and the same
-/// fixed four-column pieces as `residual_columns`.
-fn residual_norms(r: &RealMatrix, norms: &mut [f64], pool: &WorkerPool) -> Result<(), LinalgError> {
-    let _lane = lane_profile::span(lane_profile::Op::Residual, r.rows(), 0, norms.len(), 1);
-
-    fn pieces(r: &[f64], norms: &mut [f64], n: usize) {
-        if norms.len() > 4 {
-            let split = (norms.len().div_ceil(4) / 2) * 4;
-            let (rl, rr) = r.split_at(split * n);
-            let (nl, nr) = norms.split_at_mut(split);
-            WorkerPool::join(|| pieces(rl, nl, n), || pieces(rr, nr, n));
-        } else {
-            for (j, out) in norms.iter_mut().enumerate() {
-                *out = norm(&r[j * n..(j + 1) * n]);
-            }
-        }
-    }
-    let n = r.rows();
-    pool.install(|| pieces(&r.as_slice()[..n * norms.len()], norms, n));
-    finite(norms)
+    Ok(())
 }
 fn orthogonality_defect(v: &RealMatrix) -> f64 {
     let mut defect = 0_f64;
@@ -1870,7 +1721,6 @@ pub(crate) fn ortho_panel_width(n: usize) -> usize {
 /// not a physical parameter: in the faer microbenchmark at n = 11877, m = 408
 /// (`dft-numerics/tests/algebra_stream.rs stream_timing`) the narrow kernels
 /// win 2.3x at one column, 1.3x at four and break even at eight.
-pub const NARROW_WIDTH: usize = 4;
 struct Projection {
     pool: std::sync::Arc<WorkerPool>,
     normalized: RealMatrix,
@@ -1878,32 +1728,20 @@ struct Projection {
     projected: RealMatrix,
     output: RealMatrix,
     column: Vec<f64>,
-    /// ORTHO-DGKS (opt-in `BAANDI_ORTHO=dgks`, default off; rounding class):
+    /// DGKS second-pass rule (frozen at ratio 0.1):
     /// the second projection pass against the basis runs only when a column of
     /// the block lost more than 1 - 1/sqrt(2) of its norm in the first pass (or
     /// a column was dropped). Skipping it saves two of the four streams of the
     /// basis per append.
     dgks: Option<f64>,
-    /// NARROW-PROJ (`ResearchOptions::narrow_proj`, set per solve): blocks of
-    /// at most `NARROW_WIDTH` columns use the streaming dot and fused update
-    /// kernels of the GEMM workspace instead of the panel GEMMs.
-    narrow: bool,
 }
 /// DGKS keep ratio: one pass suffices when every column kept at least this
-/// fraction of its unit input norm (`BAANDI_ORTHO=dgks`, parsed in the switches
-/// module; the tests use the constant directly).
+/// fraction of its unit input norm (the tests use the classical constant directly).
 #[cfg(test)]
 const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
-/// Default DGKS keep ratio (0.1): ON since the adoption rule (dev08 MICRO-ORTHO:
-/// -4.9 to -9.7 percent wall on MKL in every cell, every seed improving, equal
-/// Davidson and H counts, energies inside the classes). `BAANDI_ORTHO=off` restores
-/// two passes always; `dgks` selects the classical 1/sqrt(2) rule and `dgks:<ratio>`
-/// a ratio in [1e-3, 1] (after one classical pass the residual overlap with the
-/// basis is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
-/// orthogonality gate of the contraction).
-/// The default ratio 0.1 and the parsing live in `dft_numerics::switches` (`ORTHO`).
+/// Frozen DGKS keep ratio of the legacy oracle.
 pub(crate) fn dgks_keep() -> Option<f64> {
-    dft_numerics::switches::number(dft_numerics::switches::Id::ORTHO)
+    Some(0.1)
 }
 #[derive(Clone, Copy)]
 enum OrthoCount {
@@ -1941,7 +1779,6 @@ impl Projection {
             projected: RealMatrix::zeros(n, cap)?,
             output: RealMatrix::zeros(n, cap)?,
             dgks: dgks_keep(),
-            narrow: false,
             column: vec![0.; n],
         })
     }
@@ -2009,29 +1846,7 @@ impl Projection {
                 // Q^T X and X -= Q S.
                 flops_add(FlopSite::Projection, q.cols(), n, 2 * count);
             }
-            if let Some(q) = against
-                && self.narrow
-                && count <= NARROW_WIDTH
-            {
-                // NARROW-PROJ: S = Q^T X by streaming dots, then X -= Q S in
-                // one pass (Q read twice per projection, no tiles or copies).
-                algebra_add(AlgebraCount::NarrowProjection);
-                ws.narrow_transpose_into(
-                    q.as_slice(),
-                    n,
-                    q.cols(),
-                    &self.normalized.as_slice()[..n * count],
-                    count,
-                    self.overlap.as_mut().submatrix_mut(0, 0, q.cols(), count),
-                )?;
-                ws.narrow_subtract(
-                    q.as_slice(),
-                    n,
-                    q.cols(),
-                    self.overlap.as_ref().submatrix(0, 0, q.cols(), count),
-                    self.normalized.as_mut().subcols_mut(0, count),
-                )?;
-            } else if let Some(q) = against {
+            if let Some(q) = against {
                 ws.multiply_slices_into(
                     dft_numerics::GemmSite::ProjectionOverlap,
                     q.as_slice(),
@@ -2255,12 +2070,12 @@ impl B1Scratch {
         bands: usize,
         capacity: usize,
         seed: u64,
-        sketch: Option<(SketchKind, usize)>,
+        sketch: Option<usize>,
     ) -> Result<Self, SolverError> {
         Ok(Self {
             seed,
             sketch: match sketch {
-                Some((kind, rows)) => Some(Sketch::new(n, bands, capacity, seed, kind, rows)?),
+                Some(rows) => Some(Sketch::new(n, bands, capacity, seed, rows)?),
                 None => None,
             },
             est: vec![0.; bands],
@@ -2270,10 +2085,10 @@ impl B1Scratch {
             set_norms: vec![0.; bands],
         })
     }
-    fn matches(&self, seed: u64, sketching: bool, kind: SketchKind, rows: usize) -> bool {
+    fn matches(&self, seed: u64, sketching: bool, rows: usize) -> bool {
         self.seed == seed
             && match &self.sketch {
-                Some(s) => sketching && s.kind() == kind && s.requested == rows,
+                Some(s) => sketching && s.requested == rows,
                 None => !sketching,
             }
     }
@@ -2291,7 +2106,6 @@ struct Sketch {
     /// Rows requested before the caps (scratch reuse key).
     requested: usize,
     /// Requested form (the identity is used for small spaces of either kind).
-    kind: SketchKind,
     form: SketchForm,
     /// S V and S H V, s x capacity (live width = basis width).
     a: RealMatrix,
@@ -2306,46 +2120,31 @@ impl Sketch {
         bands: usize,
         capacity: usize,
         seed: u64,
-        kind: SketchKind,
         requested: usize,
     ) -> Result<Self, SolverError> {
         // The dense form is bounded by the GEMM workspace's short dimension;
         // the count form is not. When the space is no larger than the sketch,
         // S is the identity (exact residual norms; no sketch error at all).
-        let rows = match kind {
-            SketchKind::Dense => requested.min(capacity),
-            SketchKind::Count => requested.min(n),
-        };
+        let rows = requested.min(n);
         let mut rng = Random(seed ^ SKETCH_STREAM);
-        let form = match kind {
-            _ if n <= rows => SketchForm::Count {
+        let form = if n <= rows {
+            SketchForm {
                 bucket: (0..n).collect(),
                 sign: vec![1.; n],
-            },
-            SketchKind::Dense => {
-                let scale = 1. / (rows as f64).sqrt();
-                let mut transposed = RealMatrix::zeros(n, rows)?;
-                for v in transposed.as_mut_slice() {
-                    *v = if rng.next() < 0. { -scale } else { scale };
-                }
-                SketchForm::Dense(transposed)
             }
-            SketchKind::Count => {
-                let mut bucket = Vec::with_capacity(n);
-                let mut sign = Vec::with_capacity(n);
-                for _ in 0..n {
-                    // next() is uniform in [-0.5, 0.5).
-                    let b = ((rng.next() + 0.5) * rows as f64) as usize;
-                    bucket.push(b.min(rows - 1));
-                    sign.push(if rng.next() < 0. { -1. } else { 1. });
-                }
-                SketchForm::Count { bucket, sign }
+        } else {
+            let mut bucket = Vec::with_capacity(n);
+            let mut sign = Vec::with_capacity(n);
+            for _ in 0..n {
+                let b = ((rng.next() + 0.5) * rows as f64) as usize;
+                bucket.push(b.min(rows - 1));
+                sign.push(if rng.next() < 0. { -1. } else { 1. });
             }
+            SketchForm { bucket, sign }
         };
         Ok(Self {
             rows,
             requested,
-            kind,
             form,
             a: RealMatrix::zeros(rows, capacity)?,
             b: RealMatrix::zeros(rows, capacity)?,
@@ -2353,13 +2152,11 @@ impl Sketch {
             bc: RealMatrix::zeros(rows, bands)?,
         })
     }
-    fn kind(&self) -> SketchKind {
-        self.kind
-    }
+
     /// out[:, first..first + k] = S X for the k columns of `x`.
     fn project(
         form: &SketchForm,
-        gemm: &mut RealGemmWorkspace,
+        _gemm: &mut RealGemmWorkspace,
         x: &RealMatrix,
         out: &mut RealMatrix,
         first: usize,
@@ -2367,33 +2164,16 @@ impl Sketch {
         if x.cols() == 0 {
             return Ok(());
         }
-        let transposed = match form {
-            SketchForm::Dense(t) => t,
-            SketchForm::Count { bucket, sign } => {
-                let (n, rows) = (x.rows(), out.rows());
-                for c in 0..x.cols() {
-                    let dst = &mut out.as_mut_slice()[(first + c) * rows..(first + c + 1) * rows];
-                    dst.fill(0.);
-                    for ((&v, &b), &s) in column(x, c)[..n].iter().zip(bucket).zip(sign) {
-                        dst[b] += s * v;
-                    }
-                }
-                return finite(&out.as_slice()[first * rows..(first + x.cols()) * rows]);
+        let SketchForm { bucket, sign } = form;
+        let (n, rows) = (x.rows(), out.rows());
+        for c in 0..x.cols() {
+            let dst = &mut out.as_mut_slice()[(first + c) * rows..(first + c + 1) * rows];
+            dst.fill(0.);
+            for ((&v, &b), &s) in column(x, c)[..n].iter().zip(bucket).zip(sign) {
+                dst[b] += s * v;
             }
-        };
-        let (n, rows) = (transposed.rows(), transposed.cols());
-        gemm.multiply_slices_into(
-            dft_numerics::GemmSite::Other,
-            transposed.as_slice(),
-            n,
-            rows,
-            n,
-            RealOp::Transpose,
-            x.as_slice(),
-            x.cols(),
-            n,
-            out.as_mut().submatrix_mut(0, first, rows, x.cols()),
-        )
+        }
+        finite(&out.as_slice()[first * rows..(first + x.cols()) * rows])
     }
     /// Recompute A and B for the whole basis (start and non-contracting restart).
     fn refresh(
@@ -2461,11 +2241,9 @@ impl Sketch {
         finite(est)
     }
 }
-enum SketchForm {
-    /// S^T, N x s.
-    Dense(RealMatrix),
-    /// Bucket and sign of every coordinate.
-    Count { bucket: Vec<usize>, sign: Vec<f64> },
+struct SketchForm {
+    bucket: Vec<usize>,
+    sign: Vec<f64>,
 }
 struct Random(u64);
 impl Random {

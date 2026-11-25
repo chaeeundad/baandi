@@ -21,7 +21,7 @@ thread_local! {
     static COMM: RefCell<Option<Shared>> = const { RefCell::new(None) };
 }
 thread_local! {
-    // Test-only per-thread override of BAANDI_MPI_M2 (simulated ranks run on their own threads).
+    // Test-only per-thread override of the frozen M2 default (simulated ranks run on their own threads).
     static M2_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
 }
 static DISTRIBUTED_ROWS_SOLVES: AtomicUsize = AtomicUsize::new(0);
@@ -82,12 +82,10 @@ fn timed<R>(op: usize, values: usize, f: impl FnOnce() -> R) -> R {
 /// Stick-row distributed Davidson with distributed density/XC/energy (MPI stages
 /// M2c and M2d): default ON with two or more ranks since the adoption rule (dev08
 /// MPI-M2D: np=8 12.782 s against M1 18.366 s and the threads-only 12.585 s, zero
-/// violations); `BAANDI_MPI_M2=off` selects the M1 path. Overridable for the
+/// violations). Overridable for the
 /// calling thread by `set_m2_override` (tests).
 pub fn m2_enabled() -> bool {
-    M2_OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::MPI_M2))
+    M2_OVERRIDE.with(|o| o.get()).unwrap_or(true)
 }
 
 /// (counter name, value) list and (stage name, seconds) list.
@@ -121,7 +119,7 @@ pub fn m2_stats() -> M2Stats {
     (counts, stages)
 }
 
-/// Override `BAANDI_MPI_M2` for the calling thread (tests); `None` restores the environment.
+/// Override the frozen M2 default for the calling thread (tests); `None` restores the frozen default.
 pub fn set_m2_override(value: Option<bool>) {
     M2_OVERRIDE.with(|o| o.set(value));
 }

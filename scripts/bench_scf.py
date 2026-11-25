@@ -5,6 +5,8 @@ Runs the release dft-cli on fixed Si cases, records wall time (median of N runs)
 engine phase times, iterations and total energy, and compares them with a stored
 baseline: an optimization must keep the total energy within 1e-12 Ha and, where
 the change is meant to be numerically neutral, the density file bit-identical.
+The recorded scf.driver and effective profile must match; baselines without
+driver metadata are historical records and cannot establish identity.
 The pseudopotential is not in the repository: pass --upf (never commit it).
 
   python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
@@ -13,7 +15,7 @@ The pseudopotential is not in the repository: pass --upf (never commit it).
 Exit codes: 0 all cases within tolerance, 5 energy outside tolerance or density not
 identical when --require-identical, 3 inconsistent inputs, 1 usage or I/O error.
 """
-import argparse, hashlib, json, os, statistics, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, platform, statistics, struct, subprocess, sys, tempfile, time
 
 TEMPLATE = """[system]
 name = "Si diamond primitive, a = 5.43 Angstrom"
@@ -53,6 +55,20 @@ CASES = {
     "k444s": ("4x4x4 shifted (32 k), 30 Ry", 30.0, "kgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]"),
 }
 ENERGY_TOL_HA = 1e-12
+DRIVER_SWITCHES = ("BAANDI_REFERENCE_SCF", "BAANDI_REFERENCE_STRICT")
+
+
+def driver_metadata(report):
+    """Use the executed driver's record, never infer it from the requested switches."""
+    scf = report.get("scf", {})
+    driver = scf.get("driver")
+    switches = scf.get("switches", {})
+    if not isinstance(driver, str) or not driver:
+        raise RuntimeError("results.json is missing scf.driver; cannot establish identity")
+    if any(name not in switches for name in DRIVER_SWITCHES):
+        raise RuntimeError("results.json is missing reference/strict switch metadata")
+    return {"driver": driver,
+            "reference_switches": {name: switches[name] for name in DRIVER_SWITCHES}}
 
 
 def sha256(path):
@@ -84,7 +100,7 @@ def case_input(upf, key, threads=None, extra_toml=()):
 
 def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
     label, ecut, kblock = CASES[key]
-    walls, phases, energies, hashes, engines, last = [], [], [], [], [], None
+    walls, phases, energies, hashes, engines, routes, last = [], [], [], [], [], [], None
     with tempfile.TemporaryDirectory() as td:
         toml = os.path.join(td, "input.toml")
         text = case_input(upf, key, threads, extra_toml)
@@ -98,12 +114,15 @@ def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
                 raise RuntimeError(f"{key}: dft-cli exit {p.returncode}\n{p.stderr[-400:]}")
             last = out
             report = json.load(open(os.path.join(out, "results.json")))
+            routes.append(driver_metadata(report))
             phases.append(report["timings"]["phases"])
             engines.append(report["timings"]["engine_total_s"])
             energies.append(report["total_energy"]["ha"])
             hashes.append(sha256(os.path.join(out, "density.bin")))
         if len(set(energies)) != 1 or len(set(hashes)) != 1:
             raise RuntimeError(f"{key}: repeated runs were not identical")
+        if any(route != routes[0] for route in routes):
+            raise RuntimeError(f"{key}: repeated runs used different driver metadata")
         r = json.load(open(os.path.join(last, "results.json")))
         ph = r["timings"]["phases"]
         history = r["convergence"]["history"]
@@ -116,7 +135,11 @@ def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
             if switches and (entry is None or entry["source"] != "env"):
                 raise RuntimeError(f"{key}: {name} is set but results.json reports {entry}")
 
-        return {"operator_applications": sum(h["operator_applications"] for h in history),
+        return {"scf": routes[-1],
+                "input_toml": text,
+                "input_sha256": hashlib.sha256(text.encode()).hexdigest(),
+                "total_energy_bits_hex": struct.pack(">d", r["total_energy"]["ha"]).hex(),
+                "operator_applications": sum(h["operator_applications"] for h in history),
                 "davidson_iterations": sum(h["davidson_iterations"] for h in history),
                 "certificate_applications": sum(h["operator_applications"] for h in certificates),
                 "certificate_iterations": sum(h["davidson_iterations"] for h in certificates),
@@ -169,6 +192,11 @@ def main(argv):
         if not a.skip_legacy_si8_anchor and k == "si8" and abs(r["total_energy_ha"] - (-31.3218036010316)) > 1e-9:
             status = 5
         b = base.get(k)
+        if b and b.get("scf", {}).get("driver") != r["scf"]["driver"]:
+            print(f"{k}: run driver {r['scf']['driver']!r} differs from baseline driver "
+                  f"{b.get('scf', {}).get('driver')!r}; missing driver metadata also rejects. "
+                  "Select a baseline recorded for this driver.")
+            return 3
         if b and b.get("effective_profile", "strict") != r["effective_profile"]:
             print(f"{k}: run used the {r['effective_profile']} SCF path but the baseline is "
                   f"{b.get('effective_profile', 'strict')}; set BAANDI_REFERENCE_STRICT=on to compare "
@@ -182,7 +210,13 @@ def main(argv):
         print(f"{k:8} {r['wall_median_s']:13.3f} {r['engine_total_s']:11.3f} {r['phases_s']['diagonalization_s']:9.3f} {r['iterations']:5d} "
               f"{('%.2e' % de) if de is not None else '-':>16} {('identical' if ident else 'differs') if b else '-':>10} {('%.2fx' % sp) if sp else '-':>8}")
     if a.record:
-        meta = {"note": a.note, "binary": os.path.basename(a.binary), "machine_note": "record host and commit in the note",
+        meta = {"note": a.note, "binary": os.path.basename(a.binary),
+                "binary_sha256": sha256(a.binary), "upf_sha256": sha256(a.upf),
+                "platform": {"system": platform.system(), "machine": platform.machine(),
+                             "release": platform.release()},
+                "command": [sys.executable, "-I", "scripts/bench_scf.py", *argv],
+                "driver_environment": {name: os.environ.get(name) for name in DRIVER_SWITCHES},
+                "machine_note": "Record host/build and timing scope in the note; identity is driver-specific",
                 "energy_tolerance_ha": ENERGY_TOL_HA, "cases": result}
         json.dump(meta, open(a.record, "w"), indent=1)
         open(a.record, "a").write("\n")

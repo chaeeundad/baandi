@@ -1,0 +1,26 @@
+# expected_driver = rejected
+# expected_reason = UPF/refstart boundary requires compatible NC atomic charge and l<=3 orbitals; no legacy fallback today
+# command = run
+# expected_parse = ok
+# switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides
+# upf_requirements = nonzero PP_RHOATOM; PP_PSWFC absent
+# R0 freezes current behavior; the parse-only test does not execute this command or read UPFs.
+[system]
+name = "R0 routing Si2"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,4.0,4.0],[4.0,0.0,4.0],[4.0,4.0,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "synthetic-missing-pswfc.upf"
+[basis]
+ecutwfc_ry = 3.0
+kpoints = [[0.0,0.0,0.0]]
+[xc]
+functional = "lda-pz"
+[scf]
+max_iterations = 100

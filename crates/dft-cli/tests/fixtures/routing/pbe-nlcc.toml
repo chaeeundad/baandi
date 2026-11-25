@@ -1,0 +1,26 @@
+# expected_driver = reference
+# expected_reason = PBE with NLCC selects reference driver
+# command = run
+# expected_parse = ok
+# switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides
+# upf_requirements = NC PBE; core_correction=T and nonnegative PP_NLCC; nonzero PP_RHOATOM and s/p PP_PSWFC
+# R0 freezes current behavior; the parse-only test does not execute this command or read UPFs.
+[system]
+name = "R0 routing Si2"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,4.0,4.0],[4.0,0.0,4.0],[4.0,4.0,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "synthetic-pbe-nlcc.upf"
+[basis]
+ecutwfc_ry = 3.0
+kpoints = [[0.0,0.0,0.0]]
+[xc]
+functional = "pbe"
+[scf]
+max_iterations = 100

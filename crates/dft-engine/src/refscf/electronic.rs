@@ -113,6 +113,7 @@ pub struct Iteration {
     pub calls: Vec<(usize, usize, SolveRecord)>,
 }
 pub struct Run {
+    pub map_diagnostics: Vec<super::stall::MapDiagnostic>,
     /// Stall events from this invocation (also emitted at step boundaries).
     pub stalls: Vec<super::stall::Diagnostic>,
     pub start_report: crate::refstart::StartReport,
@@ -700,6 +701,7 @@ pub(super) async fn run_continuation<K: Collective>(
     workspace.symmetry = symmetry;
     let setup_s = clock.elapsed().as_secs_f64();
     let mut stalls = Vec::with_capacity(opts.max_iterations);
+    let mut map_diagnostics = Vec::with_capacity(opts.max_iterations);
     let mut history = Vec::new();
     let mut verification =
         (opts.verification == Verification::FixedPoint).then(VerificationReport::default);
@@ -1093,25 +1095,39 @@ pub(super) async fn run_continuation<K: Collective>(
             mixing_fraction,
             calls,
         });
-        if super::stall::detected(history.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
-            let mut gaps = [None; 2];
-            for (s, channel) in step.blocks.iter().enumerate() {
-                let n = policy.fixed_count(s);
-                if n > 0 {
-                    let high = channel
+        let mut sampled = super::stall::MapDiagnostic {
+            iteration,
+            ..Default::default()
+        };
+        for (s, channel) in step.blocks.iter().enumerate() {
+            let n = policy.fixed_count(s);
+            if n > 0 {
+                let high = channel
+                    .iter()
+                    .map(|b| b.eigenvalues[n - 1])
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let low = channel
+                    .iter()
+                    .map(|b| b.eigenvalues[n])
+                    .fold(f64::INFINITY, f64::min);
+                sampled.channel_gap_ha[s] = Some(low - high);
+                sampled.channel_edge_residual_ha[s] = Some(
+                    channel
                         .iter()
-                        .map(|b| b.eigenvalues[n - 1])
-                        .fold(f64::NEG_INFINITY, f64::max);
-                    let low = channel
-                        .iter()
-                        .map(|b| b.eigenvalues[n])
-                        .fold(f64::INFINITY, f64::min);
-                    gaps[s] = Some(low - high);
-                }
+                        .map(|b| b.residuals[n - 1] + b.residuals[n])
+                        .fold(0., f64::max),
+                );
             }
+        }
+        if let Some(t) = trace.as_ref() {
+            sampled.occupied_subspace_loss =
+                t.records[ordinary_trace.unwrap()].occupied_subspace_loss;
+        }
+        map_diagnostics.push(sampled);
+        if super::stall::detected(history.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
             let diagnostic = super::stall::Diagnostic {
                 iteration,
-                channel_gap_ha: gaps,
+                channel_gap_ha: sampled.channel_gap_ha,
                 orbital_rotation_fraction: trace
                     .as_ref()
                     .and_then(|t| t.records[ordinary_trace.unwrap()].rotation_fraction),
@@ -1144,6 +1160,7 @@ pub(super) async fn run_continuation<K: Collective>(
             }
             return Ok(Run {
                 stalls,
+                map_diagnostics,
                 start_report: refstart::StartReport {
                     // Collinear channels use uniform counts, irrespective of the
                     // atomic density used to prepare their initial orbital span.

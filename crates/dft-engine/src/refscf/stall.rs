@@ -13,7 +13,7 @@ pub struct Diagnostic {
     pub orbital_rotation_fraction: Option<f64>,
 }
 impl Diagnostic {
-    pub const RECOMMENDATION: &str = "Ill-conditioned history and no decrease of the stop estimate for three consecutive maps. Consider Fermi-Dirac occupations with fixed moment or a symmetry-breaking start. An unmeasured rotation projection is unavailable, not zero; finite gaps do not exclude a rotational soft mode.";
+    pub const RECOMMENDATION: &str = "Ill-conditioned history and no decrease of the stop estimate for three consecutive maps. For a stalled open-shell atom, Fermi-Dirac occupations with fixed moment can converge to a different fractional (spherical) state; this is not a cure for the integer-sector stall. For the integer broken-symmetry state use the strict oracle (BAANDI_REFERENCE_STRICT=on) until G4G is resolved. An unmeasured rotation projection is unavailable, not zero; finite gaps do not exclude a rotational soft mode.";
 }
 /// Newest first, including the current ordinary map. Redos and verification
 /// maps are excluded by callers. No tolerance is used to turn a decrease into
@@ -56,4 +56,14 @@ mod tests {
         ));
         assert!(!detected([(f64::NAN, bad); 4].into_iter()));
     }
+}
+
+/// Observational samples from ordinary maps in this invocation. Not checkpoint state.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MapDiagnostic {
+    pub iteration: usize,
+    pub channel_gap_ha: [Option<f64>; 2],
+    pub channel_edge_residual_ha: [Option<f64>; 2],
+    /// Only available when the electronic orbital trace was requested.
+    pub occupied_subspace_loss: [Option<f64>; 2],
 }

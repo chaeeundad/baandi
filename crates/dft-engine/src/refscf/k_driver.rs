@@ -274,6 +274,7 @@ pub(super) async fn run_continuation<K: Collective>(
     let start_time = start.elapsed();
     setup.total_s = stage_start.elapsed().as_secs_f64();
     let mut stalls = Vec::with_capacity(o.max_iterations);
+    let mut map_diagnostics = Vec::with_capacity(o.max_iterations);
     let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
     let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
@@ -857,7 +858,11 @@ pub(super) async fn run_continuation<K: Collective>(
             variational_hartree_ha: vh,
             variational_xc_ha: vx,
         });
-        if super::stall::detected(records.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
+        let mut sampled = super::stall::MapDiagnostic {
+            iteration,
+            ..Default::default()
+        };
+        if occupied > 0 && occupied < bands {
             let high = step
                 .solve
                 .per_k
@@ -870,10 +875,27 @@ pub(super) async fn run_continuation<K: Collective>(
                 .iter()
                 .map(|b| b.eigenvalues[occupied])
                 .fold(f64::INFINITY, f64::min);
-            let gaps = [Some(low - high), None];
+            sampled = super::stall::MapDiagnostic {
+                iteration,
+                channel_gap_ha: [Some(low - high), None],
+                channel_edge_residual_ha: [
+                    Some(
+                        step.solve
+                            .per_k
+                            .iter()
+                            .map(|b| b.residuals[occupied - 1] + b.residuals[occupied])
+                            .fold(0., f64::max),
+                    ),
+                    None,
+                ],
+                ..Default::default()
+            };
+        }
+        map_diagnostics.push(sampled);
+        if super::stall::detected(records.iter().rev().map(|r| (r.dr2_ry, r.mixing.condition))) {
             let diagnostic = super::stall::Diagnostic {
                 iteration,
-                channel_gap_ha: gaps,
+                channel_gap_ha: sampled.channel_gap_ha,
                 orbital_rotation_fraction: None,
             };
             map_report.stall = Some(diagnostic);
@@ -1025,6 +1047,7 @@ pub(super) async fn run_continuation<K: Collective>(
             let qe_clock = Vec::new();
             return Ok(Run {
                 stalls,
+                map_diagnostics,
                 start_report: state.common.report,
                 symmetry: symmetry.map(|s| s.report),
                 verification_k_call_indices,

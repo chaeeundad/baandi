@@ -4070,15 +4070,45 @@ filters isolated spikes and one/two-map plateaus without waiting a whole Broyden
 history cycle. This is an observational persistence choice, not a material or
 accuracy constant. Events are available in Run.stalls and StepReport.stall,
 with sampled per-channel gaps, optional measured orbital-rotation fraction,
-and Diagnostic::RECOMMENDATION (fixed-moment FD or symmetry-breaking start).
+and Diagnostic::RECOMMENDATION. For an open-shell atom whose integer sector
+stalls, fixed-moment Fermi-Dirac occupations can converge to a different
+fractional (spherical) state; this is not a cure for the integer-sector stall.
+For the integer broken-symmetry state use the strict oracle
+(`BAANDI_REFERENCE_STRICT=on`) until G4G is resolved. The architect-supplied
+dev08 gen30 O HGH result at theta=0.005 Ha and fixed moment 2.0 mu_B converges
+and verifies in 14 maps, with minority 2p occupations 1/3 each and energy
+0.0107 Ha above the strict integer-sector state. This is supplied evidence,
+not a new local or QE run.
+
+The CLI writes ordinary-map `channel_gap_ha`, `channel_edge_residual_ha` and
+`occupied_subspace_loss` under `reference_scf.iterations[]`, plus `stall` when
+present and the aggregate `reference_scf.stalls` list. Each stall produces one
+rank-zero stderr line with map, condition, estimate in Ha and recommendation.
+Channel slots are up/down for spin and total/unavailable for scalar runs.
+Overlap loss is unavailable without the optional orbital trace. Samples and
+stall events cover this invocation; earlier checkpoint history has null samples.
 For FD, integer-edge gaps are unavailable. Without an explicitly selected
 rotation probe, the projection is unavailable, never zero: a general driver
 cannot infer a physical zero mode from ill-conditioning alone. No error, reset,
 projection, eigensolver change or early termination is introduced. Events from
 this invocation are retained; checkpoints retain the ordinary history used to
 detect a streak but do not serialize these new observational events.
-The supplied O and local synthetic conditions stay below 1e12, so neither is
-claimed to trigger this particular requested warning. Predicate unit tests cover
+The initial supplied O and local synthetic conditions stayed below 1e12.
+The later dev08 gen30 O HGH fixed-sector run meets the predicate at maps 67
+and 134; the CLI previously omitted these engine events.
+
+The CLI regression `cargo test -p dft-cli --test reference_stalls` uses an
+independently generated synthetic Gaussian atom (8 Bohr cube, cutoff 6 Ha,
+beta 0.6, history 15, max_iterations 20). These are fixture inputs, not changed
+production defaults. It checks the exact persistence predicate, JSON/stderr
+agreement, the short-history negative case and scalar Gamma/complex-k gap rows.
+The synthetic fixture does not validate O HGH physics or cure its stall.
+Local G4G-CLI-RECORDS validation: CLI 184 passed/45 ignored; full check.sh
+104 binaries, 925 passed/214 ignored, no failures; build, fmt, workspace lint
+and production-only check/lint pass. `reference_identity` passes, and both
+reference/oracle `bench_scf.py --require-identical` baselines on
+Gamma/k222s/k222 give delta E=0 Ha and identical density hashes. The new CLI
+regression passes in debug and release. No remote run or speed claim is made. Predicate unit tests cover
 triggering, short histories, exact-threshold exclusion and streak breaks.
 
 Reproduction (release-only because the 200-map debug test exceeds 10 s):

@@ -7620,7 +7620,7 @@ fn g4c_spin_pbe_delivered() {
 }
 
 #[test]
-#[ignore = "G4D unqualified: expected standard no-core free-moment accuracy failure; cargo test --release -p dft-engine --test refscf g4d_free_moment_pbe_acceptance -- --ignored --nocapture"]
+#[ignore = "G4D unqualified: screened oracle cycles; unscreened energy/mu gates fail; cargo test --release -p dft-engine --test refscf g4d_free_moment_pbe_acceptance -- --ignored --nocapture"]
 fn g4d_free_moment_pbe_acceptance() {
     g4c_pbe_matrix(&["free"]);
 }
@@ -7642,7 +7642,16 @@ fn g4c_pbe_matrix(modes: &[&str]) {
         weight: 1.,
     }];
     // Pin the qualified G4B combination to isolate PBE/NLCC coverage from routing defaults.
-    let config = RunConfig::from_pairs(&[("refscf_spin_fd_moment", "on")]).unwrap();
+    let screening = std::env::var("G4D_SCREEN_NEGATIVE").unwrap_or_else(|_| "on".into());
+    let config = if modes == ["free"] {
+        RunConfig::from_pairs(&[
+            ("refscf_spin_fd_moment", "on"),
+            ("xc_screen_negative", &screening),
+        ])
+    } else {
+        RunConfig::from_pairs(&[("refscf_spin_fd_moment", "on")])
+    }
+    .unwrap();
     let _scope = config.enter();
     let mut failures = Vec::new();
     for core in [false, true] {
@@ -7707,11 +7716,29 @@ fn g4c_pbe_matrix(modes: &[&str]) {
             .unwrap()
             .run()
             .unwrap();
-            assert!(legacy.converged, "legacy {mode} core={core}");
-            eprintln!(
-                "G4C ORACLE mode={mode} core={core} M={} mu_B F={:?}",
-                legacy.moment_mu_b, legacy.thermodynamics
-            );
+            if mode == "free" && !legacy.converged {
+                eprintln!(
+                    "G4D_ORACLE_UNCONVERGED core={core} screening={screening} F={:?} M={} mu_B certificate={:?} tail={:?}",
+                    legacy.thermodynamics,
+                    legacy.moment_mu_b,
+                    legacy.finite_certificate,
+                    &legacy.history[legacy.history.len().saturating_sub(3)..]
+                );
+                failures.push(format!("legacy {mode} core={core} unconverged; differences below are NOT oracle accuracy"));
+            } else {
+                assert!(legacy.converged, "legacy {mode} core={core}");
+            }
+            if mode == "free" {
+                eprintln!(
+                    "G4D_LEGACY_SUMMARY core={core} converged={} M={} mu_B F={:?}",
+                    legacy.converged, legacy.moment_mu_b, legacy.thermodynamics
+                );
+            } else {
+                eprintln!(
+                    "G4C ORACLE mode={mode} core={core} M={} mu_B F={:?}",
+                    legacy.moment_mu_b, legacy.thermodynamics
+                );
+            }
             let oracle = legacy
                 .thermodynamics
                 .map_or(legacy.energy.total_hartree(), |t| t.free_energy_ha);
@@ -7734,7 +7761,7 @@ fn g4c_pbe_matrix(modes: &[&str]) {
                 for ranks in [1, 3, 8] {
                     let deltas = dft_mpi::simulate(ranks, |comm| {
                         let _scope = config.enter();
-                        let diagnose = mode == "free" && !core && threshold == 1e-8 && ranks == 1;
+                        let diagnose = mode == "free";
                         let mut trace = electronic::Trace::default();
                         let r = electronic::run_with_trace(
                             StartInput {
@@ -7753,19 +7780,29 @@ fn g4c_pbe_matrix(modes: &[&str]) {
                             diagnose.then_some(&mut trace),
                         )
                         .unwrap();
-                        if diagnose {
+                        if diagnose && ranks == 1 {
                             let old_down: f64 =
                                 legacy.finite_occupations.as_ref().unwrap().occupations()[12..]
                                     .iter()
                                     .sum();
                             eprintln!(
-                                "G4D_ORACLE F={oracle:.17e} Ha M={:.17e} mu_B Ndown={old_down:.17e} e",
-                                legacy.moment_mu_b
+                                "G4D_LEGACY converged={} core={core} threshold={threshold:e} Ry F={oracle:.17e} Ha M={:.17e} mu_B Ndown={old_down:.17e} e mu={:?}; trace columns: iteration,verification,redo,charge_Ry,spin_Ry,uniform_Ry,stiffness_Ha,dF_Ha,dM_muB,dNdown_e,PBE_secant_Ha,XC_remainder_Ha,dN_dmu_e_per_Ha,mask_crossings,number_residual_e,mu_Ha",
+                                legacy.converged,
+                                legacy.moment_mu_b,
+                                legacy
+                                    .finite_occupations
+                                    .as_ref()
+                                    .unwrap()
+                                    .evaluation
+                                    .unwrap()
+                                    .roots[0]
+                                    .unwrap()
+                                    .mu_ha
                             );
                             for t in trace.records() {
                                 let down: f64 = t.occupations[12..].iter().sum();
                                 eprintln!(
-                                    "G4D_TRACE {},{},{},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e}",
+                                    "G4D_TRACE {},{},{},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{:.10e},{},{:.10e},{:.10e}",
                                     t.iteration,
                                     t.verification,
                                     t.redo,
@@ -7775,9 +7812,44 @@ fn g4c_pbe_matrix(modes: &[&str]) {
                                     t.stiffness_ha,
                                     t.free_energy_ha - oracle,
                                     t.moment_mu_b - legacy.moment_mu_b,
-                                    down - old_down
+                                    down - old_down,
+                                    t.xc_response_ha,
+                                    t.xc_remainder_ha,
+                                    t.fd_number_slope_e_per_ha,
+                                    t.xc_mask_crossings,
+                                    t.electron_residual,
+                                    t.chemical_potentials_ha[0].unwrap()
                                 );
                             }
+                        }
+                        if diagnose {
+                            let plain = electronic::run_with(
+                                StartInput {
+                                    cell: &cell,
+                                    atoms: &atoms,
+                                    potentials: &potentials,
+                                    options: &options,
+                                },
+                                Profile {
+                                    threshold_ry: threshold,
+                                    ..Profile::default()
+                                },
+                                &points,
+                                policy.clone(),
+                                comm,
+                            )
+                            .unwrap();
+                            assert_eq!(
+                                g4b_fingerprint(&r),
+                                g4b_fingerprint(&plain),
+                                "G4D tracing must preserve every scientific bit"
+                            );
+                            assert!(trace.records().iter().all(|t| t.xc_response_ha.is_finite()
+                                && t.xc_response_ha >= 0.
+                                && t.xc_remainder_ha.is_finite()
+                                && t.xc_remainder_ha >= 0.
+                                && t.fd_number_slope_e_per_ha.is_finite()
+                                && t.fd_number_slope_e_per_ha >= 0.));
                         }
                         assert!(
                             r.converged && r.verification.as_ref().unwrap().passed(),
@@ -7793,11 +7865,52 @@ fn g4c_pbe_matrix(modes: &[&str]) {
                         }
                         assert!((r.channel_electrons.iter().sum::<f64>() - 1.).abs() < 1e-10);
                         assert_eq!(r.energy.nlcc.is_some(), core);
-                        delta
+                        let mut errors = [delta, 0., 0., 0.];
+                        if mode == "free" {
+                            let old = legacy.finite_occupations.as_ref().unwrap();
+                            errors[1] = (r.moment_mu_b - legacy.moment_mu_b).abs();
+                            errors[2] = r
+                                .occupations
+                                .unwrap()
+                                .roots
+                                .iter()
+                                .zip(old.evaluation.unwrap().roots)
+                                .filter_map(|(a, b)| a.zip(b))
+                                .map(|(a, b)| (a.mu_ha - b.mu_ha).abs())
+                                .fold(0., f64::max);
+                            errors[3] = r
+                                .blocks
+                                .iter()
+                                .flatten()
+                                .flat_map(|b| &b.occupations)
+                                .zip(old.occupations())
+                                .enumerate()
+                                .map(|(i, (a, b))| {
+                                    points[(i / 12) % points.len()].weight * (a - b).abs()
+                                })
+                                .sum();
+                            if comm.rank() == 0 {
+                                eprintln!(
+                                    "G4D_ERRORS core={core} P={ranks} threshold={threshold:e} Ry dF={:e} Ha dM={:e} mu_B dmu={:e} Ha docc={:e} e maps={} legacy_converged={}",
+                                    errors[0],
+                                    errors[1],
+                                    errors[2],
+                                    errors[3],
+                                    r.history.len(),
+                                    legacy.converged
+                                );
+                                g4b_dump(&r, format!("pbe-free-{core}-{ranks}-{threshold:e}.txt"));
+                            }
+                        }
+                        errors
                     });
-                    let delta = deltas.into_iter().fold(0., f64::max);
-                    if delta >= if threshold == 1e-8 { 5e-9 } else { 1e-10 } {
-                        failures.push(format!("{mode} core={core} P={ranks} threshold={threshold:e} Ry delta={delta:e} Ha"));
+                    let errors = deltas
+                        .into_iter()
+                        .fold([0_f64; 4], |a, b| std::array::from_fn(|i| a[i].max(b[i])));
+                    if errors[0] >= if threshold == 1e-8 { 5e-9 } else { 1e-10 }
+                        || errors[1..].iter().any(|&error| error >= 1e-4)
+                    {
+                        failures.push(format!("{mode} core={core} P={ranks} threshold={threshold:e} Ry errors(F Ha, M mu_B, mu Ha, occupation e)={errors:?}"));
                     }
                 }
             }

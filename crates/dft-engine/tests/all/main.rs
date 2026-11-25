@@ -39,6 +39,7 @@ mod kpoints;
 mod mixing_survey;
 mod nlcc;
 mod nscf;
+mod oncv_beta_tail;
 mod pbe;
 mod preconditioner_contract;
 mod real_nc;

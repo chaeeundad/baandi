@@ -32,7 +32,8 @@ Rust model was inspected to establish its field coverage.
 - PP_LOCAL, PP_MESH, PP_NONLOCAL and PP_RHOATOM are required by the reader.
   The reader also requires its documented header and mesh attributes; absence
   of such reader-required metadata may produce a Parse error. Projectors need
-  `index`, `angular_momentum`, `cutoff_radius`, `cutoff_radius_index`.
+  `index`, `angular_momentum`, and either `cutoff_radius_index` or
+  `cutoff_radius` (see the support/tail policy below).
 - A supplemental balanced-markup scanner reads `functional` and
   `cutoff_radius_index`, which the reader omits. It checks data-tag nesting,
   duplicate attributes, truncation, multiple roots and unsupported sections.
@@ -123,14 +124,98 @@ lengths. The vendor's mesh length validation errors are mapped to Invalid with
 PP_R, PP_RAB, PP_LOCAL or PP_RHOATOM as field identifiers.
 
 Projector tag and index must agree and follow consecutive one-based order;
-l must not exceed header l_max; cutoff radius must be finite/nonnegative;
-cutoff index is the count of valid points (1..mesh_size). Arrays may have this
-length or the full mesh length. In the latter case samples after the cutoff
-must be exactly zero. All samples must be finite; at r=0, u must be exactly
-zero for a regular beta. The validated type stores only the valid prefix and
-retains l and cutoff count. D has exactly n_proj^2 finite real entries, in
+l must not exceed header l_max; a supplied cutoff radius must be finite and
+nonnegative. The cutoff index is the count of valid points (1..mesh_size).
+Arrays may have this length or the full mesh length. All samples, including
+discarded tails, must be finite. A finite residual at r=0 is retained: it has
+zero weight in the projector integral. The validated type stores only the
+valid prefix and retains l and cutoff count. D has exactly n_proj^2 finite real entries, in
 row-major order, with symmetry checked at **absolute 1e-12 Ha**; it is not
 silently symmetrized. Couplings between different l must be exactly zero.
+
+### Metadata-based beta support and printed tails (G7-UPF-BETA-TAIL)
+
+The [public UPF description](https://pseudopotentials.quantum-espresso.org/home/unified-pseudopotential-format)
+defines a projector's mesh count and the stored function `u(r)=r*beta(r)`.
+The [UPF v2 schema documentation](https://orange-box.cc/qeschemas/qe_pp-v2.html)
+lists `PP_BETA.n` attributes `cutoff_radius_index` and `cutoff_radius` as
+optional. BAANDI uses the following explicit reader policy for NC files:
+
+- A declared `cutoff_radius_index` is authoritative, including when a radius
+  is also present. It is the one-based final included index. Zero, an index
+  outside the mesh, or an array of neither cutoff nor full-mesh length fails.
+- Without an index, a declared radius in Bohr selects the last mesh point
+  `r <= cutoff_radius`. No interpolation or extra endpoint is added. The
+  selected prefix must be nonempty; neither attribute present is an error.
+  A reader-only zero radius default permits index-only files without inventing
+  support or changing their original metadata.
+- For a nonzero full-mesh tail, let `M = max(abs(u))` over the supported prefix.
+  Let `p` be the largest number of printed significant mantissa digits among
+  nonzero prefix samples written with a decimal point or exponent. Leading
+  zeros and the exponent are excluded; trailing mantissa zeros count. Plain
+  integers and zero samples do not supply a precision estimate. The relative
+  budget is `tau = min(10^(1-p), sqrt(f64::EPSILON))`, or zero if no sample
+  supplies a precision estimate. This is one last printed significant digit;
+  the approximately `1.4901161193847656e-8` ceiling prevents coarse formatting
+  from authorizing large discarded support. The most precise sample is used
+  so a short token cannot loosen the budget. Tail tokens cannot loosen it.
+- Accept only `max(abs(tail))/M <= tau`. A zero supported projector accepts
+  only zero tails. For example, 12 fractional digits in normalized scientific
+  notation give `p=13`, `tau=1e-12`; 16 give `tau=1e-16`. No tolerance is chosen
+  by element, generator name, angular momentum, or SCF result. Printed precision
+  is a conservative acceptance policy, not proof of a generator's roundoff:
+  a tail larger than this budget still fails even if described as roundoff.
+- Accepted tails are removed from the immutable `Projector`, not integrated
+  or renormalized. `raw()` preserves the supplied samples for inspection.
+  Both production and strict drivers use this same parsed prefix through
+  `projector_transform[_with_rule]`; no driver or physics-kernel fork is needed.
+  Full-mesh zero-tail and already-shortened inputs retain their previous bits.
+
+A support violation names `PP_BETA.n`, the cutoff index, largest tail magnitude
+in Bohr^-1/2, its one-based sample index, relative tolerance and prefix maximum.
+A non-finite value instead names its sample index and cutoff, including when
+it lies in the discarded part. Nothing non-finite is silently truncated.
+
+Synthetic tests in `crates/dft-upf/tests/all/beta_tail.rs` cover signed
+1e-12-level tails, index-only and radius-only metadata, precedence, odd/even
+prefixes, both quadrature rules, precision changes, amplitude scaling, zero
+support, non-finite values and rejection diagnostics. Clean full-mesh,
+shortened and accepted-tailed transforms must have identical bits (stronger
+than the requested 1e-12 integral agreement).
+
+An optional external SG15 Si2 smoke compares the production reference driver
+with the strict oracle at the same 10 Ry cutoff and PBE functional, requiring
+verification and `abs(delta E) < 5e-9 Ha` (standard class). It is ignored in
+debug gates, requires an external file, and is not a QE comparison or a
+cutoff-converged physical reference:
+
+```sh
+DFT_ONCV_UPF=/absolute/Si_ONCV_PBE-1.0.upf cargo test --release \
+  -p dft-engine --test all oncv_beta_tail -- --ignored --nocapture
+```
+
+Without the variable it looks under the worktree's `../pseudo`. Missing files
+fail explicitly when this ignored test is requested; no UPF is committed.
+
+Local validation (2026-11-25, macOS/aarch64, Rust 1.99.1): the same ignored
+test passed with `DFT_ONCV_UPF=$PWD/../pseudo/pseudodojo/ex/Si.upf`, SHA-256
+`39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282`.
+The reference energy was `-7.80444120941249153 Ha`, strict oracle energy
+`-7.80444120970207322 Ha`, difference `2.89581691959028831e-10 Ha`.
+This available PseudoDojo file has six projectors with exactly zero tails;
+it establishes existing-file compatibility and exercises the SCF smoke,
+not SG15/HGH nonzero-tail qualification. Those files were not available.
+The nonzero-tail evidence is synthetic. Both stored Si.pz-vbc baseline
+comparisons (reference and strict oracle, Gamma/k222s/k222, three repeats)
+passed `bench_scf.py --require-identical`: all six energy differences were
+zero Ha and all density SHA-256 hashes matched. Generated README figures
+were refreshed without a diff; the nine figure/evidence tests passed.
+`cargo test -p dft-upf` passed 20 tests (one external-file test ignored).
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g7-upf-beta-tail scripts/check.sh`
+passed all gates: 1,022 tests passed, none failed, 231 ignored, including
+the production-only checks. `cargo check --workspace --tests`, formatting
+and workspace all-target Clippy with warnings denied also passed. The sandbox
+denied the gate's optional `ps` load probe; this did not affect any gate.
 
 `RadialError::Mesh` identifies invalid mesh inputs and
 `RadialError::Argument` identifies invalid arguments, dimensions, nonfinite

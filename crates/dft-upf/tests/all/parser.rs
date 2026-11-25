@@ -117,11 +117,6 @@ fn supplemental_metadata_and_storage_boundaries() {
     for (old, new, field) in [
         ("<PP_LOCAL>", "<PP_LOCAL size=\"600\">", "PP_LOCAL"),
         ("<PP_DIJ>", "<PP_DIJ size=\"8\">", "PP_DIJ"),
-        (
-            "cutoff_radius_index=\"601\"",
-            "cutoff_radius_index=\"600\"",
-            "PP_BETA",
-        ),
         ("index=\"1\"", "index=\"2\"", "PP_BETA/index"),
         (
             "number_of_proj=\"3\"",
@@ -132,6 +127,22 @@ fn supplemental_metadata_and_storage_boundaries() {
         assert!(
             matches!(parse_upf(&s.replacen(old, new, 1)), Err(UpfError::Invalid{field:f,..}) if f == field)
         );
+    }
+    // The last Gaussian sample is about 1e-62 Bohr^-1/2: the declared
+    // shorter support now accepts it as below printed precision (G7).
+    let truncated = parse_upf(&s.replacen(
+        "cutoff_radius_index=\"601\"",
+        "cutoff_radius_index=\"600\"",
+        1,
+    ))
+    .unwrap();
+    assert_eq!(truncated.projectors()[0].cutoff_index(), 600);
+    for (actual, expected) in truncated.projectors()[0]
+        .radial_times_r()
+        .iter()
+        .zip(&p.projectors()[0].radial_times_r()[..600])
+    {
+        assert_eq!(actual.to_bits(), expected.to_bits());
     }
     assert!(
         matches!(parse_upf(&s.replace("<PP_LOCAL>", "<PP_LOCAL units=\"Ha\">")), Err(UpfError::Unsupported(f)) if f.contains("units=Ha"))

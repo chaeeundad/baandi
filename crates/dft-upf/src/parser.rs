@@ -789,6 +789,26 @@ fn reader_normalization(text: &str, metadata: &[Tag]) -> Result<String, UpfError
         });
         normalized.replace_range(tag.start..tag.end, &opening);
     }
+    // PP_RHOATOM is an optional initial guess, not part of the NC operator.
+    // The compatibility reader requires a mesh-sized array. Normalize absence
+    // to its established all-zero sentinel, never to an invented atomic charge.
+    // Bound allocation by the document size; the reader still validates the
+    // declared mesh length against PP_R/PP_RAB and every supplied radial array.
+    if !metadata.iter().any(|t| t.name == "PP_RHOATOM") {
+        let count = mesh_size
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| invalid("mesh_size", "not an integer"))?;
+        if count > text.len() {
+            return Err(invalid("mesh_size", "count exceeds document size"));
+        }
+        let root = metadata.iter().find(|t| t.name == "UPF").unwrap();
+        let after_root = root.start + normalized[root.start..].find('>').unwrap() + 1;
+        normalized.insert_str(
+            after_root,
+            &format!("<PP_RHOATOM>{}</PP_RHOATOM>", "0 ".repeat(count)),
+        );
+    }
     // The original balanced tree was already checked. Renaming only XML names
     // maps extra numbered nodes to a repeatable enum variant, preserving index.
     // Validate consecutive original suffixes first (including pseudo orbitals).

@@ -148,15 +148,31 @@ owned-form helper; no legacy calls change. Bad conditioning takes distributed
 two-pass MGS with the unchanged 1e-12 relative dependence rule. Missing bands
 use the legacy kinetic-ordered Hermitian cosine/sine completion. There is **no
 random perturbation** and no PRNG consumption; the seed cannot affect this
-start. Rank-deficient atomic data fail explicitly, not via a random repair.
+start. Optional atomic data do not select a different driver: when any parsed
+species has no usable atomic charge (missing or all-zero samples), the entire
+start density is the neutral uniform valence density N_el/Omega, matching the legacy
+all-species fallback. Ionic and NLCC fields are still constructed from their
+own data. Missing PP_PSWFC contributes no columns; l>3 starting orbitals are
+skipped while supported channels retain their original order. The same
+kinetic-ordered completion fills the missing bands (all bands if no supported
+orbitals remain), for Gamma and complex k starts, including fixed-density
+starts. No atomic charge/orbital normalization or arithmetic changes when all
+atomic data are supported. Rank-deficient supplied atomic data still fail
+explicitly, not via a random repair. `StartState.report` records the density
+kind (`Atomic`, `Uniform`, `Supplied`) and orbital kind (`Atomic`,
+`AtomicWithKineticCompletion`, `Kinetic`, `Supplied`). The UPF adapter represents
+absent PP_RHOATOM with its all-zero compatibility sentinel. Results record these kinds in `reference_scf.start`
+with snake-case names, including scalar, k-point, spin and finite-T runs.
+Collinear runs report their uniform channel-density start; injected warm starts
+report supplied density and orbitals.
 The initial H/Ritz rotation is included before returning (and before the first
 Davidson). Eigenvector phases and rotations inside degenerate eigenspaces are
 not unique; compare orthogonality, Ritz energies and subspaces, not raw bits.
 
 Current implemented envelope: exact Gamma, positive even integral valence,
-fixed unpolarized occupations, NC atomic charge and l<=3 orbitals, LDA-PZ or
+fixed unpolarized occupations, NC potentials with optional atomic data, LDA-PZ or
 library LDA-PW with modified PW92. PBE/distributed gradients, NLCC,
-frozen-strain and missing atomic-data inputs reject explicitly; their legacy
+frozen-strain inputs reject explicitly; their legacy
 fallback belongs to the caller. These are remaining extensions of the broader
 reference-driver design, not silently changed physics. Parsed input agreement
 and communicator lifetime are caller contracts; mid-run remapping is not an API.

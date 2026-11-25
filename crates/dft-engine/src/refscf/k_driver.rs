@@ -174,6 +174,10 @@ pub(super) async fn run_continuation<K: Collective>(
     )?;
     if let Some(seed) = seed {
         seed.inject(&input, &mut state)?;
+        state.common.report = refstart::StartReport {
+            density: refstart::DensityStartKind::Supplied,
+            orbitals: refstart::OrbitalStartKind::Supplied,
+        };
     }
     let mut symmetry = prepared
         .map(|p| {
@@ -997,6 +1001,7 @@ pub(super) async fn run_continuation<K: Collective>(
             output.total_s = clock.elapsed().as_secs_f64();
             let qe_clock = Vec::new();
             return Ok(Run {
+                start_report: state.common.report,
                 symmetry: symmetry.map(|s| s.report),
                 verification_k_call_indices,
                 memory_breakdown: memory_scope.report(comm)?,

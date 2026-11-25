@@ -1,3 +1,4 @@
+// R6C: pin legacy-specific contracts explicitly; optional atomic data no longer route there.
 #[allow(dead_code)]
 mod common;
 use std::{fs, process::Command};
@@ -11,7 +12,7 @@ fn force_output_and_standard_rejection() {
         common::gaussian_with(1., 1.5, false, 401).replace("element=\"Xx\"", "element=\"H\""),
     )
     .unwrap();
-    let base = "[system]\nname='synthetic forces'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\n[output]\ndirectory='out'\nforces=true\n";
+    let base = "[system]\nname='synthetic forces'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nnbands=4\n[output]\ndirectory='out'\nforces=true\n";
     fs::write(dir.join("input.toml"), base).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
         .current_dir(&dir)
@@ -71,7 +72,7 @@ fn force_output_and_standard_rejection() {
         assert!(value.as_f64().unwrap().abs() < 1e-12);
     }
     // R2: the legacy driver's ADR 0043 preflight rejects unverified forces.
-    let standard = base.replace("[scf]", "[scf]\ndriver='legacy'\nverify='off'");
+    let standard = base.replace("[scf]", "[scf]\nverify='off'");
     fs::write(dir.join("input.toml"), standard).unwrap();
     for action in ["validate", "run"] {
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))

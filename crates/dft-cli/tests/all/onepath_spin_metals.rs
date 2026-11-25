@@ -48,6 +48,8 @@ struct Out {
 
 /// `command`: run, validate or relax; `strict`: BAANDI_REFERENCE_STRICT=on.
 fn cli(dir: &Path, command: &str, name: &str, input: &str, strict: bool) -> Out {
+    // R6C: this suite validates the legacy standard/strict contracts.
+    let input = input.replace("[scf]", "[scf]\ndriver='legacy'");
     let input = if input.contains("functional='lda-pw'") {
         input
             .replace("'loc.xml'", "'loc-pw.xml'")

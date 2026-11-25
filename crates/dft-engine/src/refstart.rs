@@ -41,6 +41,21 @@ pub(crate) fn validate_strain_grid(options: &ScfOptions) -> Result<(), ScfError>
     Ok(())
 }
 
+// Atomic data are optional initial guesses, independent of the NC operator.
+fn atomic_orbitals(
+    p: &dft_upf::Pseudopotential,
+) -> impl Iterator<Item = &dft_upf::AtomicWavefunction> {
+    p.atomic_wavefunctions()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|c| c.l <= 3)
+}
+
+fn has_atomic_charge(p: &dft_upf::Pseudopotential) -> bool {
+    let rho = &p.raw().rhoatom.values;
+    rho.len() == p.mesh().r().len() && rho.iter().any(|&v| v != 0.)
+}
+
 /// Parsed, immutable Gamma input. This API deliberately does not accept an
 /// already-constructed ScfProblem (which has paid the replicated setup cost).
 /// The caller explicitly selects this API; no environment/profile is changed.
@@ -75,6 +90,35 @@ pub struct StartMemory {
     pub legacy_idle_band_density_bytes: usize,
 }
 
+/// Origin of the density and orbital guesses, independent of SCF convergence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartReport {
+    pub density: DensityStartKind,
+    pub orbitals: OrbitalStartKind,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DensityStartKind {
+    Atomic,
+    Uniform,
+    Supplied,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrbitalStartKind {
+    Atomic,
+    AtomicWithKineticCompletion,
+    Kinetic,
+    Supplied,
+}
+fn orbital_kind(columns: usize, bands: usize) -> OrbitalStartKind {
+    if columns == 0 {
+        OrbitalStartKind::Kinetic
+    } else if columns < bands {
+        OrbitalStartKind::AtomicWithKineticCompletion
+    } else {
+        OrbitalStartKind::Atomic
+    }
+}
+
 /// Owned values at the first Davidson boundary. `density_g` is forward
 /// normalized on `fields.reciprocal_indices()` (full FFT sticks, zeros/high-G
 /// ringing included). G=0 is exactly N_el/Omega. `density` and `potential` use
@@ -82,6 +126,7 @@ pub struct StartMemory {
 pub struct StartState {
     /// Run-owned unpolarized PBE convention, shared by startup and every map.
     pub pw92_prefactor: crate::Pw92Prefactor,
+    pub report: StartReport,
     pub setup: crate::refscf::record::SetupTimings,
     pub basis: PlaneWaveBasis,
     pub grid: FftGridSpec,
@@ -429,14 +474,9 @@ fn start_inner<K: Collective>(
     for (i, p) in potentials.iter().enumerate() {
         if potentials[..i].iter().any(|q| q.label == p.label)
             || (!o.allow_functional_override && !o.functional.matches_upf(p.potential.functional()))
-            || p.potential
-                .atomic_wavefunctions()
-                .is_none_or(|w| w.is_empty() || w.iter().any(|c| c.l > 3))
-            || p.potential.raw().rhoatom.values.len() != p.potential.mesh().r().len()
-            || p.potential.raw().rhoatom.values.iter().all(|&v| v == 0.)
         {
             return Err(ScfError::InvalidInput(
-                "reference start: requires compatible NC atomic charge and l<=3 orbitals",
+                "reference start: duplicate species or incompatible functional",
             ));
         }
     }
@@ -493,10 +533,7 @@ fn start_inner<K: Collective>(
         .iter()
         .map(|s| {
             s.positions_bohr.len()
-                * s.potential
-                    .atomic_wavefunctions()
-                    .unwrap()
-                    .iter()
+                * atomic_orbitals(s.potential)
                     .map(|c| 2 * c.l + 1)
                     .sum::<usize>()
         })
@@ -640,6 +677,21 @@ fn start_inner<K: Collective>(
     } else {
         None
     };
+    let supplied = seed.is_some();
+    let report = StartReport {
+        density: if supplied {
+            DensityStartKind::Supplied
+        } else if species.iter().any(|s| !has_atomic_charge(s.potential)) {
+            DensityStartKind::Uniform
+        } else {
+            DensityStartKind::Atomic
+        },
+        orbitals: if supplied {
+            OrbitalStartKind::Supplied
+        } else {
+            orbital_kind(j, bands)
+        },
+    };
     let prolonged = seed
         .map(|s| s.inject(&basis, &grid, &half, operator.local_rows(), &fields, comm))
         .transpose()?;
@@ -647,6 +699,16 @@ fn start_inner<K: Collective>(
         drop(rho_hat);
         let density = fields.inverse(comm, &density_g)?;
         (density, density_g, Some(orbitals))
+    } else if report.density == DensityStartKind::Uniform {
+        drop(rho_hat);
+        // Match the legacy all-species fallback; keep the neutral zero mode exact.
+        let density = vec![electrons / volume; fields.fft.plane_points()];
+        let density_g = fields
+            .reciprocal_indices()
+            .iter()
+            .map(|&g| C::new(if g == 0 { electrons / volume } else { 0. }, 0.))
+            .collect();
+        (density, density_g, None)
     } else {
         let mut density = fields.inverse(comm, &rho_hat)?;
         drop(rho_hat);
@@ -863,6 +925,7 @@ fn start_inner<K: Collective>(
         legacy_idle_band_density_bytes,
     };
     Ok(StartState {
+        report,
         setup,
         basis,
         grid,
@@ -971,6 +1034,7 @@ fn atomic_fields(
     for s in species {
         let mesh = s.potential.mesh();
         let samples = &s.potential.raw().rhoatom.values;
+        let atomic_charge = has_atomic_charge(s.potential);
         let local = s
             .potential
             .local_transform_with_conventions(volume, o.local_mesh, o.radial_even_rule)
@@ -989,7 +1053,11 @@ fn atomic_fields(
                         f * spherical_bessel(0, q * r).map_err(err)?
                     };
                 }
-                let r = mesh.integrate(&work).map_err(err)? / volume;
+                let r = if atomic_charge {
+                    mesh.integrate(&work).map_err(err)? / volume
+                } else {
+                    0.
+                };
                 let v = if q == 0. {
                     local.alpha_z()
                 } else {
@@ -1177,11 +1245,11 @@ fn fill_species_orbitals(
         if sp.positions_bohr.is_empty() {
             continue;
         }
-        let channels = sp.potential.atomic_wavefunctions().unwrap();
+        let channels: Vec<_> = atomic_orbitals(sp.potential).collect();
         let width: usize = channels.iter().map(|c| 2 * c.l + 1).sum();
         let mut amplitudes = RealMatrix::zeros(l, width).map_err(err)?;
         let mut channel_offset = 0;
-        for c in channels {
+        for c in &channels {
             let mut radial = BTreeMap::new();
             for m in -(c.l as isize)..=c.l as isize {
                 let column = channel_offset + (m + c.l as isize) as usize;
@@ -1238,7 +1306,7 @@ fn fill_species_orbitals(
                 };
             }
             let mut channel_offset = 0;
-            for c in channels {
+            for c in &channels {
                 let count = 2 * c.l + 1;
                 let il = C::new(0., -1.).powu(c.l as u32);
                 for m in 0..count {
@@ -1290,10 +1358,7 @@ fn atomic_block<K: Collective>(
         .iter()
         .map(|s| {
             s.positions_bohr.len()
-                * s.potential
-                    .atomic_wavefunctions()
-                    .unwrap()
-                    .iter()
+                * atomic_orbitals(s.potential)
                     .map(|c| 2 * c.l + 1)
                     .sum::<usize>()
         })
@@ -1344,7 +1409,11 @@ fn atomic_block<K: Collective>(
 
     // All ranks see the same reduced S and make the same fallback decision.
     // No rank deletion, looser pivot, or alternate completion is introduced.
-    let mut q = orthogonalize(comm, &mut ws, &raw, setup)?;
+    let mut q = if j == 0 {
+        raw.clone()
+    } else {
+        orthogonalize(comm, &mut ws, &raw, setup)?
+    };
     drop(raw);
     let completion_clock = Instant::now();
     if j < bands {
@@ -1699,7 +1768,7 @@ fn finish_kpoints<K: Collective>(
         op.set_owned_potential(&potential, 1).map_err(err)?;
         let mut columns = Vec::new();
         for sp in &species {
-            for channel in sp.potential.atomic_wavefunctions().unwrap() {
+            for channel in atomic_orbitals(sp.potential) {
                 for pos in sp.positions_bohr {
                     for m in -(channel.l as isize)..=channel.l as isize {
                         let mut col = Vec::with_capacity(rows.len());
@@ -1875,12 +1944,9 @@ pub fn start_kpoints_from_density<K: Collective>(
     for (i, p) in input.potentials.iter().enumerate() {
         if input.potentials[..i].iter().any(|q| p.label == q.label)
             || (!o.allow_functional_override && !o.functional.matches_upf(p.potential.functional()))
-            || p.potential
-                .atomic_wavefunctions()
-                .is_none_or(|w| w.is_empty() || w.iter().any(|c| c.l > 3))
         {
             return Err(ScfError::InvalidInput(
-                "reference NSCF: incompatible species or missing atomic orbitals",
+                "reference NSCF: duplicate species or incompatible functional",
             ));
         }
     }
@@ -2020,6 +2086,21 @@ pub fn start_kpoints_from_density<K: Collective>(
     )
     .map_err(err)?;
     let common = StartState {
+        report: StartReport {
+            density: DensityStartKind::Supplied,
+            orbitals: orbital_kind(
+                species
+                    .iter()
+                    .map(|s| {
+                        s.positions_bohr.len()
+                            * atomic_orbitals(s.potential)
+                                .map(|c| 2 * c.l + 1)
+                                .sum::<usize>()
+                    })
+                    .sum(),
+                bands,
+            ),
+        },
         setup: Default::default(),
         basis,
         grid,
@@ -2061,10 +2142,7 @@ pub fn start_kpoints_from_density<K: Collective>(
                 .iter()
                 .map(|s| {
                     s.positions_bohr.len()
-                        * s.potential
-                            .atomic_wavefunctions()
-                            .unwrap()
-                            .iter()
+                        * atomic_orbitals(s.potential)
                             .map(|c| 2 * c.l + 1)
                             .sum::<usize>()
                 })

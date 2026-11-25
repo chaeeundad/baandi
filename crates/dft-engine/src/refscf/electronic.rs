@@ -113,6 +113,7 @@ pub struct Iteration {
     pub calls: Vec<(usize, usize, SolveRecord)>,
 }
 pub struct Run {
+    pub start_report: crate::refstart::StartReport,
     pub symmetry: Option<super::symmetry::Report>,
     pub converged: bool,
     pub density: Vec<Array3<f64>>,
@@ -886,6 +887,16 @@ pub(super) async fn run_continuation<K: Collective>(
                 blocks.push(delivered);
             }
             return Ok(Run {
+                start_report: refstart::StartReport {
+                    // Collinear channels use uniform counts, irrespective of the
+                    // atomic density used to prepare their initial orbital span.
+                    density: if states.len() == 2 {
+                        refstart::DensityStartKind::Uniform
+                    } else {
+                        states[0].report.density
+                    },
+                    ..states[0].report
+                },
                 symmetry: workspace.symmetry.map(|s| s.report),
                 converged: passed,
                 density: densities,

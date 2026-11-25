@@ -38,6 +38,8 @@ struct Out {
 
 /// `command`: run or relax; `strict`: BAANDI_REFERENCE_STRICT=on.
 fn cli(dir: &Path, command: &str, name: &str, input: &str, strict: bool) -> Out {
+    // R6C: this suite validates the legacy standard/strict contracts.
+    let input = input.replace("[scf]", "[scf]\ndriver='legacy'");
     fs::write(dir.join(format!("{name}.toml")), input).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
     cmd.current_dir(dir);

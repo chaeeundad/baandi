@@ -1,5 +1,5 @@
-# expected_driver = rejected
-# expected_reason = UPF/refstart boundary requires compatible NC atomic charge and l<=3 orbitals; no legacy fallback today
+# expected_driver = reference
+# expected_reason = R6C deterministic reference start fallback
 # command = run
 # expected_parse = ok
 # switches = BAANDI_REFERENCE_SCF=on; BAANDI_REFERENCE_STRICT=off; all others registry defaults unless [performance] overrides

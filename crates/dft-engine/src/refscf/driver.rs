@@ -64,6 +64,7 @@ impl VerificationPredictor {
 }
 
 pub struct Run {
+    pub start_report: crate::refstart::StartReport,
     pub symmetry: Option<super::symmetry::Report>,
     pub verification_k_call_indices: Vec<usize>,
     pub memory_breakdown: memory::Breakdown,
@@ -1123,6 +1124,7 @@ async fn run_stage<K: Collective>(
                 )
             });
             return Ok(StageRun::Fine(Box::new(Run {
+                start_report: state.report,
                 symmetry: None,
                 verification_k_call_indices: Vec::new(),
                 memory_breakdown: memory_scope.report(comm)?,

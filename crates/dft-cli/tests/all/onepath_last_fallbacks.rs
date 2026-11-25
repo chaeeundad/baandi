@@ -1,3 +1,4 @@
+//! R6C: pin legacy-specific contracts explicitly; optional atomic data no longer route there.
 //! ADR 0043 amendment ONEPATH-4 (user decision 2026-11-16): the last strict
 //! fallbacks are gone. The observe/agent runtime modes, `bands`/`dos`,
 //! `checkpoint`/`restart` run the single standard path with the fixed-point
@@ -36,7 +37,7 @@ impl Case {
         .unwrap();
         fs::write(
             dir.join("input.toml"),
-            format!("{BASE}[scf]\nnbands=4\n{scf}"),
+            format!("{BASE}[scf]\ndriver='legacy'\nnbands=4\n{scf}"),
         )
         .unwrap();
         Self(dir)
@@ -169,7 +170,7 @@ fn bands_and_dos_scf_run_the_verified_standard_path() {
     // The spectrum fixture of tests/all/bands_dos.rs (one synthetic Si-labelled ion).
     let c = Case::new("");
     fs::write(c.0.join("synthetic.xml"), common::fixture()).unwrap();
-    fs::write(c.0.join("input.toml"), "[system]\nname='synthetic spectrum'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='Si'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nSi='synthetic.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[bands]\npoints_per_segment=2\npoints=[{label='Gamma',fractional=[0.0,0.0,0.0]},{label='A',fractional=[0.1,0.0,0.0]},{label='B',fractional=[0.0,0.1,0.0],break_before=true},{label='Gamma',fractional=[0.0,0.0,0.0]}]\n[dos]\ndos_kgrid=[1,1,1]\n").unwrap();
+    fs::write(c.0.join("input.toml"), "[system]\nname='synthetic spectrum'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='Si'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nSi='synthetic.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\n[bands]\npoints_per_segment=2\npoints=[{label='Gamma',fractional=[0.0,0.0,0.0]},{label='A',fractional=[0.1,0.0,0.0]},{label='B',fractional=[0.0,0.1,0.0],break_before=true},{label='Gamma',fractional=[0.0,0.0,0.0]}]\n[dos]\ndos_kgrid=[1,1,1]\n").unwrap();
     for (command, file) in [("bands", "bands.json"), ("dos", "dos.json")] {
         let o = c.cli(&[command, "input.toml", "--output-dir", "out"], &[]);
         ok(&o);

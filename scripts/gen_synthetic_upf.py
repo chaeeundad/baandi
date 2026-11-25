@@ -47,6 +47,32 @@ l_local="-1" mesh_size="{points}" number_of_wfc="0" number_of_proj="{len(channel
 '''
 
 
+def start_variant(variant, **kwargs):
+    """Optional-atomic-data fixtures; the local/nonlocal operator is unchanged."""
+    data = generate(**kwargs)
+    if variant == "legacy":
+        return data
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(data)
+    r = [float(x) for x in root.find("PP_MESH/PP_R").text.split()]
+    valence = int(root.find("PP_HEADER").get("z_valence"))
+    radius = kwargs.get("radius", 1.0)
+    rho = root.find("PP_RHOATOM")
+    if variant in ("no-rhoatom", "no-atomic"):
+        root.remove(rho)
+    elif variant != "zero-rhoatom":
+        rho.text = " ".join(format(4 * valence / (math.sqrt(math.pi) * radius**3)
+                                   * x*x * math.exp(-(x/radius)**2), ".17e") for x in r)
+    if variant not in ("no-pswfc", "no-atomic"):
+        channels = (4,) if variant == "l4" else ((0, 4) if variant == "s-l4" else (0, 1))
+        root.find("PP_HEADER").set("number_of_wfc", str(len(channels)))
+        wfc = ET.SubElement(root, "PP_PSWFC")
+        for i, l in enumerate(channels, 1):
+            chi = ET.SubElement(wfc, f"PP_CHI.{i}", l=str(l), label=f"l{l}", occupation="2")
+            chi.text = " ".join(format(x**(l+1) * math.exp(-0.6*x*x), ".17e") for x in r)
+    return ET.tostring(root, encoding="unicode") + "\n"
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("output", type=Path)
@@ -55,9 +81,11 @@ def main():
     p.add_argument("--radius", type=float, default=1.0)
     p.add_argument("--shape", choices=["gaussian", "soft"], default="gaussian")
     p.add_argument("--points", type=int, default=1201)
+    p.add_argument("--start-variant", default="legacy", choices=[
+        "legacy", "atomic", "no-rhoatom", "zero-rhoatom", "no-pswfc", "no-atomic", "l4", "s-l4"])
     a = p.parse_args()
     try:
-        data = generate(a.valence, tuple(int(l) for l in a.channels.split(',')), a.radius, a.shape, a.points)
+        data = start_variant(a.start_variant, valence=a.valence, channels=tuple(int(l) for l in a.channels.split(',')), radius=a.radius, shape=a.shape, points=a.points)
     except ValueError as e:
         p.error(str(e))
     a.output.write_text(data, encoding="utf-8")

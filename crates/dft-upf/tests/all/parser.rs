@@ -414,3 +414,58 @@ fn finite_origin_projector_sample_has_exactly_zero_transform_weight() {
         }
     }
 }
+
+#[test]
+fn optional_atomic_charge_preserves_operator_and_required_fields() {
+    let original = common::fixture();
+    let remove = |text: &str, tag: &str| {
+        let begin = text.find(&format!("<{tag}>")).unwrap();
+        let end = text.find(&format!("</{tag}>")).unwrap() + tag.len() + 3;
+        format!("{}{}", &text[..begin], &text[end..])
+    };
+    for separator in [" ", "\t", "\n", "\x0b"] {
+        let text = common::fixture_with_options(
+            601,
+            &common::Options {
+                separator,
+                ..Default::default()
+            },
+        );
+        let parsed = parse_upf(&remove(&text, "PP_RHOATOM")).unwrap();
+        assert_eq!(parsed.raw().rhoatom.values.len(), 601);
+        assert!(parsed.raw().rhoatom.values.iter().all(|&v| v == 0.));
+    }
+    let without = remove(&original, "PP_RHOATOM");
+    let before = parse_upf(&original).unwrap();
+    let after = parse_upf(&without).unwrap();
+    assert_eq!(after.raw().rhoatom.values, vec![0.; after.mesh().r().len()]);
+    assert_eq!(after.mesh().r(), before.mesh().r());
+    assert_eq!(after.mesh().rab(), before.mesh().rab());
+    assert_eq!(after.local_hartree(), before.local_hartree());
+    assert_eq!(after.dij_hartree(), before.dij_hartree());
+    for (a, b) in after.projectors().iter().zip(before.projectors()) {
+        assert_eq!(a.radial_times_r(), b.radial_times_r());
+        assert_eq!(a.l(), b.l());
+    }
+    assert!(
+        matches!(parse_upf(&remove(&without, "PP_LOCAL")), Err(UpfError::Missing(field)) if field == "PP_LOCAL")
+    );
+    // Only absence is normalized. Present malformed charge must still fail.
+    for payload in ["", "0", "NaN"] {
+        assert!(parse_upf(&replace_body(&original, "PP_RHOATOM", payload)).is_err());
+    }
+    let populated = replace_body(
+        &original,
+        "PP_RHOATOM",
+        &"1 ".repeat(before.mesh().r().len()),
+    );
+    assert!(
+        parse_upf(&populated)
+            .unwrap()
+            .raw()
+            .rhoatom
+            .values
+            .iter()
+            .all(|&v| v == 1.)
+    );
+}

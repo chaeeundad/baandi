@@ -1,3 +1,4 @@
+// R6C: pin legacy-specific contracts explicitly; optional atomic data no longer route there.
 #[allow(dead_code)]
 #[path = "../common/mod.rs"]
 mod common;
@@ -11,7 +12,7 @@ fn stress_output_identity_schema_and_paths() {
         common::gaussian_with(1., 1.5, false, 401).replace("element=\"Xx\"", "element=\"H\""),
     )
     .unwrap();
-    let base = "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\n[output]\ndirectory='out'\nstress=true\n";
+    let base = "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nnbands=4\n[output]\ndirectory='out'\nstress=true\n";
     // ONEPATH-2 (ADR 0043 item 5): stress runs the standard path with the
     // fixed-point verification; the stress-off identity run takes the same
     // path. The strict reference (BAANDI_REFERENCE_STRICT=on) is checked too.
@@ -142,7 +143,7 @@ fn spin_and_finite_stress_envelopes() {
         ),
     ] {
         let text = format!(
-            "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=4\n{policy}{spin}[output]\ndirectory='{name}'\nstress=true\n"
+            "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\ndriver='legacy'\nnbands=4\n{policy}{spin}[output]\ndirectory='{name}'\nstress=true\n"
         );
         fs::write(dir.join("input.toml"), text).unwrap();
         let out = Command::new(env!("CARGO_BIN_EXE_dft-cli"))

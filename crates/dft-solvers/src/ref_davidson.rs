@@ -134,9 +134,11 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
     }
     .min(dim);
     let work_scope = work::Scope::new(options.profile, options.max_iterations, cap);
-    let bad = initial_hx.is_some_and(|hx| {
-        hx.rows() != start.rows() || hx.cols() != n || hx.as_slice().iter().any(|v| !v.is_finite())
-    }) || n == 0
+    let config = dft_numerics::switches::RunConfig::current();
+    let fused_setup = config.on(dft_numerics::switches::Id::REF_DAV_SETUP_FUSED);
+    let single_gemm = config.on(dft_numerics::switches::Id::REF_DAV_SINGLE_GEMM);
+    let mut bad = initial_hx.is_some_and(|hx| hx.rows() != start.rows() || hx.cols() != n)
+        || n == 0
         || n > dim
         || cap < n.saturating_mul(2).min(dim)
         || options.occupied > n
@@ -146,15 +148,46 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
         || !options.band_threshold(n.saturating_sub(1)).is_finite()
         || start.rows() != operator.local_rows().len()
         || start.cols() != n
-        || hamiltonian_diagonal.len() != start.rows()
-        || !start
-            .as_slice()
-            .iter()
-            .chain(hamiltonian_diagonal)
-            .all(|v| v.is_finite());
-    work::add(options.profile, |s| {
-        s.streamed_bytes += 8 * (start.rows() * n + start.rows()) as u64
-    });
+        || hamiltonian_diagonal.len() != start.rows();
+    // Allocate only after local shapes are valid. Copy/finite classification
+    // share loads; collective input agreement still precedes every H call.
+    let mut prepared = if fused_setup && !bad {
+        let mut w = Workspace::new(operator, n, cap, single_gemm)?;
+        for (dst, &value) in w.v.as_mut_slice().iter_mut().zip(start.as_slice()) {
+            *dst = value;
+            bad |= !value.is_finite();
+        }
+        if let Some(hx) = initial_hx {
+            for (dst, &value) in w.hv.as_mut_slice().iter_mut().zip(hx.as_slice()) {
+                *dst = value;
+                bad |= !value.is_finite();
+            }
+            work::copy(options.profile, start.rows() * n);
+        }
+        for &h in hamiltonian_diagonal {
+            bad |= !h.is_finite();
+            w.diagonal_bounds.0 = w.diagonal_bounds.0.min(h);
+            w.diagonal_bounds.1 = w.diagonal_bounds.1.max(h);
+        }
+        work::copy(options.profile, start.rows() * n);
+        work::add(options.profile, |s| {
+            s.streamed_bytes += 8 * start.rows() as u64
+        });
+        Some(w)
+    } else {
+        bad |= initial_hx.is_some_and(|hx| hx.as_slice().iter().any(|v| !v.is_finite()))
+            || !start
+                .as_slice()
+                .iter()
+                .chain(hamiltonian_diagonal)
+                .all(|v| v.is_finite());
+        work::add(options.profile, |s| {
+            s.streamed_bytes += 8
+                * (start.rows() * n + start.rows() + initial_hx.map_or(0, |hx| hx.as_slice().len()))
+                    as u64;
+        });
+        None
+    };
     // Agree on local invalid inputs before any rank enters operator collectives.
     let mut bad_sum = [0.0; 2];
     c.tree_sum_f64(
@@ -167,18 +200,20 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
             "reference Davidson dimensions/threshold/start",
         ));
     }
-    let single_gemm = dft_numerics::switches::RunConfig::current()
-        .on(dft_numerics::switches::Id::REF_DAV_SINGLE_GEMM);
-    let mut w = Workspace::new(operator, n, cap, single_gemm)?;
+    let mut w = match prepared.take() {
+        Some(w) => w,
+        None => Workspace::new(operator, n, cap, single_gemm)?,
+    };
     work::add(options.profile, |s| {
         // Explicit arrays of Workspace::new; shared adapter scratch excluded.
         let doubles =
             4 * start.rows() * cap + 2 * start.rows() * n + 6 * cap * cap + 3 * cap + n + 2
-                - w.reused_elements;
+                - w.reused_elements
+                + w.extra_elements;
         s.zeroed_bytes += 8 * doubles as u64;
         s.streamed_bytes += 8 * doubles as u64;
     });
-    if w.sqrt_precondition {
+    if w.sqrt_precondition && !fused_setup {
         w.diagonal_bounds = hamiltonian_diagonal
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &h| {
@@ -208,14 +243,18 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
         options.placement,
     );
     record.setup.communication = c.snapshot();
-    work::copy(options.profile, start.rows() * n);
-    w.v.as_mut_slice()[..start.rows() * n].copy_from_slice(start.as_slice());
+    if !fused_setup {
+        work::copy(options.profile, start.rows() * n);
+        w.v.as_mut_slice()[..start.rows() * n].copy_from_slice(start.as_slice());
+    }
     w.v.reshape_within_storage(start.rows(), n)?;
     w.hv.reshape_within_storage(start.rows(), n)?;
     let t = clock(options.profile);
     if let Some(hx) = initial_hx {
-        w.hv.as_mut_slice().copy_from_slice(hx.as_slice());
-        work::copy(options.profile, start.rows() * n);
+        if !fused_setup {
+            w.hv.as_mut_slice().copy_from_slice(hx.as_slice());
+            work::copy(options.profile, start.rows() * n);
+        }
     } else {
         w.apply(&c, operator, start, true, &mut record.setup)?;
     }

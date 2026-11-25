@@ -54,6 +54,22 @@ unsafe extern "C" {
         c: *mut f64,
         ldc: c_int,
     );
+    fn cblas_dgemmt(
+        layout: c_int,
+        uplo: c_int,
+        ta: c_int,
+        tb: c_int,
+        n: c_int,
+        k: c_int,
+        alpha: f64,
+        a: *const f64,
+        lda: c_int,
+        b: *const f64,
+        ldb: c_int,
+        beta: f64,
+        c: *mut f64,
+        ldc: c_int,
+    );
     fn cblas_zgemm(
         layout: c_int,
         ta: c_int,
@@ -510,6 +526,84 @@ pub fn dgemm(
     c: &mut [f64],
 ) -> Result<(), Error> {
     dgemm_at(DgemmSite::Other, transpose_a, m, n, k, a, lda, b, ldb, c)
+}
+
+/// Upper triangle of C = A^T B, with n columns in each input and k rows.
+/// Column-major, beta=0. The lower triangle and output padding are untouched.
+/// All dimensions/strides fit LP64; addressed storage is checked, including
+/// padded/offset output. Zero k writes only the upper triangle; zero n is a no-op.
+/// Inputs need not be equal or symmetric (this is GEMMT, not SYRK).
+#[allow(clippy::too_many_arguments)]
+pub fn dgemmt_upper(
+    n: usize,
+    k: usize,
+    a: &[f64],
+    lda: usize,
+    b: &[f64],
+    ldb: usize,
+    c: &mut [f64],
+    ldc: usize,
+) -> Result<(), Error> {
+    let _ = crate::keep::anchor();
+    let fits = |len: usize, rows: usize, cols: usize, ld: usize| {
+        ld >= rows
+            && (rows == 0
+                || cols == 0
+                || (cols - 1)
+                    .checked_mul(ld)
+                    .and_then(|v| v.checked_add(rows))
+                    .is_some_and(|need| need <= len))
+    };
+    if [n, k, lda, ldb, ldc]
+        .iter()
+        .any(|&v| v > c_int::MAX as usize)
+        || !fits(c.len(), n, n, ldc)
+        || (n > 0 && (!fits(a.len(), k, n, lda) || !fits(b.len(), k, n, ldb)))
+    {
+        return Err(Error::Dimension);
+    }
+    if n == 0 {
+        return Ok(());
+    }
+    if k == 0 {
+        for j in 0..n {
+            c[j * ldc..j * ldc + j + 1].fill(0.0);
+        }
+        return Ok(());
+    }
+    #[cfg(feature = "dgemm-timers")]
+    let started = std::time::Instant::now();
+    // SAFETY: checked LP64 sizes and every addressed element of A, B and C;
+    // lda/ldb >= k > 0 and ldc >= n > 0. Unique mutable C cannot alias inputs.
+    // All storage is initialized, beta=0, no pointer survives the synchronous call.
+    unsafe {
+        cblas_dgemmt(
+            102,
+            121,
+            112,
+            111,
+            n as c_int,
+            k as c_int,
+            1.0,
+            a.as_ptr(),
+            lda as c_int,
+            b.as_ptr(),
+            ldb as c_int,
+            0.0,
+            c.as_mut_ptr(),
+            ldc as c_int,
+        );
+    }
+    #[cfg(feature = "dgemm-timers")]
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        FLOPS[5].fetch_add(n as u64 * (n as u64 + 1) * k as u64, Relaxed);
+        TIMERS[5].0.fetch_add(1, Relaxed);
+        TIMERS[5]
+            .1
+            .fetch_add(started.elapsed().as_nanos() as u64, Relaxed);
+    }
+    Ok(())
 }
 
 /// Call sites of the real Davidson algebra, for the optional per-site timers.

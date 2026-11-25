@@ -503,6 +503,131 @@ impl RealGemmWorkspace {
             out,
         )
     }
+    /// One replacement GEMM directly into a contiguous long output. Unlike the
+    /// panel entry this has no short-square scratch bound. MKL is sequential;
+    /// pure builds retain the ordered panel kernel. No allocation or packing.
+    pub fn multiply_contiguous_single_into(
+        &mut self,
+        site: GemmSite,
+        a: &RealMatrix,
+        b: &RealMatrix,
+        out: &mut RealMatrix,
+    ) -> Result<(), LinalgError> {
+        let (m, k, n) = (a.rows(), a.cols(), b.cols());
+        if m > self.long
+            || k > self.short
+            || n > self.short
+            || b.rows() != k
+            || out.rows() != m
+            || out.cols() != n
+        {
+            return Err(LinalgError::Dimension);
+        }
+        #[cfg(feature = "mkl")]
+        if self.dgemm_rotation {
+            let route = self.count_route(site.index(), Route::MklSingle, [m, n, k], 1);
+            let _span = dispatch::span(site.index(), route, m, n, k);
+            dft_mkl::dgemm_at(
+                site.into(),
+                false,
+                m,
+                n,
+                k,
+                a.as_slice(),
+                m,
+                b.as_slice(),
+                k,
+                out.as_mut_slice(),
+            )
+            .map_err(|_| LinalgError::Dimension)?;
+            return finite(out.as_ref());
+        }
+        let _ = site;
+        self.multiply_into_impl(a.as_ref(), RealOp::Identity, b.as_ref(), out.as_mut())
+    }
+
+    /// MKL upper border of A^T B: a top rectangle plus one upper-square GEMMT.
+    /// No tiling into narrower column groups. Returns false without writes on
+    /// pure builds/MKL_DGEMM=off, so callers keep their original arithmetic.
+    /// The ignored lower triangle is zeroed for a deterministic full-border sum.
+    pub fn try_upper_border_into(
+        &mut self,
+        a: &RealMatrix,
+        b: &RealMatrix,
+        from: usize,
+        to: usize,
+        out: &mut RealMatrix,
+    ) -> Result<bool, LinalgError> {
+        let rows = a.rows();
+        if from > to
+            || to > a.cols()
+            || to > b.cols()
+            || b.rows() != rows
+            || rows > self.long
+            || to > self.short
+            || out.rows() != to
+            || out.cols() != to - from
+        {
+            return Err(LinalgError::Dimension);
+        }
+        #[cfg(feature = "mkl")]
+        if self.dgemm_rotation {
+            let k = to - from;
+            if k == 0 {
+                return Ok(true);
+            }
+            let rhs = &b.as_slice()[from * rows..to * rows];
+            if from > 0 {
+                let route = self.count_route(
+                    GemmSite::Other.index(),
+                    Route::MklSingle,
+                    [from, k, rows],
+                    1,
+                );
+                let _span = dispatch::span(GemmSite::Other.index(), route, from, k, rows);
+                let tile = &mut self.tiles[0];
+                tile.reshape_within_storage(from, k)?;
+                dft_mkl::dgemm_at(
+                    dft_mkl::DgemmSite::Other,
+                    true,
+                    from,
+                    k,
+                    rows,
+                    a.as_slice(),
+                    rows,
+                    rhs,
+                    rows,
+                    tile.as_mut_slice(),
+                )
+                .map_err(|_| LinalgError::Dimension)?;
+                for j in 0..k {
+                    out.as_mut_slice()[j * to..j * to + from]
+                        .copy_from_slice(&tile.as_slice()[j * from..(j + 1) * from]);
+                }
+            }
+            // GEMMT is deliberately absent from the dense dispatch histogram:
+            // its 2mnk formula would overcount. Reference work records it by name
+            // and the adapter timer uses k*(k+1)*rows FLOPs.
+            dft_mkl::dgemmt_upper(
+                k,
+                rows,
+                &a.as_slice()[from * rows..to * rows],
+                rows,
+                rhs,
+                rows,
+                &mut out.as_mut_slice()[from..],
+                to,
+            )
+            .map_err(|_| LinalgError::Dimension)?;
+            for j in 0..k {
+                out.as_mut_slice()[j * to + from + j + 1..(j + 1) * to].fill(0.0);
+            }
+            finite(out.as_ref())?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Try one sequential MKL C += A B directly into contiguous caller storage.
     /// No tile/output-size bound or temporary, and no allocation. Returns false
     /// without changing C or recording a product on pure builds/MKL_DGEMM=off;

@@ -696,7 +696,8 @@ pub struct Scf {
     pub extra_bands: Option<usize>,
     pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
-    /// Retained off-only input pin until legacy key retirement (R10c).
+    /// Oracle compatibility pin: "off" keeps the full-cutoff cold start;
+    /// omission keeps the historical fixed-default ladder. Other values reject.
     pub cutoff_ladder: Option<String>,
     /// Retired legacy input; a supplied value is rejected.
     pub cutoff_ladder_fraction: Option<f64>,

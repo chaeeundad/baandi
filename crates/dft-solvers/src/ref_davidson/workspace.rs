@@ -1390,7 +1390,9 @@ mod single_gemm_tests {
                                 matches!(g.stage, "border_s" | "border_h" | "refresh_transform")
                             })
                             .count();
-                        assert_eq!(refresh_products, if r.resets.ideal > 0 { 0 } else { 4 });
+                        // Triangular borders are unconditional since R11A (REF_DAV_TRIANGLE retired):
+                        // one GEMMT per border instead of the square layout's two calls each.
+                        assert_eq!(refresh_products, if r.resets.ideal > 0 { 0 } else { 2 });
                         assert_eq!(r.h_columns, 0);
                         assert_eq!(r.reduced_solves, 0);
                     }

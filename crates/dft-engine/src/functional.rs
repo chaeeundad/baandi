@@ -28,9 +28,12 @@ impl Functional {
                     .as_str(),
                 "SLA PW" | "SLA PW NOGX NOGC"
             ),
+            // UPF writers separate the four tokens with blanks or hyphens
+            // ("SLA PW PBX PBC", "SLA-PW-PBX-PBC" in HGH files).
             Self::Pbe => matches!(
                 label
-                    .split_whitespace()
+                    .split(|c: char| c.is_whitespace() || c == '-')
+                    .filter(|t| !t.is_empty())
                     .map(str::to_ascii_uppercase)
                     .collect::<Vec<_>>()
                     .join(" ")

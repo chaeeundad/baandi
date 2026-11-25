@@ -9,7 +9,7 @@ fn cell() -> Cell {
 #[test]
 fn functional_labels() {
     let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
-    for label in ["PBE", " SLA PW PBX PBC ", " SLA  PW   PBE  PBE", "SLA PZ"] {
+    for label in ["PBE", " SLA PW PBX PBC ", " SLA  PW   PBE  PBE", "SLA-PW-PBX-PBC", "SLA PZ"] {
         let pp = common::potential_with_functional(2.0, 1.0, false, 401, label);
         let species = [SpeciesPotential {
             label: "Xx",

@@ -1,8 +1,8 @@
 //! Independent setup-time model record. Exact parsed PP content is compared
 //! because the engine never receives original-file SHA-256 values. No hashing,
 //! I/O or work in SCF numerical kernels; PP storage is shared by result clones.
-use crate::collinear::SpinSector;
-use crate::finite_temperature::OccupationWorkspace;
+use crate::model::SpinSector;
+use crate::model::finite_temperature::OccupationWorkspace;
 use crate::{Functional, ScfOptions, SpeciesPotential};
 use dft_geometry::{Atom, Cell, kpoints::KPoint, symmetry::SymmetryOperation};
 use dft_physics::occupations::Constraint;
@@ -66,6 +66,7 @@ pub(crate) struct ModelDescription {
 }
 impl ModelDescription {
     /// Fixed-cell density transfer allows only ordered atomic positions to differ.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn transfer_matches(&self, other: &Self) -> bool {
         let mut source = other.clone();
         if self.atoms.len() != source.atoms.len()
@@ -81,6 +82,7 @@ impl ModelDescription {
         *self == source
     }
     /// Changed-cell warm transfer retains the fractional grid and frozen basis.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn cell_transfer_matches(&self, other: &Self) -> bool {
         if self.strain_reference.is_none() || other.strain_reference.is_none() {
             return false;

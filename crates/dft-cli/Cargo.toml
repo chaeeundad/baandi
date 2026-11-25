@@ -30,7 +30,7 @@ dft-basis = { path = "../dft-basis" }
 dft-geometry = { path = "../dft-geometry" }
 dft-units = { path = "../dft-units" }
 dft-upf = { path = "../dft-upf" }
-dft-engine = { path = "../dft-engine" }
+dft-engine = { path = "../dft-engine", features = ["strict-oracle"] }
 dft-mpi = { path = "../dft-mpi" }
 
 dft-physics = { path = "../dft-physics" }

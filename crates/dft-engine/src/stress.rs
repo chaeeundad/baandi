@@ -573,6 +573,7 @@ fn energy_at_prepared(
     options: crate::ScfOptions,
     prepared: Option<&crate::refscf::symmetry::Prepared>,
 ) -> Result<f64, ScfError> {
+    #[cfg(feature = "strict-oracle")]
     use crate::{ScfProblem, collinear::CollinearProblem, finite_temperature::FiniteTProblem};
     match &state.electronic {
         ElectronicState::Fixed(r) if r.force_identity.reference_delivery => {
@@ -621,6 +622,7 @@ fn energy_at_prepared(
             }
             Ok(run.outcome.result.total_hartree())
         }
+        #[cfg(feature = "strict-oracle")]
         ElectronicState::Fixed(r) => {
             let points: Vec<_> = r.k_points.iter().map(|k| k.point).collect();
             let mut p = if points.len() == 1 && points[0].fractional == [0.; 3] {
@@ -642,6 +644,7 @@ fn energy_at_prepared(
             }
             Ok(p.run()?.total_hartree())
         }
+        #[cfg(feature = "strict-oracle")]
         ElectronicState::FiniteTemperature(r) => {
             let points: Vec<_> = r.state.k_points.iter().map(|k| k.point).collect();
             let r = FiniteTProblem::new(
@@ -661,6 +664,7 @@ fn energy_at_prepared(
             }
             Ok(r.thermodynamics.free_energy_ha)
         }
+        #[cfg(feature = "strict-oracle")]
         ElectronicState::Collinear(r) => {
             let points: Vec<_> = r.k_points[0].iter().map(|k| k.point).collect();
             let p = if let Some(f) = &r.finite_occupations {
@@ -694,5 +698,9 @@ fn energy_at_prepared(
             Ok(r.thermodynamics
                 .map_or(r.energy.total_hartree(), |t| t.free_energy_ha))
         }
+        #[cfg(not(feature = "strict-oracle"))]
+        _ => Err(ScfError::InvalidInput(
+            "stress scan requires strict-oracle for legacy results",
+        )),
     }
 }

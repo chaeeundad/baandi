@@ -75,6 +75,7 @@ fn floor_chain_rule_and_legacy_identity() {
     }
 }
 
+#[cfg(feature = "strict-oracle")]
 #[test]
 fn clipped_charge_acceptance_budget() {
     for (electrons, limit) in [(2.0, 1e-3), (16.0, 1.6e-3), (100.0, 1e-2)] {

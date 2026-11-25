@@ -102,6 +102,7 @@ pub type M2Stats = (Vec<(String, usize)>, Vec<(String, f64)>);
 /// `nonlocal_energy`, `gather_planes` and engine `density`, `xc`,
 /// `nonlocal_energy`, `screen_integrals` (engine stages include the operator
 /// work they call; operator stages are named `op.*`).
+#[cfg(feature = "strict-oracle")]
 pub fn m2_stats() -> M2Stats {
     let (op_counts, op_stages) = dft_physics::distributed_real_gamma::m2_counters();
     let (engine_counts, engine_stages) = crate::m2::stats();
@@ -130,6 +131,7 @@ pub fn distributed_rows_solves() -> usize {
     DISTRIBUTED_ROWS_SOLVES.load(Ordering::Relaxed)
 }
 
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn count_distributed_rows_solve() {
     DISTRIBUTED_ROWS_SOLVES.fetch_add(1, Ordering::Relaxed);
 }
@@ -144,6 +146,7 @@ pub fn distributed_solves() -> usize {
     DISTRIBUTED_SOLVES.load(Ordering::Relaxed)
 }
 
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn count_distributed_solve() {
     DISTRIBUTED_SOLVES.fetch_add(1, Ordering::Relaxed);
 }
@@ -154,6 +157,7 @@ pub struct SharedComm(Shared);
 
 impl SharedComm {
     /// Whether a communicator is registered, including a one-rank MPI world.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn registered() -> bool {
         COMM.with(|c| c.borrow().is_some())
     }
@@ -281,4 +285,5 @@ mod arrival_tests {
     }
 }
 
+#[cfg(feature = "strict-oracle")]
 pub(crate) mod tuning;

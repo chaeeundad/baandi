@@ -1,4 +1,5 @@
 //! Final-state audit records. I/O and serialization belong to the CLI.
+#[cfg(feature = "strict-oracle")]
 use dft_solvers::{Davidson, DiagonalPreconditioner, EigenSolution, LinearOperator};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -37,6 +38,7 @@ pub struct SpectralReport {
     pub operator_applications: usize,
     pub events: Vec<SpectralEvent>,
 }
+#[cfg(feature = "strict-oracle")]
 impl SpectralReport {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn audit(
@@ -85,7 +87,7 @@ impl SpectralReport {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "strict-oracle"))]
 mod tests {
     use super::*;
     use dft_physics::data::{Complex64, ComplexMatrix};

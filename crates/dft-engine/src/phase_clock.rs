@@ -8,7 +8,9 @@
 //! calculation; callers that run several calculations in one process take a
 //! [`snapshot`] before and after and subtract ([`PhaseClock::since`]).
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "strict-oracle")]
+use std::time::Instant;
 
 #[derive(Clone, Copy)]
 enum Slot {
@@ -27,25 +29,31 @@ enum Slot {
 const SLOTS: usize = 5;
 static CLOCK: [AtomicU64; SLOTS] = [const { AtomicU64::new(0) }; SLOTS];
 
+#[cfg(feature = "strict-oracle")]
 fn add(slot: Slot, value: u64) {
     CLOCK[slot as usize].fetch_add(value, Ordering::Relaxed);
 }
+#[cfg(feature = "strict-oracle")]
 fn nanos(d: Duration) -> u64 {
     u64::try_from(d.as_nanos()).unwrap_or(u64::MAX)
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn add_steps(since: Instant) {
     add(Slot::Steps, nanos(since.elapsed()));
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn add_certificate(since: Instant) {
     add(Slot::Certificate, nanos(since.elapsed()));
     add(Slot::CertificateCount, 1);
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn add_screen(seconds: f64) {
     add(
         Slot::Screen,
         nanos(Duration::from_secs_f64(seconds.max(0.0))),
     );
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn add_atomic_start(since: Instant) {
     add(Slot::AtomicStart, nanos(since.elapsed()));
 }

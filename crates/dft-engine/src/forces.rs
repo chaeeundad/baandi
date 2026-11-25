@@ -2,8 +2,8 @@
 //! No occupation-response term is added: stationarity of F cancels it together
 //! with orbital/density response. The supplied model must be the state model.
 use crate::{
-    ScfError, ScfOptions, ScfResult, SpeciesPotential, collinear::CollinearResult,
-    finite_temperature::FiniteTResult,
+    ScfError, ScfOptions, ScfResult, SpeciesPotential, model::collinear::CollinearResult,
+    model::finite_temperature::FiniteTResult,
 };
 use dft_basis::FftGridSpec;
 use dft_geometry::{Atom, Cell};

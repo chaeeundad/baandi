@@ -1,5 +1,5 @@
 //! Additive standard-profile controls and reusable signed Coulomb metric.
-use crate::scf::*;
+use super::*;
 use dft_solvers::mixing::ResidualMetric;
 
 /// Geometry-only hypothesis, not a model of the material's dielectric response.

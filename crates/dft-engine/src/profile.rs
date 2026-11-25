@@ -268,6 +268,7 @@ pub enum AtomicPart {
     Rotate,
 }
 impl AtomicPart {
+    #[cfg(feature = "strict-oracle")]
     fn slot(self) -> usize {
         match self {
             Self::Span => S_ATOMIC_PART,
@@ -665,6 +666,7 @@ pub fn enter(top: Top) -> Guard {
 }
 
 /// A map starts: any uncommitted map is filed as ordinary.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn map_begin() {
     with(|s| {
         s.commit(MapKind::Ordinary);
@@ -673,6 +675,7 @@ pub(crate) fn map_begin() {
     });
 }
 /// Seconds of one phase of the pending map.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn map_phase(phase: Phase, seconds: f64) {
     with(|s| {
         if let Some(m) = s.pending.as_mut() {
@@ -691,6 +694,7 @@ pub fn map_commit(kind: MapKind) {
     with(|s| s.commit(kind));
 }
 /// The eigensolve of the pending map begins (the thread's counters are marked).
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn solve_begin() {
     if dft_solvers::real_davidson::lane_profile::requested() {
         let c = context();
@@ -702,7 +706,9 @@ pub(crate) fn solve_begin() {
 }
 /// Restarts, contractions and the kept-start flag of the latest real Gamma
 /// solve, keyed by rank (the solver entry notes them, the map reads them).
+#[cfg(feature = "strict-oracle")]
 static SOLVE_NOTES: Mutex<Vec<[u64; 3]>> = Mutex::new(Vec::new());
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn note_solve(restarts: usize, contractions: usize, kept_taken: bool) {
     if !enabled() {
         return;
@@ -717,12 +723,14 @@ pub(crate) fn note_solve(restarts: usize, contractions: usize, kept_taken: bool)
     n[1] += contractions as u64;
     n[2] += u64::from(kept_taken);
 }
+#[cfg(feature = "strict-oracle")]
 fn take_solve_note() -> [u64; 3] {
     let r = rank_key();
     let mut v = SOLVE_NOTES.lock().expect("solve notes");
     v.get_mut(r).map_or([0; 3], std::mem::take)
 }
 /// The eigensolve of the pending map ended: its stage deltas and work.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn solve_end(iterations: usize, h_columns: usize) {
     let Some(mark) = SOLVE_MARK.with(|m| m.take()) else {
         return;
@@ -747,6 +755,7 @@ pub(crate) fn solve_end(iterations: usize, h_columns: usize) {
     });
 }
 /// Mixing seconds of the current ordinary bucket.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn add_mixing(seconds: f64) {
     with(|s| {
         let b = s.ordinary_bucket();
@@ -757,6 +766,7 @@ pub(crate) fn add_mixing(seconds: f64) {
 }
 /// Atomic start seconds: filed under `init`, excluded from the pending map's
 /// potential phase.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn add_atomic_start(seconds: f64) {
     with(|s| {
         let a = &mut s.buckets[Bucket::Init as usize];
@@ -793,6 +803,7 @@ pub fn init_part(part: InitPart, clock: Option<std::time::Instant>) {
 }
 /// Seconds of one part of the atomic start since `clock` (under `init`; the
 /// atomic start total is its wall).
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn atomic_part(part: AtomicPart, clock: Option<std::time::Instant>) {
     if clock.is_none() {
         return;

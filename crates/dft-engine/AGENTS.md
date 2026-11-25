@@ -1,5 +1,32 @@
 # dft-engine
 
+## Frozen legacy oracle (R9c)
+
+`src/oracle/` contains the complete legacy standard and strict drivers, including
+the legacy sessions, checkpoint v1, runtime, MPI bridge, cutoff ladder and replay
+diagnostics. The `strict-oracle` Cargo feature is on by default. Treat this code
+as frozen: changes need an oracle-specific ticket and both identity gates.
+The crate-root compatibility exports keep existing adapters working; `scf.rs`
+is only a compatibility facade. CLI explicitly enables the feature.
+
+Production `refscf`, `refstart`, shared physics, model/result contracts, parallel
+infrastructure and profiling build without that feature. Shared spin/finite-T
+result data live in `model`; `atomic_start.rs` keeps only the shared
+factorization contract, and `grid_dist.rs` keeps shared plane redistribution
+and counter contracts. Legacy grid stages live in `oracle/grid_dist.rs`.
+Legacy spectral audit code is feature-gated.
+Stress scans for reference deliveries remain available without the oracle;
+legacy-result scans require the feature. No SCF arithmetic is changed.
+
+Integration harnesses that use legacy entry points (including mixed
+reference/oracle comparisons) declare `required-features = ["strict-oracle"]`.
+Default test coverage is unchanged. Reference checkpoint/stepper and module
+independence tests also compile without it. `scripts/check.sh` independently
+runs `cargo check -p dft-engine --no-default-features` and the corresponding
+`cargo clippy --all-targets -- -D warnings`, avoiding workspace feature
+unification. Run CLI `reference_identity`, engine `oracle_identity`, and both
+`bench_scf.py --require-identical` baselines after moves.
+
 ## Current ownership (2026-11-05)
 
 Owns SCF orchestration/session, `events`/`state_view`, `runtime`/`policy`,

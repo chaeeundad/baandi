@@ -100,6 +100,7 @@ pub fn local_energy(
     Ok(e)
 }
 
+#[cfg(feature = "strict-oracle")]
 fn local_energy_reciprocal(
     ng: &Array3<Complex64>,
     ionic_g: &Array3<Complex64>,
@@ -228,6 +229,7 @@ fn nonlocal_partials(
 /// Explicit occupation-weighted nonlocal energy sum_b f_b <c_b|V_nl|c_b> of one
 /// k point, with exactly the arithmetic (and `BAANDI_NL_ENERGY` choice) of the
 /// audit, so the result equals the audit's `nonlocal` field bit for bit.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn explicit_nonlocal_energy(
     nonlocal: &NonlocalOperator,
     orbitals: &[Vec<Complex64>],
@@ -252,6 +254,7 @@ pub(crate) fn explicit_nonlocal_energy(
 /// total energy of such an iteration then equals the band-structure form
 /// (`band_form`). The explicit audit stays at the certificate solve and the
 /// final state.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn energy_identity_requested() -> bool {
     // RUN-CONFIG: read from the run's configuration (thread scope or process),
     // not cached per process; called once per construction / step / audit.
@@ -260,6 +263,7 @@ pub(crate) fn energy_identity_requested() -> bool {
 
 /// Replace the nonlocal term of a k-weighted audit by the band-sum identity
 /// E_nl = sum f eps - E_kin - integral V_loc n_out - integral (V_H + V_xc)[n_in] n_out.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn apply_band_sum_identity(audit: &mut EnergyAudit) {
     audit.nonlocal = audit.band_sum - audit.kinetic - audit.local - audit.double_counting;
 }
@@ -396,6 +400,7 @@ pub(crate) fn evaluate_with_core_xc(
 pub(crate) struct SharedAudit {
     /// Fourier coefficients of the checked output density (`to_reciprocal`
     /// normalization), kept for the stop-rule estimate (ticket MPI-REMAINING).
+    #[cfg_attr(not(feature = "strict-oracle"), allow(dead_code))]
     density_reciprocal: Array3<Complex64>,
     local: f64,
     local_zero_mode: f64,
@@ -407,6 +412,7 @@ pub(crate) struct SharedAudit {
     nlcc: Option<CoreXcLedger>,
 }
 
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn prepare_shared(
     a: &AuditInput<'_>,
     fft: &mut FftPlan3d,
@@ -510,6 +516,7 @@ impl SharedAudit {
     }
     /// Fourier coefficients of the checked output density of this audit
     /// (moved out; the audit's later stages do not read them).
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn take_density_reciprocal(&mut self) -> Array3<Complex64> {
         std::mem::replace(&mut self.density_reciprocal, Array3::zeros((0, 0, 0)))
     }
@@ -652,6 +659,7 @@ pub(crate) fn evaluate_shared_with_kinetic(
 
 // Each audit uses the SAME total density and input potential. Thus averaging
 // adds k weights only to orbital terms; common nonlinear terms occur once.
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn weighted_audits(audits: &[(f64, EnergyAudit)]) -> EnergyAudit {
     macro_rules! sum {
         ($field:ident) => {

@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Clone, Copy)]
+#[cfg_attr(not(feature = "strict-oracle"), allow(dead_code))]
 pub(crate) enum Stage {
     Density,
     Xc,
@@ -36,6 +37,7 @@ pub(crate) enum Stage {
     /// the complex operator after a new problem or a ladder stage).
     RealState,
 }
+#[cfg(feature = "strict-oracle")]
 const STAGE_NAMES: [&str; 15] = [
     "density",
     "xc",
@@ -53,6 +55,7 @@ const STAGE_NAMES: [&str; 15] = [
     "entry_wait",
     "real_state",
 ];
+#[cfg(feature = "strict-oracle")]
 const STAGE_CALL_NAMES: [&str; 15] = [
     "calls.density",
     "calls.xc",
@@ -87,6 +90,7 @@ pub(crate) fn add(stage: Stage, start: Option<Instant>) {
     );
 }
 #[derive(Clone, Copy)]
+#[cfg_attr(not(feature = "strict-oracle"), allow(dead_code))]
 pub(crate) enum Count {
     Density,
     Xc,
@@ -145,6 +149,7 @@ pub(crate) enum Count {
     /// reads no orbitals; no gather at delivery).
     LazyResults,
 }
+#[cfg(feature = "strict-oracle")]
 const COUNT_NAMES: [&str; 26] = [
     "density_builds",
     "xc_evaluations",
@@ -174,12 +179,15 @@ const COUNT_NAMES: [&str; 26] = [
     "lazy_results",
 ];
 static COUNTS: [AtomicUsize; 26] = [const { AtomicUsize::new(0) }; 26];
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn count_atomic_block_fallback() {
     count(Count::AtomicBlockFallbacks);
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn count_max(c: Count, n: usize) {
     COUNTS[c as usize].fetch_max(n, Ordering::Relaxed);
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn count_n(c: Count, n: usize) {
     COUNTS[c as usize].fetch_add(n, Ordering::Relaxed);
 }
@@ -190,6 +198,7 @@ pub(crate) fn count(c: Count) {
 /// Engine-level M2d counters and stage seconds of this process (counters end
 /// with one `calls.<stage>` entry per stage; seconds 0 with
 /// `BAANDI_STAGE_TIMERS=off`).
+#[cfg(feature = "strict-oracle")]
 pub fn stats() -> dft_physics::distributed_real_gamma::M2Counters {
     let handoff_stages = [(
         "handoff.orbital_copy",

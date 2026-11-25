@@ -7,12 +7,12 @@
 use dft_engine::{
     CompletionMode, ExecutionConfig, Mixing, ScfOptions, ScfProblem, ScfSession, SpeciesPotential,
     StepStatus,
-    input::{Atom, Cell, Pseudopotential, kpoints, parse_upf},
-    refscf::{api, profile::Profile},
+    input::{Atom, Cell, kpoints, parse_upf},
+    refscf::{api, profile::Profile, runtime, stepper::StepReport},
     refstart::StartInput,
 };
 use pyo3::{
-    exceptions::{PyNotImplementedError, PyRuntimeError, PyValueError},
+    exceptions::{PyRuntimeError, PyValueError},
     prelude::*,
 };
 use std::{collections::BTreeMap, sync::mpsc};
@@ -24,9 +24,9 @@ fn runtime_error(e: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
 }
 
-/// LDA settings. Reference batch runs use atomic starts, Broyden beta 0.7,
+/// LDA settings. Reference runs use atomic starts, Broyden beta 0.7,
 /// history 8 and fixed-point verification. Explicit legacy sessions retain
-/// their former Pulay defaults and support stepwise control until R8.
+/// their former Pulay defaults and legacy step status strings.
 #[pyclass(name = "Options")]
 #[derive(Clone)]
 struct Options {
@@ -198,54 +198,91 @@ struct ResultView {
     iterations: usize,
 }
 
+/// One reference map, including verification and retry maps.
+#[pyclass(name = "StepReport", frozen, get_all)]
+struct StepView {
+    iteration: usize,
+    kind: String,
+    stage: String,
+    estimator_ha: f64,
+    dr2_ry: f64,
+    energy_ha: Option<f64>,
+    ethr_ry: f64,
+    h_columns: usize,
+    reused: bool,
+    safe_point: bool,
+}
+impl From<StepReport> for StepView {
+    fn from(r: StepReport) -> Self {
+        Self {
+            iteration: r.iteration,
+            kind: format!("{:?}", r.kind),
+            stage: r.stage.into(),
+            estimator_ha: r.estimator_ha,
+            dr2_ry: r.dr2_ry,
+            energy_ha: r.energy_ha,
+            ethr_ry: r.ethr_ry,
+            h_columns: r.h_columns,
+            reused: r.reused,
+            safe_point: r.safe_point,
+        }
+    }
+}
+
 // The engine's mixer trait is not Send. Construct and retain the entire session
 // on one worker; only owned boundary values cross channels. This also avoids
 // unsafe Send implementations and releases the GIL while waiting for SCF work.
-enum Worker {
+enum Worker<'a> {
     Legacy(Box<ScfSession>),
-    Reference(Box<ReferenceSession>),
+    Reference(Box<ReferenceSession<'a>>),
 }
 
-struct ReferenceSession {
-    cell: Cell,
-    atoms: Vec<Atom>,
-    potentials: Vec<(String, Pseudopotential)>,
-    options: ScfOptions,
-    profile: Profile,
-    points: Vec<kpoints::KPoint>,
+struct ReferenceSession<'a> {
+    input: StartInput<'a>,
+    runtime: Option<runtime::Runtime<'a, api::Delivered>>,
+    snapshot: runtime::Snapshot,
     delivered: Option<api::Delivered>,
 }
-impl ReferenceSession {
-    fn run(&mut self) -> PyResult<()> {
-        if self.delivered.is_some() {
-            return Ok(());
+impl ReferenceSession<'_> {
+    fn initialize(&mut self) -> PyResult<()> {
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| runtime_error("already completed"))?;
+        let result = runtime.initialize().map_err(runtime_error);
+        self.snapshot = runtime.snapshot();
+        result
+    }
+    fn step(&mut self) -> PyResult<StepView> {
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or_else(|| runtime_error("already completed"))?;
+        let result = runtime.step().map_err(runtime_error);
+        self.snapshot = runtime.snapshot();
+        let report = result?;
+        if runtime.result().is_some() {
+            self.delivered = Some(
+                self.runtime
+                    .take()
+                    .expect("live runtime")
+                    .finish()
+                    .map_err(runtime_error)?,
+            );
         }
-        let refs: Vec<_> = self
-            .potentials
-            .iter()
-            .map(|(s, p)| SpeciesPotential {
-                label: s,
-                potential: p,
-            })
-            .collect();
-        let mut request = api::Request::new(self.profile, self.points.clone());
-        request.derivatives = api::Derivatives {
-            forces: true,
-            stress: true,
-            deferred: true,
-        };
-        self.delivered = Some(
-            api::solve(
-                StartInput {
-                    cell: &self.cell,
-                    atoms: &self.atoms,
-                    potentials: &refs,
-                    options: &self.options,
-                },
-                request,
-            )
-            .map_err(runtime_error)?,
-        );
+        Ok(report.into())
+    }
+    fn run(&mut self) -> PyResult<()> {
+        use dft_engine::runtime::RuntimeState;
+        if self.snapshot.state == RuntimeState::Created {
+            self.initialize()?;
+        }
+        while self.snapshot.state == RuntimeState::Initialized {
+            self.step()?;
+        }
+        if self.snapshot.state == RuntimeState::Failed {
+            return Err(runtime_error("SCF failed"));
+        }
         Ok(())
     }
     fn outcome(&self) -> PyResult<&dft_engine::ScfOutcome> {
@@ -260,19 +297,11 @@ impl ReferenceSession {
         }
     }
     fn derivatives(&mut self, stress: bool) -> PyResult<&api::Observables> {
-        let refs: Vec<_> = self
-            .potentials
-            .iter()
-            .map(|(s, p)| SpeciesPotential {
-                label: s,
-                potential: p,
-            })
-            .collect();
         let input = || StartInput {
-            cell: &self.cell,
-            atoms: &self.atoms,
-            potentials: &refs,
-            options: &self.options,
+            cell: self.input.cell,
+            atoms: self.input.atoms,
+            potentials: self.input.potentials,
+            options: self.input.options,
         };
         let delivered = self
             .delivered
@@ -297,7 +326,7 @@ impl ReferenceSession {
     }
 }
 
-type Job = Box<dyn FnOnce(&mut Worker) + Send>;
+type Job = Box<dyn FnOnce(&mut Worker<'_>) + Send>;
 #[pyclass(name = "Session")]
 struct Session {
     cell_rows_bohr: [[f64; 3]; 3],
@@ -331,11 +360,6 @@ impl Session {
         py: Python<'_>,
         f: impl FnOnce(&mut ScfSession) -> PyResult<T> + Send + 'static,
     ) -> PyResult<T> {
-        if self.reference {
-            return Err(PyNotImplementedError::new_err(
-                "stepwise control requires driver='legacy' until the reference stepper (R8)",
-            ));
-        }
         self.worker_call(py, move |s| match s {
             Worker::Legacy(s) => f(s),
             Worker::Reference(_) => unreachable!("driver fixed at construction"),
@@ -393,7 +417,7 @@ impl Session {
             std::thread::Builder::new()
                 .name("baandi-session".into())
                 .spawn(move || {
-                    let setup = || -> PyResult<(Worker, f64)> {
+                    let setup = || -> PyResult<_> {
                         let cell =
                             Cell::from_user_rows_bohr(cell_rows_bohr).map_err(value_error)?;
                         let volume = cell.volume_bohr3();
@@ -408,39 +432,57 @@ impl Session {
                                 parse_upf(text).map(|p| (s.clone(), p)).map_err(value_error)
                             })
                             .collect::<PyResult<_>>()?;
-                        let refs: Vec<_> = potentials
-                            .iter()
-                            .map(|(s, p)| SpeciesPotential {
-                                label: s,
-                                potential: p,
-                            })
-                            .collect();
-                        if let Some(profile) = profile {
-                            return Ok((
-                                Worker::Reference(Box::new(ReferenceSession {
-                                    cell,
-                                    atoms,
-                                    potentials,
-                                    options,
-                                    profile,
-                                    points,
-                                    delivered: None,
-                                })),
-                                volume,
-                            ));
+                        Ok((cell, volume, atoms, potentials))
+                    };
+                    let (cell, volume, atoms, potentials) = match setup() {
+                        Ok(inputs) => inputs,
+                        Err(e) => {
+                            let _ = ready.send(Err(e));
+                            return;
                         }
-                        let problem =
-                            ScfProblem::new(&cell, &atoms, &refs, options).map_err(value_error)?;
+                    };
+                    let refs: Vec<_> = potentials
+                        .iter()
+                        .map(|(s, p)| SpeciesPotential {
+                            label: s,
+                            potential: p,
+                        })
+                        .collect();
+                    let build = || -> PyResult<Worker<'_>> {
+                        if let Some(profile) = profile {
+                            let input = || StartInput {
+                                cell: &cell,
+                                atoms: &atoms,
+                                potentials: &refs,
+                                options: &options,
+                            };
+                            let mut request = api::Request::new(profile, points);
+                            request.derivatives = api::Derivatives {
+                                forces: true,
+                                stress: true,
+                                deferred: true,
+                            };
+                            let runtime = runtime::Runtime::new(api::stepper(input(), request));
+                            let snapshot = runtime.snapshot();
+                            return Ok(Worker::Reference(Box::new(ReferenceSession {
+                                input: input(),
+                                runtime: Some(runtime),
+                                snapshot,
+                                delivered: None,
+                            })));
+                        }
+                        let problem = ScfProblem::new(&cell, &atoms, &refs, options.clone())
+                            .map_err(value_error)?;
                         let session = ScfSession::new(
                             problem,
                             CompletionMode::RetainLast,
                             ExecutionConfig::default(),
                         )
                         .map_err(value_error)?;
-                        Ok((Worker::Legacy(Box::new(session)), volume))
+                        Ok(Worker::Legacy(Box::new(session)))
                     };
-                    match setup() {
-                        Ok((mut session, volume)) => {
+                    match build() {
+                        Ok(mut session) => {
                             if ready.send(Ok(volume)).is_ok() {
                                 for job in requests {
                                     job(&mut session);
@@ -469,19 +511,27 @@ impl Session {
         })
     }
     fn initialize(&mut self, py: Python<'_>) -> PyResult<()> {
+        if self.reference {
+            return self.reference_call(py, |s| s.initialize());
+        }
         self.call(py, |s| s.initialize().map_err(runtime_error))
     }
-    /// Perform exactly one complete engine iteration. Never changes solver policy.
-    fn step(&mut self, py: Python<'_>) -> PyResult<String> {
-        self.call(py, |s| {
+    /// Perform one reference map (ordinary, verification or retry); legacy
+    /// sessions perform one legacy iteration. Never changes solver policy.
+    fn step(&mut self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        if self.reference {
+            return Ok(Py::new(py, self.reference_call(py, |s| s.step())?)?.into_any());
+        }
+        let status = self.call(py, |s| {
             s.step()
                 .map(|r| format!("{:?}", r.status))
                 .map_err(runtime_error)
-        })
+        })?;
+        Ok(status.into_pyobject(py)?.unbind().into_any())
     }
     fn run(&mut self, py: Python<'_>) -> PyResult<()> {
         if self.reference {
-            return self.reference_call(py, ReferenceSession::run);
+            return self.reference_call(py, |s| s.run());
         }
         self.call(py, |s| {
             if s.snapshot().status == StepStatus::Created {
@@ -498,10 +548,17 @@ impl Session {
     }
     #[getter]
     fn status(&self, py: Python<'_>) -> PyResult<String> {
+        if self.reference {
+            return self.reference_call(py, |s| Ok(format!("{:?}", s.snapshot.state)));
+        }
         self.call(py, |s| Ok(format!("{:?}", s.snapshot().status)))
     }
     #[getter]
     fn iteration(&self, py: Python<'_>) -> PyResult<usize> {
+        if self.reference {
+            return self
+                .reference_call(py, |s| Ok(s.snapshot.last_step.map_or(0, |r| r.iteration)));
+        }
         self.call(py, |s| Ok(s.snapshot().iteration))
     }
     fn result(&self, py: Python<'_>) -> PyResult<ResultView> {
@@ -660,6 +717,22 @@ impl Session {
         warn_pulay(py, pulay)?;
         Ok(values)
     }
+    /// Owned density values in ndarray iteration order, Bohr^-3, with grid shape.
+    /// Copying is explicit and outside SCF maps. Reference requires delivery.
+    fn density(&self, py: Python<'_>) -> PyResult<(Vec<usize>, Vec<f64>)> {
+        if self.reference {
+            return self.reference_call(py, |s| {
+                let d = &s.outcome()?.result.density;
+                Ok((d.shape().to_vec(), d.iter().copied().collect()))
+            });
+        }
+        self.call(py, |s| {
+            let d = s
+                .density()
+                .ok_or_else(|| runtime_error("density unavailable before initialization"))?;
+            Ok((d.shape().to_vec(), d.iter().copied().collect()))
+        })
+    }
     /// (shape, minimum, maximum, mean [Bohr^-3], integrated electrons).
     fn density_summary(&self, py: Python<'_>) -> PyResult<(Vec<usize>, f64, f64, f64, f64)> {
         let volume = self.volume;
@@ -717,5 +790,6 @@ fn _baandi(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Options>()?;
     m.add_class::<Session>()?;
     m.add_class::<ResultView>()?;
+    m.add_class::<StepView>()?;
     Ok(())
 }

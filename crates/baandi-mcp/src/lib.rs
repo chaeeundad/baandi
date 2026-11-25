@@ -1,16 +1,21 @@
 //! Minimal MCP adapter over the existing safe-point runtime. No filesystem tools.
-mod event;
+mod reference;
+pub use reference::ReferenceInput;
+use reference::{Action, Worker};
 pub mod schema;
 mod transport;
 use dft_engine::{
-    CompletionMode, ExecutionConfig, ExecutionMode, ScfProblem, ScfSession, policy::PolicyChange,
-    runtime::*,
+    refscf::{
+        runtime::{Control, Snapshot},
+        stepper::StepReport,
+    },
+    runtime::{Approval, RuntimeState},
 };
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    time::SystemTime,
 };
 
 #[derive(Clone, Debug)]
@@ -35,8 +40,8 @@ impl Default for Quotas {
 pub struct Server {
     workspace: PathBuf,
     quotas: Quotas,
-    inputs: BTreeMap<String, ScfProblem>,
-    runtimes: BTreeMap<String, Runtime>,
+    inputs: BTreeMap<String, ReferenceInput>,
+    runtimes: BTreeMap<String, Calculation>,
     requests: usize,
     steps: usize,
     initialized: bool,
@@ -71,7 +76,8 @@ impl Server {
     pub fn workspace(&self) -> &Path {
         &self.workspace
     }
-    pub fn register_input(&mut self, id: &str, problem: ScfProblem) -> Result<(), String> {
+    pub fn register_input(&mut self, id: &str, problem: ReferenceInput) -> Result<(), String> {
+        problem.request.profile.validate().map_err(error)?;
         if id.is_empty()
             || id.len() > 128
             || !id.bytes().all(|b| b.is_ascii_graphic())
@@ -83,63 +89,72 @@ impl Server {
         self.inputs.insert(id.into(), problem);
         Ok(())
     }
-    pub fn runtime(&self, id: &str) -> Option<&Runtime> {
+    pub fn runtime(&self, id: &str) -> Option<&Calculation> {
         self.runtimes.get(id)
     }
     /// Only the authenticated embedding host calls this, outside MCP dispatch.
     pub fn approve(&mut self, calc: &str, request: &str, approval: Approval) -> Result<(), String> {
-        let runtime = self.runtimes.get_mut(calc).ok_or("unknown calculation")?;
-        runtime.approve(request, approval).map_err(error)?;
-        runtime.safe_point().map_err(error)
+        let r = self.runtimes.get_mut(calc).ok_or("unknown calculation")?;
+        let pending = r.pending.remove(request).ok_or("unknown pending request")?;
+        let before = r.snapshot();
+        let result = if approval.id.is_empty()
+            || approval.approver.is_empty()
+            || approval.expires_at <= SystemTime::now()
+        {
+            Err("invalid or expired host approval".into())
+        } else {
+            r.validate(&pending.control)
+                .and_then(|_| r.worker.apply(pending.action))
+        };
+        r.record(
+            &pending.control,
+            pending.action,
+            before,
+            &result,
+            Some(&approval),
+        );
+        result
     }
     pub fn deny(&mut self, calc: &str, request: &str) -> Result<(), String> {
-        self.runtimes
-            .get_mut(calc)
-            .ok_or("unknown calculation")?
-            .deny(request)
-            .map_err(error)
+        let r = self.runtimes.get_mut(calc).ok_or("unknown calculation")?;
+        let pending = r.pending.remove(request).ok_or("unknown pending request")?;
+        r.record(
+            &pending.control,
+            pending.action,
+            r.snapshot(),
+            &Err("denied by host".into()),
+            None,
+        );
+        Ok(())
     }
-    fn snapshot(runtime: &Runtime) -> Value {
-        let s = runtime.session().snapshot();
-        json!({"schema_version":1,"calc_id":s.calc_id,"state":format!("{:?}",runtime.state()),"mode":format!("{:?}",s.mode),"iteration":s.iteration,"state_version":s.state_version,"policy_revision":runtime.policy_revision(),"energy_hartree":s.energy.map(|e|e.total_hartree()),"density_residual_bohr_minus_3_over_2":s.density_residual,"charge_error_relative":s.charge_error_relative,"max_eigen_residual_hartree":s.max_eigen_residual_hartree})
+    fn snapshot(r: &Calculation) -> Value {
+        let s = r.snapshot();
+        json!({"schema_version":2,"driver":"reference","calc_id":r.id,"state":format!("{:?}",s.state),"mode":format!("{:?}",r.mode),"iteration":s.last_step.map_or(0, |r|r.iteration),"completed_maps":s.completed_maps,"state_version":s.state_version,"policy_revision":s.policy_revision,"safe_point":s.safe_point,"energy_hartree":s.last_step.and_then(|r|r.energy_ha),"last_step":s.last_step.map(step_json)})
     }
-    fn audit(runtime: &Runtime) -> Value {
-        json!(runtime.audit().iter().map(|a|json!({"schema_version":a.schema_version,"calc_id":a.calc_id,"sequence":a.sequence,"timestamp_unix_ms":a.timestamp.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().to_string(),"request_id":a.request.id,"requester":a.requester,"reason":a.request.reason,"outcome":format!("{:?}",a.outcome),"before_state_version":a.before.state_version,"after_state_version":a.after.state_version,"record_debug":format!("{a:?}")})).collect::<Vec<_>>())
-    }
-    fn propose(&mut self, p: schema::Control, action: ControlAction) -> Result<Value, String> {
+    fn propose(&mut self, p: schema::Control, action: Action) -> Result<Value, String> {
         let r = self
             .runtimes
             .get_mut(&p.calc_id)
             .ok_or("unknown calculation")?;
+        if r.pending.len() >= 16 || r.seen.len() >= 4096 || r.audit.len() >= 4096 {
+            return Err("control capacity exhausted".into());
+        }
+        if r.seen.contains(&p.request_id) {
+            return Err("duplicate request_id".into());
+        }
+        r.seen.insert(p.request_id.clone());
+        let result = r.validate(&p);
+        if result.is_err() {
+            r.record(&p, action, r.snapshot(), &result, None);
+        }
+        let disposition = match result {
+            Ok(()) => "pending_host_approval".to_string(),
+            Err(e) => e,
+        };
         let id = p.request_id.clone();
-        r.submit(
-            ControlRequest {
-                schema_version: 1,
-                calc_id: p.calc_id,
-                id: p.request_id,
-                observed_state_version: p.observed_state_version,
-                observed_policy_revision: p.observed_policy_revision,
-                action,
-                preconditions: vec![],
-                expiry: Expiry {
-                    max_iteration: Some(p.max_iteration),
-                    deadline: None,
-                },
-                stale_policy: StalePolicy::Reject,
-                reason: p.reason,
-            },
-            "mcp-client".into(),
-            Authority::PendingApproval,
-        )
-        .map_err(error)?;
-        r.safe_point().map_err(error)?;
-        let disposition = r
-            .audit()
-            .iter()
-            .rev()
-            .find(|a| a.request.id == id)
-            .map(|a| format!("{:?}", a.outcome))
-            .unwrap_or_else(|| "pending_host_approval".into());
+        if disposition == "pending_host_approval" {
+            r.pending.insert(id.clone(), Pending { control: p, action });
+        }
         Ok(json!({"request_id":id,"disposition":disposition,"snapshot":Self::snapshot(r)}))
     }
     fn call(&mut self, name: &str, args: Value) -> Result<Value, String> {
@@ -155,44 +170,36 @@ impl Server {
                     .inputs
                     .remove(&p.input_id)
                     .ok_or("unknown or consumed validated input")?;
-                let session = ScfSession::new(
-                    problem,
-                    CompletionMode::RetainLast,
-                    ExecutionConfig {
-                        mode: match p.mode {
-                            schema::Mode::Observe => ExecutionMode::Observed,
-                            schema::Mode::Supervised => ExecutionMode::AgentControlled,
-                        },
-                        calc_id: p.calc_id.clone(),
-                        routine_capacity: 256,
-                        critical_capacity: 128,
-                    },
-                )
-                .map_err(error)?;
-                let mut r = Runtime::new(session, RuntimeConfig::default()).map_err(error)?;
-                let initialized = r.initialize().map_err(error);
+                let worker = Worker::new(problem)?;
+                let r = Calculation {
+                    id: p.calc_id.clone(),
+                    mode: p.mode,
+                    worker,
+                    pending: BTreeMap::new(),
+                    seen: Default::default(),
+                    audit: vec![],
+                    events: Default::default(),
+                    sequence: 0,
+                    dropped: 0,
+                };
                 let snapshot = Self::snapshot(&r);
                 self.runtimes.insert(p.calc_id, r);
-                initialized?;
                 Ok(snapshot)
             }
             "propose_policy_change" => {
                 let p: schema::Policy = serde_json::from_value(args).map_err(error)?;
-                let (p, beta) = p.into();
-                self.propose(
-                    p,
-                    ControlAction::Policy(vec![PolicyChange::MixingBeta(beta)]),
-                )
+                let (p, patch) = p.into();
+                self.propose(p, Action::Policy(patch))
             }
             "pause" | "resume" | "cancel" => {
                 let p = serde_json::from_value(args).map_err(error)?;
                 self.propose(
                     p,
-                    match name {
-                        "pause" => ControlAction::Pause,
-                        "resume" => ControlAction::Resume,
-                        _ => ControlAction::Cancel,
-                    },
+                    Action::Control(match name {
+                        "pause" => Control::Pause,
+                        "resume" => Control::Resume,
+                        _ => Control::Cancel,
+                    }),
                 )
             }
             "run" | "step" => {
@@ -212,7 +219,14 @@ impl Server {
                         break;
                     }
                     self.steps += 1;
-                    r.step().map_err(error)?;
+                    let result = r.worker.apply(Action::Step);
+                    r.sequence += 1;
+                    if r.events.len() < 256 {
+                        r.events.push_back(json!({"sequence":r.sequence,"snapshot":Self::snapshot(r),"error":result.as_ref().err()}));
+                    } else {
+                        r.dropped += 1;
+                    }
+                    result?;
                 }
                 Ok(Self::snapshot(r))
             }
@@ -222,14 +236,8 @@ impl Server {
                     .runtimes
                     .get_mut(&p.calc_id)
                     .ok_or("unknown calculation")?;
-                let mut events = vec![];
-                if let Some(queue) = r.events() {
-                    for _ in 0..p.limit {
-                        let Some(e) = queue.pop() else { break };
-                        events.push(json!({"schema_version":e.schema_version,"calc_id":e.calc_id.as_ref(),"sequence":e.sequence,"iteration":e.iteration,"state_version":e.state_version,"timestamp_unix_ms":e.timestamp.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().to_string(),"kind":event::payload(e.kind)}));
-                    }
-                }
-                Ok(json!({"events":events,"audit":Self::audit(r)}))
+                let events: Vec<_> = r.events.drain(..p.limit.min(r.events.len())).collect();
+                Ok(json!({"events":events,"dropped_events":r.dropped,"audit":r.audit}))
             }
             _ => {
                 let p: schema::Calculation = serde_json::from_value(args).map_err(error)?;
@@ -239,14 +247,87 @@ impl Server {
                     if !r.state().terminal() {
                         return Err("result requires terminal state".into());
                     }
-                    let energy = r.session().snapshot().energy.map(|e| e.total_hartree());
+                    let energy = r.snapshot().last_step.and_then(|r| r.energy_ha);
                     Ok(
-                        json!({"snapshot":s,"audit":Self::audit(r),"scope":"scalar boundary result; no density, orbitals or restart data","csv":format!("iteration,energy_hartree\n{},{}\n",r.session().snapshot().iteration,energy.map(|e|e.to_string()).unwrap_or_default())}),
+                        json!({"snapshot":s,"audit":r.audit,"scope":"scalar boundary result; no density, orbitals or restart data","csv":format!("iteration,energy_hartree\n{},{}\n",r.snapshot().last_step.map_or(0, |r|r.iteration),energy.map(|e|e.to_string()).unwrap_or_default())}),
                     )
                 } else {
                     Ok(s)
                 }
             }
         }
+    }
+}
+
+fn step_json(r: StepReport) -> Value {
+    json!({"iteration":r.iteration,"kind":format!("{:?}",r.kind),"stage":r.stage,"estimator_ha":r.estimator_ha,"dr2_ry":r.dr2_ry,"energy_ha":r.energy_ha,"ethr_ry":r.ethr_ry,"h_columns":r.h_columns,"reused":r.reused,"safe_point":r.safe_point})
+}
+struct Pending {
+    control: schema::Control,
+    action: Action,
+}
+/// Transport approval and bounded audit state; numerical policy validation lives
+/// exclusively in the reference runtime on the worker thread.
+pub struct Calculation {
+    id: String,
+    mode: schema::Mode,
+    worker: Worker,
+    pending: BTreeMap<String, Pending>,
+    seen: std::collections::BTreeSet<String>,
+    audit: Vec<Value>,
+    events: std::collections::VecDeque<Value>,
+    sequence: u64,
+    dropped: usize,
+}
+impl Calculation {
+    pub fn snapshot(&self) -> Snapshot {
+        self.worker.snapshot
+    }
+    pub fn state(&self) -> RuntimeState {
+        self.snapshot().state
+    }
+    pub fn policy_revision(&self) -> u64 {
+        self.snapshot().policy_revision
+    }
+    pub fn audit(&self) -> &[Value] {
+        &self.audit
+    }
+    fn validate(&self, p: &schema::Control) -> Result<(), String> {
+        let s = self.snapshot();
+        if !matches!(self.mode, schema::Mode::Supervised) {
+            return Err("ModeDisallowsControl".into());
+        }
+        if s.state.terminal() {
+            return Err("terminal calculation".into());
+        }
+        if p.observed_state_version != s.state_version
+            || p.observed_policy_revision != s.policy_revision
+        {
+            return Err("StaleState".into());
+        }
+        if s.last_step.is_some_and(|s| s.iteration > p.max_iteration) {
+            return Err("request expired at max_iteration".into());
+        }
+        Ok(())
+    }
+    fn record(
+        &mut self,
+        p: &schema::Control,
+        action: Action,
+        before: Snapshot,
+        result: &Result<(), String>,
+        approval: Option<&Approval>,
+    ) {
+        let outcome = match result {
+            Err(error) => error.as_str(),
+            Ok(())
+                if matches!(action, Action::Control(Control::Pause | Control::Cancel))
+                    && !before.safe_point =>
+            {
+                "QueuedUntilSafePoint"
+            }
+            Ok(()) => "Applied",
+        };
+        self.audit.push(json!({"schema_version":2,"calc_id":self.id,"sequence":self.audit.len()+1,"request_id":p.request_id,"reason":p.reason,"action":format!("{action:?}"),"requester":"mcp-client","approval_id":approval.map(|a|&a.id),"approver":approval.map(|a|&a.approver),"outcome":outcome,"before_state_version":before.state_version,"after_state_version":self.snapshot().state_version,"before_policy_revision":before.policy_revision,"after_policy_revision":self.snapshot().policy_revision,"completed_maps":self.snapshot().completed_maps}));
     }
 }

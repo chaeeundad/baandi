@@ -1,0 +1,40 @@
+{
+  "task_id": "R8D-PY-MCP-STEP",
+  "command": "PYTHONPATH=target/tmp/r8d-native python3 -m unittest discover -s crates/baandi-py/tests -p test_reference.py -v",
+  "reference": "same-build reference batch run(), not QE",
+  "scope": "synthetic cubic one-atom model; Gamma and k211; energy/eigenvalues/full density/forces",
+  "cases": [
+    {
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "energy_ha": -1.5192713249388319,
+      "energy_hex": "-0x1.84eef72e5ce53p+0",
+      "iterations": 7,
+      "maps": 8,
+      "max_energy_difference_ha": 0.0,
+      "eigenvalues_bit_identical": true,
+      "density_bit_identical": true,
+      "forces_bit_identical": true,
+      "density_hex_sha256": "3f6ca640141dde023a05ac0290a94899a2c3ccbec49dc2d8b7a1530010a48e4c"
+    },
+    {
+      "kgrid": [
+        2,
+        1,
+        1
+      ],
+      "energy_ha": -1.2322191855555735,
+      "energy_hex": "-0x1.3b72b76f77069p+0",
+      "iterations": 6,
+      "maps": 7,
+      "max_energy_difference_ha": 0.0,
+      "eigenvalues_bit_identical": true,
+      "density_bit_identical": true,
+      "forces_bit_identical": true,
+      "density_hex_sha256": "ee6f2f3d2c92ed5c16094c0905cd18194f737db8015e51080d9bf9f2b82f99b9"
+    }
+  ]
+}

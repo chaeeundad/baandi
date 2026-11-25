@@ -75,7 +75,15 @@ impl Server {
                 };
                 let args = v["params"]["arguments"].clone();
                 if !schema::validate(&spec["inputSchema"], &args) {
-                    return Some(rpc_error(id, -32602, "invalid tool arguments"));
+                    return Some(rpc_error(
+                        id,
+                        -32602,
+                        if name == "propose_policy_change" {
+                            "reference policy supports only mixing_beta, mixing_history, threshold_ry and verification; supply at least one policy field and valid control metadata"
+                        } else {
+                            "invalid tool arguments"
+                        },
+                    ));
                 }
                 match self.call(name, args) {
                     Ok(value) => {

@@ -1,0 +1,7 @@
+Architect decision on the G4 acceptance status (review of docs/design/reference-scf.md "G4 continuation review"):
+
+1. Qualified and enabled on the reference driver: scalar Fermi-Dirac and fixed collinear sector (all 24 comparisons pass), Si2 FD.
+2. Not qualified yet: collinear FD with a fixed moment (mesh weighted-occupation bound 1.41e-4 > 1e-4) and with a free moment (energy, moment and singular-history failures). Do NOT relax any bound. Route both to the legacy driver with an explicit recorded reason ("reference driver: collinear Fermi-Dirac not yet qualified, G4B"), behind a registry switch REFSCF_SPIN_FD_MOMENT (default off; on = use the reference driver for these two policies, for G4B development). Append the switch at the end of crates/dft-numerics/src/switches.rs and update the switch counts in crates/dft-numerics/tests/all/switches.rs and crates/dft-cli/tests/all/run.rs (these three files are added to OWNED_FILES for this purpose only).
+3. Keep the failing acceptance matrix test, but split it: the qualified policies (scalar FD, fixed spin) become a passing ignored release test; the two moment policies stay in a separate ignored test named g4b_moment_acceptance that is expected to fail until G4B (document it).
+4. Update the "Spin and Fermi-Dirac" section accordingly (status table: qualified / routed to legacy). Keep the measured numbers.
+5. Re-run all TEST_COMMANDS and the release g4_ tests (except g4b_moment_acceptance), report in English per docs/schemas/report.schema.json. Leave changes uncommitted.

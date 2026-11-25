@@ -238,12 +238,12 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         }
         if s.mixing
             .as_deref()
-            .is_some_and(|s| s != "linear" && s != "pulay" && s != "kerker-pulay")
+            .is_some_and(|s| !matches!(s, "pulay" | "broyden" | "plain"))
         {
             return Err(fail(
                 "scf.mixing",
                 "unknown mixer",
-                "use linear, pulay or kerker-pulay",
+                "use broyden (pulay and plain are aliases)",
             ));
         }
     }

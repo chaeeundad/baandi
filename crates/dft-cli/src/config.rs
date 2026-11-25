@@ -1018,9 +1018,9 @@ impl Config {
             .and_then(|s| s.get("density_group"))
             .cloned();
         let mut config: Self = value.try_into()?;
-        if crate::driver_select::preliminary(&config).reference_mixing()
-            && let Some(s) = &mut config.scf
-        {
+        // Both remaining drivers (reference and strict oracle) accept the
+        // reference mixer names; broyden/plain are aliases of pulay here.
+        if let Some(s) = &mut config.scf {
             s.reference_mixing_input = s.mixing.clone();
             if matches!(s.mixing.as_deref(), Some("broyden" | "plain")) {
                 s.mixing = Some("pulay".into());

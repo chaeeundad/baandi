@@ -101,6 +101,40 @@ fn human(v: &Value) -> String {
     }
 }
 
+/// Reference map payload in the existing event envelope. Missing energy and
+/// legacy residual diagnostics remain null; dr2 is an energy metric in Ry,
+/// never relabelled as the legacy real-space density residual.
+pub fn reference_step_json(
+    calc_id: &str,
+    sequence: u64,
+    state_version: u64,
+    timestamp: std::time::SystemTime,
+    report: dft_engine::refscf::stepper::StepReport,
+) -> Value {
+    use dft_engine::refscf::stepper::StepKind;
+    let kind = match report.kind {
+        StepKind::Ordinary => "ordinary",
+        StepKind::Verification => "verification",
+        StepKind::Retry => "retry",
+    };
+    json!({
+        "schema_version":"1.0", "calc_id":calc_id, "sequence":sequence,
+        "timestamp_unix_seconds":timestamp.duration_since(UNIX_EPOCH).map(|d|d.as_secs_f64()).unwrap_or(0.0),
+        "iteration":report.iteration, "state_version":state_version,
+        "type":"iteration_finished",
+        "data":{
+            "driver":"reference", "kind":kind, "stage":report.stage,
+            "energy_hartree":report.energy_ha, "estimator_hartree":report.estimator_ha,
+            "dr2_ry":report.dr2_ry, "ethr_ry":report.ethr_ry,
+            "h_columns":report.h_columns, "reused":report.reused,
+            "safe_point":report.safe_point,
+            "density_residual_bohr_minus_3_over_2":null,
+            "charge_error_relative":null, "mixing_applied":null,
+            "solver_status":"map_completed"
+        }
+    })
+}
+
 /// Publication is bounded and nonblocking. Capacity exhaustion fails at a safe
 /// boundary; queued records are drained before returning the error.
 struct Sink {

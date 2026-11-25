@@ -26,6 +26,7 @@ pub mod nscf;
 pub mod profile;
 pub mod qe_reference;
 pub mod record;
+pub mod runtime;
 pub mod stepper;
 pub mod symmetry;
 

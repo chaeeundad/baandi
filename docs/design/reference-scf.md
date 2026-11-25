@@ -4533,3 +4533,72 @@ Final invocations passed. The sandbox also denies the gate's optional `ps`
 load probe; all four verification gates still ran and passed. Real MPI8 identity
 and wall acceptance remain with the master session's
 [`r8a-dev08-request.md`](../performance/lanes/RSCF/r8a-dev08-request.md).
+
+## Runtime control
+
+R8C-RUNTIME currently provides a lifecycle foundation in `refscf::runtime`;
+CLI dispatch and L7 migration are **not complete**. The adapter owns the R8a
+continuation and exposes scalar snapshots with completed-map count, last map,
+state version and safe-point status. Trusted host pause/resume preserves that
+continuation. Cancel releases it at a safe point and retains the scalar partial
+record, without fabricating a delivered density or converged result. Controls
+requested between a candidate and its verification, or before a retry, wait for
+a safe boundary. Terminal numerical delivery wins over pending controls.
+Transport authentication and approval are not supplied by this lifecycle API.
+Collective callers must provide identical controls to every rank.
+
+`telemetry::reference_step_json` uses the existing version 1.0 event envelope,
+with one `iteration_finished` event per logical map, including verification
+and retry maps. Its payload names the kind, stage, estimator in Ha, dr2 and
+ethr in Ry, optional energy in Ha, H columns, reuse and safe-point flags.
+Unavailable legacy density-residual and charge diagnostics are null; dr2 is
+not a real-space density norm. Formatting occurs after a step returns.
+
+The remaining policy transaction requires a mailbox at the stepper boundary
+and application hooks in `driver.rs`, `k_driver.rs` and `electronic.rs`.
+Those four existing files are outside R8C's current OWNED_FILES. The R8a public
+API cannot update the profile, Broyden mixer or immutable verification option
+held inside its pinned continuation. A wrapper must not claim to apply a policy
+by updating only metadata, restarting from scratch or repeating maps.
+Approval to extend ownership is pending. The intended transaction validates
+beta/history/threshold/verification, resets the mixer for beta/history changes,
+retains density/orbitals, and applies only at a safe boundary. Unsupported
+legacy knobs must reject explicitly. L7 stays until this integration is ready.
+
+The historical self-healing evidence in
+`tests/reference/runtime/generated/results.json` uses a `MaxIterations` budget
+extension. That scenario is not applicable to R8c's closed policy allow-list;
+this does not establish reference-driver numerical-instability recovery.
+The new `reference-results.json` records only the tested lifecycle and event
+serialization scope, separately from the historical README evidence.
+
+Reproduce the synthetic one-/three-simulated-rank identity and pause/resume
+checks (verification off/on), event capture, and partial cancellation checks:
+
+```sh
+R8C_WRITE_EVIDENCE=1 cargo test -p dft-cli --test reference_runtime -- --nocapture
+```
+
+This is same-build BAANDI identity, not a QE comparison or native MPI timing.
+
+Local validation of this partial implementation: the three engine lifecycle
+unit tests pass. The new CLI integration target cannot compile because the
+starting HEAD calls nonexistent `l4` and `l5` functions in `driver_select.rs`
+(lines 75 and 78); those diagnostic blocks are outside the L7-only allowance.
+Workspace check and CLI tests exit 101 for that pre-existing error.
+An isolated Rust test harness compiled the exact integration-test source and
+`reference_step_json` function against the engine library, excluding the broken
+CLI crate. Both tests pass: 16 rank/mode/verification records converge with
+identical same-rank energy bits and density SHA-256, plus cancellation retains
+its partial scalar record. The new evidence includes the actual isolated
+compile command, source hashes and this limitation. It is not a passing CLI
+acceptance gate. The local reproducer is `target/tmp/r8c-isolated.py`; once the
+routing build is repaired, use the Cargo command above to regenerate evidence
+through the intended integration target.
+
+Final local gates for the partial patch: engine-only Clippy with warnings
+denied and formatting pass (exit 0). Full `scripts/check.sh`, with
+`CHECK_SCCACHE=0` and `BAANDI_TEST_TMP=/private/tmp/r8c-runtime-tests`, exits 1:
+build/test/clippy fail on the same missing routing predicates; fmt passes.
+The combined CLI/engine Clippy command exits 101. No CLI acceptance or L7
+migration is claimed. All changes remain uncommitted pending scope resolution.

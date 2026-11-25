@@ -1528,6 +1528,10 @@ mod tests {
     /// one) is an input error that names the reference switch.
     #[test]
     fn single_path_selection() {
+        // R2: these preflight contracts belong to the legacy standard driver.
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[("reference_scf", "off")])
+            .unwrap()
+            .enter();
         let parse = |tail: &str| Config::parse(&format!("{EXAMPLE}\n{tail}\n"));
         let plain = parse("").unwrap().scf_path().unwrap();
         assert_eq!(plain.status, "applied");

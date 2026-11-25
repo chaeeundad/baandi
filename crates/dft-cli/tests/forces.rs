@@ -70,8 +70,8 @@ fn force_output_and_standard_rejection() {
     for value in result["forces"]["net_force"].as_array().unwrap() {
         assert!(value.as_f64().unwrap().abs() < 1e-12);
     }
-    // ADR 0043: forces need the fixed-point verification; verify = off rejects.
-    let standard = base.replace("[scf]", "[scf]\nverify='off'");
+    // R2: the legacy driver's ADR 0043 preflight rejects unverified forces.
+    let standard = base.replace("[scf]", "[scf]\ndriver='legacy'\nverify='off'");
     fs::write(dir.join("input.toml"), standard).unwrap();
     for action in ["validate", "run"] {
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))

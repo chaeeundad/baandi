@@ -86,7 +86,8 @@ fn table_defaults_match_accessors_with_environment_unset() {
 }
 
 /// The defaults in force before the manifest, typed independently of the table:
-/// a table edit that flips one of them fails here.
+/// a table edit that flips one of them fails here. R2 explicitly adopts the
+/// reference production driver; the other registered defaults stay unchanged.
 #[test]
 fn legacy_defaults_are_unchanged() {
     let on = |id: Id| switches::resolve(switches::switch(id), None).0 == Value::Choice("on");
@@ -297,7 +298,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::SERIAL_DENSITY_FUSED), Value::Choice("on"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::M2_OWNED_INPUT), Value::Choice("off"));
-    assert_eq!(value(Id::REFERENCE_SCF), Value::Choice("off"));
+    assert_eq!(value(Id::REFERENCE_SCF), Value::Choice("on"));
     assert_eq!(TABLE.len(), 187);
 }
 

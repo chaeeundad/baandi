@@ -1012,9 +1012,11 @@ again at the next stop; the delivered state is always the converged step's own
 `[scf] verify = "fixed_point" | "off"`: default `fixed_point`; `off` skips the
 verification (its result is the former explicit standard profile, bit for bit).
 
-`scf.driver = "reference" | "legacy"` selects the requested SCF driver. Stage R1
-keeps the default legacy. Precedence is `BAANDI_REFERENCE_STRICT=on` (the strict
-oracle), then `scf.driver`, then `BAANDI_REFERENCE_SCF`, then the legacy default.
+`scf.driver = "reference" | "legacy"` selects the requested SCF driver. Stage R2
+defaults to the reference production driver. Precedence is `BAANDI_REFERENCE_STRICT=on` (the strict
+oracle), then `scf.driver`, then `BAANDI_REFERENCE_SCF`, then the reference default.
+`BAANDI_REFERENCE_SCF=off` requests the deprecated legacy standard driver,
+which is scheduled for removal in R10.
 An explicit `legacy` therefore overrides `REFERENCE_SCF=on`; STRICT overrides both.
 After UPF parsing, the shared selector checks declared legacy-only features:
 unqualified spin FD (G4B/G4D), bands/DOS, variable-cell relaxation, density

@@ -8702,3 +8702,242 @@ fn g6b_symmetry_direct_explicit_grid() {
         });
     }
 }
+
+/// Synthetic isolated one-electron Gaussian with a Fourier-truncated NLCC core.
+/// No external pseudopotential or QE data are used.
+#[test]
+fn g4e_vacuum() {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+        refscf::electronic::{self, Policy},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    use dft_numerics::switches::RunConfig;
+    let cell = Cell::from_user_rows_bohr([[10., 0., 0.], [0., 10., 0.], [0., 0., 10.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0., 0., 0.])];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let pp = g4c_potential(true);
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let sector = SpinSector {
+        n_up: 1,
+        n_down: 0,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: Some(1.),
+    };
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        cutoff_hartree: 2.5,
+        bands: Some(4),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Uniform,
+        max_iterations: 300,
+        residual_eigen_schedule: false,
+        initial_eigen_tolerance: 1e-11,
+        eigen_tolerance: 1e-11,
+        density_tolerance: 1e-10,
+        energy_tolerance: 1e-11,
+        ..ScfOptions::strict_reference()
+    };
+    let cfg = |on| {
+        RunConfig::from_pairs(&[("xc_screen_negative", if on { "on" } else { "off" })]).unwrap()
+    };
+    {
+        let config = cfg(false);
+        let _s = config.enter();
+        let err = CollinearProblem::new(
+            &cell,
+            &atoms,
+            &potentials,
+            options.clone(),
+            &points,
+            sector.clone(),
+        )
+        .unwrap()
+        .run()
+        .err()
+        .expect("negative NLCC must fail")
+        .to_string();
+        assert!(
+            err.contains("channel") && err.contains("minimum") && err.contains("grid point"),
+            "{err}"
+        );
+        let reference_options = ScfOptions {
+            standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+            verification: dft_engine::Verification::FixedPoint,
+            ..options.clone()
+        };
+        dft_mpi::simulate(3, |comm| {
+            let _s = config.enter();
+            let err = electronic::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &reference_options,
+                },
+                Profile::default(),
+                &points,
+                Policy::FixedSpin(sector.clone()),
+                comm,
+            )
+            .err()
+            .expect("negative NLCC must fail")
+            .to_string();
+            assert!(
+                err.contains("channel") && err.contains("minimum") && err.contains("grid point"),
+                "{err}"
+            );
+        });
+    }
+    let config = cfg(true);
+    let _s = config.enter();
+    let legacy = CollinearProblem::new(
+        &cell,
+        &atoms,
+        &potentials,
+        options.clone(),
+        &points,
+        sector.clone(),
+    )
+    .unwrap()
+    .run()
+    .unwrap();
+    assert!(legacy.converged);
+    let oracle = legacy.energy.total_hartree();
+    assert!(
+        dft_physics::xc::screening_records()
+            .iter()
+            .any(|r| r.points > 0 && r.minimum_bohr3 < 0.)
+    );
+    let options = ScfOptions {
+        standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+        verification: dft_engine::Verification::FixedPoint,
+        ..options
+    };
+    for threshold in [1e-8, 1e-12] {
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let _s = config.enter();
+                dft_physics::xc::clear_screening_records();
+                let r = electronic::run_with(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    Profile {
+                        threshold_ry: threshold,
+                        ..Profile::default()
+                    },
+                    &points,
+                    Policy::FixedSpin(sector.clone()),
+                    comm,
+                )
+                .unwrap();
+                assert!(r.converged && r.verification.as_ref().unwrap().passed());
+                let delta = (r.energy.total_hartree() - oracle).abs();
+                if comm.rank() == 0 {
+                    eprintln!(
+                        "G4E P={ranks} threshold={threshold:e} Ry E={:.17e} Ha legacy_delta={delta:e} Ha",
+                        r.energy.total_hartree()
+                    );
+                }
+                assert!(
+                    delta < if threshold == 1e-8 { 5e-9 } else { 1e-10 },
+                    "{delta:e}"
+                );
+                let records = dft_physics::xc::screening_records();
+                assert!(records.iter().any(|r| r.points > 0 && r.minimum_bohr3 < 0.));
+            });
+        }
+    }
+}
+
+#[test]
+fn g4e_positive_density_driver_bits() {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, ScfProblem, SpeciesPotential, StartDensity,
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell};
+    use dft_numerics::switches::RunConfig;
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.1, 5., 0.], [0., 0.2, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    for (functional, label) in [
+        (Functional::LdaPz, "SLA PZ"),
+        (Functional::LdaPw, "SLA PW"),
+        (Functional::Pbe, "PBE"),
+    ] {
+        let pp = common::potential_with_atomic_start(2., 1.8, false, 161, label);
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            functional,
+            cutoff_hartree: 1.5,
+            bands: Some(3),
+            gamma_real: GammaReal::On,
+            start_density: StartDensity::Uniform,
+            ..Default::default()
+        };
+        let mut old = None;
+        for setting in ["off", "on"] {
+            let config = RunConfig::from_pairs(&[("xc_screen_negative", setting)]).unwrap();
+            let _s = config.enter();
+            let legacy = ScfProblem::new(&cell, &atoms, &potentials, options.clone())
+                .unwrap()
+                .run()
+                .unwrap();
+            let reference = dft_engine::refscf::driver::run_with(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &Serial,
+            )
+            .unwrap();
+            assert!(reference.outcome.converged);
+            let bits = (
+                legacy.energy.total_hartree().to_bits(),
+                legacy
+                    .density
+                    .iter()
+                    .map(|n| n.to_bits())
+                    .collect::<Vec<_>>(),
+                reference.outcome.result.energy.total_hartree().to_bits(),
+                reference
+                    .outcome
+                    .result
+                    .density
+                    .iter()
+                    .map(|n| n.to_bits())
+                    .collect::<Vec<_>>(),
+            );
+            if let Some(old) = &old {
+                assert_eq!(&bits, old, "{functional:?}");
+            } else {
+                old = Some(bits);
+            }
+            if setting == "on" {
+                assert!(
+                    dft_physics::xc::screening_records()
+                        .iter()
+                        .all(|r| r.points == 0)
+                );
+            }
+        }
+    }
+}

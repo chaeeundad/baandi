@@ -72,6 +72,13 @@ impl Functional {
         }
         // Each functional applies its existing screening/negative-density rule
         // to the combined density. Never renormalize or clip the model core.
+        let _scope = xc::screen_negative().then(|| {
+            xc::screening_scope(
+                xc::screening_stage(),
+                xc::screening_prechecked(),
+                Some(cell.volume_bohr3() / n.len() as f64 * n.sum()),
+            )
+        });
         let mut result = self.evaluate(scratch, cell, fft)?;
         result.potential_integral = Hartree(
             cell.volume_bohr3() / n.len() as f64
@@ -169,6 +176,13 @@ impl crate::ScfOptions {
             }
             *out = floor.map_or(total, |f| total.max(f));
         }
+        let _scope = xc::screen_negative().then(|| {
+            xc::screening_scope(
+                xc::screening_stage(),
+                xc::screening_prechecked(),
+                Some(cell.volume_bohr3() / n.len() as f64 * n.sum()),
+            )
+        });
         let mut result = gga::evaluate_pw92(self.pw92_prefactor, scratch, cell, fft)?;
         if let Some(floor) = floor {
             for (i, (v, &valence)) in result.potential.iter_mut().zip(n).enumerate() {

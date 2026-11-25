@@ -45,6 +45,31 @@ pub(super) fn fields<K: Collective>(
 ) -> Result<Fields, ScfError> {
     let dims = state.grid.dims();
     let dv = cell.volume_bohr3() / dims.iter().product::<usize>() as f64;
+    let screening = dft_physics::xc::screen_negative();
+    let total = screening.then(|| {
+        density
+            .iter()
+            .enumerate()
+            .map(|(i, n)| n + state.core_density.as_ref().map_or(0., |c| c[i]))
+            .collect::<Vec<_>>()
+    });
+    if let Some(total) = &total {
+        dft_physics::gga::distributed::audit(
+            &state.fields,
+            comm,
+            total,
+            dv,
+            "total",
+            Some(state.electrons),
+        )?;
+    }
+    let _scope = screening.then(|| {
+        dft_physics::xc::screening_scope(
+            dft_physics::xc::screening_stage(),
+            true,
+            Some(state.electrons),
+        )
+    });
     let mut coeff = state.fields.forward(comm, density)?;
     // Reuse rho(G) before the Poisson multiplier overwrites it. GGA owns only
     // this rank's slabs/sticks and follows the serial signed-density policy.
@@ -90,7 +115,9 @@ pub(super) fn fields<K: Collective>(
     } else {
         let n = Array3::from_shape_vec(
             [density.len(), 1, 1],
-            if let Some(core) = &state.core_density {
+            if let Some(total) = &total {
+                total.clone()
+            } else if let Some(core) = &state.core_density {
                 density
                     .iter()
                     .zip(core)
@@ -118,11 +145,7 @@ pub(super) fn fields<K: Collective>(
             )
         })
     };
-    if sum(comm, &[f64::from(xc.is_err())])?[0] != 0. {
-        return Err(ScfError::InvalidInput(
-            "reference map: invalid XC density on a rank",
-        ));
-    }
+    dft_physics::xc::agree_error(comm, xc.as_ref().err().map(ToString::to_string))?;
     let (vxc, ex, _) = xc.map_err(numerical)?;
     // The SCF-cycle note specifies |rho| for LDA evaluation; the signed
     // mixed density itself is never clipped, damped or renormalized.

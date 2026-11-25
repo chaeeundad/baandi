@@ -58,11 +58,11 @@ pub fn evaluate(
     if n.is_empty() || n.shape() != fft.shape() {
         return Err(PhysicsError::Shape);
     }
-    if let Some(&x) = n.iter().find(|x| !x.is_finite() || **x < 0.0) {
-        return Err(PhysicsError::GgaDensity(x));
-    }
+    crate::xc::audit_density(n, cell.volume_bohr3(), "total", 0.)?;
+    let screening = crate::xc::screen_negative();
+    let projected = screening.then(|| n.mapv(crate::xc::screened_argument));
     let gradients = (0..3)
-        .map(|a| derivative(n, cell, a, fft))
+        .map(|a| derivative(projected.as_ref().unwrap_or(n), cell, a, fft))
         .collect::<Result<Vec<_>, _>>()?;
     let mut sigma = vec![0.0; n.len()];
     for g in &gradients {
@@ -106,6 +106,13 @@ pub fn evaluate(
             *f *= 2.0 * (x + c);
         }
         potential -= &derivative(&flux, cell, axis, fft)?;
+    }
+    if screening {
+        for (v, &density) in potential.iter_mut().zip(n) {
+            if density <= DENSITY_THRESHOLD {
+                *v = 0.;
+            }
+        }
     }
     let integral = weight * (n * &potential).sum();
     if !energy.is_finite() || !integral.is_finite() || potential.iter().any(|v| !v.is_finite()) {
@@ -175,11 +182,11 @@ pub fn evaluate_pw92(
     if n.is_empty() || n.shape() != fft.shape() {
         return Err(PhysicsError::Shape);
     }
-    if let Some(&x) = n.iter().find(|x| !x.is_finite() || **x < 0.0) {
-        return Err(PhysicsError::GgaDensity(x));
-    }
+    crate::xc::audit_density(n, cell.volume_bohr3(), "total", 0.)?;
+    let screening = crate::xc::screen_negative();
+    let projected = screening.then(|| n.mapv(crate::xc::screened_argument));
     let gradients = (0..3)
-        .map(|a| derivative(n, cell, a, fft))
+        .map(|a| derivative(projected.as_ref().unwrap_or(n), cell, a, fft))
         .collect::<Result<Vec<_>, _>>()?;
     let mut sigma = vec![0.0; n.len()];
     for g in &gradients {
@@ -223,6 +230,13 @@ pub fn evaluate_pw92(
             *f *= 2.0 * (x + c);
         }
         potential -= &derivative(&flux, cell, axis, fft)?;
+    }
+    if screening {
+        for (v, &density) in potential.iter_mut().zip(n) {
+            if density <= DENSITY_THRESHOLD {
+                *v = 0.;
+            }
+        }
     }
     let integral = weight * (n * &potential).sum();
     if !energy.is_finite() || !integral.is_finite() || potential.iter().any(|v| !v.is_finite()) {

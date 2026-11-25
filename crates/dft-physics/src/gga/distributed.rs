@@ -14,6 +14,11 @@ pub trait Fields<K: Collective> {
     fn dims(&self) -> [usize; 3];
     fn reciprocal_indices(&self) -> &[usize];
     fn plane_points(&self) -> usize;
+    /// Global C-order indices of the owned real samples, in complete z rows.
+    /// Required by opt-in screening and precise invalid-density diagnostics.
+    fn real_indices(&self) -> Option<Vec<usize>> {
+        None
+    }
     fn forward(&mut self, comm: &K, n: &[f64]) -> Result<Vec<C>, Self::Error>;
     fn inverse(&mut self, comm: &K, n: &[C]) -> Result<Vec<f64>, Self::Error>;
 }
@@ -24,6 +29,79 @@ fn agree<K: Collective>(comm: &K, bad: bool, message: &'static str) -> Result<()
         .map_err(|e| PhysicsError::Xc(e.to_string()))?;
     if result[0] != 0. {
         return Err(PhysicsError::Xc(message.into()));
+    }
+    Ok(())
+}
+
+/// All ranks enter this boundary before any transform, including empty owners.
+pub fn audit<K: Collective, F: Fields<K>>(
+    fields: &F,
+    comm: &K,
+    density: &[f64],
+    weight: f64,
+    channel: &'static str,
+    electrons: Option<f64>,
+) -> Result<(), PhysicsError> {
+    if crate::xc::screening_prechecked() {
+        return Ok(());
+    }
+    let enabled = crate::xc::screen_negative();
+    let mut bad = [0.];
+    comm.tree_sum_f64(
+        &[f64::from(density.iter().any(|v| !v.is_finite() || *v < 0.))],
+        &mut bad,
+    )
+    .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+    if !enabled && bad[0] == 0. {
+        return Ok(());
+    }
+    let indices = fields.real_indices();
+    agree(
+        comm,
+        indices.as_ref().is_none_or(|v| v.len() != density.len()),
+        "XC screening requires real-grid indices",
+    )?;
+    let indices = indices.unwrap();
+    if !enabled {
+        let mut local = [f64::INFINITY, 0.];
+        for (&n, &i) in density.iter().zip(&indices) {
+            if !n.is_finite() || n < local[0] {
+                local = [n, i as f64];
+            }
+        }
+        let mut minimum = [f64::INFINITY, 0.];
+        for rank in 0..comm.size() {
+            let mut values = [0.; 2];
+            comm.tree_sum_f64(
+                &if rank == comm.rank() { local } else { [0.; 2] },
+                &mut values,
+            )
+            .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+            if values[0].is_nan()
+                || values[0] < minimum[0]
+                || (values[0] == minimum[0] && values[1] < minimum[1])
+            {
+                minimum = values;
+            }
+        }
+        return Err(PhysicsError::Xc(format!(
+            "{}: XC requires finite nonnegative density; channel {} minimum {:.17e} Bohr^-3 at grid point {} (screening off)",
+            crate::xc::screening_stage(),
+            channel,
+            minimum[0],
+            minimum[1] as usize
+        )));
+    }
+    let rows = crate::xc::screening_rows(density, &indices, fields.dims());
+    let mut global = vec![0.; rows.len()];
+    comm.tree_sum_f64(&rows, &mut global)
+        .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+    let r = crate::xc::finish_screening(&global, weight, channel, electrons)?;
+    if !enabled && r.minimum_bohr3 < 0. {
+        return Err(PhysicsError::Xc(format!(
+            "{}: XC channel {} minimum {:.17e} Bohr^-3 at grid point {} (screening off)",
+            r.stage, channel, r.minimum_bohr3, r.minimum_grid_index
+        )));
     }
     Ok(())
 }
@@ -101,10 +179,45 @@ pub fn evaluate<K: Collective, F: Fields<K>>(
 ) -> Result<XcSlab, F::Error> {
     agree(
         comm,
-        density.len() != fields.plane_points() || density.iter().any(|n| !n.is_finite() || *n < 0.),
+        density.len() != fields.plane_points(),
         "distributed PBE requires finite nonnegative density with matching slab shape",
     )?;
-    let gradients = gradient(fields, comm, cell, density_g)?;
+    audit(
+        fields,
+        comm,
+        density,
+        cell.volume_bohr3() / fields.dims().iter().product::<usize>() as f64,
+        "total",
+        None,
+    )?;
+    let screening = crate::xc::screen_negative();
+    let mut screened_points = [0.];
+    if screening {
+        comm.tree_sum_f64(
+            &[density.iter().filter(|&&n| n <= DENSITY_THRESHOLD).count() as f64],
+            &mut screened_points,
+        )
+        .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+    }
+    let projected_g = if screening && screened_points[0] > 0. {
+        Some(
+            fields.forward(
+                comm,
+                &density
+                    .iter()
+                    .map(|&n| crate::xc::screened_argument(n))
+                    .collect::<Vec<_>>(),
+            )?,
+        )
+    } else {
+        None
+    };
+    let gradients = gradient(
+        fields,
+        comm,
+        cell,
+        projected_g.as_deref().unwrap_or(density_g),
+    )?;
     let rho: Vec<_> = density
         .iter()
         .map(|&n| if n <= DENSITY_THRESHOLD { 0. } else { n })
@@ -178,6 +291,13 @@ pub fn evaluate<K: Collective, F: Fields<K>>(
     let divergence = fields.inverse(comm, &divergence_g)?;
     for (v, d) in potential.iter_mut().zip(divergence) {
         *v -= d;
+    }
+    if screening {
+        for (v, &n) in potential.iter_mut().zip(density) {
+            if n <= DENSITY_THRESHOLD {
+                *v = 0.;
+            }
+        }
     }
     agree(
         comm,
@@ -274,19 +394,46 @@ impl SpinPbe {
                 || core.is_some_and(|c| c.len() != len || c.iter().any(|v| !v.is_finite())),
             "distributed spin PBE field/core shape mismatch",
         )?;
-        let mut bad = false;
+        let screening = crate::xc::screen_negative();
+        let electrons = if screening && !crate::xc::screening_prechecked() {
+            let indices = fields.real_indices();
+            agree(
+                comm,
+                indices.as_ref().is_none_or(|v| v.len() != len),
+                "XC screening requires real-grid indices",
+            )?;
+            for (i, n) in self.channel.iter_mut().enumerate() {
+                *n = density[0][i] + density[1][i];
+            }
+            let rows = crate::xc::screening_rows(&self.channel, &indices.unwrap(), self.dims);
+            let local: Vec<_> = rows.as_chunks::<5>().0.iter().map(|r| r[2]).collect();
+            let mut global = vec![0.; local.len()];
+            comm.tree_sum_f64(&local, &mut global)
+                .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+            Some(self.weight * global.iter().sum::<f64>())
+        } else {
+            None
+        };
         for (s, n) in density.iter().enumerate() {
             for (i, &n) in n.iter().enumerate() {
-                let total = n + core.map_or(0., |c| 0.5 * c[i]);
-                bad |= !total.is_finite() || total < 0.;
-                self.rho[2 * i + s] = total;
+                self.channel[i] = n + core.map_or(0., |c| 0.5 * c[i]);
+            }
+            audit(
+                fields,
+                comm,
+                &self.channel,
+                self.weight,
+                if s == 0 { "up" } else { "down" },
+                electrons,
+            )?;
+            for (i, &n) in self.channel.iter().enumerate() {
+                self.rho[2 * i + s] = if screening {
+                    crate::xc::screened_argument(n)
+                } else {
+                    n
+                };
             }
         }
-        agree(
-            comm,
-            bad,
-            "distributed spin PBE requires finite nonnegative combined channels",
-        )?;
         for s in 0..2 {
             for (i, v) in self.channel.iter_mut().enumerate() {
                 *v = self.rho[2 * i + s];
@@ -389,6 +536,15 @@ impl SpinPbe {
                 let derivative = fields.inverse(comm, &self.derivative_g)?;
                 for (v, d) in self.response.potentials[s].iter_mut().zip(derivative) {
                     *v -= d;
+                }
+            }
+        }
+        if screening {
+            for s in 0..2 {
+                for (i, v) in self.response.potentials[s].iter_mut().enumerate() {
+                    if self.rho[2 * i + s] == 0. {
+                        *v = 0.;
+                    }
                 }
             }
         }

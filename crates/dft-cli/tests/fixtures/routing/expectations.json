@@ -72,14 +72,14 @@
   "l03-bands": {
     "command": "bands",
     "mode": "classic",
-    "reference_reason": "NSCF",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
   "l03-dos": {
     "command": "dos",
     "mode": "classic",
-    "reference_reason": "NSCF",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },
@@ -295,6 +295,13 @@
     "options_error": null
   },
   "symmetry": {
+    "command": "run",
+    "mode": "classic",
+    "reference_reason": null,
+    "parse_error": null,
+    "options_error": null
+  },
+  "plain-cutoff-ladder-off": {
     "command": "run",
     "mode": "classic",
     "reference_reason": null,

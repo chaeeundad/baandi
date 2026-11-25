@@ -4,7 +4,8 @@ use dft_cli::{
     run::{RunError, sha256},
 };
 use dft_engine::{
-    NscfResult, OccupationPolicy, ScfOptions, ScfProblem, ScfResult, SpeciesPotential,
+    OccupationPolicy, ScfOptions, ScfProblem, ScfResult, SpeciesPotential, refscf,
+    refstart::StartInput,
 };
 use dft_geometry::{
     Atom, Cell,
@@ -27,6 +28,53 @@ pub(crate) fn err(code: u8, cause: impl std::fmt::Display) -> RunError {
 }
 pub(crate) fn ev(ha: f64) -> f64 {
     from_hartree(ha, EnergyUnit::ElectronVolt)
+}
+/// Output-only records: retain the density's spin axis, never reinterpret a
+/// collinear state as a scalar SCF state. Numerical work stays in the engine.
+pub(crate) struct Scf {
+    density: Vec<dft_physics::data::Array3<f64>>,
+    occupied: Vec<usize>,
+    energy: f64,
+    iterations: usize,
+    path: Value,
+}
+impl Scf {
+    fn scalar(result: ScfResult, options: &ScfOptions) -> Self {
+        Self {
+            occupied: vec![result.occupations.iter().filter(|&&f| f > 0.).count()],
+            energy: result.total_hartree(),
+            iterations: result.history.len(),
+            path: scf_path_json(options, &result),
+            density: vec![result.density],
+        }
+    }
+}
+pub(crate) struct Spectrum {
+    pub points: Vec<KPoint>,
+    /// Channel, k point, band; Hartree. No distributed orbitals are exported.
+    pub eigenvalues: Vec<Vec<Vec<f64>>>,
+    pub residuals: Vec<Vec<Vec<f64>>>,
+    pub occupied: Vec<usize>,
+    pub electrons: f64,
+    pub tolerance_hartree: f64,
+}
+impl Spectrum {
+    pub fn bands(&self) -> usize {
+        self.eigenvalues[0][0].len()
+    }
+    pub fn polarized(&self) -> bool {
+        self.eigenvalues.len() == 2
+    }
+    pub fn spectra_ev(&self, reference: f64) -> Vec<Vec<f64>> {
+        (0..self.points.len())
+            .map(|k| {
+                self.eigenvalues
+                    .iter()
+                    .flat_map(|s| s[k].iter().map(|e| ev(e - reference)))
+                    .collect()
+            })
+            .collect()
+    }
 }
 pub(crate) struct Context {
     pub config: Config,
@@ -144,7 +192,16 @@ impl Context {
             .map(|(label, potential)| SpeciesPotential { label, potential })
             .collect()
     }
-    pub fn scf(&self) -> Result<ScfResult, RunError> {
+    pub fn scf(&self) -> Result<Scf, RunError> {
+        if self.selection.reference() {
+            return self.reference_scf();
+        }
+        if self.config.collinear() {
+            return Err(err(
+                1,
+                "collinear bands/DOS requires the reference driver; legacy NSCF supports only total density",
+            ));
+        }
         let points = self.config.basis.resolve_kpoints().map_err(|e| err(1, e))?;
         let problem = if self.config.basis.legacy_gamma() {
             ScfProblem::new(&self.cell, &self.atoms, &self.refs(), self.options.clone())
@@ -191,17 +248,94 @@ impl Context {
             ),
             (None, _) => println!("SCF path: strict reference (certificate)"),
         }
+        Ok(Scf::scalar(result, &self.options))
+    }
+    fn reference_scf(&self) -> Result<Scf, RunError> {
+        let points = self.config.basis.resolve_kpoints().map_err(|e| err(1, e))?;
+        let potentials = self.refs();
+        let electrons = self
+            .atoms
+            .iter()
+            .map(|a| {
+                potentials
+                    .iter()
+                    .find(|p| p.label == a.species)
+                    .map(|p| p.potential.z_valence())
+                    .ok_or_else(|| err(1, "missing species potential"))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .sum();
+        let sector = self.config.spin_sector(electrons).map_err(|e| err(1, e))?;
+        let mut request =
+            refscf::api::Request::new(dft_cli::run::reference_profile(&self.config)?, points);
+        request.policy = sector.map(refscf::electronic::Policy::FixedSpin);
+        request.symmetry = self
+            .config
+            .prepared_symmetry()
+            .map_err(|e| err(1, e))?
+            .map(|p| {
+                refscf::symmetry::Prepared::from_prepared(
+                    &self.cell,
+                    &self.atoms,
+                    &self.config.symmetry_full_mesh().map_err(|e| err(1, e))?,
+                    self.config.symmetry.tolerance_bohr,
+                    self.config.basis.time_reversal(),
+                    &p,
+                )
+                .map_err(|e| err(4, e))
+            })
+            .transpose()?;
+        let delivered = refscf::api::solve(
+            StartInput {
+                cell: &self.cell,
+                atoms: &self.atoms,
+                potentials: &potentials,
+                options: &self.options,
+            },
+            request,
+        )
+        .map_err(|e| err(4, e))?;
+        let result = match delivered.run {
+            refscf::api::Run::Scalar(r) => {
+                if !r.outcome.converged {
+                    return Err(err(3, "reference SCF did not converge; NSCF not run"));
+                }
+                Scf::scalar(r.outcome.result, &self.options)
+            }
+            refscf::api::Run::Electronic(r) => {
+                if !r.converged {
+                    return Err(err(3, "reference spin SCF did not converge; NSCF not run"));
+                }
+                Scf {
+                    occupied: r
+                        .channel_electrons
+                        .iter()
+                        .map(|n| n.round() as usize)
+                        .collect(),
+                    energy: r.energy.total_hartree(),
+                    iterations: r.history.len(),
+                    path: path_json(&self.options, r.verification.as_ref(), false),
+                    density: r.density,
+                }
+            }
+        };
+        println!(
+            "SCF converged: {:.12} Ha, {} iterations",
+            result.energy, result.iterations
+        );
+        println!("SCF path: {}", result.path);
         Ok(result)
     }
     pub fn spectrum(
         &self,
-        scf: &ScfResult,
+        scf: &Scf,
         points: &[KPoint],
         bands: Option<usize>,
         tolerance: Option<f64>,
         iterations: Option<usize>,
-    ) -> Result<NscfResult, RunError> {
-        let occupied = scf.occupations.iter().filter(|&&f| f > 0.0).count();
+    ) -> Result<Spectrum, RunError> {
+        let occupied = *scf.occupied.iter().max().unwrap();
         let mut opts = self.options.clone();
         let count = bands.unwrap_or(occupied + opts.extra_bands.max(4));
         if count < occupied + 4 {
@@ -216,21 +350,81 @@ impl Context {
             points.len(),
             opts.eigen_tolerance
         );
-        dft_engine::nscf(
-            &self.cell,
-            &self.atoms,
-            &self.refs(),
-            &scf.density,
-            points,
-            opts,
-        )
-        .map_err(|e| err(4, e))
+        let (eigenvalues, residuals, electrons) = if self.selection.reference() {
+            let result = refscf::nscf::nscf(
+                StartInput {
+                    cell: &self.cell,
+                    atoms: &self.atoms,
+                    potentials: &self.refs(),
+                    options: &opts,
+                },
+                &scf.density,
+                points,
+                count,
+                opts.eigen_tolerance,
+            )
+            .map_err(|e| err(4, e))?;
+            let mut eigenvalues = Vec::new();
+            let mut residuals = Vec::new();
+            for channel in result.channels {
+                let (values, norms) = channel
+                    .into_iter()
+                    .map(|b| (b.eigenvalues, b.residuals))
+                    .unzip();
+                eigenvalues.push(values);
+                residuals.push(norms);
+            }
+            (eigenvalues, residuals, result.electrons)
+        } else {
+            let result = dft_engine::nscf(
+                &self.cell,
+                &self.atoms,
+                &self.refs(),
+                &scf.density[0],
+                points,
+                opts.clone(),
+            )
+            .map_err(|e| err(4, e))?;
+            let (values, norms) = result
+                .solutions
+                .into_iter()
+                .map(|k| (k.solution.eigenvalues, k.solution.residuals))
+                .unzip();
+            (vec![values], vec![norms], result.electrons)
+        };
+        Ok(Spectrum {
+            points: points.to_vec(),
+            eigenvalues,
+            residuals,
+            occupied: scf.occupied.clone(),
+            electrons,
+            tolerance_hartree: opts.eigen_tolerance,
+        })
     }
-    pub fn metadata(&self, result: &NscfResult, edges: &Edges, scf: &ScfResult) -> Value {
-        let density_bytes: Vec<_> = scf.density.iter().flat_map(|v| v.to_le_bytes()).collect();
-        let mut metadata = json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.total_hartree(),"scf_iterations":scf.history.len(),"scf_path":scf_path_json(&self.options, scf),"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
-        "energy_reference":"maximum occupied eigenvalue over this computed sampling (VBM); not a Fermi level","hartree_to_ev":ev(1.0),"energy_reference_hartree":edges.vbm,"vbm":{"hartree":edges.vbm,"k_index":edges.vi,"fractional":result.points[edges.vi].fractional},"cbm":{"hartree":edges.cbm,"k_index":edges.ci,"fractional":result.points[edges.ci].fractional},"gap_ev":ev(edges.cbm-edges.vbm),"gap_hartree":edges.cbm-edges.vbm,"electrons":result.electrons,"nbands":result.solutions[0].solution.eigenvalues.len(),"cutoff_hartree":self.options.cutoff_hartree,"threads":self.options.threads,"converged":result.converged,"functional":self.options.functional.name(),"lattice_columns_bohr":self.cell.lattice_columns_bohr(),"kpoints":result.points.iter().map(|p| json!({"fractional":p.fractional,"weight":p.weight})).collect::<Vec<_>>(),"residuals_hartree":result.solutions.iter().map(|k| &k.solution.residuals).collect::<Vec<_>>()});
+    pub fn metadata(&self, result: &Spectrum, edges: &Edges, scf: &Scf) -> Value {
+        let density_bytes: Vec<_> = scf
+            .density
+            .iter()
+            .flat_map(|s| s.iter().flat_map(|v| v.to_le_bytes()))
+            .collect();
+        let mut metadata = json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.energy,"scf_iterations":scf.iterations,"scf_path":scf.path,"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
+        "energy_reference":"maximum occupied eigenvalue over this computed sampling (VBM); not a Fermi level","hartree_to_ev":ev(1.0),"energy_reference_hartree":edges.vbm,"vbm":{"hartree":edges.vbm,"k_index":edges.vi,"fractional":result.points[edges.vi].fractional},"cbm":{"hartree":edges.cbm,"k_index":edges.ci,"fractional":result.points[edges.ci].fractional},"gap_ev":ev(edges.cbm-edges.vbm),"gap_hartree":edges.cbm-edges.vbm,"electrons":result.electrons,"nbands":result.bands(),"cutoff_hartree":self.options.cutoff_hartree,"threads":self.options.threads,"converged":true,"functional":self.options.functional.name(),"lattice_columns_bohr":self.cell.lattice_columns_bohr(),"kpoints":result.points.iter().map(|p| json!({"fractional":p.fractional,"weight":p.weight})).collect::<Vec<_>>(),"residuals_hartree":result.residuals[0]});
         self.selection.record(&mut metadata);
+        // Both stages use the resolved selection, with no error-triggered fallback.
+        metadata["nscf"] = self.selection.json();
+        metadata["band_data"] = json!({"ordering":"spin_k_band", "shape":[result.eigenvalues.len(), result.points.len(), result.bands()],
+            "eigenvalues_ha":result.eigenvalues,"residuals_ha":result.residuals});
+        if result.polarized() {
+            metadata["schema_version"] = json!(2);
+            metadata["vbm"]["spin_index"] = json!(edges.vs);
+            metadata["cbm"]["spin_index"] = json!(edges.cs);
+            metadata["spin"] = json!({"mode":"collinear","channel_order":["up","down"],
+                "occupied_bands":result.occupied,"axis_cartesian":self.config.spin_sector(result.electrons).ok().flatten().map(|s| s.axis_cartesian),
+                "density_hash_order":"up then down, C order, little-endian f64",
+                "band_columns":"up bands followed by down bands; nbands is per channel",
+                "dos_columns":"spin-summed; DOSCAR and band_data retain channels"});
+            metadata["residuals_hartree"] = json!(result.residuals);
+        }
         metadata
     }
     pub fn write(&self, name: &str, text: &str) -> Result<(), RunError> {
@@ -243,10 +437,14 @@ impl Context {
             &serde_json::to_string_pretty(value).map_err(|e| err(5, e))?,
         )
     }
-    pub fn vasp_header(&self, eigenval: bool) -> String {
-        // EIGENVAL: NBLOCK*KBLOCK=1, ISPIN=1. DOSCAR: no partial DOS,
+    pub fn vasp_header(&self, eigenval: bool, polarized: bool) -> String {
+        // EIGENVAL: NBLOCK*KBLOCK=1, ISPIN=1/2. DOSCAR: no partial DOS,
         // unused NCDIJ=0. Remaining header fields have the same layout.
-        let flags = if eigenval { "1 1" } else { "0 0" };
+        let flags = if eigenval {
+            if polarized { "1 2" } else { "1 1" }
+        } else {
+            "0 0"
+        };
         let n = self.atoms.len();
         let a = self.cell.lattice_columns_bohr();
         let lengths: [f64; 3] = std::array::from_fn(|j| {
@@ -263,13 +461,20 @@ impl Context {
 /// threshold and verification outcome. The NSCF solve itself is always the
 /// all-bands residual solve (`eigen_tolerance_hartree`).
 fn scf_path_json(options: &ScfOptions, scf: &ScfResult) -> Value {
+    path_json(options, scf.verification.as_ref(), scf.certified)
+}
+fn path_json(
+    options: &ScfOptions,
+    verification: Option<&dft_engine::VerificationReport>,
+    certified: bool,
+) -> Value {
     json!({
         "effective_profile": if options.standard.is_some() { "standard" } else { "strict" },
         "standard_threshold_ha": options.standard.map(|p| p.threshold_ha),
         "verification": if options.standard.is_some() { options.verification.name() } else { "strict_certificate" },
-        "verified": scf.verification.as_ref().map(|v| v.passed()),
-        "verification_attempts": scf.verification.as_ref().map(|v| v.attempts.len()),
-        "certified": scf.certified,
+        "verified": verification.map(|v| v.passed()),
+        "verification_attempts": verification.map(|v| v.attempts.len()),
+        "certified": certified,
         "switch": "BAANDI_REFERENCE_STRICT", "adr": "0043"
     })
 }
@@ -278,23 +483,31 @@ pub(crate) struct Edges {
     pub cbm: f64,
     pub vi: usize,
     pub ci: usize,
+    pub vs: usize,
+    pub cs: usize,
 }
-pub(crate) fn edges(result: &NscfResult) -> Result<Edges, RunError> {
-    let occupied = result.electrons.round() as usize / 2;
+pub(crate) fn edges(result: &Spectrum) -> Result<Edges, RunError> {
     let mut e = Edges {
         vbm: f64::NEG_INFINITY,
         cbm: f64::INFINITY,
         vi: 0,
         ci: 0,
+        vs: 0,
+        cs: 0,
     };
-    for (i, k) in result.solutions.iter().enumerate() {
-        if k.solution.eigenvalues[occupied - 1] > e.vbm {
-            e.vbm = k.solution.eigenvalues[occupied - 1];
-            e.vi = i;
-        }
-        if k.solution.eigenvalues[occupied] < e.cbm {
-            e.cbm = k.solution.eigenvalues[occupied];
-            e.ci = i;
+    for (spin, (channel, &occupied)) in result.eigenvalues.iter().zip(&result.occupied).enumerate()
+    {
+        for (i, values) in channel.iter().enumerate() {
+            if occupied > 0 && values[occupied - 1] > e.vbm {
+                e.vbm = values[occupied - 1];
+                e.vi = i;
+                e.vs = spin;
+            }
+            if values[occupied] < e.cbm {
+                e.cbm = values[occupied];
+                e.ci = i;
+                e.cs = spin;
+            }
         }
     }
     if e.cbm <= e.vbm {
@@ -392,17 +605,7 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         b.max_iterations,
     )?;
     let edge = edges(&result)?;
-    let spectra: Vec<Vec<f64>> = result
-        .solutions
-        .iter()
-        .map(|k| {
-            k.solution
-                .eigenvalues
-                .iter()
-                .map(|e| ev(e - edge.vbm))
-                .collect()
-        })
-        .collect();
+    let spectra = result.spectra_ev(edge.vbm);
     let nb = spectra[0].len();
     let mut csv = String::from(
         "# k fractional; distance 1/Bohr; energies eV relative to sampled VBM\nk_index,distance_inv_bohr,kx,ky,kz",
@@ -414,8 +617,15 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
     let mut dat = String::from(
         "# distance_inv_bohr band_1..band_N_eV_relative_to_VBM; blank lines mark path breaks\n",
     );
-    let mut eigenval = ctx.vasp_header(true);
-    writeln!(eigenval, "{:.0} {} {nb}", result.electrons, points.len()).unwrap();
+    let mut eigenval = ctx.vasp_header(true, result.polarized());
+    writeln!(
+        eigenval,
+        "{:.0} {} {}",
+        result.electrons,
+        points.len(),
+        result.bands()
+    )
+    .unwrap();
     for (i, (p, energies)) in points.iter().zip(&spectra).enumerate() {
         if path.breaks.contains(&i) {
             dat.push('\n');
@@ -433,20 +643,33 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
             p.fractional[0], p.fractional[1], p.fractional[2]
         )
         .unwrap();
-        for (band, &energy) in energies.iter().enumerate() {
+        for &energy in energies {
             write!(csv, ",{energy:.16e}").unwrap();
             write!(dat, " {energy:.16e}").unwrap();
-            writeln!(
-                eigenval,
-                "{} {energy:.16e} {:.1}",
-                band + 1,
-                if band < result.electrons as usize / 2 {
-                    2.0
-                } else {
-                    0.0
-                }
-            )
-            .unwrap();
+        }
+        for band in 0..result.bands() {
+            if result.polarized() {
+                // ISPIN=2: band, epsilon_up, epsilon_down, f_up, f_down.
+                writeln!(
+                    eigenval,
+                    "{} {:.16e} {:.16e} {:.1} {:.1}",
+                    band + 1,
+                    energies[band],
+                    energies[result.bands() + band],
+                    if band < result.occupied[0] { 1.0 } else { 0.0 },
+                    if band < result.occupied[1] { 1.0 } else { 0.0 }
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    eigenval,
+                    "{} {:.16e} {:.1}",
+                    band + 1,
+                    energies[band],
+                    if band < result.occupied[0] { 2.0 } else { 0.0 }
+                )
+                .unwrap();
+            }
         }
         csv.push('\n');
         dat.push('\n');

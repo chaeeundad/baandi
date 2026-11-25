@@ -6,6 +6,7 @@ pub use scf::*;
 /// Stable input facade for clients; numerical implementations remain private to
 /// their owning crates. All faer calls use explicit `Par::Seq`, and FFTs are serial.
 pub mod input {
+    pub use dft_geometry::kpoints;
     pub use dft_geometry::{Atom, Cell};
     pub use dft_upf::{Pseudopotential, parse_upf};
 }

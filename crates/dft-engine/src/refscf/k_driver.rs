@@ -2,6 +2,7 @@
 //! verification retain the real reference loop's ordering. Gamma dispatch stays
 //! in driver::run; this sibling owns only complex k lists.
 use super::memory::{self, Component as Mem, bytes, observe};
+use super::stepper::{Boundary, StepKind, StepReport, Stepper};
 use super::{
     broyden::{Broyden, Diagnostics, PredictionScratch},
     density::DensityPlan,
@@ -78,6 +79,16 @@ pub fn run_seeded_with<K: Collective>(
 ) -> Result<Run, ScfError> {
     run_inner(input, profile, points, comm, None, Some(seed))
 }
+pub fn stepper_with<'a, K: Collective>(
+    input: StartInput<'a>,
+    profile: Profile,
+    points: &'a [KPoint],
+    comm: &'a K,
+) -> Stepper<'a, Run> {
+    Stepper::new(move |boundary| async move {
+        run_continuation(input, profile, points, comm, None, None, &boundary).await
+    })
+}
 fn run_inner<K: Collective>(
     input: StartInput<'_>,
     profile: Profile,
@@ -86,6 +97,21 @@ fn run_inner<K: Collective>(
     prepared: Option<&super::symmetry::Prepared>,
     seed: Option<super::delivered::KSeed>,
 ) -> Result<Run, ScfError> {
+    Stepper::new(move |boundary| async move {
+        run_continuation(input, profile, points, comm, prepared, seed, &boundary).await
+    })
+    .run_to_end()
+}
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn run_continuation<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    points: &[KPoint],
+    comm: &K,
+    prepared: Option<&super::symmetry::Prepared>,
+    seed: Option<super::delivered::KSeed>,
+    boundary: &Boundary,
+) -> Result<Run, ScfError> {
     kpoints::validate(points).map_err(numerical)?;
     if seed.is_none()
         && prepared.is_none()
@@ -93,7 +119,7 @@ fn run_inner<K: Collective>(
         && points[0].fractional == [0.; 3]
         && input.options.gamma_real == crate::GammaReal::On
     {
-        return super::driver::run_with(input, profile, comm);
+        return super::driver::run_inner(input, profile, comm, None, boundary).await;
     }
     let start = Instant::now();
     let stage_start = Instant::now();
@@ -268,6 +294,7 @@ fn run_inner<K: Collective>(
     let mut field_cache = None;
     let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
     let mut kept = super::k_kept::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
+    boundary.ready().await;
     for iteration in 1..=o.max_iterations {
         if let Some(s) = &mut symmetry {
             s.iteration = iteration;
@@ -289,6 +316,7 @@ fn run_inner<K: Collective>(
         }
         let requested = ethr;
         let mut redo = false;
+        let mut reported_columns = 0;
         let mut calls = Vec::new();
         let mut call_indices = Vec::new();
         let mut timings = PhaseTimings::default();
@@ -335,6 +363,17 @@ fn run_inner<K: Collective>(
             let dr2 = metric.norm(comm, &f)?;
             metric_s += clock.elapsed().as_secs_f64();
             if iteration == 1 && !redo && dr2 < ethr * state.electrons.max(1.) {
+                let mut report = StepReport::new(
+                    iteration,
+                    StepKind::Ordinary,
+                    dr2,
+                    step.energy.total_hartree(),
+                    ethr,
+                    calls.iter().map(|c| c.h_columns).sum(),
+                );
+                report.stage = "fine";
+                reported_columns = report.h_columns;
+                boundary.emit(report).await;
                 ethr = next_ethr_ry(ethr, dr2, state.electrons);
                 redo = true;
                 kept.invalidate();
@@ -396,6 +435,20 @@ fn run_inner<K: Collective>(
             timings.energy += elapsed;
             map_s += elapsed.as_secs_f64();
         }
+        let mut map_report = StepReport::new(
+            iteration,
+            if redo {
+                StepKind::Retry
+            } else {
+                StepKind::Ordinary
+            },
+            dr2,
+            step.energy.total_hartree(),
+            ethr,
+            calls.iter().map(|c| c.h_columns).sum::<usize>() - reported_columns,
+        );
+        map_report.stage = "fine";
+        map_report.reused = reused_from.is_some();
         let mut verification_energy = None;
         let mut verification_warm = None;
         let mut actual_error_ha = None;
@@ -405,6 +458,7 @@ fn run_inner<K: Collective>(
             && !skipped
             && let Some(report) = &mut verification
         {
+            boundary.emit(map_report).await;
             let qe_before = qe_scope.as_ref().map(|s| s.snapshot());
             verification_start_s = Some(start.elapsed().as_secs_f64());
             let clock = Instant::now();
@@ -543,6 +597,15 @@ fn run_inner<K: Collective>(
                 attempt.threshold_ha = VerificationEnergy::THRESHOLD_HA;
                 verification_energy = Some(energy);
             }
+            map_report = StepReport::new(
+                iteration,
+                StepKind::Verification,
+                error * 2.,
+                check.energy.total_hartree(),
+                tol,
+                current_calls.iter().map(|c| c.h_columns).sum(),
+            );
+            map_report.stage = "fine";
             if reuse && !attempt.passed && iteration < o.max_iterations {
                 pending = Some((check, tol, iteration));
             }
@@ -650,6 +713,10 @@ fn run_inner<K: Collective>(
             variational = step.energy.band_form;
             vh = step.energy.hartree;
             vx = step.energy.xc;
+            if map_report.kind != StepKind::Verification {
+                let energy = step.energy.total_hartree();
+                map_report.energy_ha = energy.is_finite().then_some(energy);
+            }
         }
         let mut sums = [0.; 3];
         if let Some(local) = fused_local {
@@ -759,7 +826,9 @@ fn run_inner<K: Collective>(
             variational_hartree_ha: vh,
             variational_xc_ha: vx,
         });
+        map_report.safe_point = failure.is_none();
         if finish || failure.is_some() || iteration == o.max_iterations {
+            boundary.publish(map_report);
             let verified = verification.as_ref().is_none_or(VerificationReport::passed);
             let converged = stopped && verified && failure.is_none();
             let exit_reason = failure.unwrap_or_else(|| {
@@ -932,6 +1001,7 @@ fn run_inner<K: Collective>(
         n.copy_from_slice(&next_planes);
         state.orbitals = step.solve.eigenvectors;
         records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
+        boundary.emit(map_report).await;
     }
     unreachable!("positive budget checked")
 }

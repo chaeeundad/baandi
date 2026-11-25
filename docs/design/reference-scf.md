@@ -4279,3 +4279,222 @@ BAANDI_TEST_TMP=/private/tmp/g6b-tests`; its optional sandbox-denied `ps` probe
 did not prevent verification. README generation made no tracked changes and
 all 9 freshness checks passed. Logs and the before/after automatic-grid
 fingerprints are retained locally under `target/tmp/g6b-validation/`.
+
+## Non-self-consistent bands
+
+R4A-REF-NSCF supports scalar and collinear fixed-density spectra. The user
+approved the visibility-only extension to `electronic_map.rs`: `Fields`,
+`Fields::hxc` and `fields` are visible to sibling reference modules. Their
+arithmetic and the SCF callers are unchanged.
+
+R4A-REF-NSCF adds `refscf::nscf::{nscf, nscf_with}` and
+`refstart::start_kpoints_from_density`. The engine API accepts `StartInput`,
+replicated density arrays, an ordered k list, an explicit total band count and
+a positive residual tolerance in Hartree. One array denotes total unpolarized
+density; two arrays denote up/down collinear densities, not total/magnetization.
+The explicit-communicator variant permits the same deterministic collective
+harness as the reference SCF driver. All inputs must be identical across ranks.
+
+The supplied real-space grid is retained. There is no interpolation, clipping,
+charge normalization, density update, occupation solve or mixing. The checks
+retain the legacy finite-density lower bound of -1e-14 electrons/Bohr^3 and
+charge tolerance of 1e-8 times the valence electron count. Unpolarized inputs
+require positive even integer electron count and at least N/2 + 4 bands. For
+collinear input the minimum is four above the ceiling of the larger integrated
+channel charge (charge-check-sized roundoff is removed before the ceiling).
+PZ has no polarized adapter and rejects collinear input. Too few plane waves or
+an incompatible supplied grid reject, rather than changing the basis or grid.
+
+Initialization builds ionic/core fields and uses the supplied valence density.
+It shares the existing atomic-orbital Ritz construction and kinetic completion
+with the k SCF start; it does not call an atomic-density SCF initializer. Atomic
+orbitals are still required by this reference start contract. The scalar
+Hartree/XC potential uses `electronic_map::fields` (delegating to `map::fields`
+for scalar input), including the existing NLCC and spectral PBE core-gradient
+treatment. Spin input uses the same per-channel LDA-PW/PBE fields as SCF, with
+the Hartree potential from the total valence density and the nonmagnetic core
+split equally between channels. The immutable channel potentials are prepared
+once, then
+redistributed to each k Hamiltonian. Gamma also uses complex orbitals. All ranks
+process each k point in sequence; there are no k-point pools.
+
+Every band is marked strict in `ref_davidson_complex`, bypassing the SCF loose
+empty-band criterion. Ritz-value changes are not the acceptance certificate.
+The inner Ritz-change threshold is the minimum positive normal `f64`, so
+only exactly unchanged Ritz values can end that inner check; a zero threshold
+is invalid in the shared solver. This is not an energy-accuracy threshold.
+After each solver call NSCF freshly applies H to the returned orbitals, reduces
+squared residual norms over owned rows, and accepts only when every finite
+residual is at most the requested tolerance. Otherwise it restarts all bands
+from those vectors, for at most 64 calls. Exhaustion reports channel/k context
+and the maximum residual in Hartree; it never returns unconverged spectra.
+The result retains original k coordinates/weights, eigenvalues and residuals
+in Ha, and distributed eigenvectors with their global row indices. It is not
+an SCF result or a fixed-point certificate. CLI routing is R4b's responsibility.
+
+Validation commands:
+
+```sh
+cargo test -p dft-engine --test refscf_nscf
+cargo test --release -p dft-engine --test refscf_nscf synthetic_rank_matrix -- --nocapture
+DFT_SI_UPF=/absolute/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test refscf_nscf silicon_path -- --ignored --nocapture
+cargo test --release -p dft-engine --test refscf_nscf spin_channels_match_serial_dense_oracle -- --ignored --nocapture
+```
+
+The scalar matrix compares identical nonuniform fixed densities with legacy
+NSCF at 1e-8 Ha residual certification on both sides and a 1e-8 Ha eigenvalue
+bound. The legacy wrapper retains SCF buffer-band stopping and rejects the
+ordinary low-band-count fixture with an unconverged empty-band residual. The
+oracle therefore requests its complete plane-wave basis separately at each k
+and compares the requested leading bands. Each legacy call still passes its
+own all-band 1e-8 Ha guard. Its single-point weight is one; k weights do not
+enter the fixed-density Hamiltonian. It includes Gamma/X/L, skew two-species local/nonlocal projectors, PBE
+NLCC, and external Si2, using simulated communicator sizes 1/3/8. The spin
+oracle uses the serial collinear Hartree/XC adapters and full dense Hermitian
+diagonalization because legacy `nscf` has no collinear entry. Synthetic fixtures
+are not material or QE evidence. Simulated ranks do not establish real MPI
+transport/scaling. No SCF thresholds, defaults or arithmetic are changed.
+
+Local evidence (2026-11-25, simulated ranks, not QE or MPI timing):
+
+| Fixture | Ranks | Maximum eigenvalue difference (Ha) | Maximum NSCF residual (Ha) |
+| --- | --- | ---: | ---: |
+| Cubic synthetic, no atomic charge | 1 | 2.232e-14 | 5.002e-9 |
+| Skew two-species | 1/3/8 | 2.109e-15 | 6.418e-9 |
+| PBE NLCC synthetic | 1/3/8 | 2.498e-15 | 9.897e-9 |
+| Si2 Gamma/X/L, 3 Ha cutoff | 1/3/8 | 2.942e-15 | 3.236e-9 |
+| Spin LDA-PW NLCC, serial spin-field/dense oracle | 1/3/8 | 2.387e-15 | 9.080e-9 |
+| Spin PBE NLCC, serial spin-field/dense oracle | 1/3/8 | 2.998e-15 | 7.503e-9 |
+
+The Si file is external `Si.pz-vbc.UPF`, SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+The spin matrix covers two unequal, nonuniform channel densities integrating
+to 1.25 and 0.75 electrons, a skew cell, nonlocal projectors, NLCC and three
+k points. The serial dense oracle independently certifies its retained bands
+at 1e-8 Ha; the reference solve certifies every requested band at the same
+bound. The input channel arrays remain unchanged. These are correctness
+observations, not a performance or material-accuracy qualification.
+
+Final gate results after the approved spin integration: `cargo check
+--workspace --tests`, the default NSCF suite (3 passed, 2 ignored), the existing
+`refscf` suite (84 passed, 24 ignored), formatting and engine clippy all exited
+0. The complete release NSCF matrix, including external Si2 and both spin
+functionals, passed all 5 tests with no ignored tests. The full gate
+`BAANDI_TEST_TMP=/private/tmp/r4a-check CHECK_SCCACHE=0 CHECK_NICE=0
+scripts/check.sh` exited 0: 107 binaries, 1,017 passed, 0 failed, 221 ignored;
+build/fmt/clippy also passed. External scratch resolves the earlier three
+CLI cache-fixture failures caused by worktree-local scratch. The optional
+sandbox-denied `ps` load probe did not affect the gate. All nine README
+freshness checks passed. Logs are retained under `target/` as
+`nscf-all-approved.log`, `check-full-approved.log`,
+`check-workspace-approved.log`, `nscf-approved.log`, `refscf-approved.log` and
+`clippy-approved.log`.
+
+## Stepper (R8a)
+
+`refscf::stepper::Stepper` is a synchronous, single-owner continuation of the
+Gamma, complex-k, and electronic (fixed spin / Fermi–Dirac) drivers. Construct it
+with `driver::stepper[_with]`, `k_driver::stepper_with`,
+`electronic::stepper_with`, or the adapter-facing `api::stepper(input, request)`.
+Call `initialize()` once, then `step()` until `is_done()`, then `finish()`.
+`result()` borrows a delivered result. `run_to_end()` is precisely that sequence;
+all existing run entry points and `api::solve` use it. A caller may also call
+`run_to_end()` after any successful partial sequence.
+
+Initialization validates and builds the original numerical workspace, stopping
+before the first SCF map. Calls before initialization, repeated initialization,
+and calls after completion fail without advancing numerics. A numerical error
+is terminal and releases the continuation; no partial result is fabricated.
+`finish()` rejects incomplete or failed runs and never executes numerical work.
+An exhausted run retains its original delivered nonconverged result.
+
+Each report describes one logical SCF map, including its inner eigensolver
+retries. First-iteration SCF redo is a separate `Retry` map. Verification is a
+separate `Verification` map, including a failed verification. Its iteration
+index names the ordinary candidate being checked. Reports carry the estimator
+in Ha, dr2 and ethr in Ry, optional fully computed energy in Ha, and H columns
+for that map only. Lean unaudited maps carry `None`, never a fabricated energy.
+A cached failed verification consumed as the next ordinary map is marked
+`reused = true` and has zero new H work. Coarse ladder maps have stage `coarse`;
+fine maps have stage `fine`, with the original per-stage iteration numbering.
+
+Mixing order is unchanged: an ordinary candidate that needs verification yields
+with `safe_point = false`; the following verification step includes the pass
+or failure decision and any recovery mixing of that candidate. A discarded
+first map also yields an unsafe boundary before its retry. Other successful
+boundaries are safe only after the original mixing/state handoff, or after
+terminal delivery when no next eigensolve exists. A mixer failure is not a safe
+point. Observers may read scalar reports at every return; interventions must
+wait for a safe point. No map is repeated to implement stepping, and verification
+never replaces the delivered candidate.
+
+Implementation uses Rust's compiler-generated pinned continuation to retain
+loop locals and their existing ownership and drop order. There is no async
+executor, background thread, polling loop, wakeup, callback or transport in the
+engine. Two allocations at construction hold the continuation and a single
+scalar report slot. Yielding and polling that slot allocate nothing. Existing
+map, audit, history and delivery allocations remain; this is not a claim that
+the pre-existing SCF maps are allocation-free. No density, orbital or HX clone
+was added, and no collective was inserted or reordered.
+
+The continuation is thread-affine because existing configuration, memory and
+solver diagnostic scopes are thread-local. Keep its configuration scope alive,
+and finish or drop one initialized stepper before initializing another on the
+same thread; overlapping initialization is rejected without advancing either
+run. Independent threads/ranks can own independent steppers. MPI callers
+must initialize, step, finish, and abandon a run collectively in the same order;
+there is no asynchronous rank cancellation. Caller pauses are included in the
+existing wall clocks, so timing gates use uninterrupted `run_to_end()`.
+
+Checkpoint encoding/restoration and policy mutation are R8b/R8c work, not R8a
+APIs. The compiler continuation itself is not a serialization format: those
+stages must expose explicit versioned numerical state rather than serialize
+opaque future bytes. Python/MCP adapters must drive the continuation on its
+owning worker thread. Derivative and ionic-seed delivery in `api::stepper`
+occurs at the terminal step just as it does in `api::solve`.
+
+Validation: `cargo test -p dft-engine --test refscf_stepper` exercises the short
+lifecycle/exhaustion case. The complete synthetic Gamma, shifted 2x2x2 k mesh,
+FD and fixed-spin matrix, verify off/on, simulated ranks 1/3/8, is release-only:
+
+```sh
+cargo test --release -p dft-engine --test refscf_stepper -- --include-ignored --nocapture
+```
+
+The test compares every density/orbital bit as well as energy bits, prints
+FNV-1a fingerprints over little-endian f64 bytes, and reconciles per-step H
+columns and verification counts with the original run records. Simulated ranks
+establish collective ordering and same-rank identity, not real-MPI timing or
+cross-rank bit identity. The separate `reference_identity` test and release
+`bench_scf.py --require-identical` retain their pre-refactor reference baselines.
+
+Local validation (2026-11-25, pure Rust macOS/aarch64, Rust 1.99.1): the
+run-only fixture was independently compiled from an archive of starting commit
+`81763a54f574b4a63b625303a91667626f89013b`. All 24 converged
+fixture/rank/verification combinations and the one exhausted Gamma case retain
+its energy/free-energy bits and density/orbital fingerprints. The parent
+fingerprints are stored in `tests/refscf_stepper.rs`; the stepwise comparison
+also checks all array bits, internal energy and entropy, and H-column totals.
+The release stepper suite passes all five tests, including failed verification,
+whole-map reuse, coarse/fine boundaries, partial facade execution, rejection of
+interleaved sessions, and error/drop cleanup.
+
+Final local gates all exit 0: workspace check; debug stepper (3 passed,
+2 release-only ignored); existing refscf (84 passed, 24 ignored);
+`reference_identity` (1 passed); full `scripts/check.sh` (109 binaries,
+1,025 passed, 226 ignored, no failures; build/fmt/clippy pass); engine clippy;
+and README generation/freshness (9 tests, generated output unchanged).
+The release benchmark with the default `baseline-reference.json`, one thread,
+three repetitions each of Gamma/k222s/k222 reports seven iterations per case,
+zero energy difference in Ha and identical density hashes. These are identity
+checks, not QE comparisons or Mac performance acceptance.
+
+Two validation setup errors were corrected without changing numerical gates:
+the first release test compile selected stale parent-archive library artifacts
+from the shared target (exit 101; only the engine release artifacts were cleaned
+before rebuilding), and the first benchmark invocation inherited test-only
+`BAANDI_TEST_TMP` (exit 3; removed for the benchmark's switch-manifest check).
+Final invocations passed. The sandbox also denies the gate's optional `ps`
+load probe; all four verification gates still ran and passed. Real MPI8 identity
+and wall acceptance remain with the master session's
+[`r8a-dev08-request.md`](../performance/lanes/RSCF/r8a-dev08-request.md).

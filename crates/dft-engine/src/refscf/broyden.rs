@@ -6,6 +6,7 @@
 //! A=Q Lambda Q^T, gamma=Q Lambda^-1 Q^T c. A numerical rank deficiency
 //! (lambda_min <= p*eps*lambda_max) is a reported error, never a ridge or
 //! pseudoinverse. cond_2=lambda_max/lambda_min is reported on every solve.
+use super::memory::{Component as Mem, bytes, observe};
 use super::{
     Error, invalid,
     metric::Metric,
@@ -31,11 +32,13 @@ pub struct PredictionScratch {
 }
 impl PredictionScratch {
     pub fn new(len: usize) -> Self {
-        Self {
+        let scratch = Self {
             dx: vec![C::default(); len],
             df: vec![C::default(); len],
             forms: [0.; 3 * 25 + 1],
-        }
+        };
+        observe(Mem::Prediction, bytes(&scratch.dx) + bytes(&scratch.df));
+        scratch
     }
 }
 #[derive(Clone, Copy, Debug, Default)]
@@ -100,7 +103,7 @@ impl Broyden {
                 lambda: vec![0.; p],
             });
         }
-        Ok(Self {
+        let mixer = Self {
             profile,
             iteration: 0,
             previous_x: vec![C::default(); g2.len()],
@@ -116,7 +119,28 @@ impl Broyden {
             incremental: dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_PERMAP),
             gram: [[0.; 25]; 25],
             gram_metric: None,
-        })
+        };
+        observe(
+            Mem::History,
+            bytes(&mixer.previous_x)
+                + bytes(&mixer.previous_f)
+                + mixer.df.iter().chain(&mixer.dx).map(bytes).sum::<usize>(),
+        );
+        observe(
+            Mem::Mixer,
+            bytes(&mixer.smooth)
+                + bytes(&mixer.screening)
+                + mixer
+                    .solves
+                    .iter()
+                    .map(|s| {
+                        std::mem::size_of_val(s.a.as_slice())
+                            + std::mem::size_of_val(s.q.as_slice())
+                            + bytes(&s.lambda)
+                    })
+                    .sum::<usize>(),
+        );
+        Ok(mixer)
     }
     pub fn occupancy(&self) -> usize {
         self.iteration.saturating_sub(1).min(self.profile.history)

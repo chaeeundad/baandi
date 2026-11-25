@@ -5363,3 +5363,189 @@ fn denskeep_density_probe() {
         }
     });
 }
+
+/// Allocation ownership only: every scientific bit and solver decision must
+/// survive trimming. Simulated ranks cover uneven/empty owners, not MPI speed.
+#[test]
+fn memory_trim_verified_bits_and_rank_census() {
+    memory_trim_case(
+        "skew",
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        true,
+        3,
+    );
+}
+
+/// Broader shape/thread matrix (under one second in the Mac debug gate).
+#[test]
+fn memory_trim_generality() {
+    for (name, rows, nl, ranks) in [
+        (
+            "cubic",
+            [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+            false,
+            1,
+        ),
+        (
+            "elongated",
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 11.]],
+            true,
+            8,
+        ),
+        (
+            "slab",
+            [[10., 0., 0.], [0.2, 10., 0.], [0., 0., 5.]],
+            false,
+            3,
+        ),
+    ] {
+        memory_trim_case(name, rows, nl, ranks);
+    }
+}
+fn memory_trim_case(name: &str, rows: [[f64; 3]; 3], nonlocal: bool, ranks: usize) {
+    use dft_engine::{
+        GammaReal, ScfOptions, SpeciesPotential,
+        refscf::{driver, memory},
+        refstart,
+    };
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, nonlocal, 161, "SLA PZ");
+    let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    dft_mpi::simulate(ranks, |comm| {
+        let run = |arm, threads| {
+            let _scope = RunConfig::from_pairs(&[
+                ("refscf_memory_trim", arm),
+                ("refscf_kept_hx", "on"),
+                ("refscf_verify_warm", "on"),
+                ("refscf_verify_energy", "off"),
+            ])
+            .unwrap()
+            .enter();
+            let options = ScfOptions {
+                cutoff_hartree: 1.,
+                bands: Some(3),
+                max_iterations: 120,
+                gamma_real: GammaReal::On,
+                threads,
+                ..Default::default()
+            };
+            driver::run_with(
+                refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile {
+                    threshold_ry: 1e-12,
+                    ..Default::default()
+                },
+                comm,
+            )
+            .unwrap()
+        };
+        let baseline = run("off", 1);
+        for threads in [1, 2] {
+            let candidate = run("on", threads);
+            for r in [&baseline, &candidate] {
+                assert!(r.outcome.converged, "{name}: {}", r.exit_reason);
+                assert!(r.outcome.result.verification.as_ref().unwrap().passed());
+                assert_eq!(r.memory_breakdown.components_per_rank.len(), ranks);
+                assert_eq!(r.memory_breakdown.davidson_per_rank.len(), ranks);
+                assert!(
+                    r.memory_breakdown
+                        .components_per_rank
+                        .iter()
+                        .all(|r| r.len() == memory::NAMES.len())
+                );
+            }
+            let a = &baseline.outcome.result;
+            let b = &candidate.outcome.result;
+            assert_eq!(a.total_hartree().to_bits(), b.total_hartree().to_bits());
+            let bits = |s: &[f64]| s.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+            assert_eq!(
+                bits(a.density.as_slice().unwrap()),
+                bits(b.density.as_slice().unwrap())
+            );
+            assert_eq!(a.orbitals, b.orbitals);
+            assert_eq!(bits(&a.eigenvalues), bits(&b.eigenvalues));
+            assert_eq!(baseline.records.len(), candidate.records.len());
+            for (a, b) in baseline.records.iter().zip(&candidate.records) {
+                assert_eq!(
+                    (a.dr2_ry.to_bits(), a.davidson_iterations, a.h_columns),
+                    (b.dr2_ry.to_bits(), b.davidson_iterations, b.h_columns)
+                );
+                for (a, b) in a.calls.iter().zip(&b.calls) {
+                    assert_eq!(a.corrections, b.corrections);
+                }
+            }
+            assert_eq!(
+                baseline.verification_calls.len(),
+                candidate.verification_calls.len()
+            );
+            for (a, b) in baseline
+                .verification_calls
+                .iter()
+                .zip(&candidate.verification_calls)
+            {
+                assert_eq!((a.iterations, a.h_columns), (b.iterations, b.h_columns));
+                assert_eq!(a.corrections, b.corrections);
+            }
+            let idx = |name| memory::NAMES.iter().position(|&n| n == name).unwrap();
+            for (a, b) in baseline
+                .memory_breakdown
+                .components_per_rank
+                .iter()
+                .zip(&candidate.memory_breakdown.components_per_rank)
+            {
+                assert_eq!(a[idx("start_vectors_released")], 0);
+                assert!(b[idx("start_vectors_released")] > 0);
+                assert_eq!(a[idx("kept_slabs")], b[idx("kept_slabs")]);
+            }
+            for (a, b) in baseline
+                .memory_breakdown
+                .davidson_per_rank
+                .iter()
+                .zip(&candidate.memory_breakdown.davidson_per_rank)
+            {
+                assert_eq!(a[0..6], b[0..6]); // Same live solver workspace.
+                assert_eq!(a[8], 2 * b[8]); // Returned X/HX use n rather than 2n.
+            }
+            if comm.rank() == 0 {
+                eprintln!(
+                    "P4_MEM {name} ranks={ranks} threads={threads} E={:.17e} Ha dE=0 Ha density/orbitals/decisions=bit-identical returned_bytes={:?}->{:?} released_start_bytes={:?}",
+                    b.total_hartree(),
+                    baseline
+                        .memory_breakdown
+                        .davidson_per_rank
+                        .iter()
+                        .map(|r| r[8])
+                        .collect::<Vec<_>>(),
+                    candidate
+                        .memory_breakdown
+                        .davidson_per_rank
+                        .iter()
+                        .map(|r| r[8])
+                        .collect::<Vec<_>>(),
+                    candidate
+                        .memory_breakdown
+                        .components_per_rank
+                        .iter()
+                        .map(|r| r[idx("start_vectors_released")])
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+        // Rollback changes the cache shape/key; repeating off must restore bits.
+        let rollback = run("off", 1);
+        assert_eq!(
+            baseline.outcome.result.orbitals,
+            rollback.outcome.result.orbitals
+        );
+    });
+}

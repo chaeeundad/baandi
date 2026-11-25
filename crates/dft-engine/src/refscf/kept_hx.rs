@@ -3,7 +3,10 @@
 //! its own products or density into the ordinary-map cache. The fixed operator
 //! token includes the basis and both row/plane layouts; orbital equality is
 //! bitwise, never a checksum.
-use super::numerical;
+use super::{
+    memory::{Component as Mem, bytes, observe},
+    numerical,
+};
 use crate::ScfError;
 use dft_mpi::Collective;
 use dft_numerics::RealMatrix;
@@ -82,6 +85,10 @@ impl KeptHx {
     pub(super) fn preserve_input(&mut self, preserve: bool) {
         self.preserve_input = preserve;
     }
+    pub(super) fn release_storage(&mut self) {
+        self.entry = None;
+        self.slabs = Vec::new();
+    }
     pub fn invalidate(&mut self) {
         self.entry = None;
     }
@@ -130,6 +137,10 @@ impl KeptHx {
         let mut delta = vec![f64::NAN; operator.potential().len()];
         operator.write_planes(&delta_planes, &mut delta);
         let mut change = RealMatrix::zeros(x.rows(), x.cols()).map_err(numerical)?;
+        observe(
+            Mem::KeptDelta,
+            bytes(&delta_planes) + bytes(&delta) + std::mem::size_of_val(change.as_slice()),
+        );
         operator
             .apply_local_change(comm, x, &self.slabs, e.pairs, &delta, &mut change)
             .map_err(numerical)?;
@@ -190,6 +201,7 @@ impl KeptHx {
             .band_density_sum_keeping(comm, x, occupations, volume, out, &mut self.slabs)
             .map_err(numerical)?;
         self.slab_bytes = self.slab_bytes.max(self.slabs.len() * 16);
+        observe(Mem::Slabs, bytes(&self.slabs));
         self.entry = Some(Entry {
             identity: operator.kept_identity(),
             x: x.clone(),
@@ -198,6 +210,13 @@ impl KeptHx {
             epoch: operator.owned_epoch().expect("owned potential"),
             pairs,
         });
+        let entry = self.entry.as_ref().expect("installed entry");
+        observe(
+            Mem::KeptEntry,
+            std::mem::size_of_val(entry.x.as_slice())
+                + std::mem::size_of_val(entry.hx.as_slice())
+                + bytes(&entry.potential),
+        );
         Ok(())
     }
     pub fn report<K: Collective>(&self, comm: &K) -> Result<Report, ScfError> {

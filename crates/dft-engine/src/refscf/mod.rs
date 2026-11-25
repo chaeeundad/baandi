@@ -13,6 +13,7 @@ pub mod driver;
 pub mod kept_hx;
 pub mod ladder;
 mod map;
+pub mod memory;
 pub mod metric;
 pub mod profile;
 pub mod qe_reference;

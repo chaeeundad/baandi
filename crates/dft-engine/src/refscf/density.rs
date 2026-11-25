@@ -3,6 +3,7 @@
 //! The half-sphere is i>0 || (i=0,j>0) || (i=j=0,k>=0). BAANDI's order is
 //! retained; external entries are matched by Miller triple, never position.
 //! History/metric use the smooth sphere; higher dense G use simple mixing.
+use super::memory::{Component as Mem, bytes, observe};
 use super::{Error, invalid, numerical};
 use dft_basis::PlaneWaveBasis;
 use dft_geometry::Cell;
@@ -107,6 +108,15 @@ impl DensityPlan {
                 result.offsets.extend(start..start + dims[2]);
             }
         }
+        observe(
+            Mem::DensityPlan,
+            bytes(&result.miller)
+                + bytes(&result.g2)
+                + bytes(&result.smooth)
+                + bytes(&result.selected)
+                + bytes(&result.coefficients)
+                + bytes(&result.offsets),
+        );
         Ok(result)
     }
     pub fn plane_len(&self) -> usize {

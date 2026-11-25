@@ -5,6 +5,7 @@ pub use dft_solvers::ref_rmm::{
     STAGES as RMM_STAGES, scheduled as rmm_scheduled, take_records as take_rmm_records,
 };
 
+use super::memory::{self, Component as Mem, bytes, observe};
 use super::{
     broyden::{Broyden, Diagnostics, PredictionScratch},
     density::DensityPlan,
@@ -73,6 +74,7 @@ pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
 }
 
 pub struct Run {
+    pub memory_breakdown: memory::Breakdown,
     pub kept_hx: super::kept_hx::Report,
     pub ladder: Option<super::ladder::Report>,
     pub qe_clock: Vec<super::record::QeClock>,
@@ -201,10 +203,12 @@ fn run_stage<K: Collective>(
     start: Instant,
 ) -> Result<StageRun, ScfError> {
     let stage_start = Instant::now();
+    let memory_scope = memory::Scope::begin();
     // Resolve once from this run's scope, never a process-cached profile flag.
     use dft_numerics::switches::{Id, RunConfig};
     let config = RunConfig::current();
     let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
+    let trim_memory = config.on(Id::REFSCF_MEMORY_TRIM);
     let rmm = config.on(Id::REFSCF_RMM).then(|| {
         let mut options = dft_solvers::ref_rmm::Options::new(0, 0., 0);
         options.steps = config.number(Id::REFSCF_RMM_STEPS).unwrap_or(4.) as usize;
@@ -287,6 +291,31 @@ fn run_stage<K: Collective>(
     let mut next_planes = vec![0.; n.len()];
     plan.forward(&prep_comm, &n, &mut x)?;
     set_zero(&plan, &mut x, state.electrons / volume);
+    observe(
+        Mem::Start,
+        bytes(&state.density)
+            + bytes(&state.density_g)
+            + bytes(&state.potential)
+            + bytes(&state.ionic)
+            + bytes(&state.diagonal_static)
+            + bytes(&state.ritz_values_hartree),
+    );
+    if trim_memory {
+        // These start-only outputs have no consumer in the reference map. Drop
+        // backing storage (clear would retain capacity) before the first solve.
+        observe(
+            Mem::ReleasedStart,
+            bytes(&state.density_g) + bytes(&state.potential) + bytes(&state.ritz_values_hartree),
+        );
+        state.density_g = Vec::new();
+        state.potential = Vec::new();
+        state.ritz_values_hartree = Vec::new();
+    }
+    observe(
+        Mem::DriverReciprocal,
+        bytes(&x) + bytes(&y) + bytes(&f) + bytes(&next),
+    );
+    observe(Mem::DriverPlanes, bytes(&n) + bytes(&next_planes));
     // Peak envelope: startup, owned Davidson arrays/factors plus current field,
     // mixer/history buffers. Excludes backend/FFT metadata, stacks and allocator.
     let cap = (2 * bands).min(state.basis.vectors().len());
@@ -518,6 +547,7 @@ fn run_stage<K: Collective>(
             let current_calls = &verification_calls[first_call..];
             verification_warm = Some(check.warm_start);
             let mut checked = y.clone();
+            observe(Mem::Verification, bytes(&checked));
             plan.forward(comm, &check.density, &mut checked)?;
             for (v, y) in checked.iter_mut().zip(&y) {
                 *v -= y;
@@ -821,6 +851,9 @@ fn run_stage<K: Collective>(
                 }
             });
             if coarse {
+                if trim_memory {
+                    dft_solvers::ref_davidson::work::release_row_cache();
+                }
                 if failed {
                     return Err(ScfError::Numerical(exit_reason));
                 }
@@ -845,6 +878,23 @@ fn run_stage<K: Collective>(
                         coarse_stopped: stopped,
                     },
                 ));
+            }
+            if trim_memory {
+                kept.release_storage();
+                dft_solvers::ref_davidson::work::release_row_cache();
+                state.orbitals = dft_numerics::RealMatrix::zeros(0, bands).map_err(numerical)?;
+                step.solve.hx = None;
+                drop(field_cache);
+                drop(mixer);
+                drop(metric);
+                drop(plan);
+                drop(prediction_scratch);
+                drop(x);
+                drop(y);
+                drop(f);
+                drop(next);
+                drop(n);
+                drop(next_planes);
             }
             let clock = Instant::now();
             records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
@@ -954,6 +1004,12 @@ fn run_stage<K: Collective>(
                 setup_time: start_time,
                 total_time: start.elapsed(),
             };
+            observe(
+                Mem::Delivered,
+                std::mem::size_of_val(result.density.as_slice().unwrap())
+                    + std::mem::size_of_val(result.orbitals.as_slice())
+                    + std::mem::size_of_val(result.k_points[0].solution.eigenvectors.as_slice()),
+            );
             output.record("result_assembly", phase);
             output.total_s = clock.elapsed().as_secs_f64();
             let qe_clock = qe_scope.as_ref().map_or_else(Vec::new, |scope| {
@@ -967,6 +1023,7 @@ fn run_stage<K: Collective>(
                 )
             });
             return Ok(StageRun::Fine(Box::new(Run {
+                memory_breakdown: memory_scope.report(comm)?,
                 kept_hx: kept.report(comm)?,
                 ladder: None,
                 qe_clock,
@@ -1125,6 +1182,10 @@ fn gather_orbitals<K: Collective>(
     }
     let mut full = local.clone();
     comm.tree_sum_f64(&local, &mut full).map_err(numerical)?;
+    observe(Mem::Gather, bytes(&local) + bytes(&full));
+    if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_MEMORY_TRIM) {
+        drop(local);
+    }
     let mut out = ComplexMatrix::zeros(n, x.cols()).map_err(numerical)?;
     for j in 0..x.cols() {
         state
@@ -1256,9 +1317,17 @@ mod delivery_tests {
                     ..Default::default()
                 };
                 let mut baseline: Option<ScfResult> = None;
-                for (switch, needed) in [("off", false), ("on", false), ("on", true)] {
+                for (switch, needed, trim) in [
+                    ("off", false, "off"),
+                    ("on", false, "off"),
+                    ("on", true, "off"),
+                    ("off", false, "on"),
+                    ("on", false, "on"),
+                    ("on", true, "on"),
+                ] {
                     let config = RunConfig::from_pairs(&[
                         ("refscf_lazy_output", switch),
+                        ("refscf_memory_trim", trim),
                         ("m2_lazy_result", "on"),
                     ])
                     .unwrap();

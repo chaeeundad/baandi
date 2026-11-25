@@ -3,6 +3,7 @@
 //! Each batch uses ONE allgather of scalar partials, followed by ascending-rank
 //! summation. Fixed local G order; across rank counts differences are rounding
 //! only (this does not claim bitwise rank-count independence).
+use super::memory::{Component as Mem, bytes, observe};
 use super::{Error, invalid, numerical};
 use dft_mpi::Collective;
 use dft_physics::data::Complex64 as C;
@@ -43,7 +44,7 @@ impl Metric {
                 }
             })
             .collect();
-        Ok(Self {
+        let metric = Self {
             identity: {
                 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -52,7 +53,15 @@ impl Metric {
             local: vec![0.; max_batch],
             gathered: vec![0.; ranks * max_batch],
             counts: vec![0; ranks],
-        })
+        };
+        observe(
+            Mem::Metric,
+            bytes(&metric.weights)
+                + bytes(&metric.local)
+                + bytes(&metric.gathered)
+                + bytes(&metric.counts),
+        );
+        Ok(metric)
     }
     /// Immutable geometry identity for the mixer's exact Gram cache. A new
     /// metric invalidates it even when the vector lengths happen to agree.

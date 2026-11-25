@@ -1,0 +1,1 @@
+Approved: apply target/tmp/spin-field-integration.patch (visibility-only change in crates/dft-engine/src/refscf/electronic_map.rs is now in OWNED_FILES), finish the spin NSCF case and validate the spin matrix (ranks 1/3/8, 1e-8 Ha vs legacy). Use BAANDI_TEST_TMP outside the checkout (e.g. /private/tmp/r4a-check) for the full check. Report in English; leave changes uncommitted.

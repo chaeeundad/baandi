@@ -1,0 +1,7 @@
+Architect decisions for G4C-SPIN-PBE (review of your report):
+
+1. Permission granted: replace the obsolete assertion in g4_rejections_and_unverified_delivery (spin PBE now supported; keep polarized LDA-PZ rejected) and update the CLI result limitation metadata in crates/dft-cli/src/run.rs that still lists distributed spin PBE as unavailable.
+2. Qualified now: spin PBE fixed sector and fixed-moment FD (with and without NLCC). Free-moment FD with PBE is NOT qualified (no-core near-full-polarization standard case: |dF| 9.2e-7 Ha while verification passes). Route free-moment FD + PBE to the legacy driver with a recorded reason ("reference driver: free-moment collinear FD with PBE not yet qualified, G4D"), independent of the G4B switches. Free-moment LDA-PW stays as G4B left it.
+3. Split the release test: qualified cases in g4c_spin_pbe_delivered (must pass), the free-moment PBE cases in a separate ignored test g4d_free_moment_pbe_acceptance (expected to fail, documented).
+4. Add to the design section a short diagnosis record for G4D: per map, for the failing no-core free-moment case at standard threshold, the charge/spin/uniform/stiffness estimator terms and the true error vs the legacy oracle (energy, M, minority-channel occupation), so the next ticket starts from data. Do not change stopping rules or tolerances.
+5. Use BAANDI_TEST_TMP outside the checkout (for example /private/tmp/g4c-check) for the CLI cache tests. Re-run all TEST_COMMANDS; report in English. Leave changes uncommitted.

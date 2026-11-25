@@ -4289,6 +4289,160 @@ dft-physics dft-engine dft-cli` exits 0: build/test/fmt/clippy all pass, 59
 binaries, 632 passed, 0 failed, 167 ignored. The sandbox still denies the
 non-gating `ps` load probe; cache tests now pass outside the checkout.
 No stopping rules or tolerances were changed. Changes remain uncommitted.
+### G4D qualification attempt: negative result (2026-11-25)
+
+**Free-moment PBE remains unqualified; L1/G4D_FALLBACK is retained.** No
+production stopping arithmetic, functional, occupation root, density mask or
+acceptance tolerance changes. The historical statement that the tight case
+passes refers to its energy assertion only: G4D now also checks the previously
+omitted moment, chemical-potential and weighted-occupation bounds. The current
+screened functional has an additional independent oracle-convergence failure.
+
+The opt-in map trace now records, for free-moment PBE only:
+
+- `xc_response_ha = (dv/2) sum_is |(n_out,is-n_in,is)
+  (v_xc,out,is-v_xc,in,is)|`. Both potentials are already evaluated by the
+  ordinary energy audit. Subtract Hartree before contracting each channel.
+  This is a finite secant of the **complete** functional along the actual
+  charge/spin displacement, including PBE gradient/divergence terms. It is
+  not a point-local spin Hessian or a rigorous delivered-error bound.
+- `xc_remainder_ha = |E_xc[out]-E_xc[in]-integral v_xc[in] delta n|`, the
+  existing audit's nonlinear XC remainder, separated from Hartree/eigen error.
+- `fd_number_slope_e_per_ha = sum_ski w_k f_ski(1-f_ski)/theta`, the
+  frozen-spectrum total-number response. Evaluate each factor as
+  `t/(1+t)^2`, `t=exp(-abs((epsilon-mu)/theta))`, to retain holes that round
+  out of stored occupations. This does not change the FD root solver.
+- `xc_mask_crossings`, the global count of channel samples whose ADR 0046
+  mask differs between the input and output combined valence plus half-core
+  densities. It is zero with screening off; no probe or second charge audit
+  is introduced.
+
+These measurements are disabled without an external trace and for every other
+policy. There are no extra XC evaluations or orbital applications. Traced and
+untraced runs are compared using full scientific fingerprints (including
+history, density, orbitals, occupations, energies and verification, excluding
+clocks) at both thresholds, core on/off and simulated ranks 1/3/8. Trace output
+is formatted only by the test after the run.
+
+#### Diagnosis (a), (b), and the additional screening boundary (c)
+
+Explicitly disabling screening reproduces the G4C record exactly. This is a
+historical functional diagnostic, not qualification of the current default.
+`RunConfig::from_pairs` ignores process environment; consequently the test-only
+`G4D_SCREEN_NEGATIVE=off` override selects this historical policy explicitly.
+Setting `BAANDI_XC_SCREEN_NEGATIVE=off` alone does not change this test.
+
+| Historical no-core map | LDA proxy (Ha) | Complete PBE secant (Ha) | XC remainder (Ha) | abs(delta F) (Ha) | abs(delta mu) (Ha) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Standard delivery 10 | 3.9989240082e-9 | 9.7838748046e-8 | 6.4641737966e-8 | 9.2064981574e-7 | 1.8150397485e-1 |
+| Standard verification 10 | 4.2709047420e-9 | 1.0467069748e-7 | 9.2151104043e-8 | 7.5776810851e-7 | 1.7600796403e-1 |
+| Tight delivery 35 | 1.9839902184e-14 | 2.9726458466e-10 | 2.7839154909e-10 | 1.7263968033e-14 | 8.1041664761e-4 |
+
+(a) The local LDA proxy underweights the actual nonlinear PBE response on
+this trajectory: the complete secant is about 24.5 times the proxy at both
+standard acceptance maps. The exact XC remainder independently exceeds the
+5e-9 Ha class. Using the functional's response rejects that premature stop;
+the experiment below restores the energy accuracy. This is evidence for a
+missing PBE response, not a claim that the secant isolates a local `f_mm` or
+proves a general energy bound.
+
+(b) Density/occupation agreement does not control the chemical potential in
+the saturated FD tail. At tight map 35 the occupation L1 error is only
+6.2396202210e-14 electrons, but the chemical-potential error is 8.1041664761e-4
+Ha. The frozen-spectrum slope is 7.6909938838e-11 electrons/Ha: the existing
+1e-13 electron root budget corresponds locally to about 1.30e-3 Ha in mu.
+Its root residual is -1.6764367672e-14 electrons. This is an ill-conditioned
+mu observable, not a failed number solve. The fresh verification's mu is
+0.27447897020 Ha, close to the oracle's 0.27447897623158113 Ha; delivery
+correctly keeps the candidate's 0.27366855958 Ha. Even exact agreement of
+occupations to 1e-4 electrons cannot certify the separately required mu bound.
+No root tolerance or occupation floor is changed. Thus (a) explains the
+historical premature energy stop; (b) remains a separate qualification gap.
+
+(c) With the current default screening on, the strict legacy no-core run
+never converges within its existing 400-map budget. Maps 398/399/400 alternate
+internal energies -0.23459348382729217 / -0.2345938272088778 /
+-0.2345934838272923 Ha, with charge/spin residuals about 1.13614545e-7 /
+1.41271339e-7 Bohr^-3/2. Its final F=-0.23459365980999383 Ha and
+M=0.9999988552855509 mu_B are **not an oracle**. Reference tight map 59 and its
+verification cross 446 and 498 combined-channel masks, respectively. The
+verification's PBE secant/remainder are 6.4889376785e-8 / 1.7910508236e-7 Ha,
+although the existing estimator passes. Screening off removes the legacy
+cycle; a curvature-only correction cannot establish smooth response across
+the hard-mask boundary. The G4F frozen derivative mask is not a remedy for
+these actual-map crossings. Differences from the unconverged legacy endpoint
+are diagnostic differences only, never accepted accuracy evidence.
+
+#### Implemented and rejected response candidate
+
+The candidate replaced the G4B stiffness contribution **only for free-moment
+PBE** by `max(LDA_proxy, complete_PBE_secant, abs_XC_remainder)` in ordinary
+maps, first-map redo/ratchet and independent verification. Other policy paths
+retained their arithmetic. The secant and exact remainder use the actual
+functional and actual map displacement, with no polarization/material cutoff,
+probe scale or fitted multiplier. The usual Ha-to-Ry factor two is unchanged.
+
+| Screening / core / threshold | Candidate result (maximum over ranks 1/3/8 unless stated) |
+| --- | --- |
+| Off / no core / standard | abs(delta F)=3.4777736246e-14 Ha; abs(delta M)=1.2534417948e-13 mu_B; occupation L1=1.2670570366e-13 e; **abs(delta mu)=1.6448606254e-3 Ha (FAIL)**; 34/36/34 maps |
+| Off / no core / tight | abs(delta F)=1.9428902931e-16 Ha; abs(delta mu)=3.8371945066e-9 Ha; 47/57/52 maps (PASS) |
+| Off / NLCC / standard | abs(delta F)=5.5114368624e-10 Ha; abs(delta M)=4.0041627231e-5 mu_B; abs(delta mu)=2.0006100130e-5 Ha; occupation L1=4.0041627230e-5 e (PASS) |
+| Off / NLCC / tight | abs(delta F)=7.9936057773e-15 Ha; abs(delta mu)=7.5299773696e-8 Ha (PASS) |
+| On / no core / standard | Reference verifies after 310/183/150 maps; legacy is unconverged, so no accuracy claim |
+| On / no core / tight | Rank-one reference exhausts 400 maps (FAIL); the candidate test then stops, so no candidate tight ranks 3/8 or screened NLCC result is claimed |
+
+The candidate is rejected, its stopping-rule edits removed, and only the
+non-mutating diagnostics retained. Fixing the historical energy alone does
+not satisfy the user's unchanged full bounds. L1 remains in place. Further
+qualification needs a mu-sensitive stopping/verification rule meeting the
+unchanged bound, and a converged independent oracle for the screened functional; neither
+is silently substituted by the tighter reference run.
+
+Reproduction and local evidence (Mac/aarch64, pure Rust, baseline `be7fd4a4`):
+
+```sh
+# Current default; deliberately remains a failing qualification gate.
+DFT_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" \
+G4B_FINGERPRINT_DIR=/private/tmp/g4d/after \
+cargo test --release -p dft-engine --test refscf g4 -- \
+  --include-ignored --nocapture --test-threads=1
+# Historical functional; unchanged energy/mu bounds still fail without the candidate.
+G4D_SCREEN_NEGATIVE=off cargo test --release -p dft-engine --test refscf g4d -- \
+  --include-ignored --nocapture --test-threads=1
+```
+
+The response candidate was tested with the second command and then with its
+screening override omitted; both exit 101 for the reasons above. Its exact
+rule is given above, rather than retaining a rejected production switch.
+Local raw logs, the candidate patch and saved baseline/candidate binaries are
+under `/private/tmp/g4d/` (ephemeral, not repository reference artifacts).
+No QE source was read; no new QE, dev08, real-MPI, MKL, real-material
+free-moment PBE or performance result is claimed. The external Si UPF is only
+used by the unrelated existing `g4_si_gap` test, never committed.
+
+Final local gates on the retained diagnostics/test changes:
+
+| Command / check | Exit | Result |
+| --- | ---: | --- |
+| `cargo check --workspace --tests` | 0 | All workspace test targets compile |
+| `cargo test -p dft-engine --test refscf` | 0 | 79 passed, 27 ignored |
+| Release `g4` command above, with external Si UPF | 101 | 13 passed; only `g4d_free_moment_pbe_acceptance` fails; all 12 G4D cells complete, including trace/untraced identity at every simulated rank |
+| Historical `g4d` matrix, screening off | 101 | Six no-core rows fail the full energy/mu gates; six NLCC rows pass; all trace/untraced fingerprints match |
+| `CHECK_NICE=0 CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/g4d/check TMPDIR=/private/tmp/g4d/check scripts/check.sh` | 0 | 112 binaries, 1015 passed, 0 failed, 229 ignored; build/test/fmt/clippy and production-only check/clippy pass |
+| `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` | 0 | No format or lint failures |
+| README generation / `scripts/tests/test_readme_figures.py` | 0 / 0 | Nine freshness/specification tests pass; README and figures have no diff |
+
+Sixty baseline scientific fingerprints remain byte-identical: 48 synthetic
+scalar-FD/fixed-spin/LDA free- and fixed-moment cases plus 12 Si FD cases.
+All 24 G4C fixed-sector/fixed-moment PBE result rows are identical as well.
+The Si UPF SHA-256 is
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+The first baseline release invocation lacked `DFT_SI_UPF` and additionally
+failed `g4_si_gap`; supplying that existing external file resolves it without
+editing a test. The check script's informational `ps` probe is denied by the
+sandbox but does not prevent any gate. Changes remain uncommitted; reporting
+JSON and new README evidence types are outside this ticket's owned files.
+
 ### G6B grid and diagnostic regression
 
 The explicit-grid replacement was in `Config::prepare`: after validating an

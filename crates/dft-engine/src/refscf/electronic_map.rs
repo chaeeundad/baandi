@@ -267,6 +267,10 @@ pub(super) struct Map {
     pub charges: Vec<f64>,
     pub moment: f64,
     pub absolute_moment: f64,
+    pub xc_response_ha: f64,
+    pub xc_remainder_ha: f64,
+    pub fd_number_slope_e_per_ha: f64,
+    pub xc_mask_crossings: usize,
 }
 impl Map {
     pub fn entropy(&self) -> f64 {
@@ -469,6 +473,7 @@ pub(super) fn evaluate<K: Collective>(
     ethr: f64,
     first: bool,
     diagnostics: bool,
+    response_diagnostics: bool,
 ) -> Result<Map, ScfError> {
     let fields = fields(workspace, &mut states[0], comm, cell, functional, input)?;
     let bands = states[0].orbitals.cols();
@@ -732,6 +737,78 @@ pub(super) fn evaluate<K: Collective>(
         ],
     )?;
     let output = fields_output(workspace, &mut states[0], comm, cell, functional, &density)?;
+    // Diagnose the complete functional along the actual map displacement.
+    // These potentials already include PBE's gradient/divergence response;
+    // subtract Hartree before contracting each channel, without cancellation.
+    let response_diagnostics = response_diagnostics
+        && functional == Functional::Pbe
+        && matches!(
+            policy,
+            Policy::SpinFermiDirac {
+                constraint: dft_physics::occupations::Constraint::Total,
+                ..
+            }
+        );
+    let (xc_response_ha, xc_remainder_ha, fd_number_slope_e_per_ha, xc_mask_crossings) =
+        if response_diagnostics {
+            let local = density
+                .iter()
+                .zip(input)
+                .enumerate()
+                .map(|(s, (a, b))| {
+                    a.iter()
+                        .zip(b)
+                        .enumerate()
+                        .map(|(i, (a, b))| {
+                            let dvxc = (output.hxc[s][i] - output.vh[i])
+                                - (fields.hxc[s][i] - fields.vh[i]);
+                            ((a - b) * dvxc).abs()
+                        })
+                        .sum::<f64>()
+                })
+                .sum::<f64>();
+            let mut crossings = 0.;
+            if dft_physics::xc::screen_negative() {
+                for (a, b) in density.iter().zip(input) {
+                    for (i, (a, b)) in a.iter().zip(b).enumerate() {
+                        let core = states[0].core_density.as_ref().map_or(0., |c| 0.5 * c[i]);
+                        let t = dft_physics::xc::DENSITY_THRESHOLD;
+                        crossings += f64::from((a + core > t) != (b + core > t));
+                    }
+                }
+            }
+            let values = sum(comm, &[local, crossings])?;
+            let theta = policy.finite().unwrap().0;
+            let mu = evaluation.unwrap().roots[0].unwrap().mu_ha;
+            // dN/dmu at this frozen spectrum. Use the exponential tail, retaining
+            // holes even when a stored majority occupation rounds to one.
+            let slope = blocks
+                .iter()
+                .map(|channel| {
+                    channel
+                        .iter()
+                        .zip(&weights)
+                        .map(|(b, w)| {
+                            b.eigenvalues
+                                .iter()
+                                .map(|e| {
+                                    let t = (-((e - mu) / theta).abs()).exp();
+                                    w * t / ((1. + t).powi(2) * theta)
+                                })
+                                .sum::<f64>()
+                        })
+                        .sum::<f64>()
+                })
+                .sum::<f64>();
+            (
+                0.5 * dv * values[0],
+                (output.xc - fields.xc - (remainder[0] - remainder[1])).abs(),
+                slope,
+                values[1] as usize,
+            )
+        } else {
+            (0., 0., 0., 0)
+        };
     let ewald = states[0].ewald.energy.0;
     let energy = EnergyAudit {
         xc_floor: None,
@@ -767,6 +844,10 @@ pub(super) fn evaluate<K: Collective>(
             0.
         },
         absolute_moment: integral[6],
+        xc_response_ha,
+        xc_remainder_ha,
+        fd_number_slope_e_per_ha,
+        xc_mask_crossings,
     })
 }
 // Separate name avoids shadowing the input Fields value in evaluate.

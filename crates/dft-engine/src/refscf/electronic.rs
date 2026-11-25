@@ -148,6 +148,14 @@ pub struct MapTrace {
     pub history_pair_norm2_ry: [f64; 25],
     pub history_max_cosine: f64,
     pub stiffness_ha: f64,
+    /// Diagnostic only: complete PBE secant and nonlinear energy remainder.
+    /// Zero unless tracing free-moment PBE; neither changes the stop rule.
+    pub xc_response_ha: f64,
+    pub xc_remainder_ha: f64,
+    /// Frozen-spectrum FD number derivative, including rounded-away holes.
+    pub fd_number_slope_e_per_ha: f64,
+    /// Number of combined valence plus half-core channel samples changing mask.
+    pub xc_mask_crossings: usize,
     pub dropped_pairs: usize,
     pub dropped_conditions: [f64; 25],
 }
@@ -193,6 +201,10 @@ impl Trace {
         };
         record.free_energy_ha = step.free_energy();
         record.moment_mu_b = step.moment;
+        record.xc_response_ha = step.xc_response_ha;
+        record.xc_remainder_ha = step.xc_remainder_ha;
+        record.fd_number_slope_e_per_ha = step.fd_number_slope_e_per_ha;
+        record.xc_mask_crossings = step.xc_mask_crossings;
         if let Some(e) = step.evaluation {
             record.chemical_potentials_ha = e.roots.map(|r| r.map(|r| r.mu_ha));
             record.electron_residual = e.electron_residual;
@@ -587,6 +599,7 @@ pub(super) async fn run_continuation<K: Collective>(
                 ethr,
                 iteration == 1 && !redo,
                 diagnostic,
+                trace.is_some(),
             )?;
             collect_calls(&step, &mut calls);
             let y = transform(&mut plan, comm, &step.density, &policy, electrons, volume)?;
@@ -686,6 +699,7 @@ pub(super) async fn run_continuation<K: Collective>(
                 tolerance,
                 false,
                 diagnostic,
+                trace.is_some(),
             )?;
             for cache in &mut kept {
                 cache.preserve_input(false);

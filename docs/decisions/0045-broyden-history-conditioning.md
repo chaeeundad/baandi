@@ -118,3 +118,14 @@ denied by the sandbox. Excluding only the two baseline failures named above,
 the release G4 suite passes all 12 tests. README generation and freshness
 checks pass with no generated changes; reporting JSON and new README evidence
 are outside this ticket's owned files. Changes are left uncommitted for review.
+
+## G4D qualification note (2026-11-25)
+
+The follow-up response experiment does not qualify free-moment PBE. Complete
+PBE secants detect the historical premature energy stop, but standard chemical
+potential errors still exceed 1e-4 Ha; the current screened no-core strict
+oracle cycles, and the candidate tight reference run exhausts its budget.
+The candidate stopping changes were removed and L1/G4D_FALLBACK remains.
+Non-mutating traces and the full negative result are recorded under
+[Spin and Fermi-Dirac](../design/reference-scf.md#spin-and-fermi-dirac).
+History conditioning, G4F screening probes and acceptance bounds are unchanged.

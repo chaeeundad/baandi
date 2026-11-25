@@ -28,7 +28,7 @@ use dft_mpi::Collective;
 #[derive(Default)]
 pub struct VerificationPredictor {
     pub(super) observed: Option<(f64, f64)>,
-    skipped_last: bool,
+    pub(super) skipped_last: bool,
 }
 impl VerificationPredictor {
     pub fn observe(&mut self, dr2_ry: f64, error_ha: f64) {
@@ -420,8 +420,65 @@ async fn run_stage<K: Collective>(
     let mut field_cache = None;
     let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
     let mut kept = super::kept_hx::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
-    boundary.ready().await;
-    for iteration in 1..=o.max_iterations {
+    let mut completed = 0usize;
+    // R8b: closure creation borrows locals only. State visits occur exclusively
+    // on an explicit checkpoint poll; ordinary maps allocate nothing here.
+    macro_rules! checkpoint_state {
+        () => {
+            |io: &mut super::checkpoint::Exchange<'_>| -> Result<usize, ScfError> {
+                if coarse || prolonged_start || config.on(Id::REFSCF_LADDER) {
+                    return Err(super::checkpoint::invalid(
+                        "checkpoint requires an unseeded fixed-cutoff run",
+                    ));
+                }
+                super::checkpoint::header(io, &input, profile, comm, "gamma", dims)?;
+                io.same(&plan.g2)?;
+                io.value(&mut completed)?;
+                io.planes(&mut n)?;
+                io.reciprocal(&mut x)?;
+                mixer.checkpoint(io, &metric)?;
+                super::checkpoint::gamma_operator(io, &mut state)?;
+                kept.checkpoint(io, &state.operator, bands)?;
+                io.value(&mut ethr)?;
+                io.value(&mut last_dr2)?;
+                io.value(&mut history)?;
+                io.value(&mut records)?;
+                io.value(&mut verification)?;
+                io.value(&mut verification_calls)?;
+                io.value(&mut first_reference_stop)?;
+                io.value(&mut predictor.observed)?;
+                io.value(&mut predictor.skipped_last)?;
+                io.value(&mut field_cache)?;
+                io.value(&mut pending)?;
+                super::checkpoint::cached_fields(&field_cache, n.len())?;
+                if let Some((map, tolerance, source)) = &pending {
+                    map.validate_checkpoint(state.operator.local_len(), bands, n.len())?;
+                    if !tolerance.is_finite() || *tolerance <= 0. || *source > completed {
+                        return Err(super::checkpoint::invalid("pending verification counters"));
+                    }
+                }
+                super::checkpoint::counters(
+                    completed,
+                    o.max_iterations,
+                    history.len(),
+                    ethr,
+                    last_dr2,
+                )?;
+                if records.len() != completed
+                    || verification.as_ref().is_some_and(|v| {
+                        v.attempts
+                            .iter()
+                            .any(|a| a.passed || a.iteration > completed)
+                    })
+                {
+                    return Err(super::checkpoint::invalid("record/verification history"));
+                }
+                Ok(completed)
+            }
+        };
+    }
+    boundary.ready_state(checkpoint_state!()).await;
+    for iteration in completed + 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
         let reused_from = pending.as_ref().map(|(_, _, source)| *source);
@@ -1135,7 +1192,8 @@ async fn run_stage<K: Collective>(
         n.copy_from_slice(&next_planes);
         state.orbitals = step.solve.eigenvectors;
         records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
-        boundary.emit(map_report).await;
+        completed = iteration;
+        boundary.emit_state(map_report, checkpoint_state!()).await;
     }
     unreachable!("positive budget checked")
 }
@@ -1196,7 +1254,7 @@ fn solve_map<K: Collective>(
         )?;
         warm_start |= step.warm_start;
         step.warm_start = warm_start;
-        let r = &step.solve.record;
+        let r = step.solve.record.as_ref().expect("fresh solve accounting");
         let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();
         calls.push(SolveRecord {
             ethr_ry: ethr,

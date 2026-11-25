@@ -294,8 +294,62 @@ pub(super) async fn run_continuation<K: Collective>(
     let mut field_cache = None;
     let warm_verification = config.on(Id::REFSCF_VERIFY_WARM);
     let mut kept = super::k_kept::KeptHx::new(config.on(Id::REFSCF_KEPT_HX));
-    boundary.ready().await;
-    for iteration in 1..=o.max_iterations {
+    let mut completed = 0usize;
+    // R8b: closure creation borrows locals only. State visits occur exclusively
+    // on an explicit checkpoint poll; ordinary maps allocate nothing here.
+    macro_rules! checkpoint_state {
+        () => {
+            |io: &mut super::checkpoint::Exchange<'_>| -> Result<usize, ScfError> {
+                super::checkpoint::header(io, &input, profile, comm, "complex-k", dims)?;
+                super::checkpoint::symmetry(io, &mut symmetry)?;
+                io.same(&plan.g2)?;
+                io.value(&mut completed)?;
+                io.planes(&mut n)?;
+                io.reciprocal(&mut x)?;
+                mixer.checkpoint(io, &metric)?;
+                super::checkpoint::k_state(io, &mut state)?;
+                kept.checkpoint(io, &state)?;
+                io.value(&mut verification_k_call_indices)?;
+                io.value(&mut ethr)?;
+                io.value(&mut last_dr2)?;
+                io.value(&mut history)?;
+                io.value(&mut records)?;
+                io.value(&mut verification)?;
+                io.value(&mut verification_calls)?;
+                io.value(&mut first_reference_stop)?;
+                io.value(&mut predictor.observed)?;
+                io.value(&mut predictor.skipped_last)?;
+                io.value(&mut field_cache)?;
+                io.value(&mut pending)?;
+                super::checkpoint::cached_fields(&field_cache, n.len())?;
+                if let Some((map, tolerance, source)) = &pending {
+                    map.validate_checkpoint(&state, n.len())?;
+                    if !tolerance.is_finite() || *tolerance <= 0. || *source > completed {
+                        return Err(super::checkpoint::invalid("pending verification counters"));
+                    }
+                }
+                super::checkpoint::counters(
+                    completed,
+                    o.max_iterations,
+                    history.len(),
+                    ethr,
+                    last_dr2,
+                )?;
+                if records.len() != completed
+                    || verification.as_ref().is_some_and(|v| {
+                        v.attempts
+                            .iter()
+                            .any(|a| a.passed || a.iteration > completed)
+                    })
+                {
+                    return Err(super::checkpoint::invalid("record/verification history"));
+                }
+                Ok(completed)
+            }
+        };
+    }
+    boundary.ready_state(checkpoint_state!()).await;
+    for iteration in completed + 1..=o.max_iterations {
         if let Some(s) = &mut symmetry {
             s.iteration = iteration;
             s.verification = false;
@@ -1001,7 +1055,8 @@ pub(super) async fn run_continuation<K: Collective>(
         n.copy_from_slice(&next_planes);
         state.orbitals = step.solve.eigenvectors;
         records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
-        boundary.emit(map_report).await;
+        completed = iteration;
+        boundary.emit_state(map_report, checkpoint_state!()).await;
     }
     unreachable!("positive budget checked")
 }

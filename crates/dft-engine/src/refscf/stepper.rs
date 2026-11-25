@@ -5,7 +5,7 @@
 //! callback, serialization or allocation is involved at a step boundary.
 use crate::ScfError;
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -69,23 +69,66 @@ impl StepReport {
     }
 }
 
+type StateResponse = Result<(Vec<u8>, usize), ScfError>;
+
 #[derive(Default)]
 pub(super) struct Boundary {
     report: Cell<Option<StepReport>>,
     initialized: Cell<bool>,
+    request: RefCell<Option<Option<Vec<u8>>>>,
+    response: RefCell<Option<StateResponse>>,
+    state_available: Cell<bool>,
 }
 impl Boundary {
-    pub async fn ready(&self) {
-        if !self.initialized.replace(true) {
-            self.pause().await;
-        }
-    }
     pub fn publish(&self, report: StepReport) {
         assert!(self.report.replace(Some(report)).is_none());
     }
     pub async fn emit(&self, report: StepReport) {
         self.publish(report);
         self.pause().await;
+    }
+    pub async fn ready_state(
+        &self,
+        mut visit: impl FnMut(&mut super::checkpoint::Exchange<'_>) -> Result<usize, ScfError>,
+    ) {
+        if !self.initialized.replace(true) {
+            self.pause_state(&mut visit).await;
+        }
+    }
+    pub async fn emit_state(
+        &self,
+        report: StepReport,
+        mut visit: impl FnMut(&mut super::checkpoint::Exchange<'_>) -> Result<usize, ScfError>,
+    ) {
+        self.publish(report);
+        self.pause_state(&mut visit).await;
+    }
+    async fn pause_state(
+        &self,
+        visit: &mut impl FnMut(&mut super::checkpoint::Exchange<'_>) -> Result<usize, ScfError>,
+    ) {
+        let mut yielded = false;
+        std::future::poll_fn(|_| {
+            self.state_available.set(true);
+            if let Some(request) = self.request.borrow_mut().take() {
+                let mut exchange = match &request {
+                    Some(bytes) => super::checkpoint::Exchange::load(bytes),
+                    None => super::checkpoint::Exchange::save(),
+                };
+                let result = visit(&mut exchange)
+                    .and_then(|iteration| exchange.finish().map(|bytes| (bytes, iteration)));
+                *self.response.borrow_mut() = Some(result);
+                yielded = true;
+                return Poll::Pending;
+            }
+            if std::mem::replace(&mut yielded, true) {
+                self.state_available.set(false);
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
     }
     async fn pause(&self) {
         let mut yielded = false;
@@ -111,6 +154,8 @@ pub struct Stepper<'a, T> {
     result: Option<T>,
     initialized: bool,
     done: bool,
+    safe: bool,
+    iteration: usize,
 }
 impl<'a, T> Stepper<'a, T> {
     pub(super) fn new<F: Future<Output = Result<T, ScfError>> + 'a>(
@@ -123,6 +168,8 @@ impl<'a, T> Stepper<'a, T> {
             result: None,
             initialized: false,
             done: false,
+            safe: true,
+            iteration: 0,
         }
     }
     fn advance(&mut self) -> Result<(), ScfError> {
@@ -168,9 +215,85 @@ impl<'a, T> Stepper<'a, T> {
             ));
         }
         self.advance()?;
-        self.boundary.report.take().ok_or(ScfError::InvalidInput(
+        let report = self.boundary.report.take().ok_or(ScfError::InvalidInput(
             "reference stepper: missing map boundary",
-        ))
+        ))?;
+        self.safe = report.safe_point;
+        self.iteration = report.iteration;
+        Ok(report)
+    }
+    /// Capture without running another map. All ranks call at the same safe point.
+    pub fn checkpoint(
+        &mut self,
+        identity: super::checkpoint::Identity,
+        rank: usize,
+    ) -> Result<super::checkpoint::Checkpoint, ScfError> {
+        identity.validate()?;
+        if !self.initialized || self.done || !self.safe || !self.boundary.state_available.get() {
+            return Err(super::checkpoint::invalid(
+                "capture requires a live safe point",
+            ));
+        }
+        if rank >= identity.ranks {
+            return Err(super::checkpoint::invalid("rank"));
+        }
+        *self.boundary.request.borrow_mut() = Some(None);
+        self.advance()?;
+        let (state, iteration) = self
+            .boundary
+            .response
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| super::checkpoint::invalid("missing state response"))??;
+        if iteration != self.iteration {
+            return Err(super::checkpoint::invalid("iteration boundary mismatch"));
+        }
+        Ok(super::checkpoint::Checkpoint {
+            schema_version: super::checkpoint::SCHEMA_VERSION,
+            identity,
+            rank,
+            iteration,
+            state,
+        })
+    }
+    /// Restore into a fresh stepper with the same input/configuration. Initialization
+    /// rebuilds immutable plans; no completed SCF maps are replayed.
+    pub fn restore(
+        &mut self,
+        checkpoint: &super::checkpoint::Checkpoint,
+        expected: &super::checkpoint::Identity,
+        rank: usize,
+    ) -> Result<(), ScfError> {
+        if self.initialized || self.done {
+            return Err(super::checkpoint::invalid(
+                "restore requires an uninitialized stepper",
+            ));
+        }
+        checkpoint.validate(expected, rank)?;
+        *self.boundary.request.borrow_mut() = Some(Some(checkpoint.state.clone()));
+        self.initialize()?;
+        let response = self
+            .boundary
+            .response
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| super::checkpoint::invalid("driver has no checkpoint boundary"))
+            .and_then(|r| r);
+        match response {
+            Ok((_, iteration)) if iteration == checkpoint.iteration => {
+                self.iteration = iteration;
+                self.safe = true;
+                Ok(())
+            }
+            result => {
+                self.continuation = None;
+                self.done = true;
+                SUSPENDED.set(None);
+                Err(result
+                    .err()
+                    .unwrap_or_else(|| super::checkpoint::invalid("iteration metadata mismatch")))
+            }
+        }
     }
     pub fn is_done(&self) -> bool {
         self.done

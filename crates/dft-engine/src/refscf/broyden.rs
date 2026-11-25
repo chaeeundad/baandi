@@ -424,3 +424,52 @@ impl Broyden {
         })
     }
 }
+
+impl Broyden {
+    /// Scratch eigensolver workspaces are rebuilt; history and the incremental
+    /// Gram cache are authoritative and retain their exact bits and slot order.
+    pub(super) fn checkpoint(
+        &mut self,
+        io: &mut super::checkpoint::Exchange<'_>,
+        metric: &Metric,
+    ) -> Result<(), crate::ScfError> {
+        use super::checkpoint::invalid;
+        io.same(&format!("{:?}", self.profile))?;
+        io.same(&self.smooth)?;
+        io.same(&self.screening)?;
+        io.same(&self.incremental)?;
+        io.same(&self.conditioning)?;
+        io.value(&mut self.iteration)?;
+        io.reciprocal(&mut self.previous_x)?;
+        io.reciprocal(&mut self.previous_f)?;
+        let lengths: Vec<_> = self.df.iter().chain(&self.dx).map(Vec::len).collect();
+        io.value(&mut self.df)?;
+        io.value(&mut self.dx)?;
+        if self.df.len() != self.profile.history
+            || self.dx.len() != self.profile.history
+            || !self.df.iter().chain(&self.dx).map(Vec::len).eq(lengths)
+            || self
+                .df
+                .iter()
+                .chain(&self.dx)
+                .flatten()
+                .any(|v| !v.re.is_finite() || !v.im.is_finite())
+        {
+            return Err(invalid("Broyden history shape/values"));
+        }
+        io.value(&mut self.gram)?;
+        let mut valid = self.gram_metric.is_some();
+        io.value(&mut valid)?;
+        if io.loading() {
+            self.gram_metric = valid.then(|| metric.identity());
+        }
+        io.value(&mut self.retained)?;
+        io.value(&mut self.conditioning_diagnostics)?;
+        if self.retained > self.profile.history
+            || self.gram.iter().flatten().any(|v| !v.is_finite())
+        {
+            return Err(invalid("Broyden Gram/retained history"));
+        }
+        Ok(())
+    }
+}

@@ -25,6 +25,9 @@ fn evidence(path: &Path) -> Result<Value, Error> {
     let path = source(path);
     if crate::checkpoint_inspect::recognizes(&path)? {
         let mut result = crate::checkpoint_inspect::evidence(&path)?;
+        if result["schema_version"] == 2 {
+            return Ok(result);
+        }
         let cp = crate::checkpoint_io::read(&path)?;
         if let Some(c) = &cp.continuation {
             result["preconditioner"] = json!(c.options.preconditioner.name());

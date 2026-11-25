@@ -181,9 +181,6 @@ fn l2(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
             && switches::on(Id::REFSCF_SPIN_STIFFNESS)
             && switches::on(Id::REFSCF_HISTORY_CONDITIONING))
 }
-fn l6(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
-    matches!(command, Command::Checkpoint | Command::Restart)
-}
 fn l7(_: &Config, mode: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
     mode != Mode::Classic
 }
@@ -271,7 +268,6 @@ type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
 const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l1, G4D_FALLBACK),
     (l2, G4B_FALLBACK),
-    (l6, CHECKPOINT),
     (l7, RUNTIME),
     (l8, SESSION),
     (l9, LEGACY_INPUT),

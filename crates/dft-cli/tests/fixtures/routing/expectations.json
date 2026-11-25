@@ -100,7 +100,7 @@
   "l06-checkpoint": {
     "command": "checkpoint",
     "mode": "classic",
-    "reference_reason": "CHECKPOINT",
+    "reference_reason": null,
     "parse_error": null,
     "options_error": null
   },

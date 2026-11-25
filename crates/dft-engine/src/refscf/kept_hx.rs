@@ -233,6 +233,76 @@ impl KeptHx {
     }
 }
 
+impl KeptHx {
+    pub(super) fn checkpoint(
+        &mut self,
+        io: &mut super::checkpoint::Exchange<'_>,
+        operator: &DistributedRealHamiltonian,
+        bands: usize,
+    ) -> Result<(), ScfError> {
+        use super::checkpoint::invalid;
+        io.same(&self.enabled)?;
+        io.same(&self.recompute_slabs)?;
+        io.value(&mut self.preserve_input)?;
+        if self.preserve_input {
+            return Err(invalid("HX capture during verification"));
+        }
+        let mut data = if io.loading() {
+            None
+        } else {
+            self.entry.as_ref().map(|e| {
+                (
+                    e.x.clone(),
+                    e.hx.clone(),
+                    (e.potential.clone(), e.epoch, e.pairs),
+                )
+            })
+        };
+        io.value(&mut data)?;
+        if let Some((x, hx, (potential, epoch, pairs))) = data {
+            if x.rows() != operator.local_len()
+                || x.cols() != bands
+                || hx.rows() != x.rows()
+                || hx.cols() != bands
+                || potential.len() != operator.plane_points()
+                || pairs > bands / 2
+            {
+                return Err(invalid("Gamma HX shape"));
+            }
+            io.finite(x.as_slice())?;
+            io.finite(hx.as_slice())?;
+            io.finite(&potential)?;
+            if io.loading() {
+                self.entry = Some(Entry {
+                    identity: operator.kept_identity(),
+                    x,
+                    hx,
+                    potential,
+                    epoch,
+                    pairs,
+                });
+            }
+        } else if io.loading() {
+            self.entry = None;
+        }
+        io.value(&mut self.slabs)?;
+        io.value(&mut self.hits)?;
+        io.value(&mut self.columns)?;
+        io.value(&mut self.slab_bytes)?;
+        if self
+            .slabs
+            .iter()
+            .any(|v| !v.re.is_finite() || !v.im.is_finite())
+            || self.entry.as_ref().is_some_and(|e| {
+                e.pairs.checked_mul(operator.plane_points()) != Some(self.slabs.len())
+            })
+        {
+            return Err(invalid("Gamma HX slabs"));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -202,22 +202,6 @@ table! {
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
     REUSE_PSI: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "C2: a lean real Gamma Davidson solve that starts from the previous solve's orbitals X takes H X from that solve's rotated H images plus (V_new - V_old) X, formed from the psi(r) the density build kept (one forward transform per pair; no inverse transform, nonlocal product or kinetic pass); falls back to the plain apply when X, the operator or the grid changed or the cache exceeds its memory gate; rounding class";
-    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
-    REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "reference Davidson only: form the first post-contraction corrections directly from retained V/HV, omitting identity-coefficient GEMMs; measured H/S refresh and band decisions unchanged";
-    // Adopted 2026-11-24 (dev08 MPI8 A/B at 66d45e6: si64 -1.8%, si128 -3.4%, others neutral).
-    REFSTART_MKL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "reference SCF atomic start only: Gram and rotation products through the dispatching GEMM entries (MKL panels) instead of the direct pure-Rust kernel; rounding class";
-    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
-    REF_DAV_WIDE_ROTATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "reference Davidson only: route the V C / HV C rotations through the wide GEMM entry (MKL panels) instead of the whole-output-bound pure-Rust fallback; rounding class";
-    REFSCF_VERIFY_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "reference SCF only: consume a failed verification map as the next ordinary Broyden iterate; passing criterion unchanged";
-    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0ce77fdc: si64 -5.4%, si128 -6.5%, elongated/rskew neutral; attempts ledger).
-    REFSCF_VERIFY_GATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "reference SCF only: defer predicted failing verification attempts using observed error/estimator scaling; never deliver without a passing attempt";
-    REFSCF_VERIFY_GATE_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "reference SCF only, requires REFSCF_VERIFY_GATE: predict the first verification from density/residual secants; undefined predictions attempt and the passing criterion is unchanged";
     VERIFY_REUSE: Kind::Choice { allowed: &["off", "warm", "feed", "feed2", "replace", "half"], default: "half" }, "half", "off, warm, feed, feed2, replace, half",
         "reuse of a failed fixed-point verification solve (F at the delivered density rho_out): warm = the next SCF step starts from its orbitals (so the REUSE_PSI kept start is taken); feed = warm and the pair (rho_out, F(rho_out)) also enters the mixer after the step's own pair, so the next input density is mixed from it (the verification map counts as an SCF map); off = discarded; rounding class (trajectory changes, acceptance still needs a passed verification)";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
@@ -447,71 +431,23 @@ table! {
         "wait probe of the phase profile (ticket BREAKTHROUGH-4-OTHER-AND-INIT): a timed barrier before every collective of the distributed solver and at the entry of every M2 solve, so that the time ranks spend waiting for the last rank (load imbalance, arrival skew) is reported apart from the collective's own transfer (`solve.wait`, `solve.entry_wait`, `coll.barrier`); changes the timing (extra barriers), never the arithmetic; diagnostic only, never an acceptance arm";
     SNAPSHOT_DIR: Kind::Path, "unset", "absolute directory",
         "SCF snapshot capture: every real Gamma solve of the run writes the state that replays it (input density, this rank's orbital rows, kept H X and its armed flag, tolerance, policy, layout hash, context) to this directory outside the timed map phases; replay with davidson_bench --snapshot <manifest.json>";
-    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
-    REFSCF_SETUP_PHASE_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP: reference start reuses identical direct structure factors across atomic charge/local potential and magnetic orbital channels; same arithmetic, default off pending dev08 A/B";
-    // Provisionally adopted 2026-11-25 (development protocol: screen + partial P3d si128 -1.2%); precise measurement pending.
-    REF_DAV_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "reference Davidson only: transposed borders and repair projections use one sequential MKL GEMM over all local rows; rounding class, pure builds retain panel arithmetic";
     FFT_SPARSE_CLEAR: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT: clear only holes before coefficient/middle/slab scatter using cached contiguous ranges; same FFT order, default off pending dev08";
     FFT_DIRECT_PACK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT: pack distributed real H input ORC rows directly into FFT sticks, avoiding the intermediate coefficient write/read; default off pending dev08";
-    // Default off since 2026-11-25: dev08 one-run screen, energy change ~0.85x the Coulomb error, no earlier pass (ADR 0044 status).
-    REFSCF_VERIFY_ENERGY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "reference SCF only: accept the independent verification map when the variational energy change is below 5e-9 Ha; Coulomb/residual diagnostics retained, predictor gates inactive; off restores the old fixed-point rule";
     FFT_FUSED_ROWS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT2: stream distributed local-potential last-axis inverse/multiply/forward through reusable rows with immutable zero-hole input; rustfft lanes only, rounding class, default off pending dev08";
-    // Adopted 2026-11-25 (bit-identical; dev08 one-run P3i: si128 38.15 -> 37.05 s, setup 3.39 -> 2.75 s).
-    REF_DAV_SWAP_BUFFERS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-DAVREM: reference Davidson restart/repair exchange equal-capacity basis and rotation buffers instead of copying rows; bit-identical, default off pending dev08";
-    // Adopted 2026-11-25 (bit-identical; dev08 one-run P3i: si128 38.15 -> 37.05 s, setup 3.39 -> 2.75 s).
-    REF_DAV_LEAN_RESET: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-DAVREM: reference restart resets only C; fresh Gram/factor/transform overwrite H, S, T and A, and eigen/repair overwrite Y before use; bit-identical, default off pending dev08";
-    // Adopted 2026-11-25 (bit-identical; dev08 one-run P3i: si128 38.15 -> 37.05 s, setup 3.39 -> 2.75 s).
-    REFSTART_DIAGONAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP2: reference start caches one atom's owned projector values and reuses identical nonlocal diagonal values for adjacent ORC partner rows; bit-identical, default off pending dev08";
-    // Adopted 2026-11-25 (bit-identical; dev08 one-run P3i: si128 38.15 -> 37.05 s, setup 3.39 -> 2.75 s).
-    REFSTART_ORBITAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP2: reference start reuses exact radial-times-harmonic amplitudes across atoms of each species and radial orbital; bit-identical, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
-    REF_DAV_SQRT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-STREAM: chunked residual/precondition/norm with sqrt instead of hypot; rounding class, extreme columns use hypot; default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
-    REF_DAV_FUSED_APPEND: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-STREAM: store normalized corrections in E and V together; bit-identical; default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
-    REF_DAV_CHECK_APPEND: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-STREAM: fuse correction H finite check and HV append; collective failure agreement retained, bit-identical; default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3j: si128 37.23 -> 36.06 s, si64 7.48 -> 7.18, elongated 1.55 -> 1.45).
-    REF_DAV_REUSE_ROWS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-STREAM: reuse four initialized row buffers between successful solves on the calling thread; bit-identical; default off pending dev08";
     FFT_A2A_BALANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-A2A: cap rank stick counts to reduce padded FFT alltoall payload, preserving mirror units; use only if the block shrinks, row-reduction rounding class, default off pending dev08";
     // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
-    REFSTART_GENERALIZED: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP3: reference atomic start uses raw-overlap generalized Rayleigh-Ritz without wide QR passes when J >= bands and the guarded metric reduction passes; otherwise legacy CholQR2/completion; rounding class, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
-    REFSTART_COMPACT_G: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP3: reference atomic fields map density Miller indices directly into sorted owned FFT positions, omitting the duplicate density-grid reverse map and tree lookup table; bit-identical, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
     NONLOCAL_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-NL: one MKL projection over all local rows instead of 256-row reduction panels; requires M2_DGEMM, rounding class, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
-    REFSCF_LAZY_OUTPUT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-NL: reference driver retains owned orbitals when the caller requests lazy delivery; requires M2_LAZY_RESULT and a registered MPI communicator; default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
-    REF_DAV_IDEAL_RESET: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-RESET: ideal Ritz contraction with norm guard and every-fourth measured refresh; default off pending multi-system accuracy and dev08 evidence";
     // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
     NONLOCAL_FUSE_COUPLING: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-ADDV: store DQ in the dead local projection buffer after rank reduction, omitting separate W storage; bit-identical, default off pending dev08";
     // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
     NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-ADDV: one sequential MKL P W directly into HX with beta=1; requires M2_DGEMM and MKL_DGEMM, rounding class, default off pending dev08";
-    // Adopted 2026-11-26 (dev08 one-run P3q: delivered density/energy bit-identical, si128 per-map energy 1.17 -> 0.28 s).
-    REFSCF_LEAN_ENERGY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "Reference SCF intermediate band energy with full delivery and verification audits";
 
     REFSCF_RMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-RMM: bounded RMM-DIIS sweeps between Davidson SCF iterations 1, 2 and multiples of five; verification always Davidson";
@@ -519,14 +455,6 @@ table! {
         "P3-RMM: maximum DIIS steps per sweep; default four, experimental overrides require multi-system evidence";
     REFSCF_RMM_BLOCK: Kind::Number { default: Some(16.), valid: |v| (1. ..=64.).contains(&v) && v.fract() == 0. }, "16", "integer 1..64",
         "P3-RMM: band-order Gram-Schmidt panel width; default sixteen";
-    // Adopted 2026-11-26 (dev08 one-run P3t: si128 setup 2.34 -> 2.25 s, density FFT plan 0.25 -> 0.12 s; rounding class).
-    REFSTART_FFT_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP4: run-owned FFT kernel cache and shared start/density layout; bit-identical, pending dev08";
-    // Adopted 2026-11-26 (dev08 one-run P3t: si128 setup 2.34 -> 2.25 s, density FFT plan 0.25 -> 0.12 s; rounding class).
-    REFSTART_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-SETUP4: one MKL call per atomic overlap/H Gram rectangle; requires REFSTART_MKL, rounding class";
-    REFSTART_LOCAL_SHELLS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "P3-SETUP4: dense owned-shell indexing reused across species and batched direct ionic phases; bit-identical";
 
     FFT_KERNEL_BY_LENGTH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-PERMAP: calibrate rustfft/MKL per actual lane length, batch and direction once per run; pure builds retain rustfft";
@@ -536,31 +464,9 @@ table! {
         "reference cutoff ladder: coarse stopping threshold = fine dr2 threshold times this ratio (material independent)";
     REFSCF_LADDER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-LADDER: reference coarse cutoff 0.5, exact owned prolongation, fresh fine Broyden history";
-    // Adopted 2026-11-26 (dev08 one-run KEPTHX2: si128 32.82 -> 31.40 s, si64 6.37 -> 6.30; +271 MB/rank peak RSS on si128).
-    REFSCF_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-KEPTHX: exact retained Ritz HX plus local-potential delta on ordinary warm starts; bounded pair slabs; default off pending dev08";
-    // Adopted 2026-11-26 (dev08 one-run: verification H columns -25 to -27%, si128 verification 4.03 -> 3.72 s; criterion unchanged).
-    REFSCF_VERIFY_WARM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-VERWARM: reuse kept HX for independent verification and preserve candidate products for recovery; requires REFSCF_KEPT_HX; tolerance unchanged";
-    // Adopted 2026-11-26 (dev08 one-run P4: setup si128 -0.12 s, si216 -0.70 s; rounding class).
-    REFSTART_CHOLESKY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P4-START: one scaled library Cholesky and triangular solves for the generalized atomic Ritz start, no explicit inverse; rounding class";
-    // Adopted 2026-11-26 (dev08 one-run P4: setup si128 -0.12 s, si216 -0.70 s; rounding class).
-    REFSTART_SPECIES_FILL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P4-START: owned atomic orbital amplitudes per species, one direct phase per atom/representative across radial channels; exact arithmetic";
-    // Adopted 2026-11-26 (dev08 one-run P4: setup si128 -0.12 s, si216 -0.70 s; rounding class).
-    REFSTART_PARTITION_CACHE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P4-START: constructor-scoped exact FFT partition reuse between owned projector lookup and operator plans; no shared mutable buffers";
 
     REFSCF_KEPT_RECOMPUTE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; requires REFSCF_KEPT_HX";
-    // Adopted 2026-11-25 (dev08 2432530 MPI8 verify off: si216 -1.82 s, si128 -0.26 s, counts identical, rounding class)
-    REF_DAV_TRIANGLE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P4-DAVREM: MKL rectangular top plus GEMMT upper square borders; rounding class";
-    REF_DAV_STACK_ROTATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "P4-DAVREM: pack V/HV rows and rotate restart/return in one GEMM; rounding class";
-    REF_DAV_SETUP_FUSED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "P4-DAVREM: fuse start/HX validation with copying and diagonal bounds; bit-identical";
+        "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; retained HX enabled";
     REFSCF_MEMORY_TRIM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-MEM: release dead start/map/delivery arrays and return band-sized Davidson storage; identical arithmetic; pending dev08";
 
@@ -569,10 +475,6 @@ table! {
     REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "R6a: reference collinear FD moment policies enabled by default; G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s; free-moment PBE remains G4D";
 
-    REFSCF_SPIN_STIFFNESS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "R6a: absolute local LDA-PW spin curvature residual energy for collinear FD only; G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s";
-    REFSCF_HISTORY_CONDITIONING: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "R6a: oldest-first history pruning at rcond <= sqrt(p*epsilon), collinear FD only; accepted ADR 0045, G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s";
     XC_SCREEN_NEGATIVE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "G4E: screen XC-only small/signed vacuum densities with a screened-charge budget; accepted ADR 0046";
 }

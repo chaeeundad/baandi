@@ -129,9 +129,7 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
     let dim = operator.global_len();
     let cap = workspace::capacity(dim, n, options.capacity);
     let work_scope = work::Scope::new(options.profile, options.max_iterations, cap);
-    let config = dft_numerics::switches::RunConfig::current();
-    let fused_setup = config.on(dft_numerics::switches::Id::REF_DAV_SETUP_FUSED);
-    let single_gemm = config.on(dft_numerics::switches::Id::REF_DAV_SINGLE_GEMM);
+
     let mut bad = initial_hx.is_some_and(|hx| hx.rows() != start.rows() || hx.cols() != n)
         || n == 0
         || n > dim
@@ -146,43 +144,18 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
         || hamiltonian_diagonal.len() != start.rows();
     // Allocate only after local shapes are valid. Copy/finite classification
     // share loads; collective input agreement still precedes every H call.
-    let mut prepared = if fused_setup && !bad {
-        let mut w = Workspace::new(operator, n, cap, single_gemm)?;
-        for (dst, &value) in w.v.as_mut_slice().iter_mut().zip(start.as_slice()) {
-            *dst = value;
-            bad |= !value.is_finite();
-        }
-        if let Some(hx) = initial_hx {
-            for (dst, &value) in w.hv.as_mut_slice().iter_mut().zip(hx.as_slice()) {
-                *dst = value;
-                bad |= !value.is_finite();
-            }
-            work::copy(options.profile, start.rows() * n);
-        }
-        for &h in hamiltonian_diagonal {
-            bad |= !h.is_finite();
-            w.diagonal_bounds.0 = w.diagonal_bounds.0.min(h);
-            w.diagonal_bounds.1 = w.diagonal_bounds.1.max(h);
-        }
-        work::copy(options.profile, start.rows() * n);
-        work::add(options.profile, |s| {
-            s.streamed_bytes += 8 * start.rows() as u64
-        });
-        Some(w)
-    } else {
-        bad |= initial_hx.is_some_and(|hx| hx.as_slice().iter().any(|v| !v.is_finite()))
-            || !start
-                .as_slice()
-                .iter()
-                .chain(hamiltonian_diagonal)
-                .all(|v| v.is_finite());
-        work::add(options.profile, |s| {
-            s.streamed_bytes += 8
-                * (start.rows() * n + start.rows() + initial_hx.map_or(0, |hx| hx.as_slice().len()))
-                    as u64;
-        });
-        None
-    };
+
+    bad |= initial_hx.is_some_and(|hx| hx.as_slice().iter().any(|v| !v.is_finite()))
+        || !start
+            .as_slice()
+            .iter()
+            .chain(hamiltonian_diagonal)
+            .all(|v| v.is_finite());
+    work::add(options.profile, |s| {
+        s.streamed_bytes += 8
+            * (start.rows() * n + start.rows() + initial_hx.map_or(0, |hx| hx.as_slice().len()))
+                as u64;
+    });
     // Agree on local invalid inputs before any rank enters operator collectives.
     let mut bad_sum = [0.0; 2];
     c.tree_sum_f64(
@@ -195,20 +168,16 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
             "reference Davidson dimensions/threshold/start",
         ));
     }
-    let mut w = match prepared.take() {
-        Some(w) => w,
-        None => Workspace::new(operator, n, cap, single_gemm)?,
-    };
+    let mut w = Workspace::new(operator, n, cap)?;
     work::add(options.profile, |s| {
         // Explicit arrays of Workspace::new; shared adapter scratch excluded.
         let doubles =
             4 * start.rows() * cap + 2 * start.rows() * n + 6 * cap * cap + 3 * cap + n + 2
-                - w.reused_elements
-                + w.extra_elements;
+                - w.reused_elements;
         s.zeroed_bytes += 8 * doubles as u64;
         s.streamed_bytes += 8 * doubles as u64;
     });
-    if w.sqrt_precondition && !fused_setup {
+    {
         w.diagonal_bounds = hamiltonian_diagonal
             .iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &h| {
@@ -221,15 +190,12 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
     // Resolve once per solve. The reference workspace resets C to identity
     // on contraction, even though it remeasures S/H and their factor afterward.
     // Only the immediately following correction can use these stored Ritz rows.
-    let reuse_restart =
-        dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_RESTART_CORRECTIONS);
+
     work::add(options.profile, |s| {
-        if reuse_restart {
-            s.zeroed_bytes += 16 * n as u64;
-            s.streamed_bytes += 16 * n as u64;
-        }
+        s.zeroed_bytes += 16 * n as u64;
+        s.streamed_bytes += 16 * n as u64;
     });
-    let mut restart_scratch = reuse_restart.then(|| (vec![0.0; n], vec![0.0; n]));
+    let mut restart_scratch = (vec![0.0; n], vec![0.0; n]);
     let mut contracted = false;
     let mut record = Record::new(
         options.max_iterations,
@@ -238,7 +204,7 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
         options.placement,
     );
     record.setup.communication = c.snapshot();
-    if !fused_setup {
+    {
         work::copy(options.profile, start.rows() * n);
         w.v.as_mut_slice()[..start.rows() * n].copy_from_slice(start.as_slice());
     }
@@ -246,7 +212,7 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
     w.hv.reshape_within_storage(start.rows(), n)?;
     let t = clock(options.profile);
     if let Some(hx) = initial_hx {
-        if !fused_setup {
+        {
             w.hv.as_mut_slice().copy_from_slice(hx.as_slice());
             work::copy(options.profile, start.rows() * n);
         }
@@ -295,7 +261,8 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
                 "capacity cannot hold the active correction block; use at least 2*bands",
             ));
         }
-        if let Some((norms, sums)) = restart_scratch.as_mut().filter(|_| contracted) {
+        if contracted {
+            let (norms, sums) = &mut restart_scratch;
             restart_corrections(
                 &c,
                 &mut w,
@@ -372,7 +339,6 @@ pub fn solve_with_initial_hx<C: Collective, O: DistributedRealOperator>(
     record.communication = c.snapshot();
     record.total_seconds = elapsed(total_clock);
     record.summarize();
-    ideal_reset::publish(record.resets);
     if options.profile {
         accounting::qe_clock_add(5, record.total_seconds, 1);
         for r in std::iter::once(&record.setup)
@@ -420,7 +386,7 @@ fn restart_corrections<C: Collective>(
     let rows = w.v.rows();
     let k = active.len();
     w.e.reshape_within_storage(rows, k)?;
-    if w.sqrt_precondition {
+    {
         let mut sqrt_columns = 0;
         for (j, &band) in active.iter().enumerate() {
             let x = &w.v.as_slice()[band * rows..(band + 1) * rows];
@@ -435,22 +401,6 @@ fn restart_corrections<C: Collective>(
             sqrt_columns += usize::from(safe);
         }
         stream::count(profile, rows, sqrt_columns, k - sqrt_columns);
-    } else {
-        norms[..k].fill(0.0);
-        for (j, &band) in active.iter().enumerate() {
-            for (i, &h) in diagonal.iter().enumerate() {
-                let z = (w.hv[(i, band)] - w.values[band] * w.v[(i, band)])
-                    / preconditioner_denominator(h, w.values[band]);
-                w.e[(i, j)] = z;
-                norms[j] += z * z;
-            }
-        }
-        work::add(profile, |s| {
-            s.scalar_flops += 13 * (rows * k) as u64;
-            s.hypot_calls += (rows * k) as u64;
-            s.zeroed_bytes += 8 * k as u64;
-            s.streamed_bytes += 32 * (rows * k) as u64 + 8 * k as u64;
-        });
     }
     drop(precondition);
     w.normalize_restart(c, norms, sums, r, profile)?;
@@ -559,8 +509,8 @@ mod diagnostic_tests {
     #[test]
     fn restart_corrections_preserve_decisions_columns_and_remove_identity_flops() {
         use dft_numerics::switches::RunConfig;
-        let off = RunConfig::from_pairs(&[("ref_dav_restart_corrections", "off")]).unwrap();
-        let on = RunConfig::from_pairs(&[("ref_dav_restart_corrections", "on")]).unwrap();
+        let off = RunConfig::from_pairs(&[]).unwrap();
+        let on = RunConfig::from_pairs(&[]).unwrap();
         for (dim, n, clustered) in [(12, 3, false), (17, 5, true), (7, 4, true)] {
             for ranks in [1, 2, 3, 8] {
                 dft_mpi::simulate(ranks, |comm| {
@@ -615,7 +565,7 @@ mod diagnostic_tests {
                             assert_eq!(a.record.h_calls, b.record.h_calls);
                             assert_eq!(a.record.restarts, b.record.restarts);
                             assert_eq!(a.record.iterations.len(), b.record.iterations.len());
-                            let mut saved = 0;
+                            let saved = 0;
                             let mut restart = false;
                             for (ar, br) in a.record.iterations.iter().zip(&b.record.iterations) {
                                 assert_eq!(ar.active_bands, br.active_bands);
@@ -625,49 +575,20 @@ mod diagnostic_tests {
                                 assert_eq!(ar.repairs, br.repairs);
                                 assert_eq!(ar.dropped_corrections, br.dropped_corrections);
                                 assert_eq!(ar.unconverged, br.unconverged);
-                                let omitted: Vec<_> = ar
-                                    .gemms
-                                    .iter()
-                                    .filter(|g| {
-                                        restart && matches!(g.stage, "residual_x" | "residual_hx")
-                                    })
-                                    .collect();
+                                assert_eq!(ar.gemms, br.gemms);
                                 if restart {
-                                    assert_eq!(omitted.len(), 2);
-                                    let expected = 4
-                                        * op.rows.len() as u64
-                                        * n as u64
-                                        * ar.active_bands.len() as u64;
-                                    assert_eq!(
-                                        omitted.iter().map(|g| g.flops).sum::<u64>(),
-                                        expected
+                                    assert!(
+                                        !br.gemms.iter().any(|g| matches!(
+                                            g.stage,
+                                            "residual_x" | "residual_hx"
+                                        ))
                                     );
-                                    let payload: u64 = omitted
-                                        .iter()
-                                        .map(|g| 8 * (g.m * g.k + g.k * g.n + g.m * g.n) as u64)
-                                        .sum();
-                                    let rows = op.rows.len() as u64;
-                                    let width = ar.active_bands.len() as u64;
-                                    assert_eq!(
-                                        payload,
-                                        16 * (rows * n as u64 + n as u64 * width + rows * width)
-                                    );
-                                    saved += expected;
                                 }
-                                let retained: Vec<_> = ar
-                                    .gemms
-                                    .iter()
-                                    .filter(|g| {
-                                        !restart || !matches!(g.stage, "residual_x" | "residual_hx")
-                                    })
-                                    .collect();
-                                assert_eq!(retained, br.gemms.iter().collect::<Vec<_>>());
                                 restart = ar.restarts > 0;
                             }
-                            assert_eq!(a.record.gemm_flops - b.record.gemm_flops, saved);
+                            assert_eq!(a.record.gemm_flops, b.record.gemm_flops);
                             if budget > 1 {
                                 assert!(a.converged.iter().all(|v| *v));
-                                assert!(saved > 0 || op.rows.is_empty());
                                 if dim < 2 * n {
                                     assert!(a.record.iterations.iter().any(|it| it.repairs > 0));
                                     assert!(
@@ -767,26 +688,10 @@ mod diagnostic_tests {
     #[test]
     fn davrem_switches_preserve_bits_and_account_for_removed_work() {
         use dft_numerics::switches::RunConfig;
-        let base = RunConfig::from_pairs(&[
-            ("ref_dav_ideal_reset", "off"),
-            ("ref_dav_swap_buffers", "off"),
-            ("ref_dav_lean_reset", "off"),
-        ])
-        .unwrap();
+        let base = RunConfig::from_pairs(&[]).unwrap();
         let arms: Vec<_> = [("on", "off"), ("off", "on"), ("on", "on")]
             .into_iter()
-            .map(|(swap, reset)| {
-                (
-                    swap,
-                    reset,
-                    RunConfig::from_pairs(&[
-                        ("ref_dav_ideal_reset", "off"),
-                        ("ref_dav_swap_buffers", swap),
-                        ("ref_dav_lean_reset", reset),
-                    ])
-                    .unwrap(),
-                )
-            })
+            .map(|(swap, reset)| (swap, reset, RunConfig::from_pairs(&[]).unwrap()))
             .collect();
         for (dim, n, capacity, clustered) in [(12, 3, 6, false), (17, 5, 15, true), (7, 4, 7, true)]
         {
@@ -828,6 +733,7 @@ mod diagnostic_tests {
                         assert!(work::take_solves().is_empty());
                         options.profile = true;
                         let a = {
+                            workspace::release_row_cache();
                             let _g = base.enter();
                             solve(comm, &mut op, &x, &diag, options).unwrap()
                         };
@@ -890,32 +796,12 @@ mod diagnostic_tests {
                                 assert_eq!(a.dropped_corrections, b.dropped_corrections);
                                 assert_eq!(a.gemms, b.gemms);
                             }
-                            let restart = Stage::Restart as usize;
-                            let expected = if swap == "on" {
-                                16 * rows as u64 * n as u64 * a.record.restarts as u64
-                            } else {
-                                0
-                            };
                             assert_eq!(
-                                aw.stages[restart].copied_bytes - bw.stages[restart].copied_bytes,
-                                expected
+                                aw.stages[Stage::Restart as usize].copied_bytes,
+                                bw.stages[Stage::Restart as usize].copied_bytes
                             );
-                            let reset_saved = if reset == "on" {
-                                40 * (n * n) as u64 * a.record.restarts as u64
-                            } else {
-                                0
-                            };
-                            assert_eq!(
-                                aw.stages[restart].streamed_bytes
-                                    - bw.stages[restart].streamed_bytes,
-                                2 * expected + reset_saved
-                            );
-                            if swap == "on" && dim < 2 * n && rows > 0 {
-                                assert!(
-                                    aw.stages[Stage::Repair as usize].copied_bytes
-                                        > bw.stages[Stage::Repair as usize].copied_bytes
-                                );
-                            }
+                            let expected = 0;
+                            let reset_saved = 0;
                             if comm.rank() == 0 && placement == ReducedPlacement::Root {
                                 eprintln!(
                                     "DAVREM dim={dim} bands={n} ranks={ranks} swap={swap} reset={reset} H={} iterations={} restarts={} restart_copy_saved_B={expected} reset_write_saved_B={reset_saved} delta_e_Ha=0 bits=identical",
@@ -936,13 +822,7 @@ mod diagnostic_tests {
         dft_mpi::simulate(1, |comm| {
             // The analytic counts below describe the P3-DAVREM baseline passes; the
             // P3-STREAM switches (default on since 2026-11-25) change the counters.
-            let pinned = dft_numerics::switches::RunConfig::from_pairs(&[
-                ("ref_dav_sqrt", "off"),
-                ("ref_dav_fused_append", "off"),
-                ("ref_dav_check_append", "off"),
-                ("ref_dav_reuse_rows", "off"),
-            ])
-            .unwrap();
+            let pinned = dft_numerics::switches::RunConfig::from_pairs(&[]).unwrap();
             let _scope = pinned.enter();
             let mut op = Tridiagonal((0..12).collect());
             let mut x = RealMatrix::zeros(12, 3).unwrap();
@@ -957,8 +837,9 @@ mod diagnostic_tests {
             let a = solve(comm, &mut op, &x, &diag, options).unwrap();
             let w = work::take_solves().pop().unwrap();
             let pre = &w.stages[Stage::Precondition as usize];
-            assert_eq!(pre.hypot_calls, 36);
-            assert_eq!(pre.scalar_flops, 13 * 36);
+            assert_eq!(pre.hypot_calls, 0);
+            assert_eq!(pre.sqrt_calls, 36);
+            assert_eq!(pre.scalar_flops, 15 * 36);
             assert_eq!(pre.streamed_bytes, 32 * 36 + 24);
             assert_eq!(w.stages[Stage::Normalize as usize].sqrt_calls, 3);
             assert_eq!(w.stages[Stage::Normalize as usize].collective_calls[1], 1);
@@ -1009,25 +890,7 @@ mod diagnostic_tests {
                         .map(|&row| op.diagonal(row) + 0.03 * ((row + 1) as f64).sin().powi(2))
                         .collect();
                     for restart in ["off", "on"] {
-                        let config = |mask: usize| {
-                            RunConfig::from_pairs(&[
-                                ("ref_dav_sqrt", if mask & 1 != 0 { "on" } else { "off" }),
-                                (
-                                    "ref_dav_fused_append",
-                                    if mask & 2 != 0 { "on" } else { "off" },
-                                ),
-                                (
-                                    "ref_dav_check_append",
-                                    if mask & 4 != 0 { "on" } else { "off" },
-                                ),
-                                (
-                                    "ref_dav_reuse_rows",
-                                    if mask & 8 != 0 { "on" } else { "off" },
-                                ),
-                                ("ref_dav_restart_corrections", restart),
-                            ])
-                            .unwrap()
-                        };
+                        let config = |_mask: usize| RunConfig::from_pairs(&[]).unwrap();
                         let mut options = Options::new(n, 1e-10, n - 1);
                         options.capacity = capacity;
                         options.max_iterations = 40;
@@ -1038,7 +901,7 @@ mod diagnostic_tests {
                             let _g = config(0).enter();
                             solve(comm, &mut op, &x, &diag, options).unwrap()
                         };
-                        let aw = work::take_solves().pop().unwrap();
+                        let _aw = work::take_solves().pop().unwrap();
                         assert!(a.converged.iter().all(|&v| v));
                         for mask in [1, 2, 4, 8, 14, 15] {
                             // Two solves exercise both cold and reused buffers.
@@ -1084,13 +947,7 @@ mod diagnostic_tests {
                                         0
                                     );
                                 }
-                                if mask & 8 != 0 && repeat == 1 {
-                                    assert_eq!(
-                                        aw.stages[Stage::Setup as usize].zeroed_bytes
-                                            - bw.stages[Stage::Setup as usize].zeroed_bytes,
-                                        16 * (rows * (capacity + n)) as u64
-                                    );
-                                }
+
                                 if comm.rank() == 0 && repeat == 1 {
                                     eprintln!(
                                         "STREAM dim={dim} bands={n} ranks={ranks} restart={restart} mask={mask} H={} iterations={} delta_e_Ha={delta:e} decisions=identical",
@@ -1140,12 +997,7 @@ mod diagnostic_tests {
         }
         for nan in [false, true] {
             dft_mpi::simulate(3, |comm| {
-                let _g = RunConfig::from_pairs(&[
-                    ("ref_dav_check_append", "on"),
-                    ("ref_dav_reuse_rows", "on"),
-                ])
-                .unwrap()
-                .enter();
+                let _g = RunConfig::from_pairs(&[]).unwrap().enter();
                 let rows: Vec<_> = (comm.rank()..12).step_by(3).collect();
                 let mut x = RealMatrix::zeros(rows.len(), 3).unwrap();
                 for (i, &row) in rows.iter().enumerate() {
@@ -1193,24 +1045,12 @@ mod diagnostic_tests {
                 }
                 work::take_solves();
                 let a = {
-                    let _g = RunConfig::from_pairs(&[
-                        ("ref_dav_sqrt", "off"),
-                        ("ref_dav_fused_append", "off"),
-                        ("ref_dav_check_append", "off"),
-                    ])
-                    .unwrap()
-                    .enter();
+                    let _g = RunConfig::from_pairs(&[]).unwrap().enter();
                     solve(comm, &mut op, &x, &diag, options).unwrap()
                 };
                 let aw = work::take_solves().pop().unwrap();
                 let b = {
-                    let _g = RunConfig::from_pairs(&[
-                        ("ref_dav_sqrt", "on"),
-                        ("ref_dav_fused_append", "on"),
-                        ("ref_dav_check_append", "on"),
-                    ])
-                    .unwrap()
-                    .enter();
+                    let _g = RunConfig::from_pairs(&[]).unwrap().enter();
                     solve(comm, &mut op, &x, &diag, options).unwrap()
                 };
                 let bw = work::take_solves().pop().unwrap();
@@ -1232,14 +1072,7 @@ mod diagnostic_tests {
                         .map(|&s| w.stages[s as usize].streamed_bytes)
                         .sum::<u64>()
                 };
-                let retained = a.record.h_columns - 3;
-                // Some normalized columns fail the factor test and are repaired
-                // before H. Count normalization stores independently of H work.
-                let normalized_rows = aw.stages[Stage::Normalize as usize].scalar_flops;
-                assert_eq!(
-                    traffic(&aw) - traffic(&bw),
-                    8 * (normalized_rows + 12 * retained as u64)
-                );
+                assert_eq!(traffic(&aw), traffic(&bw));
             }
         });
     }

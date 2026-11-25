@@ -466,11 +466,7 @@ fn certificate_opt_out_rejection_and_reference_finite_difference() {
         .is_err()
     );
     {
-        let config = RunConfig::from_pairs(&[
-            ("xc_screen_negative", "off"),
-            ("refscf_verify_energy", "on"),
-        ])
-        .unwrap();
+        let config = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
         let _scope = config.enter();
         let mut energy_verified = k_driver::run(input(), profile, &points).unwrap();
         let view = delivered::force_state(input(), &mut energy_verified.outcome).unwrap();
@@ -591,13 +587,9 @@ fn lazy_delivery_materializes_once_and_preserves_derivatives() {
             };
             let mut baseline = None;
             for lazy in ["off", "on"] {
-                let config = RunConfig::from_pairs(&[
-                    ("refscf_lazy_output", lazy),
-                    ("m2_lazy_result", "on"),
-                ])
-                .unwrap();
+                let config = RunConfig::from_pairs(&[("m2_lazy_result", "on")]).unwrap();
                 let _scope = config.enter();
-                dft_engine::gamma_real::set_delivered_orbitals(false);
+                dft_engine::gamma_real::set_delivered_orbitals(lazy == "off");
                 let mut run = k_driver::run(
                     input(),
                     Profile::from_standard_ha(opts.standard.unwrap().threshold_ha).unwrap(),

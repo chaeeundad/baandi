@@ -326,25 +326,10 @@ pub(super) async fn run_continuation<K: Collective>(
             "reference spin/FD requires standard profile, positive budget, prepared symmetry when requested",
         ));
     }
-    if config.on(Id::REFSCF_RMM)
-        || config.on(Id::REFSCF_LADDER)
-        || config.on(Id::REFSCF_VERIFY_ENERGY)
-        || config.on(Id::REFSCF_VERIFY_REUSE)
-    {
+    if config.on(Id::REFSCF_RMM) || config.on(Id::REFSCF_LADDER) {
         return Err(ScfError::InvalidInput(
             "reference spin/FD supports Davidson and fixed-point verification only; RMM, ladder, energy verification and failed-map reuse unavailable",
         ));
-    }
-    for id in [
-        Id::REFSCF_VERIFY_GATE,
-        Id::REFSCF_VERIFY_GATE_FIRST,
-        Id::REFSCF_LEAN_ENERGY,
-    ] {
-        config.note_path(
-            id,
-            "inactive",
-            Some("reference spin/FD uses complete map audits and verifies each stop"),
-        );
     }
     if policy.channels() == 2 && opts.functional == Functional::LdaPz {
         return Err(ScfError::InvalidInput(
@@ -477,13 +462,11 @@ pub(super) async fn run_continuation<K: Collective>(
         Broyden::new(profile, &plan.g2, &plan.smooth, volume, electrons)?
     };
     let spin_fd = matches!(policy, Policy::SpinFermiDirac { .. });
-    let stiffness = spin_fd && config.on(Id::REFSCF_SPIN_STIFFNESS);
-    if spin_fd && config.on(Id::REFSCF_HISTORY_CONDITIONING) {
+    let stiffness = spin_fd;
+    if spin_fd {
         mixer.condition_history();
     }
-    let mut kept: Vec<_> = (0..policy.channels())
-        .map(|_| KeptHx::new(config.on(Id::REFSCF_KEPT_HX)))
-        .collect();
+    let mut kept: Vec<_> = (0..policy.channels()).map(|_| KeptHx::new(true)).collect();
     let mut x = transform(&mut plan, comm, &n, &policy, electrons, volume)?;
     let mut workspace = map::Workspace::new(
         &states[0],
@@ -522,7 +505,7 @@ pub(super) async fn run_continuation<K: Collective>(
                             } else {
                                 Broyden::new(next, &plan.g2, &plan.smooth, volume, electrons)?
                             };
-                            if spin_fd && config.on(Id::REFSCF_HISTORY_CONDITIONING) {
+                            if spin_fd {
                                 replacement.condition_history();
                             }
                             mixer = replacement;
@@ -681,11 +664,8 @@ pub(super) async fn run_continuation<K: Collective>(
             boundary.emit(map_report).await;
             let start = Instant::now();
             warm(&mut states, &step);
-            let warm_check = config.on(Id::REFSCF_VERIFY_WARM);
+
             for cache in &mut kept {
-                if !warm_check {
-                    cache.invalidate();
-                }
                 cache.preserve_input(true);
             }
             let tolerance = next_ethr_ry(ethr, dr2, electrons);

@@ -307,12 +307,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     let mut opts = dav::Options::new(n, o.threshold_ha, o.occupied);
     opts.profile = o.profile;
     let (mut x, mut hx, mut values, mut g) = {
-        let mut w = Workspace::new(
-            op,
-            n,
-            n.max(m),
-            dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_SINGLE_GEMM),
-        )?;
+        let mut w = Workspace::new(op, n, n.max(m))?;
         w.v.reshape_within_storage(rows, n)?;
         w.hv.reshape_within_storage(rows, n)?;
         w.v.as_mut_slice().copy_from_slice(start.as_slice());

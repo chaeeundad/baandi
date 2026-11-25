@@ -121,12 +121,7 @@ fn fixture(mode: &str, ranks: usize, verify: bool, budget: usize, stepped: bool)
         }]
     };
     dft_mpi::simulate(ranks, |comm| {
-        let _scope = RunConfig::from_pairs(&[
-            ("refscf_verify_energy", "off"),
-            ("refscf_verify_gate", "off"),
-        ])
-        .unwrap()
-        .enter();
+        let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
         let input = || StartInput {
             cell: &cell,
             atoms: &atoms,
@@ -402,15 +397,10 @@ fn failed_verification_reuse_and_ladder_boundaries() {
         history: 4,
         ..Default::default()
     };
-    for (reuse, ladder) in [("off", "off"), ("on", "off"), ("off", "on")] {
-        let _scope = RunConfig::from_pairs(&[
-            ("refscf_verify_energy", "off"),
-            ("refscf_verify_gate", "off"),
-            ("refscf_verify_reuse", reuse),
-            ("refscf_ladder", ladder),
-        ])
-        .unwrap()
-        .enter();
+    for ladder in ["off", "on"] {
+        let _scope = RunConfig::from_pairs(&[("refscf_ladder", ladder)])
+            .unwrap()
+            .enter();
         let a = driver::run(input(), profile).unwrap();
         let (b, reports) = drive(driver::stepper(input(), profile));
         assert_eq!(scalar_bits(&a), scalar_bits(&b));
@@ -436,7 +426,7 @@ fn failed_verification_reuse_and_ladder_boundaries() {
         );
         if ladder == "off" {
             assert!(attempts.iter().any(|a| !a.passed));
-            assert_eq!(reports.iter().any(|r| r.reused), reuse == "on");
+            assert!(!reports.iter().any(|r| r.reused));
             assert!(
                 reports
                     .iter()

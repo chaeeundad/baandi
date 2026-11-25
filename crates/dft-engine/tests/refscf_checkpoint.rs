@@ -102,12 +102,9 @@ fn fixture(mode: &str, ranks: usize, budget: usize, points_to_save: &[usize], re
         }]
     };
     dft_mpi::simulate(ranks, |comm| {
-        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[(
-            "refscf_verify_reuse",
-            if reuse { "on" } else { "off" },
-        )])
-        .unwrap()
-        .enter();
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+            .unwrap()
+            .enter();
         let build = || {
             k_driver::stepper_with(
                 StartInput {
@@ -222,11 +219,7 @@ fn gamma_k222s_skew_ranks_1_3_8() {
         }
     }
 }
-#[test]
-#[ignore = "verification recovery convergence; run in release (module header)"]
-fn verification_reuse_identity() {
-    fixture("gamma", 3, 400, &[3, 8], true);
-}
+
 #[test]
 fn rejects_identity_and_corruption() {
     let cp = dft_engine::refscf::checkpoint::Checkpoint {
@@ -250,90 +243,6 @@ fn rejects_identity_and_corruption() {
     assert!(bad.validate(&identity(1), 0).is_err());
 }
 
-#[test]
-#[ignore = "failed verification recovery matrix; run in release"]
-fn pending_verification_map_is_restored_without_replay() {
-    use dft_engine::refscf::stepper::StepKind;
-    let cell = Cell::from_user_rows_bohr([[11., 0., 0.], [0.2, 11., 0.], [0., 0.1, 11.]]).unwrap();
-    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
-    let pp = common::potential_with_atomic_start(4., 1.2, true, 161, "SLA PZ");
-    let potentials = [SpeciesPotential {
-        label: "Xx",
-        potential: &pp,
-    }];
-    let points = [KPoint {
-        fractional: [0.; 3],
-        weight: 1.,
-    }];
-    for gamma in [GammaReal::On, GammaReal::Off] {
-        let options = ScfOptions {
-            cutoff_hartree: 2.,
-            bands: Some(3),
-            gamma_real: gamma,
-            max_iterations: 100,
-            ..Default::default()
-        };
-        dft_mpi::simulate(3, |comm| {
-            let _scope = dft_numerics::switches::RunConfig::from_pairs(&[
-                ("refscf_verify_energy", "off"),
-                ("refscf_verify_gate", "off"),
-                ("refscf_verify_reuse", "on"),
-            ])
-            .unwrap()
-            .enter();
-            let build = || {
-                k_driver::stepper_with(
-                    StartInput {
-                        cell: &cell,
-                        atoms: &atoms,
-                        potentials: &potentials,
-                        options: &options,
-                    },
-                    Profile {
-                        history: 4,
-                        ..Default::default()
-                    },
-                    &points,
-                    comm,
-                )
-            };
-            let expected = build().run_to_end().unwrap();
-            assert!(expected.outcome.converged);
-            let mut s = build();
-            s.initialize().unwrap();
-            loop {
-                let r = s.step().unwrap();
-                assert!(!s.is_done(), "fixture needs a failed verification");
-                if !r.safe_point {
-                    assert!(s.checkpoint(identity(3), comm.rank()).is_err());
-                }
-                if r.kind == StepKind::Verification && r.safe_point {
-                    break;
-                }
-            }
-            let cp = s.checkpoint(identity(3), comm.rank()).unwrap();
-            let next = s.step().unwrap();
-            assert!(next.reused);
-            assert_eq!(next.h_columns, 0);
-            drop(s);
-            let mut restored = build();
-            restored.restore(&cp, &identity(3), comm.rank()).unwrap();
-            let report = restored.step().unwrap();
-            assert!(report.reused);
-            assert_eq!(report.h_columns, 0);
-            assert_eq!(report.iteration, next.iteration);
-            assert_eq!(report.ethr_ry.to_bits(), next.ethr_ry.to_bits());
-            let actual = restored.run_to_end().unwrap();
-            assert_eq!(bits(&expected), bits(&actual));
-            if comm.rank() == 0 {
-                println!(
-                    "R8B_PENDING gamma={gamma:?} iteration={} identity=true",
-                    cp.iteration
-                );
-            }
-        });
-    }
-}
 #[test]
 #[ignore = "additional spin/FD two-map continuation; run in release"]
 fn electronic_fixed_spin_and_fd_restart() {
@@ -370,12 +279,9 @@ fn electronic_fixed_spin_and_fd_restart() {
             weight: 1.,
         }];
         dft_mpi::simulate(3, |comm| {
-            let _scope = dft_numerics::switches::RunConfig::from_pairs(&[
-                ("refscf_verify_energy", "off"),
-                ("refscf_verify_gate", "off"),
-            ])
-            .unwrap()
-            .enter();
+            let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+                .unwrap()
+                .enter();
             let build = || {
                 electronic::stepper_with(
                     StartInput {

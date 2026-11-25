@@ -3737,3 +3737,152 @@ identical; |E_T - E_D| <= 4.6e-13 Ha. ADOPTED (default on). STACK_ROTATE and SET
 si216 1.91 GB/rank, measured 1.38 GB (kept slabs ~500, cached rows 202, returned 134). Generalization agreement:
 G2 si32 PBE E_ref - E_legacy = -1.2e-10 Ha, G1 Mg NLCC +3.6e-10 Ha, both verified, both within the standard class
 of the strict oracle. Evidence: dev08 /data/sig-dft/gen/RESULT.md.
+
+
+## R10a legacy experiment retirement (2026-11-25)
+
+User decision D3 and R10A-DELETE-EXPERIMENTS; removal, not a new speed claim.
+Stored evidence remains under `tests/reference`. The reference ladder, live
+fixed-map diagnostic, floor physics tests, and snapshot capture/replay remain.
+
+| Removed switch | Prior evidence | Disposition |
+| --- | --- | --- |
+| `BAANDI_CUTOFF_LADDER_STANDARD` | LADDER-STANDARD / LADDER-S1-STANDARD | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_STANDARD_SEED` | LADDER-STANDARD / LADDER-S1-STANDARD | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_SECANT` | LADDER-SECANT / LADDER-S2-SECANT | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_COARSE_STOP` | D1-LADDER-HANDOFF-KNOBS / F-LADDER-FRACTION | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_COARSE_RULE` | D1-LADDER-HANDOFF-KNOBS | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_FRACTION_RULE` | F-LADDER-FRACTION | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_STOP_RULE` | F-LADDER-FRACTION | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_WATCH` | F-LADDER-FRACTION | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_BASIS_CHECK` | G-LADDER-FALLBACK | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_LADDER_FIRST_TOL` | D1-LADDER-HANDOFF-KNOBS | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_SCF_ADVANCE` | BT3-ADVANCE-CONTRACT / BT3-BUDGET-VARIANTS | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_SCF_ADVANCE_BLOCKS` | BT3-ADVANCE-CONTRACT / BT3-BUDGET-VARIANTS | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_SCF_ADVANCE_GROWTH` | BT3-GROWTH-TRIGGER | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_SCF_ADVANCE_ADAPT` | BT3-ADVANCE-CONTRACT / BT3-BUDGET-VARIANTS | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_SCF_ADVANCE_SCOPE` | BT3-ADVANCE-CONTRACT / BT3-BUDGET-VARIANTS | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_M2_OWNED_HANDOFF` | G-HANDOFF-OWNED-CLOSED | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_CUTOFF_LADDER` | C1-LADDER / C1-LADDER-DEV08 | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_VERIFY_PROFILE` | LANE-VERIFY Phase 0 | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+| `BAANDI_FIRST_BLOCK` | BT0-FIRST-BLOCK | retired in R10a, code deleted; recreate from git history `d049b09a756c7da9f0b076698bd90aec6faec8bc` if needed |
+
+### R10a deleted-test inventory
+
+Surviving prolongation, snapshot, fixed-map and floor tests are retained.
+
+| Source | Deleted test | Reason |
+| --- | --- | --- |
+| `crates/dft-cli/tests/all/run.rs` | `final_spectral_guard_is_additive_and_audits_only_reported_state` | tests deleted code |
+| `crates/dft-engine/tests/owned_handoff.rs` | `profile_is_observational_at_active_and_terminal_handoffs` | tests deleted code |
+| `crates/dft-engine/tests/owned_handoff.rs` | `profile_matrix_one_through_seven_ranks` | tests deleted code |
+| `crates/dft-engine/tests/owned_handoff.rs` | `whole_handoff_uses_at_most_two_collectives_on_two_through_seven_ranks` | tests deleted code |
+| `crates/dft-engine/tests/owned_handoff.rs` | `unsupported_consumers_keep_the_full_route` | tests deleted code |
+| `crates/dft-engine/tests/owned_handoff.rs` | `rank_local_consumer_mismatch_is_an_agreed_error` | tests deleted code |
+| `crates/dft-engine/tests/scf_advance.rs` | `scf_advance_keeps_the_standard_class_and_records_every_advanced_map` | tests deleted code |
+| `crates/dft-engine/tests/first_block_diag.rs` | `physical_boundary_spectrum_and_criterion` | tests deleted code |
+| `crates/dft-engine/tests/first_block_diag.rs` | `fixed_steps_preserve_production_bits_and_work` | tests deleted code |
+| `crates/dft-engine/tests/all/direct_min.rs` | `default_method_is_the_ordinary_scf` | tests deleted code |
+| `crates/dft-engine/tests/all/direct_min.rs` | `minimizer_descends_to_the_scf_state_and_hands_off_certified` | tests deleted code |
+| `crates/dft-engine/tests/all/direct_min.rs` | `minimizer_is_thread_count_independent` | tests deleted code |
+| `crates/dft-engine/tests/all/direct_min.rs` | `ineligible_problems_fall_back_with_a_reason` | tests deleted code |
+| `crates/dft-engine/tests/all/direct_min.rs` | `track_a_stage0_bench` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ladder_reaches_the_full_cutoff_fixed_point_skewed` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ladder_reaches_the_full_cutoff_fixed_point_slab` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ineligible_problem_falls_back_bit_identically` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ladder_result_is_independent_of_thread_count` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `standard_ladder_is_opt_in_and_stays_in_the_standard_class` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `secant_seeds_keep_the_strict_fixed_point` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `standard_and_secant_ladder_is_independent_of_thread_count` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `d1_defaults_are_the_adopted_ladder` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `d1_knobs_change_only_their_quantity_and_the_fine_stage_converges` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `atomic_coarse_rule_only_raises_the_stop_level` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ladder_reports_the_start_of_each_stage` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `d1_knobs_on_a_k_point_problem_fall_back_bit_identically` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `d1_knobs_are_independent_of_thread_count` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ladder_d1_scan` | tests deleted code |
+| `crates/dft-engine/tests/all/cutoff_ladder.rs` | `ladder_standard_secant_bench` | tests deleted code |
+| `crates/dft-engine/src/gamma_real.rs` | `owned_permutation_matches_complex_injection_and_packing` | tests deleted code |
+| `crates/dft-engine/src/gamma_real.rs` | `owned_rank_local_faults_are_agreed_before_transfer` | tests deleted code |
+| `crates/dft-engine/src/gamma_real.rs` | `owned_missing_block_and_bad_density_are_agreed` | tests deleted code |
+| `crates/dft-engine/src/gamma_real.rs` | `owned_overlap_boundary_uses_original_verdict` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `basis_plan_matches_constructor_at_dimension_boundaries` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `planned_basis_skip_preserves_full_cutoff_result` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `high_g_indicator_has_the_known_diagonal_value` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `fraction_rules_preserve_grid_and_parseval_budget` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `fraction_watch_is_bit_identical_and_forecast_is_diagnostic` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `measure` | tests deleted code |
+| `crates/dft-engine/src/cutoff_ladder.rs` | `measure_2x2` | tests deleted code |
+| `crates/dft-engine/src/replay_capture.rs` | `signed_mode_metric_has_analytic_units_and_sphere_filter` | tests deleted code |
+| `crates/dft-engine/src/verification_tests.rs` | `verification_lane_profile_identity` | tests deleted code |
+| `crates/dft-engine/src/verification_profile.rs` | `gather_preserves_unequal_rank_records_and_count_only_payloads` | tests deleted code |
+| `crates/dft-engine/src/advance.rs` | `completion_rules_in_order` | tests deleted code |
+| `crates/dft-engine/src/advance.rs` | `budget_adaptation_is_bounded` | tests deleted code |
+
+### R10a strict-oracle exception (D2)
+
+The stored strict Gamma baseline uses the legacy ladder by default. Removing
+that default changed density bits despite an energy difference of only
+9.77e-14 Ha. The user confirmed D2: keep the oracle's default arithmetic whole.
+`cutoff_ladder.rs` therefore retains only that fixed-default initialization:
+fraction 0.5, coarse density residual 1e-4, at most 30 coarse maps, no secant
+memory, no tolerance seed, no fraction/basis/owned-handoff experiment branches.
+It has no ladder switch reads. The switch retirement rows refer to the deleted
+configuration and variant code, not this retained oracle default. The live
+reference driver still uses its independent ladder. No baseline was changed.
+
+### R10a final verification
+
+Rust line counts include every `.rs` file recursively in the three affected
+crates; inline tests are counted in `src`, and stored reference evidence is
+excluded.
+
+| Directory | Before files / lines | After files / lines |
+| --- | ---: | ---: |
+| `crates/dft-engine/src` | 73 / 49421 | 67 / 43196 |
+| `crates/dft-engine/tests` | 87 / 38333 | 83 / 35917 |
+| `crates/dft-cli/src` | 25 / 20846 | 25 / 20661 |
+| `crates/dft-cli/tests` | 49 / 13957 | 49 / 13883 |
+| `crates/dft-numerics/src` | 19 / 14774 | 19 / 14701 |
+| `crates/dft-numerics/tests` | 18 / 4814 | 18 / 4792 |
+
+- Switches: **187 → 168** (19 removed; retirement rows above).
+- Test binaries: **112 → 109**. Named test inventory: **1274 → 1229**
+  (45 removed, zero added); ignored inventory: **237 → 230**.
+- Full runner summaries: before **1038 passed / 0 failed / 237 ignored**;
+  after **1000 passed / 0 failed / 230 ignored**. Runner summary totals exceed the named
+  inventory by one before and after; both measurements are reported separately.
+- `cargo check --workspace --tests`: exit 0.
+- `CHECK_SCCACHE=0 BAANDI_TEST_TMP=/tmp/r10a-test scripts/check.sh`: exit 0;
+  build, tests, fmt, clippy all PASS. Sandbox denies the optional `ps` load
+  probe; no verification gate is skipped or fails.
+- `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings`:
+  exit 0.
+- `cargo test -p dft-cli --test reference_identity -- --nocapture`: exit 0,
+  one passed; both reference and strict golden values unchanged.
+- `python3 -I scripts/make_readme_figures.py` and
+  `python3 -I scripts/tests/test_readme_figures.py`: exit 0, nine tests passed.
+  README block, figures, baseline files and `tests/reference` have no diff.
+- The mode-comparison fixture now pins `gamma_real='off'` to compare direct
+  sessions without the fixed-default oracle ladder; this replaces its retired
+  ladder-off switch pin. The retired ladder routing fixture was deleted.
+
+Both identity commands use `target/release/dft-cli`, three repeats, one thread,
+`--cases gamma,k222s,k222 --require-identical`, and UPF SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+Reference: `--baseline docs/performance/baseline-reference.json`, exit 0.
+Oracle: `BAANDI_REFERENCE_STRICT=on` and
+`--baseline docs/performance/baseline-oracle.json`, exit 0. Every energy bit and
+density hash matches; all energy differences are exactly 0 Ha.
+
+| Path | Case | Energy bits (Ha, binary64 hex) | Fine iterations | Density SHA-256 |
+| --- | --- | --- | ---: | --- |
+| reference | gamma | `c01d2e9f89e0349a` | 7 | `a0c76c8c7741125ad2cf59dee1534a0e4c29bc306002e6de22e56b92c99573e2` |
+| reference | k222s | `c01fad7d54bc623e` | 7 | `67120c8ad65d1b86021aec1aa39c82e5e3dfd39f5dc758473589a9cd77c29d5c` |
+| reference | k222 | `c01f532df8c633b9` | 7 | `680dd07126157dadfe5d2cb2cf036a3a05e5778e4afa8c99357651d7c3b3cdef` |
+| strict oracle | gamma | `c01d2e9f89ffbffc` | 8 | `2fb29221af964b9ab95d635c1b23a0fade6f9b4676ab6a8d8fe65f290b29fcb5` |
+| strict oracle | k222s | `c01fad7d54beed04` | 10 | `913aa5b4c39d9a49d0afc17d26efbc6f07a89cefd67c67fd1521287339baa564` |
+| strict oracle | k222 | `c01f532df8db2672` | 10 | `4edeedb4469f5324df3da08c9d1e5810f7711367e7971c4cacb2921615a110fd` |
+
+Raw command logs and inventories: `/tmp/r10a-evidence` (local run artifacts).
+No timing acceptance or remote performance claim is made. Changes are uncommitted.

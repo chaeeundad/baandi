@@ -109,7 +109,6 @@ fn legacy_defaults_are_unchanged() {
         Id::APPLY_LEAN,
         Id::MKL_DGEMM,
         Id::MKL_EVD,
-        Id::CUTOFF_LADDER_STANDARD,
         Id::STANDARD_RESIDUAL_GUARD,
         Id::PHASE_THREADS,
         Id::STAGE_TIMERS,
@@ -178,11 +177,6 @@ fn legacy_defaults_are_unchanged() {
     let value = |id: Id| switches::resolve(switches::switch(id), None).0;
     assert_eq!(value(Id::NL_ENERGY), Value::Choice("fast"));
     assert_eq!(value(Id::B1_SKETCH), Value::Choice("count"));
-    assert_eq!(value(Id::LADDER_STANDARD_SEED), Value::Choice("coarse"));
-    assert_eq!(value(Id::LADDER_SECANT), Value::Choice("off"));
-    assert_eq!(value(Id::LADDER_COARSE_STOP), Value::Number(Some(1e-4)));
-    assert_eq!(value(Id::LADDER_COARSE_RULE), Value::Choice("fixed"));
-    assert_eq!(value(Id::LADDER_FIRST_TOL), Value::Choice("auto"));
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(
@@ -225,7 +219,6 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::MIX_GROWTH_RESET), Value::Number(None));
     assert_eq!(value(Id::B1_MARGIN), Value::Number(Some(0.5)));
     assert_eq!(value(Id::B1_ROWS), Value::Number(None));
-    assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
     // MPI-KEPT-START stays opt-in until dev08.
@@ -244,11 +237,8 @@ fn legacy_defaults_are_unchanged() {
     // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
     assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
     // BREAKTHROUGH-3 bounded subspace SCF stays off (rejected at stage 1, ledger BT3-*).
-    assert_eq!(value(Id::SCF_ADVANCE), Value::Choice("off"));
-    assert_eq!(value(Id::SCF_ADVANCE_BLOCKS), Value::Number(Some(2.0)));
     // BREAKTHROUGH-0-INSTRUMENT measurement switches stay off (results unchanged either way).
     assert_eq!(value(Id::PHASE_PROFILE), Value::Choice("off"));
-    assert_eq!(value(Id::FIRST_BLOCK), Value::Choice("off"));
     assert_eq!(value(Id::SNAPSHOT_DIR), Value::Raw(None));
     // BREAKTHROUGH-4-OTHER-AND-INIT: wait probe and the three removal switches
     // stay off until dev08 (all bit-identical; the probe changes timing only).
@@ -274,21 +264,9 @@ fn legacy_defaults_are_unchanged() {
     // M2-OWNED: owned potential and density prototype, off until dev08.
     assert_eq!(value(Id::M2_LOCAL_FIELDS), Value::Choice("on"));
     assert_eq!(value(Id::M2_LOCAL_DENSITY), Value::Choice("on"));
-    assert_eq!(value(Id::INIT_OWNED_STATES), Value::Choice("on")); // on since 2026-11-19 (dev08 si64 -11.4 %)
-    assert_eq!(value(Id::M2_OWNED_HANDOFF), Value::Choice("off"));
-    assert_eq!(value(Id::VERIFY_SCHEDULE), Value::Choice("on")); // on since 2026-11-19 (dev08 1-core si64 -6.8 %)
-    assert_eq!(value(Id::LADDER_FRACTION_RULE), Value::Choice("off"));
-    assert_eq!(value(Id::LADDER_STOP_RULE), Value::Choice("off"));
-    assert_eq!(value(Id::LADDER_WATCH), Value::Choice("off"));
-    assert_eq!(value(Id::LADDER_BASIS_CHECK), Value::Choice("off"));
     assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
     assert_eq!(value(Id::INIT_PROFILE), Value::Choice("off"));
     assert_eq!(value(Id::FFT_PROFILE), Value::Choice("off"));
-    assert_eq!(value(Id::VERIFY_PROFILE), Value::Choice("off"));
-    assert_eq!(
-        switches::table_of(Id::VERIFY_PROFILE),
-        switches::Table::Profile
-    );
     assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("on"));
     assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
     assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
@@ -300,7 +278,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_OWNED_INPUT), Value::Choice("off"));
     assert_eq!(value(Id::REFERENCE_SCF), Value::Choice("on"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 187);
+    assert_eq!(TABLE.len(), 168);
 }
 
 #[test]

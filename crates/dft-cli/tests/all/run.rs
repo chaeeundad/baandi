@@ -53,10 +53,7 @@ impl Case {
         )
         .unwrap();
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
-        // These legacy-output tests pin the pre-ladder path (the C1 cutoff ladder is
-        // on by default since 2026-11-10 and has its own tests).
-        cmd.env("BAANDI_CUTOFF_LADDER", "off");
-        // They also pin the strict reference path (ADR 0043: the single
+        // These legacy-output tests pin the strict reference path (ADR 0043: the single
         // standard path is the default since 2026-11-16 and is tested in
         // tests/all/single_path.rs); the legacy outputs and the independent engine
         // comparisons below are strict.
@@ -99,7 +96,6 @@ fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
     let run = |mode: &str, extra: (&str, &str)| {
         let out = format!("reuse-{mode}-{}", extra.1);
         let o = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
-            .env("BAANDI_CUTOFF_LADDER", "off")
             .env("BAANDI_DAVIDSON", "lean")
             .env("BAANDI_REUSE_PSI", mode)
             .env("BAANDI_EWALD_FAST", "off")
@@ -241,7 +237,6 @@ fn verify(large: bool) {
         "phases_s",
         "certificate_outside_phases_s",
         "step_overhead_s",
-        "ladder_coarse_s",
         "remainder_s",
     ]
     .iter()
@@ -716,23 +711,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    // 89 = 83 + RESTART_KEEP (BREAKTHROUGH-1) + the five BREAKTHROUGH-3 switches (SCF_ADVANCE, _BLOCKS, _GROWTH, _ADAPT, _SCOPE).
-    // 97 = 96 + SPIN_SHARE (ONEPATH-5).
-    // 98 = 97 + M2_LAZY_SERIAL (ISSUE-20).
-    // 100 = 99 + IMPORT_CHECK (LADDER-IMPORT-SPLIT).
-    // 101 = 100 + M2_LAZY_RESULT (LAZY-RESULT).
-    // 101 = 99 + M2_GRID + M2_MIX (M2-GRID).
-    // 105 = 103 + EWALD_FAST + IONIC_FAST (INIT-EWALD-FAST, INIT-IONIC-FAST).
-    // 106 = 105 + MIX_COULOMB_GUARD (SCF-TRAJECTORY).
-    // 108 = 106 + M2_LOCAL_FIELDS + M2_LOCAL_DENSITY (M2-OWNED).
-    // 109 = 108 + STOP_PREDICTOR (SCF-TAIL).
-    // 111 includes default-off M2_OWNED_HANDOFF.
-    assert_eq!(switches.len(), 187);
-    let ladder = &switches["BAANDI_CUTOFF_LADDER"];
-    assert_eq!(
-        (&ladder["value"], &ladder["source"]),
-        (&serde_json::json!("off"), &serde_json::json!("env"))
-    );
+    assert_eq!(switches.len(), 168);
     if std::env::var_os("BAANDI_BUFFER_TOL").is_none() {
         let tol = &switches["BAANDI_BUFFER_TOL"];
         assert_eq!(
@@ -994,9 +973,6 @@ fn baandi() -> Command {
         paths.extend(std::env::split_paths(&path));
     }
     command.env("PATH", std::env::join_paths(paths).unwrap());
-    // Legacy-output comparison across CLI modes: pin the pre-ladder path (the
-    // observe/agent modes do not run the C1 ladder).
-    command.env("BAANDI_CUTOFF_LADDER", "off");
     command.env("BAANDI_BINARY_HASH_CACHE", "off");
     command
 }
@@ -1016,7 +992,9 @@ fn agent_socket_mode() {
 
 fn compare_execution_modes(include_agent: bool) {
     let c = Case::new(false);
-    let suffix = "[scf]\nmax_iterations=3\n";
+    // Runtime sessions start directly; use the complex path, which is ineligible
+    // for the fixed-default oracle ladder, in every mode of this comparison.
+    let suffix = "[scf]\nmax_iterations=3\ngamma_real='off'\n";
     let classic = c.run(suffix, Some(&c.dir.join("classic")));
     status(&classic, 3);
     let mut expected = c.json("classic", "results.json");
@@ -1240,56 +1218,7 @@ fn observed_file_mirror_is_exact_and_logs_are_never_overwritten() {
     assert_eq!(before, fs::read(c.dir.join("mirror.jsonl")).unwrap());
 }
 
-#[test]
-fn final_spectral_guard_is_additive_and_audits_only_reported_state() {
-    let c = Case::new(false);
-    // Pinned to the complex path: the guard forces it, and bit-identical energies are the claim.
-    status(
-        &c.run("[scf]\ngamma_real='off'\n", Some(Path::new("off"))),
-        0,
-    );
-    let off = c.json("off", "results.json");
-    assert_eq!(off["scf"]["spectral_guard"], "off");
-    assert!(off.get("spectral_completeness").is_none());
-    let run = c.run(
-        "[scf]\nspectral_guard='final'\ngamma_real='off'\n",
-        Some(Path::new("final")),
-    );
-    status(&run, 0);
-    let guarded = c.json("final", "results.json");
-    assert_eq!(guarded["schema_version"], off["schema_version"]);
-    assert_eq!(guarded["total_energy"], off["total_energy"]);
-    assert_eq!(guarded["eigenvalues"], off["eigenvalues"]);
-    assert_eq!(
-        hash(&c.dir.join("off/density.bin")),
-        hash(&c.dir.join("final/density.bin"))
-    );
-    let report = &guarded["spectral_completeness"];
-    assert_eq!(report["passed"], true);
-    assert_eq!(report["retries"], 0);
-    let events = report["events"].as_array().unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0]["iteration"], guarded["convergence"]["iterations"]);
-    assert_eq!(events[0]["k_point"], 0);
-    assert_eq!(events[0]["method"], "full_space_dense");
-    assert_eq!(
-        events[0]["extra_operator_applications"],
-        report["extra_operator_applications"]
-    );
-    assert!(report["extra_operator_applications"].as_u64().unwrap() > 0);
-    assert_eq!(
-        guarded.as_object().unwrap().len(),
-        off.as_object().unwrap().len() + 1
-    );
-    let bad = c.run(
-        "[scf]\nspectral_guard='sometimes'\n",
-        Some(Path::new("bad")),
-    );
-    status(&bad, 1);
-    assert!(String::from_utf8_lossy(&bad.stderr).contains("scf.spectral_guard"));
-}
-
-/// ONEPATH-5: both collinear writers expose count-only sharing diagnostics.
+// ONEPATH-5: both collinear writers expose count-only sharing diagnostics.
 #[test]
 fn spin_share_results_include_shared_and_fallback_counts() {
     let c = Case::new(false);
@@ -1321,7 +1250,6 @@ fn spin_share_results_include_shared_and_fallback_counts() {
             .args(["run", "spin.toml", "--output-dir", name])
             .env("BAANDI_SPIN_SHARE", mode)
             .env("BAANDI_REFERENCE_STRICT", "off")
-            .env("BAANDI_CUTOFF_LADDER", "off")
             .output()
             .unwrap();
         status(&output, 0);
@@ -1391,7 +1319,6 @@ fn verification_schedule_json_is_lazy_and_optional() {
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .current_dir(&case.dir)
             .env("BAANDI_REFERENCE_STRICT", "off")
-            .env("BAANDI_CUTOFF_LADDER", "off")
             .env("BAANDI_VERIFY_SCHEDULE", mode)
             .args(["run", "schedule.toml", "--output-dir"])
             .arg(&dest)

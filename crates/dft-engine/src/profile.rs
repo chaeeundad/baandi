@@ -1467,7 +1467,3 @@ mod fft_lane_tests {
         }
     }
 }
-
-/// Per-attempt verification lane instrumentation (Phase 0).
-#[path = "verification_profile.rs"]
-pub mod verification;

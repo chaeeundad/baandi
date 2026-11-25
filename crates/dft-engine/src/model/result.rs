@@ -52,10 +52,6 @@ pub struct IterationRecord {
     pub mixing_raw_recovery: bool,
     pub fixed_point_certificate: Option<FixedPointCertificate>,
     pub timings: PhaseTimings,
-    /// BREAKTHROUGH-3 (`BAANDI_SCF_ADVANCE=on`): Some when this map ran a
-    /// bounded subspace update (its completion, if any, is inside); None on
-    /// an ordinary converging map. Not carried by checkpoint v1.
-    pub advance: Option<crate::advance::AdvanceRecord>,
     /// SCF-TRAJECTORY: what the mixer did with this map's pair (coefficients,
     /// Gram conditioning, predicted residual, step length). Diagnostic only;
     /// None when no mixing followed or the mixer reports none. Not carried by

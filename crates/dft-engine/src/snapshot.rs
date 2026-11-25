@@ -2,8 +2,7 @@
 //! 2026-11-17 section 13.3).
 //!
 //! `BAANDI_SNAPSHOT_DIR=<absolute dir>` (default unset): every real Gamma
-//! eigensolve of the run (cold / atomic, ladder coarse maps, the coarse
-//! hand-off solve, fine early / middle / late, the first-step redo at the same
+//! eigensolve of the run (cold / atomic, early / middle / late, the first-step redo at the same
 //! Hamiltonian, every verification map) writes, at the solver entry, the state
 //! that replays exactly that solve:
 //!
@@ -124,6 +123,21 @@ impl Layout {
     }
 }
 
+/// Quantity tested by the eigensolver, recorded in snapshot metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Criterion {
+    ResidualNorm,
+    RitzChange,
+}
+impl Criterion {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ResidualNorm => "residual_norm",
+            Self::RitzChange => "ritz_change",
+        }
+    }
+}
+
 /// What the solver entry hands to the capture.
 pub(crate) struct Entry<'a> {
     pub rank: usize,
@@ -137,7 +151,7 @@ pub(crate) struct Entry<'a> {
     pub bands: usize,
     pub occupied: usize,
     pub occupations: &'a [f64],
-    pub criterion: crate::first_block::Criterion,
+    pub criterion: Criterion,
     pub tolerance: f64,
     pub strict_bands: usize,
     pub buffer_tolerance: f64,

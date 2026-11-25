@@ -566,7 +566,7 @@ record!(super::electronic::Iteration {
 });
 impl Codec for crate::IterationRecord {
     fn put(&self, o: &mut Vec<u8>) -> Result<(), ScfError> {
-        if self.advance.is_some() || self.pulay.is_some() {
+        if self.pulay.is_some() {
             return Err(invalid("legacy iteration fields"));
         }
         self.standard_error_ha.put(o)?;
@@ -619,7 +619,6 @@ impl Codec for crate::IterationRecord {
             mixing_raw_recovery: Codec::get(r)?,
             fixed_point_certificate: Codec::get(r)?,
             timings: Codec::get(r)?,
-            advance: None,
             pulay: None,
         })
     }

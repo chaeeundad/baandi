@@ -20,9 +20,6 @@ pub use crate::model::GammaReal;
 pub struct GammaRealDiagnostics {
     pub gamma_real_used: bool,
     pub fallback_reason: Option<String>,
-    /// BREAKTHROUGH-3: the session's `Advance` request for the coming map and
-    /// its outcome (taken by `step_map` after the solve; never set otherwise).
-    pub(crate) advance: Option<crate::advance::AdvanceSlot>,
 }
 impl GammaRealDiagnostics {
     pub(crate) fn fallback(
@@ -342,10 +339,6 @@ use crate::refscf::lazy::LazyInner;
 use crate::refscf::lazy::assemble_lazy_block;
 pub(crate) use crate::refscf::lazy::lazy_result_allowed;
 pub use crate::refscf::lazy::{LazyOrbitals, set_delivered_orbitals};
-
-pub(crate) fn owned_handoff_supported() -> bool {
-    crate::m2::active().is_some() && m2_lazy() && !M2_DIST_DISABLED.with(|v| v.get())
-}
 
 /// MPI-LAZY-ORBITALS: the audit's kinetic energy of a lazy block, with the ORC
 /// kinetic diagonal of the operator rows of `state` (kept by the solve that
@@ -1218,14 +1211,13 @@ pub(crate) fn solve_real_gamma(
             }
         }
     }
-    // BREAKTHROUGH-0-INSTRUMENT: snapshot capture and the first-block
-    // diagnostic of a threads-only solve (M2 solves are handled below, where
+    // Snapshot capture of a threads-only solve (M2 solves are handled below, where
     // their rows and kept H X are known).
     let occupied = occupations.iter().filter(|&&f| f > 0.0).count();
     let criterion = if options.standard.is_some() {
-        crate::first_block::Criterion::RitzChange
+        crate::snapshot::Criterion::RitzChange
     } else {
-        crate::first_block::Criterion::ResidualNorm
+        crate::snapshot::Criterion::ResidualNorm
     };
     let capacity_per_band = options.davidson_capacity_per_band;
     let threads_capture = if comm.is_none() {
@@ -1240,35 +1232,6 @@ pub(crate) fn solve_real_gamma(
         } else {
             packed.as_ref()
         };
-        if crate::first_block::enabled()
-            && let Some(x) = x_block
-        {
-            let op_ref = state
-                .op
-                .as_ref()
-                .expect("serial operator on the threads path");
-            let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
-                op_ref.apply_block(x, y).map_err(|e| e.to_string())
-            };
-            crate::first_block::evaluate::<crate::parallel::SharedComm>(
-                None,
-                crate::first_block::Input {
-                    x,
-                    hx: hx.filter(|_| armed),
-                    bands,
-                    occupations,
-                    electrons,
-                    criterion,
-                    tolerance,
-                    strict_bands: policy.strict_bands,
-                    buffer_tolerance: policy.buffer_tolerance,
-                    capacity,
-                    pool: pool.clone(),
-                },
-                &mut apply,
-            )
-            .map_err(ScfError::Numerical)?;
-        }
         crate::snapshot::capture_entry(crate::snapshot::Entry {
             rank: 0,
             ranks: 1,
@@ -1320,12 +1283,6 @@ pub(crate) fn solve_real_gamma(
         && (tuning.workspace || tuning.selected_roots || tuning.lean_algebra);
     if !m2_kept {
         state.m2_reuse = None;
-    }
-    if comm.is_some()
-        && let Some(slot) = diagnostics.advance.as_mut()
-    {
-        // BREAKTHROUGH-3: the distributed solvers have no Advance contract yet.
-        slot.declined = Some("distributed solver");
     }
     let result = if let (Some(comm), Some(dist)) = (&comm, dist) {
         // M2-OWNED: the operator must hold exactly this map's owned field (or
@@ -1422,31 +1379,6 @@ pub(crate) fn solve_real_gamma(
                 // itself (`x_local`), not the round-tripped start: capture
                 // and analyse that block when the start is armed.
                 let x_rows: Option<&RealMatrix> = if armed { Some(&x_local) } else { x_rows };
-                if crate::first_block::enabled()
-                    && let Some(x) = x_rows
-                {
-                    let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
-                        dist.apply_block(comm, x, y).map_err(|e| e.to_string())
-                    };
-                    crate::first_block::evaluate(
-                        Some(comm),
-                        crate::first_block::Input {
-                            x,
-                            hx,
-                            bands,
-                            occupations,
-                            electrons,
-                            criterion,
-                            tolerance,
-                            strict_bands: policy.strict_bands,
-                            buffer_tolerance: policy.buffer_tolerance,
-                            capacity,
-                            pool: pool.clone(),
-                        },
-                        &mut apply,
-                    )
-                    .map_err(ScfError::Numerical)?;
-                }
                 let capture = crate::snapshot::capture_entry(crate::snapshot::Entry {
                     rank: comm.rank(),
                     ranks: comm.size(),
@@ -1518,31 +1450,6 @@ pub(crate) fn solve_real_gamma(
                 // MPI-LAZY-ORBITALS without the kept start: a kept-start object
                 // that never keeps (only the local rows are returned in x_local).
                 let mut plain = DistributedKeptStart::new();
-                if crate::first_block::enabled()
-                    && let Some(x) = x_rows
-                {
-                    let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
-                        dist.apply_block(comm, x, y).map_err(|e| e.to_string())
-                    };
-                    crate::first_block::evaluate(
-                        Some(comm),
-                        crate::first_block::Input {
-                            x,
-                            hx: None,
-                            bands,
-                            occupations,
-                            electrons,
-                            criterion,
-                            tolerance,
-                            strict_bands: policy.strict_bands,
-                            buffer_tolerance: policy.buffer_tolerance,
-                            capacity,
-                            pool: pool.clone(),
-                        },
-                        &mut apply,
-                    )
-                    .map_err(ScfError::Numerical)?;
-                }
                 let capture = crate::snapshot::capture_entry(crate::snapshot::Entry {
                     rank: comm.rank(),
                     ranks: comm.size(),
@@ -1680,53 +1587,7 @@ pub(crate) fn solve_real_gamma(
             certify && options.standard.is_none(),
             options.davidson_capacity_per_band,
         )?
-    } else if let Some(slot) = diagnostics
-        .advance
-        .as_mut()
-        .filter(|_| options.standard.is_some())
-    {
-        // BREAKTHROUGH-3: bounded subspace update of this map. A solver
-        // configuration that cannot advance (classic Davidson, second
-        // vector) or a solver error declines with its reason and the ordinary
-        // converging solve runs instead.
-        let op = op_opt.ok_or(ScfError::InvalidInput("serial real operator missing"))?;
-        match solver.advance_reusing(
-            op,
-            packed.as_ref(),
-            &diagonal,
-            policy,
-            slot.budget,
-            options.davidson_capacity_per_band,
-            &mut state.workspace,
-            options.preconditioner,
-        ) {
-            Ok(advanced) => {
-                slot.outcome = Some(advanced.diagnostics);
-                advanced.solution
-            }
-            Err(e) => {
-                slot.declined = Some(match e {
-                    SolverError::InvalidParameter(_) => "lean Ritz-change solver not active",
-                    SolverError::NotConverged { .. } => "advance exhausted its iteration limit",
-                    _ => "advance solver error",
-                });
-                solver.solve_reusing_with_preconditioner(
-                    op,
-                    packed.as_ref(),
-                    &diagonal,
-                    policy,
-                    true,
-                    false,
-                    options.davidson_capacity_per_band,
-                    &mut state.workspace,
-                    options.preconditioner,
-                )?
-            }
-        }
     } else {
-        if let Some(slot) = diagnostics.advance.as_mut() {
-            slot.declined = Some("strict solve");
-        }
         let op = op_opt.ok_or(ScfError::InvalidInput("serial real operator missing"))?;
         let armed_before = state
             .workspace
@@ -2463,258 +2324,6 @@ mod lazy_assemble_tests {
 
     fn gcd(a: usize, b: usize) -> usize {
         if b == 0 { a } else { gcd(b, a % b) }
-    }
-}
-
-#[cfg(test)]
-mod owned_handoff_tests {
-    use super::*;
-    use dft_basis::{FftGridSpec, HalfSphere};
-    use dft_mpi::{Collective, SimRank, simulate};
-
-    thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
-    struct Counted(SimRank);
-    impl Collective for Counted {
-        fn rank(&self) -> usize {
-            self.0.rank()
-        }
-        fn size(&self) -> usize {
-            self.0.size()
-        }
-        fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
-            CALLS.with(|c| c.set(c.get() + 1));
-            self.0.barrier()
-        }
-        fn allgatherv_f64(
-            &self,
-            local: &[f64],
-            counts: &[usize],
-            out: &mut [f64],
-        ) -> Result<(), dft_mpi::MpiError> {
-            CALLS.with(|c| c.set(c.get() + 1));
-            self.0.allgatherv_f64(local, counts, out)
-        }
-        fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
-            CALLS.with(|c| c.set(c.get() + 1));
-            self.0.tree_sum_f64(local, out)
-        }
-        fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
-            CALLS.with(|c| c.set(c.get() + 1));
-            self.0.bcast_f64(data, root)
-        }
-        fn alltoall_f64(
-            &self,
-            send: &[f64],
-            block: usize,
-            recv: &mut [f64],
-        ) -> Result<(), dft_mpi::MpiError> {
-            CALLS.with(|c| c.set(c.get() + 1));
-            self.0.alltoall_f64(send, block, recv)
-        }
-    }
-
-    fn fixture(skew: bool, cutoff: f64, odd: bool) -> (PlaneWaveBasis, FftGridSpec) {
-        let cell = dft_geometry::Cell::from_user_rows_bohr(if skew {
-            [[6., 0., 0.], [0.8, 7., 0.], [0.4, 0.6, 8.]]
-        } else {
-            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]
-        })
-        .unwrap();
-        let basis = PlaneWaveBasis::new(&cell, dft_units::Hartree(cutoff)).unwrap();
-        let grid = FftGridSpec::new(
-            &basis,
-            &basis.density_basis(&cell).unwrap(),
-            Some(if odd { [15, 17, 19] } else { [16, 18, 20] }),
-        )
-        .unwrap();
-        (basis, grid)
-    }
-    fn handle(
-        comm: &SimRank,
-        basis: &PlaneWaveBasis,
-        grid: &FftGridSpec,
-        fault: usize,
-        norm: Option<f64>,
-    ) -> LazyOrbitals {
-        CALLS.with(|c| c.set(0));
-        crate::parallel::set_communicator(Some(Arc::new(Counted(comm.clone()))));
-        let half = HalfSphere::new(basis, grid).unwrap();
-        let n = half.full_len();
-        // Deliberately unrelated to the fine stick ownership, reversed local
-        // row order, including ranks with no rows in larger communicator tests.
-        let mut rows: Vec<usize> = (0..n)
-            .rev()
-            .filter(|r| (r + 1) % comm.size() == comm.rank())
-            .collect();
-        if fault == 1 && comm.rank() == 0 && !rows.is_empty() {
-            rows[0] = (rows[0] + 1) % n;
-        }
-        let mut values = Vec::new();
-        for j in 0..2 {
-            for &r in &rows {
-                let v = if let Some(scale) = norm {
-                    if r == j {
-                        if j == 0 { scale } else { 1. }
-                    } else {
-                        0.
-                    }
-                } else {
-                    match (r + j) % 7 {
-                        0 => -0.,
-                        1 => 1e-310,
-                        _ => ((r * 11 + j) as f64).sin() * 0.01,
-                    }
-                };
-                values.push(v);
-            }
-        }
-        if fault == 2 && comm.rank() == 0 && !values.is_empty() {
-            values[0] = f64::NAN;
-        }
-        let bands = if fault == 4 && comm.rank() == 0 {
-            values.truncate(rows.len());
-            1
-        } else {
-            2
-        };
-        LazyOrbitals(Arc::new(LazyInner {
-            x: RealMatrix::new(rows.len(), bands, values).unwrap(),
-            rows: rows.into(),
-            n,
-            half: Arc::new(half),
-            comm: crate::parallel::SharedComm::active().unwrap(),
-            full: std::sync::OnceLock::new(),
-            handoff_zero_pairs: None,
-        }))
-    }
-    #[test]
-    fn owned_permutation_matches_complex_injection_and_packing() {
-        for ranks in 2..=7 {
-            for skew in [false, true] {
-                for odd in [false, true] {
-                    let (coarse, cg) = fixture(skew, 1., !odd);
-                    let (fine, fg) = fixture(skew, 2., odd);
-                    simulate(ranks, |comm| {
-                        let h = handle(comm, &coarse, &cg, 0, None);
-                        let expected = crate::cutoff_ladder::prolong_orbitals(
-                            &coarse,
-                            &fine,
-                            h.materialize().unwrap(),
-                        )
-                        .unwrap();
-                        let got = h.prolong_owned(&coarse, &fine, &fg, 2).unwrap();
-                        let actual = got.materialize().unwrap();
-                        for (a, b) in expected.as_slice().iter().zip(actual.as_slice()) {
-                            assert_eq!(
-                                [a.re.to_bits(), a.im.to_bits()],
-                                [b.re.to_bits(), b.im.to_bits()]
-                            );
-                        }
-                        let packed = got.round_trip_start().unwrap();
-                        for j in 0..2 {
-                            let mut full = vec![0.; got.global_len()];
-                            got.0.half.pack(expected.column(j), &mut full).unwrap();
-                            for (l, &r) in got.0.rows.iter().enumerate() {
-                                assert_eq!(
-                                    packed.as_slice()[j * got.0.rows.len() + l].to_bits(),
-                                    full[r].to_bits()
-                                );
-                            }
-                        }
-                        crate::parallel::set_communicator(None);
-                    });
-                }
-            }
-        }
-    }
-    #[test]
-    fn owned_rank_local_faults_are_agreed_before_transfer() {
-        for ranks in 2..=7 {
-            let (coarse, cg) = fixture(true, 1., false);
-            let (fine, fg) = fixture(true, 2., true);
-            for fault in 1..=4 {
-                let errors = simulate(ranks, |comm| {
-                    let h = handle(comm, &coarse, &cg, fault, None);
-                    // One rank supplies a different fine layout; agreement
-                    // must precede differently sized messages.
-                    let (wrong, wg) = fixture(true, 1.5, true);
-                    let result = if fault == 3 && comm.rank() == 0 {
-                        h.prolong_owned(&coarse, &wrong, &wg, 2)
-                    } else {
-                        h.prolong_owned(&coarse, &fine, &fg, 2)
-                    };
-                    crate::parallel::set_communicator(None);
-                    assert!(CALLS.with(|c| c.get()) <= 2);
-                    result.unwrap_err().to_string()
-                });
-                assert!(errors.iter().all(|e| e == &errors[0]));
-            }
-        }
-    }
-    #[test]
-    fn owned_missing_block_and_bad_density_are_agreed() {
-        for ranks in 2..=7 {
-            let (basis, grid) = fixture(false, 1., true);
-            for missing in [true, false] {
-                let errors = simulate(ranks, |comm| {
-                    let h = handle(comm, &basis, &grid, 0, Some(1.));
-                    let lazy = (!(missing && comm.rank() == 0)).then_some(h);
-                    let density = if comm.rank() == 0 {
-                        if missing { vec![1.] } else { vec![1., 2.] }
-                    } else {
-                        Vec::new()
-                    };
-                    let result = crate::cutoff_ladder::OwnedExport::prepare(
-                        lazy, density, [1; 3], 2, &basis, &basis, &grid, true, 0, 2,
-                    )
-                    .and_then(|e| e.expect("available on peers").transfer(true));
-                    assert!(CALLS.with(|c| c.get()) <= 2);
-                    crate::parallel::set_communicator(None);
-                    result.unwrap_err().to_string()
-                });
-                assert!(errors.iter().all(|e| e == &errors[0]));
-            }
-        }
-    }
-
-    #[test]
-    fn owned_overlap_boundary_uses_original_verdict() {
-        for ranks in 2..=7 {
-            let (basis, grid) = fixture(false, 1., true);
-            for defect in [0., 0.5e-8, 0.99999e-8, 1e-8, 1.00001e-8, 2e-8] {
-                simulate(ranks, |comm| {
-                    let h = handle(comm, &basis, &grid, 0, Some((1f64 + defect).sqrt()));
-                    let export = crate::cutoff_ladder::OwnedExport::prepare(
-                        Some(h.clone()),
-                        if comm.rank() == 0 {
-                            vec![1.]
-                        } else {
-                            Vec::new()
-                        },
-                        [1; 3],
-                        2,
-                        &basis,
-                        &basis,
-                        &grid,
-                        true,
-                        0,
-                        2,
-                    )
-                    .unwrap()
-                    .unwrap();
-                    let actual = export.transfer(true).is_ok();
-                    assert_eq!(
-                        CALLS.with(|c| c.get()),
-                        2,
-                        "boundary oracle must fit two exchanges"
-                    );
-                    let expected =
-                        crate::scf::session::orthonormal_serial(h.materialize().unwrap());
-                    assert_eq!(actual, expected, "P={ranks} defect={defect}");
-                    crate::parallel::set_communicator(None);
-                });
-            }
-        }
     }
 }
 

@@ -13,16 +13,11 @@ use convergence::CoulombMetric;
 pub use convergence::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
 #[path = "collinear.rs"]
 pub mod collinear;
-/// C1 cutoff ladder (coarse-cutoff start, full-cutoff finish); opt-in.
+/// Compatibility exports for reference prolongation.
 #[path = "cutoff_ladder.rs"]
 pub mod cutoff_ladder;
-/// Track A pre-converger; a child of `scf` for read access to problem internals.
-#[path = "direct_min.rs"]
-pub mod direct_min;
 #[path = "finite_temperature.rs"]
 pub mod finite_temperature;
-#[path = "replay_capture.rs"]
-mod replay_capture;
 #[path = "session.rs"]
 pub mod session;
 use crate::Functional;
@@ -48,10 +43,7 @@ use dft_solvers::{
 };
 use dft_upf::Pseudopotential;
 use session::{CompletionMode, ScfSession, StepStatus};
-use std::{
-    fmt,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 pub use crate::model::ScfError;
 
@@ -692,10 +684,6 @@ pub struct ScfStep {
     /// True when `energy.nonlocal` comes from the band-sum identity (B2,
     /// `BAANDI_ENERGY_IDENTITY=on`, non-final iterations only).
     pub nonlocal_from_identity: bool,
-    /// BREAKTHROUGH-3: the session's `Advance` request of this map with its
-    /// outcome (`Some(diagnostics)`) or the reason it was declined. None when
-    /// no advance was requested: the map is an ordinary converging solve.
-    pub(crate) advance: Option<crate::advance::AdvanceSlot>,
     /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the output density on this
     /// rank's slab planes; `density` is then an empty array.
     pub(crate) owned_density: Option<crate::grid_dist::Owned>,
@@ -3367,17 +3355,6 @@ impl ScfProblem {
                 .map(|k| k.solution.operator_applications)
                 .sum(),
         );
-        // BREAKTHROUGH-3: the advance slot belongs to exactly one map.
-        let advance = self
-            .states
-            .first_mut()
-            .and_then(|s| s.gamma_real.advance.take())
-            .map(|mut slot| {
-                if slot.outcome.is_none() && slot.declined.is_none() {
-                    slot.declined = Some("complex solver path");
-                }
-                slot
-            });
         if let Some(w) = finite.as_mut() {
             for (k, point) in k_points.iter().enumerate() {
                 w.eigenvalues[k * w.bands..(k + 1) * w.bands]
@@ -3675,7 +3652,6 @@ impl ScfProblem {
             energy,
             timings,
             nonlocal_from_identity: identity,
-            advance,
             owned_density: owned_out,
         })
     }
@@ -4246,7 +4222,6 @@ mod tests {
             mixing_raw_recovery: false,
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
-            advance: None,
             pulay: None,
         };
         assert!(converged(&good, &o));
@@ -4363,8 +4338,6 @@ mod threading_tests {
     }
 }
 
-#[path = "spectral_scf.rs"]
-mod spectral_scf;
 #[cfg(test)]
 #[path = "verification_tests.rs"]
 mod verification_tests;

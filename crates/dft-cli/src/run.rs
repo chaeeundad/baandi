@@ -1310,19 +1310,15 @@ fn phase_json(t: &PhaseTimings) -> Value {
 }
 /// P48F: additive timing blocks that close the time budget of a run.
 /// total = setup + phases + certificate outside phases + step overhead +
-/// ladder coarse stage + remainder (fine-session start, result assembly).
-/// `clock` is the process clock accumulated during the SCF (coarse stage
-/// included); the coarse part is subtracted for the fine-session values.
+/// remainder (session start and result assembly).
 fn closed_timings(
     phases: &PhaseTimings,
     history: &[IterationRecord],
     setup: f64,
     total: f64,
     clock: dft_engine::phase_clock::PhaseClock,
-    ladder: Option<&dft_engine::cutoff_ladder::CutoffLadderReport>,
 ) -> Value {
-    let coarse = ladder.map(|l| l.coarse_clock).unwrap_or_default();
-    let fine = clock.since(&coarse);
+    let fine = clock;
     let cert_phases: f64 = history
         .iter()
         .filter_map(|h| h.fixed_point_certificate.as_ref())
@@ -1332,24 +1328,17 @@ fn closed_timings(
     let cert_outside = (cert_wall - cert_phases).max(0.0);
     let phases_s = phase_sum(phases);
     let steps = fine.steps.as_secs_f64();
-    let ladder_s = ladder.map_or(0.0, |l| l.coarse_time.as_secs_f64());
     let step_overhead = steps - phases_s - cert_outside;
-    let remainder = total - setup - ladder_s - steps;
+    let remainder = total - setup - steps;
     json!({
         "certificate":{"blocks":fine.certificate_blocks,"wall_s":cert_wall,"screen_s":fine.screen.as_secs_f64(),
             "phases_s":cert_phases,"outside_phases_s":cert_outside,
             "note":"wall of the certificate blocks (screen, re-solve, checks); phases_s is already inside timings.phases"},
         "atomic_start_s":fine.atomic_start.as_secs_f64(),
         "steps_s":steps,
-        "ladder_coarse":ladder.filter(|l| l.coarse_time > std::time::Duration::ZERO).map(|l| json!({
-            "setup_s":l.coarse_setup.as_secs_f64(),"session_s":l.coarse_session.as_secs_f64(),
-            "prolong_s":l.coarse_prolong.as_secs_f64(),"total_s":l.coarse_time.as_secs_f64(),
-            "phases":phase_json(&l.coarse_phases),"phases_sum_s":phase_sum(&l.coarse_phases),
-            "atomic_start_s":l.coarse_clock.atomic_start.as_secs_f64(),"steps_s":l.coarse_clock.steps.as_secs_f64(),
-            "certificate_s":l.coarse_clock.certificate.as_secs_f64()})),
         "closure":{"setup_s":setup,"phases_s":phases_s,"certificate_outside_phases_s":cert_outside,
-            "step_overhead_s":step_overhead,"ladder_coarse_s":ladder_s,"remainder_s":remainder,"total_s":total,
-            "note":"total = setup + phases + certificate_outside_phases + step_overhead + ladder_coarse + remainder; atomic_start_s is inside phases (potential of the first map)"}
+            "step_overhead_s":step_overhead,"remainder_s":remainder,"total_s":total,
+            "note":"total = setup + phases + certificate_outside_phases + step_overhead + remainder; atomic_start_s is inside phases (potential of the first map)"}
     })
 }
 fn phase_sum(t: &PhaseTimings) -> f64 {
@@ -1373,32 +1362,9 @@ fn history_json(r: &IterationRecord) -> Value {
             "predicted_ratio":p.predicted_ratio,"step_l2_sum":p.step_norm,
             "coulomb_predicted_ratio":p.coulomb_predicted_ratio,"coulomb_refit":p.coulomb_refit});
     }
-    if let Some(a) = &r.advance {
-        // BREAKTHROUGH-3: bounded subspace update of this map (research diagnostic).
-        result["advance"] = json!({"budget_blocks":a.budget_blocks,"blocks_used":a.blocks_used,"h_columns":a.h_columns,
-            "kept_start":a.kept_start,"unconverged_roots":a.unconverged_roots,"inner_estimate_ha":a.inner_estimate_ha,
-            "scf_error_ha":a.scf_error_ha,"inner_scf_ratio":if a.scf_error_ha > 0.0 {a.inner_estimate_ha / a.scf_error_ha} else {f64::INFINITY},
-            "completion":a.completion.map(|t| t.name()),"completion_h_columns":a.completion_h_columns});
-    }
     result
 }
 
-/// BREAKTHROUGH-3 (`BAANDI_SCF_ADVANCE`) counters of this process (count only).
-fn scf_advance_json() -> serde_json::Value {
-    let c = dft_engine::advance_counters();
-    json!({
-        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::SCF_ADVANCE),
-        "starting_blocks":dft_numerics::switches::number(dft_numerics::switches::Id::SCF_ADVANCE_BLOCKS),
-        "inner_ratio_rule":dft_engine::ADVANCE_INNER_RATIO,
-        "maps_advanced":c.maps_advanced,"maps_exact":c.maps_exact,"declined":c.declined,
-        "completions":c.completions(),"completion_candidate":c.completion_candidate,"completion_inner_noise":c.completion_inner_noise,
-        "completion_growth":c.completion_growth,"completion_gap":c.completion_gap,
-        "advance_h_columns":c.advance_h_columns,"completion_h_columns":c.completion_h_columns,"advance_blocks":c.advance_blocks,
-        "kept_starts":c.kept_starts,"converged_within_budget":c.converged_within_budget,
-        "ratio_below_rule":c.ratio_below_rule,"ratio_above_rule":c.ratio_above_rule,
-        "note":"maps_advanced = standard maps run as a bounded subspace update (Advance), maps_exact = eligible-path maps that ran the converging solve (first map, redo, candidates), declined = requests the solver could not honour; completions = advanced maps followed by the exact solve at the same density, by trigger; advance_h_columns / completion_h_columns = operator columns of the advance calls and of their completions (both inside h_vectors_recorded); ratio_* = advanced maps whose B / E was at or below / above the rule"
-    })
-}
 /// Gregorian UTC conversion from nonnegative Unix seconds, including leap years.
 pub fn timestamp(seconds: u64) -> String {
     let days = (seconds / 86400) as i64;
@@ -1868,12 +1834,6 @@ fn execute_mode_inner(
     // BREAKTHROUGH-0-INSTRUMENT: problem construction is the `init` bucket.
     dft_engine::profile::add_init(setup);
     let clock_start = dft_engine::phase_clock::snapshot();
-    let ladder = if reference {
-        None
-    } else {
-        crate::config::Scf::cutoff_ladder(config.scf.as_ref())
-            .map_err(|e| error(1, e.to_string()))?
-    };
     let reference_symmetry = if reference {
         reference_symmetry(&config)?
     } else {
@@ -1900,7 +1860,6 @@ fn execute_mode_inner(
             dft_physics::distributed_real_gamma::ApplyH::take_davidson_work();
         }
     }
-    let mut ladder_report = None;
     let atomic_density_built = reference
         || problem
             .as_ref()
@@ -2037,22 +1996,7 @@ fn execute_mode_inner(
                 run.outcome
             })
         } else {
-            match ladder {
-                Some(fraction) => dft_engine::cutoff_ladder::run_ladder(
-                    problem.take().expect("legacy mode"),
-                    &refs,
-                    &dft_engine::cutoff_ladder::CutoffLadderOptions {
-                        fraction,
-                        ..Default::default()
-                    },
-                    true,
-                )
-                .map(|l| {
-                    ladder_report = Some(l.report);
-                    l.outcome
-                }),
-                None => problem.take().expect("legacy mode").run_outcome(),
-            }
+            dft_engine::cutoff_ladder::run_oracle(problem.take().expect("legacy mode"), &refs)
         };
         match run {
             Ok(outcome) => outcome,
@@ -2170,7 +2114,6 @@ fn execute_mode_inner(
         setup,
         total,
         dft_engine::phase_clock::snapshot().since(&clock_start),
-        ladder_report.as_ref(),
     );
     let energies = energy_json(&r.energy);
     let davidson_work: Vec<_> = dft_engine::work_accounting::take()
@@ -2207,7 +2150,6 @@ fn execute_mode_inner(
                 "algebra_stream":algebra_stream_json(),
                 "davidson_lean":davidson_lean_json(),
                 "reuse_psi":reuse_psi_json(),
-                "scf_advance":scf_advance_json(),
                 "gemm_dispatch":gemm_dispatch_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
@@ -2215,7 +2157,7 @@ fn execute_mode_inner(
         "total_energy":{"ha":r.energy.total_hartree(),"ry":from_hartree(r.energy.total_hartree(), EnergyUnit::Rydberg),"ev":from_hartree(r.energy.total_hartree(), EnergyUnit::ElectronVolt)},
         "eigenvalues":{"ha":r.eigenvalues,"ev":r.eigenvalues.iter().map(|e|from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
         "timings":{"phases":phase_json(&phases),"setup_s":setup,"engine_setup_s":r.setup_time.as_secs_f64(),"engine_total_s":r.total_time.as_secs_f64(),"total_s":total,"fft_hpsi":"included in enclosing phases; not separately measured",
-            "certificate":timings["certificate"],"atomic_start_s":timings["atomic_start_s"],"steps_s":timings["steps_s"],"ladder_coarse":timings["ladder_coarse"],"closure":timings["closure"]},
+            "certificate":timings["certificate"],"atomic_start_s":timings["atomic_start_s"],"steps_s":timings["steps_s"],"closure":timings["closure"]},
         "threading":{"threads":opts.threads.max(1),"threads_requested":opts.threads,"threads_used":opts.threads.max(1),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1),"backend":"persistent Rayon pool shared by k points and fixed inner pieces; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
@@ -2296,60 +2238,13 @@ fn execute_mode_inner(
             }
         }
     }
-    if let Some(l) = &ladder_report {
-        result["convergence"]["work"]["cutoff_ladder"] = json!({
-            "used":l.used,"fallback_reason":l.fallback_reason,"fraction":l.fraction,
-            "coarse_cutoff_ha":l.coarse_cutoff_hartree,"coarse_fft_grid":l.coarse_grid,
-            "fine_fft_grid":l.fine_grid,"coarse_plane_waves":l.coarse_plane_waves,
-            "fine_plane_waves":l.fine_plane_waves,"coarse_iterations":l.coarse_iterations,
-            "coarse_final_density_residual":l.coarse_final_density_residual,
-            "coarse_davidson_iterations":l.coarse_davidson_iterations,
-            "coarse_h_vectors":l.coarse_h_vectors,"coarse_start_h_vectors":l.coarse_start_h_vectors,
-            "coarse_h_full_grid_equivalents":l.coarse_h_equivalents(),
-            "coarse_setup_s":l.coarse_setup.as_secs_f64(),"coarse_stage_s":l.coarse_time.as_secs_f64(),
-            "standard":l.standard,"standard_seed_ha":l.standard_seed_ha,
-            "secant_requested":l.secant_requested,"secant_seeded":l.secant_seeded,
-            "secant_fallback":l.secant_fallback,
-            "coarse_stop_rule":l.coarse_rule.map(|r| format!("{r:?}").to_lowercase()),
-            "coarse_stop_level":l.coarse_stop_level,
-            "atomic_truncation_distance":l.atomic_truncation_distance,
-            "handoff_to_final_density_distance":l.handoff_to_final_density_distance,
-            "first_tolerance":l.first_tolerance.map(|r| format!("{r:?}").to_lowercase()),
-            "strict_seed_ha":l.strict_seed_ha,
-            "fine_scf_steps":l.fine_iterations,"fine_h_vectors":l.fine_h_vectors,
-            "fine_certificate_h_vectors":l.fine_certificate_h_vectors,
-            "coarse_fine_step_equivalents":l.coarse_fine_step_equivalents(),
-            "coarse_wall_fine_step_equivalents":(l.used && l.fine_iterations > 0).then(|| {
-                let steps = timings["steps_s"].as_f64().unwrap_or(f64::NAN)
-                    - timings["certificate"]["wall_s"].as_f64().unwrap_or(0.0);
-                l.coarse_time.as_secs_f64() / (steps / l.fine_iterations as f64)
-            }).filter(|x| x.is_finite()),
-            "total_step_equivalents":l.coarse_fine_step_equivalents().map(|c| c + l.fine_iterations as f64),
-            "total_h_full_grid_equivalents":l.coarse_h_equivalents() + (l.fine_h_vectors + l.fine_certificate_h_vectors) as f64,
-            "coarse_history":l.coarse_history.iter().map(history_json).collect::<Vec<_>>(),
-            "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only; coarse_history holds the coarse maps, energies at the coarse cutoff). D1: coarse_fine_step_equivalents = coarse_h_full_grid_equivalents / (fine_h_vectors / fine_scf_steps) (recorded H per fine step, certificate excluded); coarse_wall_fine_step_equivalents = coarse_stage_s / ((timings.steps_s - timings.certificate.wall_s) / fine_scf_steps); total_step_equivalents = fine_scf_steps + coarse_fine_step_equivalents; total_h_full_grid_equivalents = coarse equivalents + fine recorded + fine certificate H; distances in the density-residual norm (Bohr^-3/2)"});
-    }
-    // SCF-TRAJECTORY (ISSUE: start_density looked dead on dev08): the start
-    // each stage actually used. With the ladder the coarse stage is the first
-    // stage and takes the requested start; the full-cutoff stage always starts
-    // from the prolonged coarse density and orbitals, so the top-level
-    // `atomic_start` block (the full-cutoff session's) reads "supplied initial
-    // vectors retained" by design.
-    result["effective_start"] = match ladder_report.as_ref().filter(|l| l.used) {
-        Some(l) => json!([
-            {"stage":"coarse","density":l.coarse_start_density,
-             "wavefunctions":opts.start_wavefunctions.name(),
-             "atomic_orbitals_used":l.coarse_atomic_start.as_ref().map(|a| a.atomic_orbitals),
-             "atomic_start_h_applications":l.coarse_atomic_start.as_ref().map(|a| a.initial_h_applications),
-             "atomic_fallback_reason":l.coarse_atomic_start.as_ref().and_then(|a| a.fallback_reason.clone())},
-            {"stage":"fine","density":"prolonged coarse density","wavefunctions":"prolonged coarse orbitals"}]),
-        None => json!([
+    result["effective_start"] = json!([
             {"stage":"single","density":if atomic_density_built {"atomic"} else {"uniform"},
              "wavefunctions":opts.start_wavefunctions.name(),
              "atomic_orbitals_used":(opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then_some(r.atomic_start.atomic_orbitals),
              "atomic_start_h_applications":(opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then_some(r.atomic_start.initial_h_applications),
-             "atomic_fallback_reason":r.atomic_start.fallback_reason}]),
-    };
+             "atomic_fallback_reason":r.atomic_start.fallback_reason}]);
+
     if let Some(c) = &r.energy_identity {
         // B2 (BAANDI_ENERGY_IDENTITY=on): history energies of non-final iterations
         // use the band-sum identity; the final energy is the explicit audit.
@@ -2892,7 +2787,7 @@ fn execute_mode_inner(
         }
     }
     // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (BAANDI_PHASE_PROFILE=on)
-    // and first-block diagnostic (BAANDI_FIRST_BLOCK=on); both absent otherwise.
+    // instrumentation; absent otherwise.
     if launch::clock().is_some() {
         launch::elapsed("materialize_including_outputs", Some(io_clock));
     }
@@ -2922,16 +2817,7 @@ fn execute_mode_inner(
         }
         let table = report.table(Some(total));
         console.push_str(&table);
-        let mut phases = profile_json(&report, total);
-        if dft_engine::profile::verification::enabled() {
-            let mine = dft_engine::profile::verification::take();
-            let records = match dft_engine::parallel::SharedComm::active() {
-                Some(comm) => dft_engine::profile::verification::gather(&comm, &mine)
-                    .map_err(|e| error(5, e))?,
-                None => mine,
-            };
-            phases["verification_lane"] = verification_lane_json(&records);
-        }
+        let phases = profile_json(&report, total);
         if crate::parallel::size() > 1 {
             result["parallel"]["phases"] = phases.clone();
         }
@@ -2954,11 +2840,6 @@ fn execute_mode_inner(
             "per_rank": ranks.iter().map(|r| json!({"rank":r.rank,
                 "dropped":r.dropped,"records":r.records})).collect::<Vec<_>>()
         });
-    }
-    let first_block = dft_engine::first_block::take_records();
-    if !first_block.is_empty() {
-        console.push_str(&dft_engine::first_block::table(&first_block));
-        result["convergence"]["work"]["first_block"] = first_block_json(&first_block);
     }
     let manifest_clock = launch::clock();
     note_switch_paths(run_config);
@@ -3678,26 +3559,6 @@ fn fft_lane_json(report: &dft_engine::profile::Report) -> serde_json::Value {
     })
 }
 
-/// LANE-VERIFY per-call/per-rank records, serialized only after the run.
-fn verification_lane_json(
-    records: &[dft_engine::profile::verification::Record],
-) -> serde_json::Value {
-    use dft_engine::profile::verification::{MAP_PARTS, PARTS, SIZES};
-    json!({
-        "schema": "verify-profile-1",
-        "records": records.iter().map(|r| json!({
-            "rank": r.rank, "iteration": r.iteration, "cutoff_ha": r.cutoff_ha,
-            "event": if r.event == 0 { "attempt" } else { "schedule" },
-            "status": r.status, "timed": r.timed,
-            "sizes": SIZES.iter().zip(r.sizes).map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
-            "seconds": PARTS.iter().zip(r.seconds).map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
-            "map_seconds": MAP_PARTS.iter().zip(r.map_seconds).map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
-            "h_vectors": r.h_vectors, "davidson_iterations": r.davidson_iterations,
-        })).collect::<Vec<_>>(),
-        "note": "seconds are exclusive consecutive intervals on one rank; map_seconds are nested in seconds.map; never sum rank maxima; status -1 is an incomplete/error attempt whose restore interval includes its unclosed tail; sizes are payload/floor inputs, not measured memory traffic; post-run gathering is outside these intervals"
-    })
-}
-
 /// Rank-local I/O payload sizes and existing between-map clocks (Phase 0).
 fn launchio_json(mine: &dft_engine::profile::RankProfile, upf_records: Vec<Value>) -> Value {
     use dft_engine::profile::{BUCKET_LABELS, COUNT_LABELS, SEC_LABELS};
@@ -3830,29 +3691,6 @@ pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serd
         }).collect::<Vec<_>>(),
         "note": "top-level buckets are mutually exclusive (init, coarse, fine, fine_redo, verify_pass, verify_fail, materialize); wall = potential + solve + density + energy (+ mixing, atomic start, io); solve.* are exclusive stages inside solve (solve.other = the remainder); coll.* and m2.* are inside the stages, not exclusive; seconds = max over ranks (critical path) and min over ranks (imbalance), never summed over ranks; counts are per rank (max); with BAANDI_STAGE_TIMERS=off only the counts and the map phase clocks are filled"
     })
-}
-
-/// First-block residual records (`BAANDI_FIRST_BLOCK=on`).
-pub fn first_block_json(records: &[dft_engine::first_block::Record]) -> serde_json::Value {
-    json!(records.iter().map(|r| json!({
-        "stage": r.stage, "kind": r.kind, "iteration": r.iteration,
-        "bands": r.bands, "occupied": r.occupied, "tolerance_ha": r.tolerance,
-        "buffer_tolerance_ha": r.buffer_tolerance, "kept_hx": r.kept_hx,
-        "overlap_defect": r.overlap_defect, "boundary_gap_ha": r.boundary_gap,
-        "ritz_values_ha": r.ritz_values, "residual_norms": r.residual_norms,
-        "electrons": r.electrons, "occupations": r.occupations,
-        "mandatory_roots": r.mandatory_roots, "density_carrying_roots": r.occupied,
-        "empty_buffer_roots": r.empty_buffer_roots,
-        "convergence_criterion": r.criterion.name(), "root_thresholds_ha": r.root_thresholds,
-        "ritz_changes_ha": r.ritz_changes,
-        "diagnostic_operator_applications": r.diagnostic_operator_applications,
-        "residual_unconverged_all": r.residual_unconverged_all,
-        "residual_unconverged_occupied": r.residual_unconverged_occupied,
-        "ritz_first_correction_capacity": r.ritz_first_correction_capacity,
-        "singular_values": r.singular_values,
-        "rank_1e1": r.rank_1e1, "rank_1e2": r.rank_1e2, "rank_1e3": r.rank_1e3, "rank_1e4": r.rank_1e4,
-        "rank_above_residual_tolerance": r.rank_above_residual_tolerance,
-    })).collect::<Vec<_>>())
 }
 
 /// Reference-only full diagnostics. Gather serialized rank records with variable

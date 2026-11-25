@@ -1,5 +1,5 @@
 //! BREAKTHROUGH-0-INSTRUMENT: the measurement switches (phase profile,
-//! first-block residual diagnostic, SCF snapshot capture) leave the SCF bit for
+//! SCF snapshot capture) leave the SCF bit for
 //! bit unchanged, the snapshot of a solve replays its work exactly, and the
 //! profile buckets are filled. Production standard SCF (fixed-point
 //! verification) on the threads-only path (one rank, REUSE-PSI kept start) and
@@ -182,19 +182,15 @@ fn instrumentation_is_bit_identical_and_snapshots_replay() {
     for ranks in [1usize, 2] {
         // Plain run: every switch off.
         dft_engine::profile::force(Some(false));
-        dft_engine::first_block::force(Some(false));
         dft_engine::snapshot::force_dir(Some(None));
         let plain = results(ranks, &pp);
         let _ = dft_engine::profile::take_registry();
-        let _ = dft_engine::first_block::take_records();
-        // Instrumented run: profile, first-block diagnostic and capture on.
+        // Instrumented run: profile and capture on.
         let dir = scratch(&format!("p{ranks}"));
         dft_engine::profile::force(Some(true));
-        dft_engine::first_block::force(Some(true));
         dft_engine::snapshot::force_dir(Some(Some(dir.clone())));
         let instrumented = results(ranks, &pp);
         dft_engine::profile::force(Some(false));
-        dft_engine::first_block::force(Some(false));
         dft_engine::snapshot::force_dir(Some(None));
         for r in 0..ranks {
             assert_eq!(
@@ -239,9 +235,6 @@ fn instrumentation_is_bit_identical_and_snapshots_replay() {
             );
             assert!(fine.seconds[9] > 0.0, "solve.apply seconds on the M2 path");
         }
-        // First-block records: one per warm solve, ranks within [1, n_o].
-        let records = dft_engine::first_block::take_records();
-        print!("{}", dft_engine::first_block::table(&records));
         let warm_solves = steps - 1
             + instrumented[0]
                 .history
@@ -249,23 +242,6 @@ fn instrumentation_is_bit_identical_and_snapshots_replay() {
                 .filter(|h| h.standard_redo)
                 .count()
             + verify as usize;
-        assert_eq!(records.len(), warm_solves, "one record per warm solve");
-        for r in &records {
-            assert_eq!(r.bands, 6);
-            assert!(r.rank_1e1 >= 1 && r.rank_1e1 <= r.occupied);
-            assert!(r.rank_1e4 >= r.rank_1e1);
-            assert_eq!(r.occupied, 4);
-            assert_eq!(r.electrons, 8.);
-            assert_eq!(r.mandatory_roots, 5);
-            assert_eq!(r.empty_buffer_roots, 1);
-            assert_eq!(r.criterion, dft_engine::first_block::Criterion::RitzChange);
-            assert_eq!(r.residual_unconverged_all, None);
-            assert!(
-                r.overlap_defect < 1e-8,
-                "kept vectors orthonormal: {}",
-                r.overlap_defect
-            );
-        }
         // Snapshots: one manifest per solve, replayed with the same work.
         let files = manifests(&dir);
         assert_eq!(

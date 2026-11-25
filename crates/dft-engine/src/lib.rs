@@ -31,9 +31,7 @@ pub use session::{CompletionMode, ScfSession, StepReport, StepStatus, assess_fix
 
 pub mod diagnostics;
 pub mod phase_clock;
-// BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile, SCF snapshots, the
-// first-block residual diagnostic (all default off).
-pub mod first_block;
+// Optional exclusive phase profile and SCF snapshots.
 pub mod profile;
 pub mod snapshot;
 
@@ -52,16 +50,11 @@ pub use stress::{StressResult, StressState, stress};
 
 pub use dft_solvers::locking::Locking;
 
-pub mod advance;
 pub mod gamma_real;
 pub mod grid_dist;
 pub mod m2;
 pub mod mix_dist;
 pub mod parallel;
-pub use advance::{
-    ADVANCE_INNER_RATIO, AdvanceCounters, AdvanceRecord, CompletionTrigger,
-    counters as advance_counters,
-};
 pub use dft_solvers::real_davidson::{
     StageSeconds as StageSecondsReport, WIDTH_LABELS as DAVIDSON_WIDTH_LABELS, algebra_counters,
     b1_counters, b5_counters, flop_counters, lean_counters, ortho_counters, second_vector_columns,

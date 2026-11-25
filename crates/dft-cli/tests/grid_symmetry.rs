@@ -102,7 +102,6 @@ fn symmetry_grid_run_records_both_drivers() {
                 .current_dir(&dir)
                 .env("BAANDI_REFERENCE_SCF", "off")
                 .env("BAANDI_REFERENCE_STRICT", "off")
-                .env("BAANDI_CUTOFF_LADDER", "off")
                 .args(["run", "in.toml", "--output-dir", &out])
                 .output()
                 .unwrap();

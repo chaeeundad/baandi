@@ -4340,3 +4340,112 @@ freshness checks passed. Logs are retained under `target/` as
 `nscf-all-approved.log`, `check-full-approved.log`,
 `check-workspace-approved.log`, `nscf-approved.log`, `refscf-approved.log` and
 `clippy-approved.log`.
+
+## Stepper (R8a)
+
+`refscf::stepper::Stepper` is a synchronous, single-owner continuation of the
+Gamma, complex-k, and electronic (fixed spin / Fermi–Dirac) drivers. Construct it
+with `driver::stepper[_with]`, `k_driver::stepper_with`,
+`electronic::stepper_with`, or the adapter-facing `api::stepper(input, request)`.
+Call `initialize()` once, then `step()` until `is_done()`, then `finish()`.
+`result()` borrows a delivered result. `run_to_end()` is precisely that sequence;
+all existing run entry points and `api::solve` use it. A caller may also call
+`run_to_end()` after any successful partial sequence.
+
+Initialization validates and builds the original numerical workspace, stopping
+before the first SCF map. Calls before initialization, repeated initialization,
+and calls after completion fail without advancing numerics. A numerical error
+is terminal and releases the continuation; no partial result is fabricated.
+`finish()` rejects incomplete or failed runs and never executes numerical work.
+An exhausted run retains its original delivered nonconverged result.
+
+Each report describes one logical SCF map, including its inner eigensolver
+retries. First-iteration SCF redo is a separate `Retry` map. Verification is a
+separate `Verification` map, including a failed verification. Its iteration
+index names the ordinary candidate being checked. Reports carry the estimator
+in Ha, dr2 and ethr in Ry, optional fully computed energy in Ha, and H columns
+for that map only. Lean unaudited maps carry `None`, never a fabricated energy.
+A cached failed verification consumed as the next ordinary map is marked
+`reused = true` and has zero new H work. Coarse ladder maps have stage `coarse`;
+fine maps have stage `fine`, with the original per-stage iteration numbering.
+
+Mixing order is unchanged: an ordinary candidate that needs verification yields
+with `safe_point = false`; the following verification step includes the pass
+or failure decision and any recovery mixing of that candidate. A discarded
+first map also yields an unsafe boundary before its retry. Other successful
+boundaries are safe only after the original mixing/state handoff, or after
+terminal delivery when no next eigensolve exists. A mixer failure is not a safe
+point. Observers may read scalar reports at every return; interventions must
+wait for a safe point. No map is repeated to implement stepping, and verification
+never replaces the delivered candidate.
+
+Implementation uses Rust's compiler-generated pinned continuation to retain
+loop locals and their existing ownership and drop order. There is no async
+executor, background thread, polling loop, wakeup, callback or transport in the
+engine. Two allocations at construction hold the continuation and a single
+scalar report slot. Yielding and polling that slot allocate nothing. Existing
+map, audit, history and delivery allocations remain; this is not a claim that
+the pre-existing SCF maps are allocation-free. No density, orbital or HX clone
+was added, and no collective was inserted or reordered.
+
+The continuation is thread-affine because existing configuration, memory and
+solver diagnostic scopes are thread-local. Keep its configuration scope alive,
+and finish or drop one initialized stepper before initializing another on the
+same thread; overlapping initialization is rejected without advancing either
+run. Independent threads/ranks can own independent steppers. MPI callers
+must initialize, step, finish, and abandon a run collectively in the same order;
+there is no asynchronous rank cancellation. Caller pauses are included in the
+existing wall clocks, so timing gates use uninterrupted `run_to_end()`.
+
+Checkpoint encoding/restoration and policy mutation are R8b/R8c work, not R8a
+APIs. The compiler continuation itself is not a serialization format: those
+stages must expose explicit versioned numerical state rather than serialize
+opaque future bytes. Python/MCP adapters must drive the continuation on its
+owning worker thread. Derivative and ionic-seed delivery in `api::stepper`
+occurs at the terminal step just as it does in `api::solve`.
+
+Validation: `cargo test -p dft-engine --test refscf_stepper` exercises the short
+lifecycle/exhaustion case. The complete synthetic Gamma, shifted 2x2x2 k mesh,
+FD and fixed-spin matrix, verify off/on, simulated ranks 1/3/8, is release-only:
+
+```sh
+cargo test --release -p dft-engine --test refscf_stepper -- --include-ignored --nocapture
+```
+
+The test compares every density/orbital bit as well as energy bits, prints
+FNV-1a fingerprints over little-endian f64 bytes, and reconciles per-step H
+columns and verification counts with the original run records. Simulated ranks
+establish collective ordering and same-rank identity, not real-MPI timing or
+cross-rank bit identity. The separate `reference_identity` test and release
+`bench_scf.py --require-identical` retain their pre-refactor reference baselines.
+
+Local validation (2026-11-25, pure Rust macOS/aarch64, Rust 1.99.1): the
+run-only fixture was independently compiled from an archive of starting commit
+`81763a54f574b4a63b625303a91667626f89013b`. All 24 converged
+fixture/rank/verification combinations and the one exhausted Gamma case retain
+its energy/free-energy bits and density/orbital fingerprints. The parent
+fingerprints are stored in `tests/refscf_stepper.rs`; the stepwise comparison
+also checks all array bits, internal energy and entropy, and H-column totals.
+The release stepper suite passes all five tests, including failed verification,
+whole-map reuse, coarse/fine boundaries, partial facade execution, rejection of
+interleaved sessions, and error/drop cleanup.
+
+Final local gates all exit 0: workspace check; debug stepper (3 passed,
+2 release-only ignored); existing refscf (84 passed, 24 ignored);
+`reference_identity` (1 passed); full `scripts/check.sh` (109 binaries,
+1,025 passed, 226 ignored, no failures; build/fmt/clippy pass); engine clippy;
+and README generation/freshness (9 tests, generated output unchanged).
+The release benchmark with the default `baseline-reference.json`, one thread,
+three repetitions each of Gamma/k222s/k222 reports seven iterations per case,
+zero energy difference in Ha and identical density hashes. These are identity
+checks, not QE comparisons or Mac performance acceptance.
+
+Two validation setup errors were corrected without changing numerical gates:
+the first release test compile selected stale parent-archive library artifacts
+from the shared target (exit 101; only the engine release artifacts were cleaned
+before rebuilding), and the first benchmark invocation inherited test-only
+`BAANDI_TEST_TMP` (exit 3; removed for the benchmark's switch-manifest check).
+Final invocations passed. The sandbox also denies the gate's optional `ps`
+load probe; all four verification gates still ran and passed. Real MPI8 identity
+and wall acceptance remain with the master session's
+[`r8a-dev08-request.md`](../performance/lanes/RSCF/r8a-dev08-request.md).

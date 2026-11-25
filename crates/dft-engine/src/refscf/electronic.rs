@@ -1,5 +1,6 @@
 //! Reference SCF for scalar FD and collinear fixed/FD occupations.
 //! The fixed unpolarized entry points never call this module.
+use super::stepper::{Boundary, StepKind, StepReport, Stepper};
 use super::{
     broyden::{Broyden, ConditioningDiagnostics, Diagnostics},
     density::DensityPlan,
@@ -267,6 +268,17 @@ pub fn run_prepared_with<K: Collective>(
         None,
     )
 }
+pub fn stepper_with<'a, K: Collective>(
+    input: StartInput<'a>,
+    profile: Profile,
+    points: &'a [KPoint],
+    policy: Policy,
+    comm: &'a K,
+) -> Stepper<'a, Run> {
+    Stepper::new(move |boundary| async move {
+        run_continuation(input, profile, points, policy, comm, None, None, &boundary).await
+    })
+}
 fn run_inner<K: Collective>(
     input: StartInput<'_>,
     profile: Profile,
@@ -274,7 +286,26 @@ fn run_inner<K: Collective>(
     policy: Policy,
     comm: &K,
     prepared: Option<&super::symmetry::Prepared>,
+    trace: Option<&mut Trace>,
+) -> Result<Run, ScfError> {
+    Stepper::new(move |boundary| async move {
+        run_continuation(
+            input, profile, points, policy, comm, prepared, trace, &boundary,
+        )
+        .await
+    })
+    .run_to_end()
+}
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn run_continuation<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    points: &[KPoint],
+    policy: Policy,
+    comm: &K,
+    prepared: Option<&super::symmetry::Prepared>,
     mut trace: Option<&mut Trace>,
+    boundary: &Boundary,
 ) -> Result<Run, ScfError> {
     if policy.channels() == 2 && prepared.is_some_and(|p| p.time_reversal) {
         return Err(ScfError::InvalidInput(
@@ -475,6 +506,7 @@ fn run_inner<K: Collective>(
     let mut previous = f64::INFINITY;
     let guard = config.on(Id::STANDARD_RESIDUAL_GUARD);
     let diagnostic = config.on(Id::DAVIDSON_STAGES);
+    boundary.ready().await;
     for iteration in 1..=opts.max_iterations {
         if let Some(s) = &mut workspace.symmetry {
             s.iteration = iteration;
@@ -489,6 +521,7 @@ fn run_inner<K: Collective>(
         }
         let mut calls = Vec::new();
         let mut redo = false;
+        let mut reported_columns = 0;
         let (step, y, f, dr2) = loop {
             let step = map::evaluate(
                 &mut workspace,
@@ -531,6 +564,16 @@ fn run_inner<K: Collective>(
                 trace.records[trace.used - 1].stiffness_ha = stiffness_ha;
             }
             if iteration == 1 && !redo && dr2 < ethr * electrons.max(1.) {
+                let report = StepReport::new(
+                    iteration,
+                    StepKind::Ordinary,
+                    dr2,
+                    step.energy.total_hartree(),
+                    ethr,
+                    calls.iter().map(|(_, _, c)| c.h_columns).sum(),
+                );
+                reported_columns = report.h_columns;
+                boundary.emit(report).await;
                 ethr = next_ethr_ry(ethr, dr2, electrons);
                 redo = true;
                 warm(&mut states, &step);
@@ -550,8 +593,21 @@ fn run_inner<K: Collective>(
         if stopped {
             check_gaps(&step, &policy, opts.eigen_tolerance)?;
         }
+        let mut map_report = StepReport::new(
+            iteration,
+            if redo {
+                StepKind::Retry
+            } else {
+                StepKind::Ordinary
+            },
+            dr2,
+            step.energy.total_hartree(),
+            ethr,
+            calls.iter().map(|(_, _, c)| c.h_columns).sum::<usize>() - reported_columns,
+        );
         let mut passed = stopped;
         if stopped && let Some(report) = &mut verification {
+            boundary.emit(map_report).await;
             let start = Instant::now();
             warm(&mut states, &step);
             let warm_check = config.on(Id::REFSCF_VERIFY_WARM);
@@ -640,6 +696,14 @@ fn run_inner<K: Collective>(
                 && (!guard || fresh.guard < profile.threshold_ry / 2.)
                 && valid_map(&fresh, &policy, electrons);
             let all_calls = fresh.blocks.iter().flatten().flat_map(|b| &b.calls);
+            map_report = StepReport::new(
+                iteration,
+                StepKind::Verification,
+                error * 2.,
+                fresh.energy.total_hartree(),
+                tolerance,
+                all_calls.clone().map(|c| c.h_columns).sum(),
+            );
             report.attempts.push(VerificationAttempt {
                 iteration,
                 passed,
@@ -745,7 +809,9 @@ fn run_inner<K: Collective>(
             mixing_fraction,
             calls,
         });
+        map_report.safe_point = true;
         if passed || iteration == opts.max_iterations {
+            boundary.publish(map_report);
             let mut densities = Vec::new();
             let mut blocks = Vec::new();
             for (s, channel) in step.blocks.iter().enumerate() {
@@ -791,6 +857,7 @@ fn run_inner<K: Collective>(
                 total_s: clock.elapsed().as_secs_f64(),
             });
         }
+        boundary.emit(map_report).await;
     }
     unreachable!("positive budget checked")
 }

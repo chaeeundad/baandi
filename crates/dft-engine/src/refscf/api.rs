@@ -181,6 +181,22 @@ impl Observables {
 /// Same input and request on every rank. Existing drivers select the active
 /// communicator; this facade neither changes switches nor adds collectives.
 pub fn solve(input: StartInput<'_>, request: Request) -> Result<Delivered, ScfError> {
+    stepper(input, request).run_to_end()
+}
+
+/// Incremental facade with the same dispatch and derivative delivery as solve.
+pub fn stepper(input: StartInput<'_>, request: Request) -> super::stepper::Stepper<'_, Delivered> {
+    let comm = crate::parallel::SharedComm::active();
+    super::stepper::Stepper::new(move |boundary| async move {
+        solve_continuation(input, request, comm, &boundary).await
+    })
+}
+async fn solve_continuation(
+    input: StartInput<'_>,
+    mut request: Request,
+    comm: Option<crate::parallel::SharedComm>,
+    boundary: &super::stepper::Boundary,
+) -> Result<Delivered, ScfError> {
     if request.seed.is_some() && (request.symmetry.is_some() || request.policy.is_some()) {
         return Err(ScfError::InvalidInput(
             "reference API: ionic seeds with symmetry or electronic policy are unsupported",
@@ -206,18 +222,17 @@ pub fn solve(input: StartInput<'_>, request: Request) -> Result<Delivered, ScfEr
         potentials: input.potentials,
         options: input.options,
     };
-    let run = if let Some(policy) = request.policy {
-        Run::Electronic(Box::new(if let Some(symmetry) = &request.symmetry {
-            electronic::run_prepared(model(), request.profile, symmetry, policy)?
-        } else {
-            electronic::run(model(), request.profile, &request.points, policy)?
-        }))
+    let run = if let Some(comm) = &comm {
+        run_request(model(), &mut request, comm, Some(comm.clone()), boundary).await?
     } else {
-        Run::Scalar(Box::new(if let Some(symmetry) = &request.symmetry {
-            super::k_driver::run_prepared(model(), request.profile, symmetry)?
-        } else {
-            delivered::run(model(), request.profile, &request.points, request.seed)?
-        }))
+        run_request(
+            model(),
+            &mut request,
+            &super::metric::Serial,
+            None,
+            boundary,
+        )
+        .await?
     };
     let mut output = Delivered {
         run,
@@ -249,6 +264,80 @@ pub fn solve(input: StartInput<'_>, request: Request) -> Result<Delivered, ScfEr
         }
     }
     Ok(output)
+}
+
+async fn run_request<K: dft_mpi::Collective>(
+    input: StartInput<'_>,
+    request: &mut Request,
+    comm: &K,
+    owned_comm: Option<crate::parallel::SharedComm>,
+    boundary: &super::stepper::Boundary,
+) -> Result<Run, ScfError> {
+    let points = request
+        .symmetry
+        .as_ref()
+        .map_or(request.points.as_slice(), |s| s.points());
+    if let Some(policy) = request.policy.take() {
+        return Ok(Run::Electronic(Box::new(
+            electronic::run_continuation(
+                input,
+                request.profile,
+                points,
+                policy,
+                comm,
+                request.symmetry.as_ref(),
+                None,
+                boundary,
+            )
+            .await?,
+        )));
+    }
+    let run = match request.seed.take() {
+        Some(IonicSeed::Gamma(seed)) => {
+            if points.len() != 1
+                || points[0].fractional != [0.; 3]
+                || input.options.gamma_real != crate::GammaReal::On
+            {
+                return Err(ScfError::InvalidInput(
+                    "reference ionic seed: Gamma/k mismatch",
+                ));
+            }
+            driver::run_seeded_continuation(input, request.profile, comm, *seed, boundary).await?
+        }
+        Some(IonicSeed::K(seed)) => {
+            super::k_driver::run_continuation(
+                input,
+                request.profile,
+                points,
+                comm,
+                None,
+                Some(seed),
+                boundary,
+            )
+            .await?
+        }
+        None if request.symmetry.is_none()
+            && points.len() == 1
+            && points[0].fractional == [0.; 3]
+            && input.options.gamma_real == crate::GammaReal::On =>
+        {
+            dft_geometry::kpoints::validate(points).map_err(super::numerical)?;
+            driver::run_inner(input, request.profile, comm, owned_comm, boundary).await?
+        }
+        None => {
+            super::k_driver::run_continuation(
+                input,
+                request.profile,
+                points,
+                comm,
+                request.symmetry.as_ref(),
+                None,
+                boundary,
+            )
+            .await?
+        }
+    };
+    Ok(Run::Scalar(Box::new(run)))
 }
 
 /// Export fixed-cell continuation at an adapter's existing delivery boundary.

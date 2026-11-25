@@ -458,8 +458,8 @@ The legacy engine and solver groups (about 100 switches) are classes (a) and (b)
 ## 7. User decisions (2026-11-25)
 
 - D1: approved as recommended (port checkpoint/restart, runtime control, Python/MCP stepping to a reference stepper, R8).
-- D2: pending; the user asked for an explanation of the strict oracle first.
-- D3: pending; the user asked for an explanation of the rollback switches first.
+- D2: approved as recommended: move the strict oracle whole (R9); trimming its MPI part is decided separately at the end (R10d) after a 1e-12 Ha oracle-versus-oracle check.
+- D3: removal approved, more broadly than the recommendation: default-on rollback switches on the reference path are removed together with their pre-adoption code (no two-generation wait; "they can be recreated quickly if needed"), and rejected default-off experiment switches are removed. Kept: diagnostics/profiling, infrastructure, REFERENCE_STRICT, and isolated algorithm modules protected by the Generality rule (e.g. RMM, reference ladder). This supersedes, for stage R, the AGENTS.md wording that adopted defaults stay switchable for rollback.
 - D4: legacy-only input keys are removed outright after R10 (no migration messages: there are no existing users). They become ordinary unknown-key errors.
 - D5: approved as recommended (decide port or retire of RELAX_EXTRAPOLATION from the attempts ledger).
 - D6: approved as recommended (report README factual corrections first, edit after approval).

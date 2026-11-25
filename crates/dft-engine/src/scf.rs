@@ -1,7 +1,5 @@
-#[path = "atomic_start.rs"]
-mod atomic_start;
-#[path = "refscf/mod.rs"]
-pub mod refscf;
+use crate::atomic_start;
+pub use crate::refscf;
 #[path = "start_density.rs"]
 mod start_density;
 pub use atomic_start::{AtomicStartReport, StartWavefunctions};
@@ -41,11 +39,12 @@ use dft_solvers::{
     kerker::{Kerker, MixerHistory, PreconditionedPulay},
     mixing::{LinearMixer, PulayMixer},
 };
+#[cfg(test)]
 use dft_upf::Pseudopotential;
 use session::{CompletionMode, ScfSession, StepStatus};
 use std::time::{Duration, Instant};
 
-pub use crate::model::ScfError;
+pub use crate::model::{PreparedSymmetry, ScfError, SpeciesPotential};
 
 pub use crate::model::{CompatMode, Mixing, ScfOptions, bands_fit_subspace};
 
@@ -55,83 +54,6 @@ pub use crate::model::OccupationPolicy;
 
 pub(crate) use crate::model::result::materialize_kpoints;
 pub use crate::model::{KPointSolution, ScfResult, split_warm};
-
-/// Species labels resolve explicitly against Atom::species; the PP must declare SLA PZ or SLA PZ NOGX NOGC.
-pub struct SpeciesPotential<'a> {
-    pub label: &'a str,
-    pub potential: &'a Pseudopotential,
-}
-
-/// Immutable geometry-verified symmetry preparation shared with input adapters.
-/// Private fields prevent callers from supplying an unverified orbit map.
-#[derive(Debug)]
-pub struct PreparedSymmetry {
-    lattice: [[f64; 3]; 3],
-    atoms: Vec<Atom>,
-    full: Vec<KPoint>,
-    tolerance_bohr: f64,
-    time_reversal: bool,
-    map: dft_geometry::symmetry::KOrbitMap,
-    crystal_operations: Vec<dft_geometry::symmetry::SymmetryOperation>,
-}
-impl PreparedSymmetry {
-    pub fn new(
-        cell: &Cell,
-        atoms: &[Atom],
-        full: &[KPoint],
-        tolerance_bohr: f64,
-        time_reversal: bool,
-    ) -> Result<Self, ScfError> {
-        let crystal_operations = dft_geometry::symmetry::detect(cell, atoms, tolerance_bohr)
-            .map_err(|e| ScfError::Numerical(e.to_string()))?;
-        let map =
-            dft_geometry::symmetry::reduce_mesh(full, &crystal_operations, time_reversal, false)
-                .map_err(|e| ScfError::Numerical(e.to_string()))?;
-        Ok(Self {
-            lattice: cell.lattice_columns_bohr(),
-            atoms: atoms.to_vec(),
-            full: full.to_vec(),
-            tolerance_bohr,
-            time_reversal,
-            map,
-            crystal_operations,
-        })
-    }
-    /// Public configurations may change during relaxation. Reuse only for the
-    /// exact geometry, mesh and detection settings that produced this record.
-    pub fn matches(
-        &self,
-        cell: &Cell,
-        atoms: &[Atom],
-        full: &[KPoint],
-        tolerance_bohr: f64,
-        time_reversal: bool,
-    ) -> bool {
-        self.lattice == cell.lattice_columns_bohr()
-            && self.atoms == atoms
-            && self.full == full
-            && self.tolerance_bohr.to_bits() == tolerance_bohr.to_bits()
-            && self.time_reversal == time_reversal
-    }
-    pub fn map(&self) -> &dft_geometry::symmetry::KOrbitMap {
-        &self.map
-    }
-    pub fn density_operations(
-        &self,
-        crystal: bool,
-    ) -> Vec<dft_geometry::symmetry::SymmetryOperation> {
-        if crystal {
-            self.crystal_operations.clone()
-        } else {
-            self.map
-                .operations
-                .iter()
-                .filter(|o| !o.antiunitary)
-                .cloned()
-                .collect()
-        }
-    }
-}
 
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
@@ -3822,9 +3744,7 @@ fn converged(r: &IterationRecord, o: &ScfOptions) -> bool {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-#[path = "../tests/common/mod.rs"]
-mod pool_fixture;
+use crate::pool_fixture;
 
 #[cfg(test)]
 mod tests {

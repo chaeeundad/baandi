@@ -360,7 +360,7 @@ pub(super) async fn run_continuation<K: Collective>(
             .ok_or(ScfError::InvalidInput("unknown species"))
     })?;
     let mut options = opts.clone();
-    options.gamma_real = crate::GammaReal::Off;
+    options.gamma_real = crate::model::GammaReal::Off;
     let bands = match &policy {
         Policy::FermiDirac { band_cap, .. } | Policy::SpinFermiDirac { band_cap, .. } => *band_cap,
         Policy::FixedSpin(sector) => options.bands.unwrap_or(
@@ -372,7 +372,7 @@ pub(super) async fn run_continuation<K: Collective>(
         ),
     };
     if let Some((theta, constraint)) = policy.finite() {
-        crate::scf::finite_temperature::validate_options(&options, theta, bands)?;
+        crate::model::spin::validate_options(&options, theta, bands)?;
         if !theta.is_finite()
             || theta <= 0.
             || bands == 0

@@ -89,10 +89,10 @@ pub(super) trait Codec: Sized {
 macro_rules! record {
     ($t:ty { $($f:ident),* $(,)? }) => {
         impl $crate::refscf::checkpoint::Codec for $t {
-            fn put(&self, out: &mut Vec<u8>) -> Result<(), crate::ScfError> {
+            fn put(&self, out: &mut Vec<u8>) -> Result<(), crate::model::ScfError> {
                 $( $crate::refscf::checkpoint::Codec::put(&self.$f, out)?; )* Ok(())
             }
-            fn get(input: &mut $crate::refscf::checkpoint::Reader<'_>) -> Result<Self, crate::ScfError> {
+            fn get(input: &mut $crate::refscf::checkpoint::Reader<'_>) -> Result<Self, crate::model::ScfError> {
                 Ok(Self { $( $f: $crate::refscf::checkpoint::Codec::get(input)?, )* })
             }
         }
@@ -422,14 +422,14 @@ record!(crate::energy::CoreXcLedger {
     core_potential_integral_ha,
     valence_potential_integral_ha
 });
-record!(crate::PhaseTimings {
+record!(crate::model::PhaseTimings {
     potential,
     diagonalization,
     density,
     energy,
     mixing
 });
-record!(crate::FixedPointCertificate {
+record!(crate::model::FixedPointCertificate {
     strict_residuals_per_k,
     buffer_residuals_per_k,
     density_residual,
@@ -440,7 +440,7 @@ record!(crate::FixedPointCertificate {
     operator_applications_per_k,
     timings
 });
-record!(crate::VerificationAttempt {
+record!(crate::model::VerificationAttempt {
     iteration,
     passed,
     coulomb_error_ha,
@@ -564,7 +564,7 @@ record!(super::electronic::Iteration {
     mixing_fraction,
     calls
 });
-impl Codec for crate::IterationRecord {
+impl Codec for crate::model::IterationRecord {
     fn put(&self, o: &mut Vec<u8>) -> Result<(), ScfError> {
         if self.pulay.is_some() {
             return Err(invalid("legacy iteration fields"));
@@ -623,7 +623,7 @@ impl Codec for crate::IterationRecord {
         })
     }
 }
-impl Codec for crate::VerificationReport {
+impl Codec for crate::model::VerificationReport {
     fn put(&self, o: &mut Vec<u8>) -> Result<(), ScfError> {
         if self.schedule.is_some() {
             return Err(invalid("legacy verification schedule"));

@@ -1,40 +1,18 @@
 //! P45A atomic Fourier span and first-density Rayleigh-Ritz initialization.
-use super::*;
+pub use crate::model::{AtomicStartReport, StartWavefunctions};
+use crate::model::{ScfError, ScfOptions};
 use dft_basis::HalfSphere;
+use dft_basis::{FftGridSpec, PlaneWaveBasis};
+use dft_geometry::Cell;
 use dft_mpi::Collective;
 use dft_numerics::linalg::{MatrixOp, gemm, hermitian_eigh, orthonormalize};
 use dft_numerics::switches::{InitProfile, RunCounter as IC};
+use dft_physics::{
+    data::*,
+    hamiltonian::{self, Hamiltonian, Species},
+};
 use dft_solvers::LinearOperator;
 use dft_upf::radial::{projector_transform_with_rule, real_spherical_harmonic};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum StartWavefunctions {
-    FreeElectron,
-    /// Default (ADR 0042): atomic-orbital subspace with Rayleigh-Ritz; falls back to
-    /// the free-electron start with a recorded reason when it does not apply.
-    #[default]
-    Atomic,
-}
-impl StartWavefunctions {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::FreeElectron => "free_electron",
-            Self::Atomic => "atomic",
-        }
-    }
-}
-
-/// Initialization work is separate from Davidson work; MACs are complex MACs.
-#[derive(Debug, Clone, Default)]
-pub struct AtomicStartReport {
-    pub atomic_orbitals: usize,
-    pub initial_h_applications: usize,
-    pub gram_rotation_macs: usize,
-    pub mgs_projection_macs: usize,
-    pub radial_samples: usize,
-    pub evd_orders: Vec<usize>,
-    pub fallback_reason: Option<String>,
-}
 
 fn numerical(e: impl std::fmt::Display) -> ScfError {
     ScfError::Numerical(e.to_string())
@@ -174,7 +152,8 @@ pub(super) fn span(
     let part = clock();
     // BAANDI_M2_ATOMIC_BLOCK=on: row-distributed CholQR2 (rounding class);
     // None (any rank could not use it) continues with the split routine below.
-    let distributed_block = split.filter(|_| npw > 0 && crate::m2::tuning().atomic_block);
+    let distributed_block =
+        split.filter(|_| npw > 0 && crate::parallel::tuning::tuning().atomic_block);
     // Local arithmetic reuse, not a new MPI mode. A disabled M2 split path
     // on a multi-rank job must not accidentally enter the local experiment.
     let local_block = npw > 0
@@ -202,7 +181,7 @@ pub(super) fn span(
                 p.count(IC::InitAtomicLocalFallbacks, 1);
             }
         } else {
-            crate::m2::count_atomic_block_fallback();
+            crate::profile::distributed::count_atomic_block_fallback();
         }
     }
     if let Some(comm) = split.filter(|_| npw > 0) {
@@ -785,7 +764,7 @@ fn orthonormalize_block(
         });
         let local: Vec<f64> = q.as_slice().iter().flat_map(|z| [z.re, z.im]).collect();
         let vectors = gather_rows(comm, &counts, &local, n)?;
-        crate::m2::count(crate::m2::Count::AtomicBlockStarts);
+        crate::profile::distributed::count(crate::profile::distributed::Count::AtomicBlockStarts);
         vectors
     } else {
         q
@@ -965,7 +944,7 @@ pub(super) fn ritz(
         selected.column_mut(j).copy_from_slice(rot.column(j));
     }
     // BAANDI_M2_ATOMIC_BLOCK=on: the rotation by row blocks (one allgatherv).
-    let guess = match split.filter(|_| crate::m2::tuning().atomic_block) {
+    let guess = match split.filter(|_| crate::parallel::tuning::tuning().atomic_block) {
         Some(comm) => rotate_rows(comm, q, &selected)?,
         None => gemm(q, MatrixOp::Identity, &selected, MatrixOp::Identity).map_err(numerical)?,
     };

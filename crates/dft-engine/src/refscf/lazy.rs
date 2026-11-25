@@ -1,5 +1,6 @@
 //! Shared distributed orbital delivery and materialization.
 use crate::model::ScfError;
+use crate::profile::distributed;
 use dft_mpi::Collective;
 use dft_numerics::{RealMatrix, linalg::ComplexMatrix};
 use dft_physics::data::Complex64;
@@ -210,8 +211,8 @@ impl LazyOrbitals {
             }
         }
         let _ = inner.full.set(full);
-        crate::m2::count(crate::m2::Count::LazyMaterializations);
-        crate::m2::add(crate::m2::Stage::LazyMaterialize, start);
+        distributed::count(distributed::Count::LazyMaterializations);
+        distributed::add(distributed::Stage::LazyMaterialize, start);
         Ok(inner.full.get().expect("set above"))
     }
     /// The full block, owned (gathered if not yet; moved out of the cache when

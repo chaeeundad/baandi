@@ -175,9 +175,9 @@ fn inject_rows<K: Collective>(
 mod tests {
     use super::*;
     use crate::{
-        SpeciesPotential,
         model::GammaReal,
         model::ScfOptions,
+        model::SpeciesPotential,
         refstart::{self, StartInput},
     };
     use dft_numerics::linalg::ComplexMatrix;
@@ -188,9 +188,8 @@ mod tests {
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
                 let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-                let pp = crate::scf::pool_fixture::potential_with_atomic_start(
-                    2., 1.8, true, 161, "SLA PZ",
-                );
+                let pp =
+                    crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
                 let cell = dft_geometry::Cell::from_user_rows_bohr([
                     [5., 0., 0.],
                     [0.2, 6., 0.],

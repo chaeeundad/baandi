@@ -279,7 +279,7 @@ async fn run_stage<K: Collective>(
     let mut profile = profile.validate()?;
     let o = input.options;
     if o.standard.is_none()
-        || o.gamma_real != crate::GammaReal::On
+        || o.gamma_real != crate::model::GammaReal::On
         || o.crystal_density_group
         || o.max_iterations == 0
     {
@@ -754,7 +754,7 @@ async fn run_stage<K: Collective>(
                 std::iter::once((1., check.residuals.as_slice())),
                 &occupations,
             );
-            let mut attempt = crate::assess_fixed_point(
+            let mut attempt = crate::model::assess_fixed_point(
                 &options,
                 iteration,
                 tol / 2.,
@@ -1088,11 +1088,11 @@ async fn run_stage<K: Collective>(
             output.record("density_gather", phase);
             let phase = Instant::now();
             let lazy_comm = owned_comm.clone().filter(|_| {
-                config.on(Id::REFSCF_LAZY_OUTPUT) && crate::gamma_real::lazy_result_allowed()
+                config.on(Id::REFSCF_LAZY_OUTPUT) && crate::refscf::lazy::lazy_result_allowed()
             });
             let (orbitals, lazy) = if let Some(comm) = lazy_comm {
                 let placeholder = ComplexMatrix::zeros(0, bands).map_err(numerical)?;
-                let lazy = crate::gamma_real::LazyOrbitals::from_owned_handoff(
+                let lazy = crate::refscf::lazy::LazyOrbitals::from_owned_handoff(
                     std::mem::replace(
                         &mut step.solve.eigenvectors,
                         dft_numerics::RealMatrix::zeros(0, bands).map_err(numerical)?,
@@ -1474,7 +1474,7 @@ fn qe_clock_table(
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
-    use crate::SpeciesPotential;
+    use crate::model::SpeciesPotential;
     use dft_numerics::switches::RunConfig;
     use std::sync::Arc;
 
@@ -1483,9 +1483,8 @@ mod delivery_tests {
         for ranks in [2, 3] {
             dft_mpi::simulate(ranks, |comm| {
                 crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
-                let pp = crate::scf::pool_fixture::potential_with_atomic_start(
-                    2., 1.8, true, 161, "SLA PZ",
-                );
+                let pp =
+                    crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
                 let cell = dft_geometry::Cell::from_user_rows_bohr([
                     [7., 0., 0.],
                     [0.2, 7., 0.],
@@ -1501,7 +1500,7 @@ mod delivery_tests {
                     cutoff_hartree: 1.,
                     bands: Some(3),
                     max_iterations: 100,
-                    gamma_real: crate::GammaReal::On,
+                    gamma_real: crate::model::GammaReal::On,
                     ..Default::default()
                 };
                 let mut baseline: Option<ScfResult> = None;
@@ -1520,7 +1519,7 @@ mod delivery_tests {
                     ])
                     .unwrap();
                     let _guard = config.enter();
-                    crate::gamma_real::set_delivered_orbitals(needed);
+                    crate::refscf::lazy::set_delivered_orbitals(needed);
                     let run = run(
                         StartInput {
                             cell: &cell,
@@ -1573,7 +1572,7 @@ mod delivery_tests {
                         baseline = Some(r);
                     }
                 }
-                crate::gamma_real::set_delivered_orbitals(true);
+                crate::refscf::lazy::set_delivered_orbitals(true);
                 crate::parallel::set_communicator(None);
             });
         }

@@ -576,17 +576,16 @@ mod tests {
     #[test]
     fn cached_fields_equal_fresh_bits_and_agree_on_local_misses() {
         dft_mpi::simulate(3, |comm| {
-            let pp =
-                crate::scf::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+            let pp = crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
             let cell =
                 Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]).unwrap();
             let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
-            let potentials = [crate::SpeciesPotential {
+            let potentials = [crate::model::SpeciesPotential {
                 label: "Xx",
                 potential: &pp,
             }];
-            let options = crate::ScfOptions {
-                gamma_real: crate::GammaReal::On,
+            let options = crate::model::ScfOptions {
+                gamma_real: crate::model::GammaReal::On,
                 cutoff_hartree: 1.,
                 bands: Some(3),
                 ..Default::default()
@@ -629,18 +628,17 @@ mod tests {
     fn nlcc_fields_use_total_xc_but_valence_hartree_and_integrals() {
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
-                let pp = crate::scf::pool_fixture::potential_with_atomic_start(
-                    2., 1.8, false, 161, "SLA PZ",
-                );
+                let pp =
+                    crate::pool_fixture::potential_with_atomic_start(2., 1.8, false, 161, "SLA PZ");
                 let cell =
                     Cell::from_user_rows_bohr([[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]).unwrap();
                 let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
-                let potentials = [crate::SpeciesPotential {
+                let potentials = [crate::model::SpeciesPotential {
                     label: "Xx",
                     potential: &pp,
                 }];
-                let options = crate::ScfOptions {
-                    gamma_real: crate::GammaReal::On,
+                let options = crate::model::ScfOptions {
+                    gamma_real: crate::model::GammaReal::On,
                     cutoff_hartree: 1.,
                     bands: Some(3),
                     ..Default::default()

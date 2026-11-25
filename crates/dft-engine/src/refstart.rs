@@ -5,7 +5,8 @@
 //! owned; replicated basis/grid *metadata* is retained. See the Start section
 //! of docs/design/reference-scf.md for the payload-accounting boundary.
 use crate::{
-    Functional, SpeciesPotential,
+    Functional,
+    model::SpeciesPotential,
     model::{ScfError, ScfOptions},
 };
 use dft_basis::{FftGridSpec, HalfSphere, PlaneWaveBasis};
@@ -1252,7 +1253,7 @@ fn overlap_transform<K: Collective>(
     let s = gram(comm, ws, raw, raw)?;
     setup.record("atomic_overlap_gram", clock);
     let clock = Instant::now();
-    let t = crate::AtomicStartReport::owned_qr_transform(&s, true)?;
+    let t = crate::model::AtomicStartReport::owned_qr_transform(&s, true)?;
     setup.record("atomic_overlap_factor_inverse", clock);
     let Some(t) = t else { return Ok(None) };
     let clock = Instant::now();
@@ -1282,7 +1283,7 @@ fn orthogonalize<K: Collective>(
         let g = gram(comm, ws, &q, &q)?;
         setup.record("atomic_qr_gram", clock);
         let clock = Instant::now();
-        let transform = crate::AtomicStartReport::owned_qr_transform(&g, first)?;
+        let transform = crate::model::AtomicStartReport::owned_qr_transform(&g, first)?;
         setup.record("atomic_qr_factor_inverse", clock);
         let Some(t) = transform else {
             let clock = Instant::now();
@@ -1899,7 +1900,7 @@ fn start_kpoints_inner<K: Collective>(
         }
     }
     let mut common_options = o.clone();
-    common_options.gamma_real = crate::GammaReal::On;
+    common_options.gamma_real = crate::model::GammaReal::On;
     common_options.grid_override = Some(dims);
     let common_clock = Instant::now();
     let timed = TimedCollective::new(comm);

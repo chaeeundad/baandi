@@ -309,20 +309,19 @@ mod tests {
 
     #[test]
     fn slab_storage_survives_consumption_and_invalidation() {
-        let pp =
-            crate::scf::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let pp = crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
         let cell =
             dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
                 .unwrap();
         let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
-        let potentials = [crate::SpeciesPotential {
+        let potentials = [crate::model::SpeciesPotential {
             label: "Xx",
             potential: &pp,
         }];
-        let options = crate::ScfOptions {
+        let options = crate::model::ScfOptions {
             cutoff_hartree: 1.,
             bands: Some(3),
-            gamma_real: crate::GammaReal::On,
+            gamma_real: crate::model::GammaReal::On,
             ..Default::default()
         };
         dft_mpi::simulate(2, |comm| {

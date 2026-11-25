@@ -3,66 +3,10 @@
 //! Schedule and divergence interventions are explicitly rejected by the P11-COMMON
 //! allow-list. Model fields (XC, species, charge, geometry, grid, bands, threads,
 //! seed and pseudopotentials) cannot be expressed as a policy change.
+use crate::model::runtime::mixing_key;
+pub use crate::model::runtime::{PolicyChange, RuntimeEigensolver};
 use crate::{Mixing, ScfOptions};
 use dft_solvers::SolverChoice;
-
-/// Select the existing implementations with their existing defaults. Arbitrary
-/// hybrid tuning parameters are not a runtime intervention.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RuntimeEigensolver {
-    Davidson,
-    Hybrid,
-}
-
-#[derive(Clone, Debug)]
-pub enum PolicyChange {
-    Mixing(Mixing),
-    MixingBeta(f64),
-    MixingHistory(usize),
-    ResetHistory,
-    Eigensolver(RuntimeEigensolver),
-    DensityTolerance(f64),
-    EnergyToleranceHartree(f64),
-    EigenToleranceHartree(f64),
-    MaxIterations(usize),
-    ScheduleFlags { residual_eigen_schedule: bool },
-    DivergenceParameters { factor: f64, patience: usize },
-}
-
-impl PartialEq for PolicyChange {
-    fn eq(&self, other: &Self) -> bool {
-        use PolicyChange::*;
-        match (self, other) {
-            (Mixing(a), Mixing(b)) => mixing_key(a) == mixing_key(b),
-            (MixingBeta(a), MixingBeta(b))
-            | (DensityTolerance(a), DensityTolerance(b))
-            | (EnergyToleranceHartree(a), EnergyToleranceHartree(b))
-            | (EigenToleranceHartree(a), EigenToleranceHartree(b)) => a.to_bits() == b.to_bits(),
-            (MixingHistory(a), MixingHistory(b)) | (MaxIterations(a), MaxIterations(b)) => a == b,
-            (ResetHistory, ResetHistory) => true,
-            (Eigensolver(a), Eigensolver(b)) => a == b,
-            (
-                ScheduleFlags {
-                    residual_eigen_schedule: a,
-                },
-                ScheduleFlags {
-                    residual_eigen_schedule: b,
-                },
-            ) => a == b,
-            (
-                DivergenceParameters {
-                    factor: a,
-                    patience: p,
-                },
-                DivergenceParameters {
-                    factor: b,
-                    patience: q,
-                },
-            ) => a.to_bits() == b.to_bits() && p == q,
-            _ => false,
-        }
-    }
-}
 
 /// Immutable deployment metadata, not new scientific defaults. Lower bounds
 /// prevent unbounded tightening; the launch and certificate ceilings separately
@@ -138,17 +82,6 @@ fn validate_mixing(mixing: &Mixing) -> Result<(), PolicyError> {
         return Err(PolicyError::NonFiniteOrNonPositive);
     }
     Ok(())
-}
-fn mixing_key(mixing: &Mixing) -> (u8, u64, usize, u64) {
-    match *mixing {
-        Mixing::Linear { beta } => (0, beta.to_bits(), 0, 0),
-        Mixing::Pulay { beta, history } => (1, beta.to_bits(), history, 0),
-        Mixing::KerkerPulay {
-            beta,
-            history,
-            q0_inverse_bohr,
-        } => (2, beta.to_bits(), history, q0_inverse_bohr.to_bits()),
-    }
 }
 fn solver_equal(a: &SolverChoice, b: &SolverChoice) -> bool {
     match (a, b) {

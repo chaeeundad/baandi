@@ -1,7 +1,6 @@
 //! Shared SCF options and occupation contracts.
 use super::{StandardProfile, Verification};
 use crate::Functional;
-pub use crate::{StartDensity, StartWavefunctions};
 use dft_basis::PlaneWaveBasis;
 use dft_geometry::Cell;
 use dft_physics::data::Hartree;
@@ -54,7 +53,7 @@ pub struct ScfOptions {
     pub compat_mode: CompatMode,
     /// Research density projector uses all crystal operations; requires enable_symmetry.
     pub crystal_density_group: bool,
-    pub gamma_real: crate::GammaReal,
+    pub gamma_real: GammaReal,
     pub standard: Option<StandardProfile>,
     /// Experimental standard-profile stagnation guard; never enabled by default.
     pub standard_stall_guard: bool,
@@ -157,7 +156,7 @@ impl ScfOptions {
             start_density: StartDensity::Uniform,
             compat_mode: CompatMode::None,
             crystal_density_group: false,
-            gamma_real: crate::GammaReal::default(),
+            gamma_real: GammaReal::default(),
             standard: None,
             standard_stall_guard: false,
             standard_density_forcing: false,
@@ -258,6 +257,41 @@ impl GammaReal {
             Self::Off => "off",
             Self::Auto => "auto",
             Self::On => "on",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StartWavefunctions {
+    FreeElectron,
+    /// Default (ADR 0042): atomic-orbital subspace with Rayleigh-Ritz; falls back to
+    /// the free-electron start with a recorded reason when it does not apply.
+    #[default]
+    Atomic,
+}
+impl StartWavefunctions {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::FreeElectron => "free_electron",
+            Self::Atomic => "atomic",
+        }
+    }
+}
+
+/// Starting density of the SCF. Default `Uniform` is bit-identical to before.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StartDensity {
+    #[default]
+    Uniform,
+    /// Sum of the atomic charge densities of the pseudopotentials (UPF
+    /// `PP_RHOATOM`, 4 pi r^2 rho), negative ringing clipped, charge renormalised.
+    Atomic,
+}
+impl StartDensity {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Uniform => "uniform",
+            Self::Atomic => "atomic",
         }
     }
 }

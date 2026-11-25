@@ -432,7 +432,7 @@ impl Broyden {
         &mut self,
         io: &mut super::checkpoint::Exchange<'_>,
         metric: &Metric,
-    ) -> Result<(), crate::ScfError> {
+    ) -> Result<(), crate::model::ScfError> {
         use super::checkpoint::invalid;
         io.same(&format!("{:?}", self.profile))?;
         io.same(&self.smooth)?;

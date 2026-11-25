@@ -10,7 +10,7 @@ use dft_numerics::{
 // One bounded cache per calling rank/thread. Only initialized, non-returned
 // row matrices are retained; numerical factors and operator state never are.
 struct Rows {
-    key: (usize, usize, usize),
+    key: (usize, usize, usize, bool),
     v: RealMatrix,
     hv: RealMatrix,
     e: RealMatrix,
@@ -18,6 +18,10 @@ struct Rows {
 }
 thread_local! {
     static ROWS: std::cell::RefCell<Option<Rows>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(super) fn release_row_cache() {
+    ROWS.with(|slot| *slot.borrow_mut() = None);
 }
 
 pub(crate) struct Workspace {
@@ -57,6 +61,8 @@ pub(crate) struct Workspace {
     fused_append: bool,
     check_append: bool,
     reuse_rows: bool,
+    compact_return: bool,
+    returned_hx: bool,
     staged_append: Option<usize>,
     pub reused_elements: usize,
 }
@@ -75,14 +81,16 @@ impl Workspace {
             .map_err(|e| SolverError::Application(e.to_string()))?;
         use dft_numerics::switches::{Id, on};
         let reuse_rows = on(Id::REF_DAV_REUSE_ROWS);
-        let cached = if reuse_rows {
+        let compact_return = on(Id::REFSCF_MEMORY_TRIM);
+        let scratch_cols = if compact_return { cap } else { n };
+        let cached = if reuse_rows || compact_return {
             ROWS.with(|slot| slot.borrow_mut().take())
-                .filter(|r| r.key == (rows, n, cap))
+                .filter(|r| reuse_rows && r.key == (rows, n, cap, compact_return))
         } else {
             None
         };
         let reused_elements = if cached.is_some() {
-            2 * rows * cap + 2 * rows * n
+            2 * rows * cap + 2 * rows * scratch_cols
         } else {
             0
         };
@@ -95,17 +103,35 @@ impl Workspace {
         } = match cached {
             Some(buffers) => buffers,
             None => Rows {
-                key: (rows, n, cap),
+                key: (rows, n, cap, compact_return),
                 v: RealMatrix::zeros(rows, cap)?,
                 hv: RealMatrix::zeros(rows, cap)?,
-                e: RealMatrix::zeros(rows, n)?,
-                he: RealMatrix::zeros(rows, n)?,
+                e: RealMatrix::zeros(rows, scratch_cols)?,
+                he: RealMatrix::zeros(rows, scratch_cols)?,
             },
         };
         v.reshape_within_storage(rows, cap)?;
         hv.reshape_within_storage(rows, cap)?;
-        e.reshape_within_storage(rows, n)?;
-        he.reshape_within_storage(rows, n)?;
+        e.reshape_within_storage(rows, scratch_cols)?;
+        he.reshape_within_storage(rows, scratch_cols)?;
+        // The compact arm caches all four capacity-wide work arrays. The two
+        // band-wide correction arrays become the returned X/HX, without copying
+        // or reallocating at finish. Repair still has full-capacity X/HX scratch.
+        let (x, hx, e, he) = if compact_return {
+            (
+                e,
+                he,
+                RealMatrix::zeros(rows, n)?,
+                RealMatrix::zeros(rows, n)?,
+            )
+        } else {
+            (
+                RealMatrix::zeros(rows, cap)?,
+                RealMatrix::zeros(rows, cap)?,
+                e,
+                he,
+            )
+        };
         let stack = on(Id::REF_DAV_STACK_ROTATE);
         let stacked = if stack {
             Some((
@@ -115,7 +141,7 @@ impl Workspace {
         } else {
             None
         };
-        Ok(Self {
+        let workspace = Self {
             triangle: on(Id::REF_DAV_TRIANGLE),
             stacked,
             extra_elements: if stack { 2 * rows * (cap + n) } else { 0 },
@@ -124,6 +150,8 @@ impl Workspace {
             fused_append: on(Id::REF_DAV_FUSED_APPEND),
             check_append: on(Id::REF_DAV_CHECK_APPEND),
             reuse_rows,
+            compact_return,
+            returned_hx: false,
             reused_elements,
             staged_append: None,
             rows,
@@ -139,8 +167,8 @@ impl Workspace {
             ),
             v,
             hv,
-            x: RealMatrix::zeros(rows, cap)?,
-            hx: RealMatrix::zeros(rows, cap)?,
+            x,
+            hx,
             e,
             he,
             values: vec![0.0; cap],
@@ -160,15 +188,71 @@ impl Workspace {
                 pool,
             )?,
             evd: RealEighWorkspace::new(cap)?,
-        })
+        };
+        work::memory_observe(work::WorkspaceMemory {
+            rows: [
+                &workspace.v,
+                &workspace.hv,
+                &workspace.x,
+                &workspace.hx,
+                &workspace.e,
+                &workspace.he,
+            ]
+            .map(|m| std::mem::size_of_val(m.as_slice())),
+            reduced: [
+                &workspace.hr,
+                &workspace.h,
+                &workspace.y,
+                &workspace.coeff,
+                &workspace.border,
+            ]
+            .iter()
+            .map(|m| std::mem::size_of_val(m.as_slice()))
+            .sum::<usize>()
+                + workspace.reduced.capacity() * size_of::<f64>(),
+            vectors: [
+                &workspace.values,
+                &workspace.old_values,
+                &workspace.norms,
+                &workspace.sums,
+            ]
+            .iter()
+            .map(|v| v.capacity() * size_of::<f64>())
+            .sum(),
+            ..Default::default()
+        });
+        Ok(workspace)
     }
     pub fn recycle_rows(&mut self) {
+        work::memory_observe(work::WorkspaceMemory {
+            returned: (1 + usize::from(self.returned_hx))
+                * size_of::<f64>()
+                * self.rows
+                * if self.compact_return {
+                    self.n
+                } else {
+                    self.cap
+                },
+            cached: if self.reuse_rows {
+                2 * size_of::<f64>()
+                    * self.rows
+                    * (self.cap
+                        + if self.compact_return {
+                            self.cap
+                        } else {
+                            self.n
+                        })
+            } else {
+                0
+            },
+            ..Default::default()
+        });
         if self.reuse_rows {
             let take = |matrix: &mut RealMatrix| {
                 std::mem::replace(matrix, RealMatrix::zeros(0, 0).expect("empty matrix"))
             };
             let rows = Rows {
-                key: (self.rows, self.n, self.cap),
+                key: (self.rows, self.n, self.cap, self.compact_return),
                 v: take(&mut self.v),
                 hv: take(&mut self.hv),
                 e: take(&mut self.e),
@@ -965,6 +1049,14 @@ impl Workspace {
         r: &mut Iteration,
         profile: bool,
     ) -> Result<(), SolverError> {
+        self.returned_hx = hx;
+        if self.compact_return {
+            // E/HE are no longer used by the solver. Their initialized storage
+            // is exactly rows*bands, while X/HX must remain capacity-wide until
+            // the last possible repair. Swap before the identical rotations.
+            std::mem::swap(&mut self.x, &mut self.e);
+            std::mem::swap(&mut self.hx, &mut self.he);
+        }
         let t = clock(profile);
         let _stage = span(profile, Stage::Return);
         if hx && self.stacked.is_some() {
@@ -1170,6 +1262,87 @@ mod single_gemm_tests {
         };
         assert_eq!(ritz_bits(a), ritz_bits(b));
         assert_eq!(bits(&a.band_thresholds_ha), bits(&b.band_thresholds_ha));
+    }
+
+    #[test]
+    fn compact_return_storage_reuse_and_rollback() {
+        for (dim, n, ranks) in [(17, 3, 3), (7, 4, 8)] {
+            dft_mpi::simulate(ranks, |c| {
+                let mut op = Operator {
+                    dim,
+                    rows: (c.rank()..dim).step_by(ranks).collect(),
+                    clustered: true,
+                    threads: 1,
+                };
+                let mut x = RealMatrix::zeros(op.rows.len(), n).unwrap();
+                for j in 0..n {
+                    for (i, &row) in op.rows.iter().enumerate() {
+                        x[(i, j)] =
+                            f64::from(row == j) + 0.03 * ((row * 7 + j * 13 + 1) as f64).sin();
+                    }
+                }
+                let diag: Vec<_> = op
+                    .rows
+                    .iter()
+                    .map(|&r| op.diagonal(r) + 0.03 * ((r + 1) as f64).sin().powi(2))
+                    .collect();
+                let mut o = Options::new(n, 1e-10, n - 1);
+                o.return_hx = true;
+                o.profile = true;
+                o.max_iterations = 30;
+                let mut baseline = None;
+                for (arm, reuse) in [
+                    ("off", "on"),
+                    ("on", "on"),
+                    ("on", "on"),
+                    ("on", "off"),
+                    ("off", "on"),
+                ] {
+                    let _scope = RunConfig::from_pairs(&[
+                        ("refscf_memory_trim", arm),
+                        ("ref_dav_reuse_rows", reuse),
+                    ])
+                    .unwrap()
+                    .enter();
+                    let memory = work::MemoryScope::begin();
+                    let mut result = solve(c, &mut op, &x, &diag, o).unwrap();
+                    if let Some(base) = &baseline {
+                        repeat(base, &result);
+                    }
+                    let storage = memory.snapshot();
+                    let width = if arm == "on" { n } else { dim.min(2 * n) };
+                    assert_eq!(storage.returned, 16 * op.rows.len() * width);
+                    if !op.rows.is_empty() {
+                        // Check the actual hidden initialized backing length,
+                        // rather than trusting the reported active shape.
+                        assert!(
+                            result
+                                .eigenvectors
+                                .reshape_within_storage(op.rows.len(), width)
+                                .is_ok()
+                        );
+                        assert!(
+                            result
+                                .eigenvectors
+                                .reshape_within_storage(op.rows.len(), width + 1)
+                                .is_err()
+                        );
+                        result
+                            .eigenvectors
+                            .reshape_within_storage(op.rows.len(), n)
+                            .unwrap();
+                        let hx = result.hx.as_mut().unwrap();
+                        assert!(hx.reshape_within_storage(op.rows.len(), width).is_ok());
+                        assert!(hx.reshape_within_storage(op.rows.len(), width + 1).is_err());
+                        hx.reshape_within_storage(op.rows.len(), n).unwrap();
+                    }
+                    if baseline.is_none() {
+                        baseline = Some(result);
+                    }
+                }
+                release_row_cache();
+            });
+        }
     }
 
     #[test]

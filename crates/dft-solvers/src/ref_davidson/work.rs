@@ -257,3 +257,58 @@ mod tests {
         });
     }
 }
+
+/// Initialized backing storage observed at allocation/ownership boundaries.
+/// Component maxima are independent, not a simultaneous process peak. Backend
+/// GEMM/EVD and private LeanScratch allocations are deliberately not inferred.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WorkspaceMemory {
+    pub rows: [usize; 6], // V, HV, X, HX, E, HE at workspace construction
+    pub reduced: usize,
+    pub vectors: usize,
+    pub returned: usize,
+    pub cached: usize,
+}
+thread_local! {
+    static MEMORY: std::cell::Cell<Option<WorkspaceMemory>> = const { std::cell::Cell::new(None) };
+}
+/// Run-local, thread-bound census; nested scopes restore their caller on drop.
+pub struct MemoryScope {
+    previous: Option<WorkspaceMemory>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+impl MemoryScope {
+    pub fn begin() -> Self {
+        Self {
+            previous: MEMORY.with(|m| m.replace(Some(WorkspaceMemory::default()))),
+            _thread: std::marker::PhantomData,
+        }
+    }
+    pub fn snapshot(&self) -> WorkspaceMemory {
+        MEMORY.with(|m| m.get().expect("active workspace memory scope"))
+    }
+}
+impl Drop for MemoryScope {
+    fn drop(&mut self) {
+        MEMORY.with(|m| m.set(self.previous));
+    }
+}
+pub(crate) fn memory_observe(value: WorkspaceMemory) {
+    MEMORY.with(|m| {
+        if let Some(mut peak) = m.get() {
+            for (p, v) in peak.rows.iter_mut().zip(value.rows) {
+                *p = (*p).max(v);
+            }
+            peak.reduced = peak.reduced.max(value.reduced);
+            peak.vectors = peak.vectors.max(value.vectors);
+            peak.returned = peak.returned.max(value.returned);
+            peak.cached = peak.cached.max(value.cached);
+            m.set(Some(peak));
+        }
+    });
+}
+
+/// Release a completed reference run's private row cache before delivery.
+pub fn release_row_cache() {
+    super::workspace::release_row_cache();
+}

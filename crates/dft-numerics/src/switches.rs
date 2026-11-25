@@ -611,6 +611,9 @@ table! {
         "P4-DAVREM: pack V/HV rows and rotate restart/return in one GEMM; rounding class";
     REF_DAV_SETUP_FUSED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-DAVREM: fuse start/HX validation with copying and diagonal bounds; bit-identical";
+    REFSCF_MEMORY_TRIM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P4-MEM: release dead start/map/delivery arrays and return band-sized Davidson storage; identical arithmetic; pending dev08";
+
 }
 
 struct Resolved {

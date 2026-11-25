@@ -1,6 +1,9 @@
 //! Owned-row map for the reference loop. Explicit kernels and call-owned
 //! options only: no ScfProblem, session or legacy solver dispatcher.
-use super::numerical;
+use super::{
+    memory::{Component as Mem, bytes, observe},
+    numerical,
+};
 use crate::{Functional, PhaseTimings, ScfError, energy::EnergyAudit, refstart::StartState};
 use dft_geometry::Cell;
 use dft_mpi::Collective;
@@ -197,6 +200,14 @@ pub(super) fn evaluate<K: Collective>(
         .operator
         .set_owned_potential(&op_potential, epoch)
         .map_err(numerical)?;
+    observe(
+        Mem::MapPotential,
+        bytes(&potential)
+            + bytes(&op_potential)
+            + bytes(&diagonal)
+            + bytes(&input_fields.hxc)
+            + bytes(&input_fields.vh),
+    );
     timings.potential = clock.elapsed();
     let clock = Instant::now();
     let mut options = ref_davidson::Options::new(
@@ -245,6 +256,16 @@ pub(super) fn evaluate<K: Collective>(
             initial_hx.as_ref(),
         )?
     };
+    let warm_start = initial_hx.is_some();
+    if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_MEMORY_TRIM) {
+        drop(initial_hx);
+        // The solver owns its returned Ritz block. The previous guess is no
+        // longer read; retries/verification explicitly install their own guess.
+        state.orbitals =
+            dft_numerics::RealMatrix::zeros(0, occupations.len()).map_err(numerical)?;
+        drop(potential);
+        drop(diagonal);
+    }
     // An exhausted inner solve must never be silently labelled converged.
     // Re-entry policy belongs to the caller and is recorded as another call.
     timings.diagonalization = clock.elapsed();
@@ -265,6 +286,12 @@ pub(super) fn evaluate<K: Collective>(
     }
     let mut density = Vec::new();
     planes.b_to_a(comm, &op_density, &mut density)?;
+    observe(Mem::MapDensity, bytes(&op_density) + bytes(&density));
+    if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_MEMORY_TRIM) {
+        drop(op_density);
+        drop(op_potential);
+        drop(planes);
+    }
     timings.density = clock.elapsed();
     let clock = Instant::now();
     let rows = state.operator.local_rows();
@@ -302,7 +329,7 @@ pub(super) fn evaluate<K: Collective>(
         return Err(ScfError::NonFinite);
     }
     Ok(Map {
-        warm_start: initial_hx.is_some(),
+        warm_start,
         solve,
         density,
         residuals,
@@ -333,6 +360,8 @@ pub(super) fn cached_fields<K: Collective>(
     }
     let value = fields(state, comm, cell, functional, density)?;
     *cache = Some((density.to_vec(), value.clone()));
+    let (n, v) = cache.as_ref().expect("installed fields");
+    observe(Mem::FieldCache, bytes(n) + bytes(&v.hxc) + bytes(&v.vh));
     Ok(value)
 }
 

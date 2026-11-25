@@ -1758,6 +1758,22 @@ fn execute_mode_inner(
                 });
                 reference_summary = Some(json!({
                     "start_s":run.start_s,"materialize_s":run.output_s,"first_estimator_stop_iteration":run.first_reference_stop,
+                    "memory_breakdown": {
+                        "schema":"reference-memory-1",
+                        "complete":false,
+                        "units":"bytes",
+                        "kind":"independent component maxima from allocated Vec capacities and initialized matrix backing; do not sum as peak RSS",
+                        "scope":"fine stage; constructor and map boundaries; no allocator overhead or process high-water measurement",
+                        "component_names":dft_engine::refscf::memory::NAMES,
+                        "components_per_rank":run.memory_breakdown.components_per_rank,
+                        "davidson_names":dft_engine::refscf::memory::DAVIDSON_NAMES,
+                        "davidson_per_rank":run.memory_breakdown.davidson_per_rank,
+                        "unmeasured":["atomic start temporaries", "Hamiltonian projectors and work buffers",
+                            "GEMM tiles and packing", "FFT lanes and plans", "private LeanScratch and EVD backend",
+                            "basis/layout metadata", "temporary XC and field transforms", "density gather scratch",
+                            "verification candidate/check matrix overlap", "CLI serialization and output buffers",
+                            "allocator, MPI, thread stacks and library internals"]
+                    },
                     "peak_bytes_per_rank":run.peak_payload_bytes_per_rank,
                     "peak_kind":if run.ladder.is_some() { "fine-stage principal array payload estimate only; coarse stage and transfer workspace excluded; not a whole-run peak or RSS" } else { "conservative principal array payload envelope; not RSS; backend/FFT/allocator storage excluded" },
                     "peak_rss_bytes_per_rank":null,
@@ -1952,7 +1968,11 @@ fn execute_mode_inner(
                 reference_davidson_work_json,
             )?;
         }
-        result["reference_scf"] = json!({"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
+        let memory_breakdown = reference_summary
+            .as_mut()
+            .and_then(Value::as_object_mut)
+            .and_then(|summary| summary.remove("memory_breakdown"));
+        result["reference_scf"] = json!({"memory_breakdown":memory_breakdown,"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
             "stop_to_verified_clock":"reference-scf-wall-1",
             "cutoff_ladder":reference_ladder,
             "kept_hx":reference_kept_hx,
@@ -3983,6 +4003,27 @@ mod tests {
                 serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
             assert_eq!(result["convergence"]["converged"], true);
             let r = &result["reference_scf"];
+            let memory = &r["memory_breakdown"];
+            assert_eq!(memory["schema"], "reference-memory-1");
+            assert_eq!(memory["complete"], false);
+            assert_eq!(memory["units"], "bytes");
+            for (names, rows) in [
+                ("component_names", "components_per_rank"),
+                ("davidson_names", "davidson_per_rank"),
+            ] {
+                let width = memory[names].as_array().unwrap().len();
+                let ranks = memory[rows].as_array().unwrap();
+                assert_eq!(ranks.len(), 1);
+                assert_eq!(ranks[0].as_array().unwrap().len(), width);
+                assert!(
+                    ranks[0]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|n| n.as_u64().is_some())
+                );
+            }
+            assert!(!memory["unmeasured"].as_array().unwrap().is_empty());
             let kept = &r["kept_hx"];
             let hits = kept["cache_hits"].as_u64().unwrap();
             assert!(hits > 0);

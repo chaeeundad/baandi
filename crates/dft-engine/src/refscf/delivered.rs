@@ -230,7 +230,37 @@ pub fn ionic_seed<K: dft_mpi::Collective>(
         return gamma_seed(input, result, density, comm)
             .map(|seed| IonicSeed::Gamma(Box::new(seed)));
     }
-    validate_model(&input, result, &[])?;
+    k_seed(input, result, density, &[])
+}
+
+/// Export a seed with the delivered symmetry identity intact. Prepared solves
+/// use complex k blocks, including Gamma; no representation conversion occurs.
+pub fn ionic_seed_prepared(
+    input: StartInput<'_>,
+    result: &crate::ScfResult,
+    density: &[f64],
+    prepared: &super::symmetry::Prepared,
+) -> Result<IonicSeed, ScfError> {
+    prepared.validate(
+        &input,
+        &result.k_points.iter().map(|k| k.point).collect::<Vec<_>>(),
+    )?;
+    if result.gamma_real_used {
+        return Err(ScfError::InvalidInput(
+            "prepared ionic seed requires complex k blocks",
+        ));
+    }
+    let operations = prepared.operations(input.options.crystal_density_group);
+    k_seed(input, result, density, operations)
+}
+
+fn k_seed(
+    input: StartInput<'_>,
+    result: &crate::ScfResult,
+    density: &[f64],
+    operations: &[dft_geometry::symmetry::SymmetryOperation],
+) -> Result<IonicSeed, ScfError> {
+    validate_model(&input, result, operations)?;
     let charge = density.iter().sum::<f64>() * input.cell.volume_bohr3() / density.len() as f64;
     if !result.orbitals_delivered()
         || density.len() != result.density.len()

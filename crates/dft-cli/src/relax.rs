@@ -476,6 +476,18 @@ impl Context {
                 points,
             );
             request.seed = seed;
+            if self.config.symmetry.mode == crate::config::SymmetryMode::Auto {
+                request.symmetry = Some(
+                    dft_engine::refscf::symmetry::Prepared::new(
+                        &self.cell,
+                        &atoms,
+                        &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                        self.config.symmetry.tolerance_bohr,
+                        self.config.basis.time_reversal(),
+                    )
+                    .map_err(|e| error(4, e))?,
+                );
+            }
             request.derivatives.forces = true;
             request.derivatives.deferred = true;
             let mut delivery = dft_engine::refscf::api::solve(
@@ -715,16 +727,19 @@ impl Context {
         if reference && settings.warm_start {
             *self.reference_seed.borrow_mut() = Some((
                 self.cell.clone(),
-                dft_engine::refscf::api::ionic_seed(
-                    dft_engine::refstart::StartInput {
-                        cell: &self.cell,
-                        atoms: &self.atoms(),
-                        potentials: &self.refs(),
-                        options: &self.opts,
-                    },
-                    &state,
-                )
-                .map_err(|e| error(4, e))?,
+                reference_derivatives
+                    .as_ref()
+                    .expect("reference delivery")
+                    .ionic_seed(
+                        dft_engine::refstart::StartInput {
+                            cell: &self.cell,
+                            atoms: &self.atoms(),
+                            potentials: &self.refs(),
+                            options: &self.opts,
+                        },
+                        &state,
+                    )
+                    .map_err(|e| error(4, e))?,
             ));
         }
         Ok((frame, state.density.iter().copied().collect(), n_at))

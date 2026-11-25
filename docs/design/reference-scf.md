@@ -3269,20 +3269,52 @@ final lattice difference is 1.43e-9 Bohr and pressure difference 3.43e-12
 Ha/Bohr^3. Both C3 orders and the none arm pass their energy/provenance checks.
 The existing external Si2 k222 ionic test also passes (maximum dE 6.50e-12 Ha).
 
-**R7b acceptance is blocked:** the stored symmetric protocol fails with a
-force model-identity mismatch, because the existing reference relaxation
-adapter supplies derivative symmetry without a prepared-symmetry SCF.
-`api::solve` currently rejects a seed together with prepared symmetry, and
-`k_driver::run_seeded_with` cannot pass both to its private `run_inner`.
-Completing the port without dropping symmetry requires extending ticket
-ownership to `refscf/api.rs` and `refscf/k_driver.rs`, then wiring prepared
-symmetry and seeded solves together. The ignored protocol test is deliberately
-retained as a failing acceptance reproducer; no tolerance was relaxed.
-An exploratory full-mesh workaround was removed because it changes the
-requested symmetry behavior. Separate unsymmetrized tight-threshold trials
-also exhausted a final cutoff-scan SCF; they are not accepted protocol evidence.
-Real Si/MgO cell protocols and dev08 validation have not been rerun; the
-synthetic/ionic checks above do not replace them.
+R7b continuation after R8a: `api::run_request` now forwards both the K seed
+and prepared symmetry into the existing `k_driver::run_continuation`.
+No stepper loop, per-map allocation or arithmetic order changes. Prepared
+Gamma solves retain their complex-k representation. `Observables::ionic_seed`
+exports using the delivered symmetry identity; it supports both deferred CLI
+export and immediate `save_ionic_seed`. Plain export still rejects a symmetric
+state, and prepared export rejects stale geometry. A direct test compares
+seeded `solve()` with explicit stepper advancement: energy bits, density,
+orbitals and forces are identical.
+
+The protocol uses an explicit one-vector mixing history in both arms at the
+unchanged 5e-15 Ha estimator threshold. The compressed synthetic case's default
+history otherwise becomes singular at iteration 5 (condition 4.28e15, eigenvalues
+2.89e-19 and 1.24e-3 Ry) before the threshold is met. No numerical default or
+accuracy tolerance changes. Tetragonal-to-cubic group changes can invalidate
+warm density/model identity in both drivers; the test permits only those
+recorded first-attempt failures followed by the existing fresh half-step retry.
+The complete stored synthetic protocol converges in both arms, with seven
+frames per isotropic case and eleven for tetragonal relaxation. Same-build Mac
+release comparisons (reference versus explicit legacy pin):
+
+| Case | Maximum per-step dE (Ha) | Final lattice difference (Bohr) | Final pressure difference (Ha/Bohr^3) |
+| --- | ---: | ---: | ---: |
+| P=0, compressed start | 3.03e-12 | 2.71e-14 | 9.95e-17 |
+| P=0, expanded start | 1.61e-11 | 1.36e-13 | 4.24e-16 |
+| P=0.001, compressed start | 3.19e-11 | 7.99e-15 | 1.04e-17 |
+| P=0.001, expanded start | 1.47e-10 | 2.89e-14 | 3.37e-16 |
+| Tetragonal to cubic | 1.37e-9 | 1.84e-9 | 2.42e-13 |
+
+`cargo test --release -p dft-cli --test all cell_relaxation -- --ignored --skip real_files --nocapture`
+passes all eight tests (exit 0), including the existing restart, independent
+energy/derivative, rebuild/FIRE and standard-versus-strict checks. The full
+`CHECK_SCCACHE=0 BAANDI_TEST_TMP=/private/tmp/r7b-approved-gates scripts/check.sh`
+gate passes build, test, fmt and clippy (exit 0; 1030 passed, 230 ignored).
+All ticket TEST_COMMANDS also exit 0. No tolerance was changed. These are
+correctness results, not performance or QE evidence.
+
+Reference cutoff scans now preserve the caller's mixer coefficient and history
+length (plain mixing retains zero history) as well as the estimator threshold.
+Previously `stress::energy_at_prepared` discarded those mixer settings and
+constructed a default eight-vector history. Standalone final-cell scans at
+12.0/12.6/13.2 Ry, with the same 10x10x10 grid and 5e-15 Ha threshold, reproduced
+singular histories (condition 2.42e15) with history eight; all three converged
+and passed independent verification with history one. This fix is confined to
+reference cutoff-scan setup; the SCF iteration and legacy scan paths are unchanged.
+Real Si/MgO cell protocols and dev08 validation have not been rerun.
 
 R7a tests append to `refscf_forces`: missing-grid rejection, explicit ordered
 Miller/kinetic/density-support checks across cutoff-shell crossings, standard

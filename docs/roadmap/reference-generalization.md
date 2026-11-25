@@ -31,5 +31,8 @@ at least one non-Si NLCC/PBE system (e.g. MgO, GaAs, SiC with PseudoDojo files; 
 | G3 | Si2 2x2x2 shifted (4 k) | +1.3e-10 | +2.1e-10 | E_ref - E_QE(k222s_c) = +2.56e-6 Ha, the archived cross-code offset of this input |
 | G5 | si8 Gamma, one atom +0.05 bohr, forces+stress, default standard | +2.97e-10 (vs oracle) | | max dF vs oracle 8.2e-6 Ha/bohr (legacy 4.9e-6), dsigma 1.1e-9; labels "verified" |
 | G5 | same, standard threshold 5e-13 Ha | | +2.0e-13 | dF 2.2e-7 Ha/bohr, dsigma 4.2e-11; 3-step relax vs legacy: dE <= 4.1e-9 Ha, dF <= 3.1e-7, dr <= 9.3e-7 bohr (gates 5e-9 / 1e-6 / 1e-6 pass) |
+| G4 | Si2 Fermi-Dirac theta 0.01 Ha, 4x4x4 (36 k, 32 bands) | -2.7e-10 (F) | +2.2e-11 (F) | mu_ref - mu_oracle -1.5e-7 Ha (legacy -3.4e-6); verified |
 
 All within the standard class (5e-9 Ha). Evidence: dev08 /data/sig-dft/gen/RESULT.md /data/sig-dft/gen4/RESULT.md and /data/sig-dft/gen5/RESULT.md (binary e3a75a5, sha256 183df05a...5a49).
+
+Open gaps found by the runs: spin with PBE needs a two-channel distributed GGA evaluator (stage G4C; real PseudoDojo files are PBE, so this blocks spin on real materials in the reference driver); `refscf-check --stop-to-verified` does not read the k/FD results schema (fold into G5B). Evidence for G4: dev08 /data/sig-dft/gen6/RESULT.md.

@@ -2106,7 +2106,7 @@ mod reuse_psi_tests {
 
 #[cfg(test)]
 mod persistence_tests {
-    include!("../tests/common/persistent_real_invalidation_unit.rs");
+    include!("../../tests/common/persistent_real_invalidation_unit.rs");
 }
 
 #[cfg(test)]
@@ -2331,7 +2331,7 @@ mod lazy_assemble_tests {
 // rather than change that unrelated module's visibility outside the ticket.
 #[cfg(test)]
 #[allow(dead_code, clippy::duplicate_mod)]
-#[path = "../tests/common/mod.rs"]
+#[path = "../../tests/common/mod.rs"]
 mod owned_input_fixtures;
 
 #[cfg(test)]

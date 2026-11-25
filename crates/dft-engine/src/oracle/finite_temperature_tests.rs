@@ -1,5 +1,5 @@
 use super::*;
-use crate::scf::pool_fixture as common;
+use crate::pool_fixture as common;
 fn run(theta: f64, bands: usize, electrons: f64) -> FiniteTResult {
     let cell =
         Cell::from_user_rows_bohr([[5.0, 0.0, 0.0], [0.0, 5.0, 0.0], [0.0, 0.0, 5.0]]).unwrap();

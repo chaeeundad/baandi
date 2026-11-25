@@ -150,12 +150,14 @@ impl LazyOrbitals {
     }
     /// Whether this handle holds the rows of `rows` (the operator's local
     /// rows) of an N-row block.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn matches(&self, rows: &[usize], n: usize) -> bool {
         self.0.n == n && *self.0.rows == *rows
     }
     /// The local rows after the elementwise ORC round trip sqrt2 * (x / sqrt2)
     /// that pack(unpack(x)) applies to every coordinate but the G = 0 row:
     /// bit-identical to the local rows of the packed gathered warm start.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn round_trip_start(&self) -> Result<RealMatrix, ScfError> {
         let x = &self.0.x;
         let nl = x.rows();
@@ -229,6 +231,7 @@ impl LazyOrbitals {
     /// representative's |G|^2/2 on both of its coordinates, |G|^2/2 at G = 0),
     /// band values reduced with one tree sum, then summed in band order.
     /// Rounding class against the complex sum (another summation order).
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn kinetic_energy(
         &self,
         diagonal: &[f64],

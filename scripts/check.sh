@@ -144,5 +144,13 @@ report fmt $? "$tmp/fmt.log"
 if [[ -n "$clippy_pid" ]]; then wait "$clippy_pid"; clippy_rc=$?
 else cargo clippy "${pkg[@]}" --all-targets -- -D warnings >"$tmp/clippy.log" 2>&1; clippy_rc=$?; fi
 report clippy $clippy_rc "$tmp/clippy.log"
+# Separate package invocation prevents workspace feature unification from
+# re-enabling the legacy oracle through the CLI/Python/MCP adapters.
+oracle_gate_start=$(date +%s)
+cargo check -p dft-engine --no-default-features >"$tmp/production-check.log" 2>&1
+report production-check $? "$tmp/production-check.log"
+cargo clippy -p dft-engine --no-default-features --all-targets -- -D warnings >"$tmp/production-clippy.log" 2>&1
+report production-clippy $? "$tmp/production-clippy.log"
+echo "PRODUCTION GATE WALL $(( $(date +%s) - oracle_gate_start )) s"
 echo "WALL $(( $(date +%s) - start )) s ($tier)"
 exit $fail

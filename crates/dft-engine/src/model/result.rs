@@ -203,3 +203,22 @@ pub struct AtomicStartReport {
     pub evd_orders: Vec<usize>,
     pub fallback_reason: Option<String>,
 }
+
+pub struct ScfStep {
+    /// Density projection policy carried with finite-temperature results as well.
+    pub crystal_density_group: bool,
+    /// First-k compatibility view; `k_points` contains every solution.
+    pub solution: EigenSolution,
+    /// Every k block in input quadrature order.
+    pub k_points: Vec<KPointSolution>,
+    pub density: Array3<f64>,
+    pub energy: EnergyAudit,
+    pub timings: PhaseTimings,
+    /// True when `energy.nonlocal` comes from the band-sum identity (B2,
+    /// `BAANDI_ENERGY_IDENTITY=on`, non-final iterations only).
+    pub nonlocal_from_identity: bool,
+    /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the output density on this
+    /// rank's slab planes; `density` is then an empty array.
+    #[cfg(feature = "strict-oracle")]
+    pub(crate) owned_density: Option<crate::grid_dist::Owned>,
+}

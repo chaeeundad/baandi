@@ -113,6 +113,7 @@ impl Drop for OrbitalCopySpan {
         );
     }
 }
+#[cfg(feature = "strict-oracle")]
 pub(crate) fn orbital_copy_seconds() -> f64 {
     ORBITAL_COPY_NS.load(std::sync::atomic::Ordering::Relaxed) as f64 * 1e-9
 }

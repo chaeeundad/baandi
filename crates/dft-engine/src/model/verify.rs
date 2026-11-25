@@ -1,5 +1,7 @@
 //! Shared convergence profiles and fixed-point assessment.
-use super::{FixedPointCertificate, IterationRecord, ScfOptions};
+#[cfg(feature = "strict-oracle")]
+use super::IterationRecord;
+use super::{FixedPointCertificate, ScfOptions};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -29,6 +31,7 @@ impl StandardProfile {
     /// residual (in atomic units) to map a norm scale to a Ritz-energy scale.
     /// This heuristic is not an energy bound or an inexact-Newton guarantee.
     /// Never loosen the ordinary ratchet; retain its existing numerical floor.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn density_forcing(tolerance: f64, history: &[IterationRecord]) -> f64 {
         history.last().map_or(tolerance, |r| {
             tolerance
@@ -45,6 +48,7 @@ impl StandardProfile {
     /// Cap against the window-entry tolerance, not the latest tolerance: this
     /// prevents repeated cuts on every step of the same plateau. History alone
     /// determines the action, including after an exact checkpoint continuation.
+    #[cfg(feature = "strict-oracle")]
     pub(crate) fn stall_guard(tolerance: f64, history: &[IterationRecord]) -> f64 {
         const INTERVALS: usize = 5;
         const TIGHTEN: f64 = 0.1;

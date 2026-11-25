@@ -375,7 +375,7 @@ pub(crate) fn start_prolonged<K: Collective>(
     let cache = (share || partitions).then(|| PlanCache::with_partition_cache(share, partitions));
     let _plans = cache.as_ref().map(PlanCache::enter);
     let timed = TimedCollective::new(comm);
-    let mut state = start_inner(input, &timed, seed)?;
+    let mut state = start_inner(input, &timed, seed, false)?;
     state.setup.total_s = clock.elapsed().as_secs_f64();
     state.setup.collective_s = timed.seconds();
     Ok(state)
@@ -384,6 +384,7 @@ fn start_inner<K: Collective>(
     input: StartInput<'_>,
     comm: &K,
     seed: Option<crate::refscf::ladder::Seed>,
+    fields_only: bool,
 ) -> Result<StartState, ScfError> {
     let mut setup = crate::refscf::record::SetupTimings::default();
     let clock = Instant::now();
@@ -485,7 +486,9 @@ fn start_inner<K: Collective>(
                     .sum::<usize>()
         })
         .sum();
-    if bands < occupied || bands > basis.vectors().len() || j > basis.vectors().len() {
+    if bands < occupied
+        || (!fields_only && (bands > basis.vectors().len() || j > basis.vectors().len()))
+    {
         return Err(ScfError::InvalidInput(
             "reference start: incompatible atomic rank/bands",
         ));
@@ -508,7 +511,7 @@ fn start_inner<K: Collective>(
     let nl = NonlocalOperator::new_owned_with_rule(
         &basis,
         volume,
-        &species,
+        if fields_only { &[] } else { &species },
         o.radial_even_rule,
         &indices,
     );
@@ -523,7 +526,7 @@ fn start_inner<K: Collective>(
     let clock = Instant::now();
     // H is applied in chunks of B during the initial Ritz solve; allocating
     // capacity J here would retain atomic-span-sized FFT batches for the run.
-    let capacity = bands;
+    let capacity = if fields_only { 1 } else { bands };
     let mut operator = DistributedRealHamiltonian::new_owned(
         &basis,
         &grid,
@@ -745,7 +748,9 @@ fn start_inner<K: Collective>(
     drop(map);
     setup.record("potential_distribution", clock);
     let clock = Instant::now();
-    let (orbitals, ritz_values_hartree) = if let Some(orbitals) = warm_orbitals {
+    let (orbitals, ritz_values_hartree) = if fields_only {
+        (RealMatrix::zeros(0, bands).map_err(err)?, Vec::new())
+    } else if let Some(orbitals) = warm_orbitals {
         (orbitals, Vec::new())
     } else {
         atomic_block(
@@ -1762,4 +1767,282 @@ fn ewald_owned<K: Collective>(
         return Err(ScfError::InvalidInput("reference start: Ewald failed"));
     }
     Ok((plan.finish_sums(state[0], state[1])?, bytes))
+}
+
+/// Complex per-k owned blocks. The real Gamma entry above is unchanged.
+#[derive(Clone)]
+pub struct KOrbitals(pub Vec<dft_numerics::linalg::ComplexMatrix>);
+impl KOrbitals {
+    pub fn cols(&self) -> usize {
+        self.0.first().map_or(0, |x| x.cols())
+    }
+}
+pub struct KBlock {
+    pub point: dft_geometry::kpoints::KPoint,
+    pub basis: PlaneWaveBasis,
+    pub operator: dft_physics::distributed_complex::DistributedComplexHamiltonian,
+}
+pub struct KStartState {
+    pub initial_h_columns: usize,
+    pub common: StartState,
+    pub blocks: Vec<KBlock>,
+    pub orbitals: KOrbitals,
+}
+impl std::ops::Deref for KStartState {
+    type Target = StartState;
+    fn deref(&self) -> &StartState {
+        &self.common
+    }
+}
+impl std::ops::DerefMut for KStartState {
+    fn deref_mut(&mut self) -> &mut StartState {
+        &mut self.common
+    }
+}
+
+/// Initialize a validated (possibly time-reversal-reduced) list. All k points
+/// share the density grid; their kinetic/projector supports use k+G. The common
+/// atomic-field initializer skips Gamma orbital/projector construction. A small
+/// unused Gamma FFT adapter remains in the shared field state; it imposes no
+/// Gamma band-rank constraint on the actual k blocks.
+pub fn start_kpoints<K: Collective>(
+    input: StartInput<'_>,
+    points: &[dft_geometry::kpoints::KPoint],
+    comm: &K,
+) -> Result<KStartState, ScfError> {
+    use dft_numerics::linalg::{ComplexMatrix as Matrix, GemmWorkspace, MatrixOp, hermitian_eigh};
+    dft_geometry::kpoints::validate(points).map_err(err)?;
+    let o = input.options;
+    let cell = input.cell;
+    let db = o.basis(cell, [0.; 3], 4.)?;
+    let bases: Vec<_> = points
+        .iter()
+        .map(|p| o.basis(cell, p.fractional, 1.))
+        .collect::<Result<_, _>>()?;
+    let gamma = o.basis(cell, [0.; 3], 1.)?;
+    let mut dims = FftGridSpec::new(&gamma, &db, o.grid_override)?.dims();
+    for b in &bases {
+        let d = FftGridSpec::new(b, &db, o.grid_override)?.dims();
+        for a in 0..3 {
+            dims[a] = dims[a].max(d[a]);
+        }
+    }
+    let mut common_options = o.clone();
+    common_options.gamma_real = crate::GammaReal::On;
+    common_options.grid_override = Some(dims);
+    let common_clock = Instant::now();
+    let timed = TimedCollective::new(comm);
+    let mut common = start_inner(
+        StartInput {
+            cell,
+            atoms: input.atoms,
+            potentials: input.potentials,
+            options: &common_options,
+        },
+        &timed,
+        None,
+        true,
+    )?;
+    common.setup.total_s = common_clock.elapsed().as_secs_f64();
+    common.setup.collective_s = timed.seconds();
+    let bands = common.orbitals.cols();
+    let mut positions = vec![Vec::new(); input.potentials.len()];
+    for a in input.atoms {
+        let i = input
+            .potentials
+            .iter()
+            .position(|p| p.label == a.species)
+            .ok_or(ScfError::InvalidInput("unknown species"))?;
+        positions[i].push(
+            cell.fractional_to_cartesian_bohr(a.fractional_position.map(|r| r.rem_euclid(1.))),
+        );
+    }
+    let species: Vec<_> = input
+        .potentials
+        .iter()
+        .zip(&positions)
+        .map(|(p, r)| Species {
+            potential: p.potential,
+            positions_bohr: r,
+        })
+        .collect();
+    let pool = WorkerPool::new(o.threads).map_err(err)?;
+    let mut blocks = Vec::new();
+    let mut orbitals = Vec::new();
+    let mut initial_h_columns = 0;
+    let clock = Instant::now();
+    for (point, basis) in points.iter().zip(bases) {
+        if bands > basis.vectors().len() {
+            return Err(ScfError::InvalidInput(
+                "reference k start: too many bands for a k basis",
+            ));
+        }
+        let grid = FftGridSpec::new(&basis, &db, Some(dims))?;
+        let layout = DistributedPairFft::new(dims, grid.g_to_fft(), comm.rank(), comm.size())
+            .map_err(err)?;
+        let rows = layout.local_positions().to_vec();
+        drop(layout);
+        let nl = NonlocalOperator::new_owned_with_rule(
+            &basis,
+            cell.volume_bohr3(),
+            &species,
+            o.radial_even_rule,
+            &rows,
+        )?;
+        let mut op = dft_physics::distributed_complex::DistributedComplexHamiltonian::new_owned(
+            &basis,
+            &grid,
+            &nl,
+            (2 * bands)
+                .max(common.memory.atomic_columns)
+                .min(basis.vectors().len()),
+            comm.rank(),
+            comm.size(),
+            pool.clone(),
+        )
+        .map_err(err)?;
+        let mut planes = crate::grid_dist::PlaneMap::new(
+            dims,
+            comm.rank(),
+            comm.size(),
+            common.fields.first_axis(),
+            op.first_axis(),
+        );
+        let mut potential = Vec::new();
+        planes.a_to_b(comm, &common.potential, &mut potential)?;
+        op.set_owned_potential(&potential, 1).map_err(err)?;
+        let mut columns = Vec::new();
+        for sp in &species {
+            for channel in sp.potential.atomic_wavefunctions().unwrap() {
+                for pos in sp.positions_bohr {
+                    for m in -(channel.l as isize)..=channel.l as isize {
+                        let mut col = Vec::with_capacity(rows.len());
+                        for &g in &rows {
+                            let q = &basis.momenta()[g];
+                            let radial = projector_transform_with_rule(
+                                sp.potential.mesh(),
+                                channel.l,
+                                &channel.radial_times_r,
+                                q.norm_squared.sqrt(),
+                                o.radial_even_rule,
+                            )
+                            .map_err(err)?
+                                / cell.volume_bohr3().sqrt();
+                            let y = if q.norm_squared == 0. {
+                                if channel.l == 0 {
+                                    1. / (4. * PI).sqrt()
+                                } else {
+                                    0.
+                                }
+                            } else {
+                                real_spherical_harmonic(channel.l, m, q.cartesian).map_err(err)?
+                            };
+                            let angle: f64 = q.cartesian.iter().zip(pos).map(|(q, r)| q * r).sum();
+                            col.push(
+                                C::new(0., -1.).powu(channel.l as u32)
+                                    * C::from_polar(1., -angle)
+                                    * (radial * y),
+                            );
+                        }
+                        columns.push(col);
+                    }
+                }
+            }
+        }
+        // Two-pass owned-row MGS, then lowest kinetic coordinate complements.
+        // Complements are chosen from the actual k+G kinetic order, never G index.
+        let mut order: Vec<_> = (0..basis.vectors().len()).collect();
+        order.sort_by(|&a, &b| {
+            basis.momenta()[a]
+                .norm_squared
+                .total_cmp(&basis.momenta()[b].norm_squared)
+                .then(a.cmp(&b))
+        });
+        let target = columns.len().max(bands).min(basis.vectors().len());
+        let mut q = Matrix::zeros(rows.len(), 0).map_err(err)?;
+        q.reserve_columns(target).map_err(err)?;
+        for mut col in columns.into_iter().chain(order.into_iter().map(|g| {
+            rows.iter()
+                .map(|&r| C::new(f64::from(r == g), 0.))
+                .collect()
+        })) {
+            for _ in 0..2 {
+                for j in 0..q.cols() {
+                    let z: C = q
+                        .column(j)
+                        .iter()
+                        .zip(&col)
+                        .map(|(a, b)| a.conj() * b)
+                        .sum();
+                    let z = sum(comm, &[z.re, z.im])?;
+                    let z = C::new(z[0], z[1]);
+                    for (a, b) in col.iter_mut().zip(q.column(j)) {
+                        *a -= z * b;
+                    }
+                }
+            }
+            let norm = sum(comm, &[col.iter().map(|z| z.norm_sqr()).sum()])?[0].sqrt();
+            if norm <= dft_numerics::linalg::DEPENDENCE_TOLERANCE {
+                continue;
+            }
+            let j = q.cols();
+            q.resize_columns(j + 1).map_err(err)?;
+            for (a, b) in q.column_mut(j).iter_mut().zip(col) {
+                *a = b / norm;
+            }
+            if q.cols() == target {
+                break;
+            }
+        }
+        if q.cols() < bands {
+            return Err(ScfError::InvalidInput(
+                "reference complex atomic start has insufficient rank",
+            ));
+        }
+        let mut hq = Matrix::zeros(rows.len(), q.cols()).map_err(err)?;
+        op.apply_block(comm, &q, &mut hq).map_err(err)?;
+        initial_h_columns += q.cols();
+        let mut gemm = GemmWorkspace::with_pool(
+            rows.len().max(q.cols()),
+            q.cols(),
+            o.threads.max(1),
+            pool.clone(),
+        )
+        .map_err(err)?;
+        let mut h = Matrix::zeros(q.cols(), q.cols()).map_err(err)?;
+        gemm.multiply_into(&q, MatrixOp::Adjoint, &hq, MatrixOp::Identity, &mut h)
+            .map_err(err)?;
+        let local: Vec<_> = h.as_slice().iter().flat_map(|z| [z.re, z.im]).collect();
+        let all = sum(comm, &local)?;
+        for (z, p) in h.as_mut_slice().iter_mut().zip(all.as_chunks::<2>().0) {
+            *z = C::new(p[0], p[1]);
+        }
+        for j in 0..h.cols() {
+            h[(j, j)].im = 0.;
+            for i in 0..j {
+                let z = (h[(i, j)] + h[(j, i)].conj()) * 0.5;
+                h[(i, j)] = z;
+                h[(j, i)] = z.conj();
+            }
+        }
+        let (_, mut c) = hermitian_eigh(&h).map_err(err)?;
+        c.resize_columns(bands).map_err(err)?;
+        let mut x = Matrix::zeros(rows.len(), bands).map_err(err)?;
+        gemm.multiply_into(&q, MatrixOp::Identity, &c, MatrixOp::Identity, &mut x)
+            .map_err(err)?;
+        orbitals.push(x);
+        blocks.push(KBlock {
+            point: *point,
+            basis,
+            operator: op,
+        });
+    }
+    common.setup.record("complex_k_atomic_starts", clock);
+    common.orbitals = RealMatrix::zeros(0, bands).map_err(err)?;
+    Ok(KStartState {
+        initial_h_columns,
+        common,
+        blocks,
+        orbitals: KOrbitals(orbitals),
+    })
 }

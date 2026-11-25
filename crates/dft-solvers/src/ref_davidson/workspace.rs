@@ -7,6 +7,17 @@ use dft_numerics::{
     GemmSite, RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool, real::RealEighWorkspace,
 };
 
+/// Shared real/complex reference subspace contract. Zero requests 2*bands,
+/// clipped only by the full physical dimension, never by a rank's local rows.
+pub(crate) fn capacity(dimension: usize, bands: usize, requested: usize) -> usize {
+    (if requested == 0 {
+        bands.saturating_mul(2)
+    } else {
+        requested
+    })
+    .min(dimension)
+}
+
 // One bounded cache per calling rank/thread. Only initialized, non-returned
 // row matrices are retained; numerical factors and operator state never are.
 struct Rows {

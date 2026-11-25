@@ -26,7 +26,7 @@ use dft_mpi::Collective;
 /// eligible candidate, bounding how long stale calibration can defer a check.
 #[derive(Default)]
 pub struct VerificationPredictor {
-    observed: Option<(f64, f64)>,
+    pub(super) observed: Option<(f64, f64)>,
     skipped_last: bool,
 }
 impl VerificationPredictor {
@@ -74,6 +74,7 @@ pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
 }
 
 pub struct Run {
+    pub verification_k_call_indices: Vec<usize>,
     pub memory_breakdown: memory::Breakdown,
     pub kept_hx: super::kept_hx::Report,
     pub ladder: Option<super::ladder::Report>,
@@ -782,6 +783,7 @@ fn run_stage<K: Collective>(
             pulay: None,
         });
         records.push(Record {
+            k_call_indices: Vec::new(),
             warm_start: step.warm_start && !calls.is_empty(),
             stage: if coarse { "coarse" } else { "fine" },
             iteration,
@@ -1023,6 +1025,7 @@ fn run_stage<K: Collective>(
                 )
             });
             return Ok(StageRun::Fine(Box::new(Run {
+                verification_k_call_indices: Vec::new(),
                 memory_breakdown: memory_scope.report(comm)?,
                 kept_hx: kept.report(comm)?,
                 ladder: None,

@@ -12,6 +12,7 @@ pub mod locking;
 pub mod mixing;
 pub mod real_davidson;
 pub mod ref_davidson;
+pub mod ref_davidson_complex;
 pub mod ref_rmm;
 pub use real_davidson::{RealDavidson, RealEigenSolution};
 #[doc(hidden)]

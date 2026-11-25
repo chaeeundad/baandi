@@ -69,6 +69,8 @@ impl VerificationEnergy {
 
 #[derive(Clone, Debug)]
 pub struct Record {
+    /// Zero-based k index for each call; empty on the unchanged real Gamma path.
+    pub k_call_indices: Vec<usize>,
     /// An ordinary solve call used supplied HX (false for a reused whole map).
     pub warm_start: bool,
     pub stage: &'static str,

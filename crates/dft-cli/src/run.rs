@@ -1529,11 +1529,12 @@ fn execute_mode_inner(
     // Keep rank-local file records; do not add collectives to measure redundant I/O.
     let mut upf_records = dft_engine::profile::enabled().then(Vec::new);
     dft_engine::profile::davidson_lane::reset();
-    if (config.collinear()
-        || config
-            .finite_temperature()
-            .map_err(|e| error(1, e))?
-            .is_some())
+    if !reference
+        && (config.collinear()
+            || config
+                .finite_temperature()
+                .map_err(|e| error(1, e))?
+                .is_some())
         && (mode.observe || mode.agent)
     {
         return Err(error(
@@ -1541,7 +1542,10 @@ fn execute_mode_inner(
             "spin.execution: runtime control is not spin-aware; use Classic execution",
         ));
     }
-    if config.symmetry.mode == crate::config::SymmetryMode::Auto && (mode.observe || mode.agent) {
+    if !reference
+        && config.symmetry.mode == crate::config::SymmetryMode::Auto
+        && (mode.observe || mode.agent)
+    {
         return Err(error(
             1,
             "symmetry.execution: checkpoint identity does not carry symmetry yet; use Classic execution",
@@ -1579,9 +1583,6 @@ fn execute_mode_inner(
     // ADR 0043 ONEPATH-4: the observe/agent runtime modes run the same single
     // standard path with the verification as a classic run (checkpoint v1
     // carries the verification option and its attempts).
-    if reference && (mode.observe || mode.agent) {
-        return Err(error(1, "reference SCF supports Classic execution only"));
-    }
     let opts = options_for(&config, selection)?;
     let mut potentials = Vec::new();
     let mut species = Vec::new();
@@ -1647,6 +1648,20 @@ fn execute_mode_inner(
         .map_err(|e| error(1, e))?;
     let reference = selection.reference();
     let opts = options_for(&config, selection)?;
+    if !reference
+        && (mode.observe || mode.agent)
+        && (config.collinear()
+            || config
+                .finite_temperature()
+                .map_err(|e| error(1, e))?
+                .is_some()
+            || config.symmetry.mode == crate::config::SymmetryMode::Auto)
+    {
+        return Err(error(
+            1,
+            "runtime control for spin/FD or symmetry requires an eligible reference driver",
+        ));
+    }
     launch::elapsed("upf_read_parse_hash", upf_clock);
     let xc_message = format!(
         "XC: {}; allow_functional_override={}; override_applied={}",
@@ -1718,6 +1733,7 @@ fn execute_mode_inner(
             preflight,
             species,
             &bytes,
+            mode,
         );
     }
     // Collinear spin and Fermi-Dirac drivers: the standard path with the
@@ -1909,7 +1925,7 @@ fn execute_mode_inner(
     launch::mark("scf_entry");
     let driver_entry = Instant::now();
     let driver_entry_s = driver_entry.duration_since(start).as_secs_f64();
-    let mut outcome = if mode.observe || mode.agent {
+    let mut outcome = if !reference && (mode.observe || mode.agent) {
         crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
         let run = if reference {
@@ -1927,10 +1943,13 @@ fn execute_mode_inner(
                 stress: config.wants_stress(),
                 deferred: true,
             };
-            let result = dft_engine::refscf::api::solve(input, request).and_then(|delivery| {
-                reference_derivatives = Some(delivery.derivatives);
-                delivery.run.into_scalar()
-            });
+            let delivered = if mode.observe || mode.agent {
+                crate::telemetry::drive_reference(input, request, mode, &out)?
+            } else {
+                dft_engine::refscf::api::solve(input, request).map_err(engine_error)?
+            };
+            reference_derivatives = Some(delivered.derivatives);
+            let result = delivered.run.into_scalar();
             result.map(|run| {
                 reference_symmetry_record = run.symmetry.as_ref().map_or(Value::Null, reference_symmetry_json);
                 reference_return = Some(Instant::now());
@@ -3015,6 +3034,9 @@ fn execute_mode_inner(
         })).collect::<Vec<_>>());
     }
     add_xc_screening_json(&mut result);
+    if reference && (mode.observe || mode.agent) {
+        crate::telemetry::annotate_reference_result(&mut result, &out)?;
+    }
     let result_path = out.join("results.json");
     let serialize_clock = launch::clock();
     if !reference_symmetry_record.is_null() {
@@ -3088,6 +3110,7 @@ fn reference_electronic_run(
     preflight: crate::config::preflight::Report,
     species: Vec<Value>,
     input_bytes: &[u8],
+    mode: &crate::telemetry::RunMode,
 ) -> Result<RunReport, RunError> {
     use dft_engine::refscf::electronic::Policy;
     let theta = config.finite_temperature().map_err(|e| error(1, e))?;
@@ -3133,9 +3156,12 @@ fn reference_electronic_run(
     let mut request = dft_engine::refscf::api::Request::new(profile, points.to_vec());
     request.symmetry = symmetry;
     request.policy = Some(policy);
-    let r = dft_engine::refscf::api::solve(input, request)
-        .and_then(|delivery| delivery.run.into_electronic())
-        .map_err(engine_error)?;
+    let delivery = if mode.observe || mode.agent {
+        crate::telemetry::drive_reference(input, request, mode, out)?
+    } else {
+        dft_engine::refscf::api::solve(input, request).map_err(engine_error)?
+    };
+    let r = delivery.run.into_electronic().map_err(engine_error)?;
     let mut total = r.density[0].clone();
     if r.density.len() == 2 {
         total += &r.density[1];
@@ -3307,6 +3333,9 @@ fn reference_electronic_run(
         r.converged,
     );
     add_xc_screening_json(&mut result);
+    if mode.observe || mode.agent {
+        crate::telemetry::annotate_reference_result(&mut result, out)?;
+    }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         converged: r.converged,

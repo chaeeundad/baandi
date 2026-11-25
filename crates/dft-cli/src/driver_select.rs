@@ -120,7 +120,6 @@ pub const VARIABLE_CELL: &str =
     "L4: variable-cell relaxation requires legacy frozen-strain support";
 pub const EXTRAPOLATION: &str = "L5: relaxation density extrapolation requires the legacy driver";
 pub const CHECKPOINT: &str = "L6: checkpoint/restart v1 requires the legacy session";
-pub const RUNTIME: &str = "L7: observe/agent runtime requires the legacy session";
 pub const SESSION: &str = "L8: step/status/iteration APIs require the legacy session";
 pub const LEGACY_INPUT: &str = "L9: explicit legacy-only SCF controls";
 pub const COMPAT: &str = "L10: original PW92 prefactor requires the legacy driver";
@@ -181,9 +180,7 @@ fn l2(c: &Config, _: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
             && switches::on(Id::REFSCF_SPIN_STIFFNESS)
             && switches::on(Id::REFSCF_HISTORY_CONDITIONING))
 }
-fn l7(_: &Config, mode: Mode, _: Command, _: &[&Pseudopotential]) -> bool {
-    mode != Mode::Classic
-}
+
 fn l8(_: &Config, _: Mode, command: Command, _: &[&Pseudopotential]) -> bool {
     command == Command::Session
 }
@@ -268,7 +265,6 @@ type Predicate = fn(&Config, Mode, Command, &[&Pseudopotential]) -> bool;
 const LEGACY_ONLY: &[(Predicate, &str)] = &[
     (l1, G4D_FALLBACK),
     (l2, G4B_FALLBACK),
-    (l7, RUNTIME),
     (l8, SESSION),
     (l9, LEGACY_INPUT),
     (l10, COMPAT),

@@ -69,6 +69,11 @@ impl StepReport {
     }
 }
 
+pub(super) enum Visit<'a, 'b> {
+    Checkpoint(&'a mut super::checkpoint::Exchange<'b>),
+    Policy(super::runtime::PolicyPatch),
+}
+
 type StateResponse = Result<(Vec<u8>, usize), ScfError>;
 
 #[derive(Default)]
@@ -78,6 +83,8 @@ pub(super) struct Boundary {
     request: RefCell<Option<Option<Vec<u8>>>>,
     response: RefCell<Option<StateResponse>>,
     state_available: Cell<bool>,
+    policy: Cell<Option<super::runtime::PolicyPatch>>,
+    policy_response: RefCell<Option<Result<(), ScfError>>>,
 }
 impl Boundary {
     pub fn publish(&self, report: StepReport) {
@@ -89,7 +96,7 @@ impl Boundary {
     }
     pub async fn ready_state(
         &self,
-        mut visit: impl FnMut(&mut super::checkpoint::Exchange<'_>) -> Result<usize, ScfError>,
+        mut visit: impl FnMut(Visit<'_, '_>) -> Result<usize, ScfError>,
     ) {
         if !self.initialized.replace(true) {
             self.pause_state(&mut visit).await;
@@ -98,24 +105,26 @@ impl Boundary {
     pub async fn emit_state(
         &self,
         report: StepReport,
-        mut visit: impl FnMut(&mut super::checkpoint::Exchange<'_>) -> Result<usize, ScfError>,
+        mut visit: impl FnMut(Visit<'_, '_>) -> Result<usize, ScfError>,
     ) {
         self.publish(report);
         self.pause_state(&mut visit).await;
     }
-    async fn pause_state(
-        &self,
-        visit: &mut impl FnMut(&mut super::checkpoint::Exchange<'_>) -> Result<usize, ScfError>,
-    ) {
+    async fn pause_state(&self, visit: &mut impl FnMut(Visit<'_, '_>) -> Result<usize, ScfError>) {
         let mut yielded = false;
         std::future::poll_fn(|_| {
             self.state_available.set(true);
+            if let Some(patch) = self.policy.take() {
+                *self.policy_response.borrow_mut() = Some(visit(Visit::Policy(patch)).map(|_| ()));
+                yielded = true;
+                return Poll::Pending;
+            }
             if let Some(request) = self.request.borrow_mut().take() {
                 let mut exchange = match &request {
                     Some(bytes) => super::checkpoint::Exchange::load(bytes),
                     None => super::checkpoint::Exchange::save(),
                 };
-                let result = visit(&mut exchange)
+                let result = visit(Visit::Checkpoint(&mut exchange))
                     .and_then(|iteration| exchange.finish().map(|bytes| (bytes, iteration)));
                 *self.response.borrow_mut() = Some(result);
                 yielded = true;
@@ -156,6 +165,7 @@ pub struct Stepper<'a, T> {
     done: bool,
     safe: bool,
     iteration: usize,
+    policy_changed: bool,
 }
 impl<'a, T> Stepper<'a, T> {
     pub(super) fn new<F: Future<Output = Result<T, ScfError>> + 'a>(
@@ -170,6 +180,7 @@ impl<'a, T> Stepper<'a, T> {
             done: false,
             safe: true,
             iteration: 0,
+            policy_changed: false,
         }
     }
     fn advance(&mut self) -> Result<(), ScfError> {
@@ -222,6 +233,26 @@ impl<'a, T> Stepper<'a, T> {
         self.iteration = report.iteration;
         Ok(report)
     }
+    /// Apply a validated transaction through the live state visitor, without a map.
+    pub(super) fn apply_policy(
+        &mut self,
+        patch: super::runtime::PolicyPatch,
+    ) -> Result<(), ScfError> {
+        if !self.initialized || self.done || !self.safe || !self.boundary.state_available.get() {
+            return Err(ScfError::InvalidInput(
+                "reference policy requires a live safe point",
+            ));
+        }
+        self.boundary.policy.set(Some(patch));
+        self.advance()?;
+        self.boundary
+            .policy_response
+            .borrow_mut()
+            .take()
+            .ok_or(ScfError::InvalidInput("reference policy: missing response"))??;
+        self.policy_changed = true;
+        Ok(())
+    }
     /// Capture without running another map. All ranks call at the same safe point.
     pub fn checkpoint(
         &mut self,
@@ -229,6 +260,11 @@ impl<'a, T> Stepper<'a, T> {
         rank: usize,
     ) -> Result<super::checkpoint::Checkpoint, ScfError> {
         identity.validate()?;
+        if self.policy_changed {
+            return Err(super::checkpoint::invalid(
+                "capture after runtime policy changes is unsupported; checkpoint identity must include the policy audit",
+            ));
+        }
         if !self.initialized || self.done || !self.safe || !self.boundary.state_available.get() {
             return Err(super::checkpoint::invalid(
                 "capture requires a live safe point",

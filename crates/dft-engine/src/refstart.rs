@@ -1860,7 +1860,6 @@ fn start_kpoints_inner<K: Collective>(
     comm: &K,
     general_occupations: bool,
 ) -> Result<KStartState, ScfError> {
-    use dft_numerics::linalg::{ComplexMatrix as Matrix, GemmWorkspace, MatrixOp, hermitian_eigh};
     dft_geometry::kpoints::validate(points).map_err(err)?;
     let o = input.options;
     let cell = input.cell;
@@ -1904,6 +1903,23 @@ fn start_kpoints_inner<K: Collective>(
     )?;
     common.setup.total_s = common_clock.elapsed().as_secs_f64();
     common.setup.collective_s = timed.seconds();
+    finish_kpoints(input, points, comm, bases, &db, common)
+}
+
+// Shared atomic-orbital Ritz construction; SCF and fixed-density starts use
+// exactly the same columns, completion order and distributed operators.
+fn finish_kpoints<K: Collective>(
+    input: StartInput<'_>,
+    points: &[dft_geometry::kpoints::KPoint],
+    comm: &K,
+    bases: Vec<PlaneWaveBasis>,
+    db: &PlaneWaveBasis,
+    mut common: StartState,
+) -> Result<KStartState, ScfError> {
+    use dft_numerics::linalg::{ComplexMatrix as Matrix, GemmWorkspace, MatrixOp, hermitian_eigh};
+    let o = input.options;
+    let cell = input.cell;
+    let dims = common.grid.dims();
     let bands = common.orbitals.cols();
     let mut positions = vec![Vec::new(); input.potentials.len()];
     for a in input.atoms {
@@ -1936,7 +1952,7 @@ fn start_kpoints_inner<K: Collective>(
                 "reference k start: too many bands for a k basis",
             ));
         }
-        let grid = FftGridSpec::new(&basis, &db, Some(dims))?;
+        let grid = FftGridSpec::new(&basis, db, Some(dims))?;
         let layout = DistributedPairFft::new(dims, grid.g_to_fft(), comm.rank(), comm.size())
             .map_err(err)?;
         let rows = layout.local_positions().to_vec();
@@ -2104,4 +2120,254 @@ fn start_kpoints_inner<K: Collective>(
         blocks,
         orbitals: KOrbitals(orbitals),
     })
+}
+
+/// Fixed-density initialization, without an atomic density or an SCF start.
+/// `density` is one total-density grid or two collinear (up/down) grids. All
+/// inputs are replicated and identical on every rank. Returns the k start and
+/// the immutable channel potentials on the common owned field planes.
+/// Atomic orbitals and deterministic kinetic complements share the SCF helper.
+pub fn start_kpoints_from_density<K: Collective>(
+    input: StartInput<'_>,
+    density: &[Array3<f64>],
+    points: &[dft_geometry::kpoints::KPoint],
+    comm: &K,
+) -> Result<(KStartState, Vec<Vec<f64>>), ScfError> {
+    let o = input.options;
+    let cell = input.cell;
+    dft_geometry::kpoints::validate(points).map_err(err)?;
+    if comm.size() == 0
+        || comm.rank() >= comm.size()
+        || input.atoms.is_empty()
+        || input.potentials.is_empty()
+        || o.strain_reference.is_some()
+        || o.pw92_prefactor != crate::Pw92Prefactor::Modified
+        || !(1..=2).contains(&density.len())
+        || (density.len() == 2 && o.functional == Functional::LdaPz)
+    {
+        return Err(ScfError::InvalidInput("reference NSCF: unsupported input"));
+    }
+    let dims = [
+        density[0].shape()[0],
+        density[0].shape()[1],
+        density[0].shape()[2],
+    ];
+    if dims.contains(&0)
+        || density
+            .iter()
+            .any(|n| n.shape() != dims || n.iter().any(|v| !v.is_finite() || *v < -1e-14))
+    {
+        return Err(ScfError::InvalidInput("reference NSCF: invalid density"));
+    }
+    let mut positions = vec![Vec::new(); input.potentials.len()];
+    for (i, p) in input.potentials.iter().enumerate() {
+        if input.potentials[..i].iter().any(|q| p.label == q.label)
+            || (!o.allow_functional_override && !o.functional.matches_upf(p.potential.functional()))
+            || p.potential
+                .atomic_wavefunctions()
+                .is_none_or(|w| w.is_empty() || w.iter().any(|c| c.l > 3))
+        {
+            return Err(ScfError::InvalidInput(
+                "reference NSCF: incompatible species or missing atomic orbitals",
+            ));
+        }
+    }
+    let mut electrons = 0.;
+    for atom in input.atoms {
+        let i = input
+            .potentials
+            .iter()
+            .position(|p| p.label == atom.species)
+            .ok_or(ScfError::InvalidInput("reference NSCF: unknown species"))?;
+        if atom.fractional_position.iter().any(|r| !r.is_finite()) {
+            return Err(ScfError::NonFinite);
+        }
+        positions[i].push(
+            cell.fractional_to_cartesian_bohr(atom.fractional_position.map(|r| r.rem_euclid(1.))),
+        );
+        electrons += input.potentials[i].potential.z_valence();
+    }
+    if !electrons.is_finite()
+        || electrons <= 0.
+        || electrons > usize::MAX as f64
+        || (electrons - electrons.round()).abs() > 1e-10
+        || (density.len() == 1 && !(electrons.round() as usize).is_multiple_of(2))
+    {
+        return Err(ScfError::InvalidInput(
+            "reference NSCF: invalid electron count",
+        ));
+    }
+    let volume = cell.volume_bohr3();
+    let charges: Vec<_> = density
+        .iter()
+        .map(|n| n.sum() * volume / n.len() as f64)
+        .collect();
+    if (charges.iter().sum::<f64>() - electrons).abs() > 1e-8 * electrons {
+        return Err(ScfError::InvalidInput(
+            "density charge does not match system",
+        ));
+    }
+    // Spin densities need not integrate to integer sectors (e.g. a metal).
+    // Round only charge-check-sized noise before taking the occupied ceiling.
+    let occupied = if density.len() == 1 {
+        electrons as usize / 2
+    } else {
+        charges
+            .iter()
+            .map(|q| (q - 1e-8 * electrons).max(0.).ceil() as usize)
+            .max()
+            .unwrap()
+    };
+    let minimum = occupied
+        .checked_add(4)
+        .ok_or(ScfError::InvalidInput("band overflow"))?;
+    let bands = o.bands.ok_or(ScfError::InvalidInput(
+        "reference NSCF requires explicit bands",
+    ))?;
+    if bands < minimum {
+        return Err(ScfError::InvalidInput("at least four empty bands required"));
+    }
+    let species: Vec<_> = input
+        .potentials
+        .iter()
+        .zip(&positions)
+        .map(|(p, r)| Species {
+            potential: p.potential,
+            positions_bohr: r,
+        })
+        .collect();
+    let basis = o.basis(cell, [0.; 3], 1.)?;
+    let db = o.basis(cell, [0.; 3], 4.)?;
+    let grid = FftGridSpec::new(&basis, &db, Some(dims))?;
+    let bases = points
+        .iter()
+        .map(|p| {
+            let b = o.basis(cell, p.fractional, 1.)?;
+            FftGridSpec::new(&b, &db, Some(dims))?;
+            if bands > b.vectors().len() {
+                return Err(ScfError::InvalidInput(
+                    "reference NSCF: too many bands for a k basis",
+                ));
+            }
+            Ok(b)
+        })
+        .collect::<Result<Vec<_>, ScfError>>()?;
+    let half = HalfSphere::new(&basis, &grid).map_err(err)?;
+    let mut fields = StartFields::new(dims, comm)?;
+    let atomic = atomic_fields(&fields, &db, None, volume, &species, o);
+    agree(
+        comm,
+        f64::from(atomic.is_err()),
+        "reference NSCF: ionic/core fields failed",
+    )?;
+    let atomic = atomic?;
+    let ionic = fields.inverse(comm, &atomic.ion)?;
+    let core_density = atomic
+        .core
+        .map(|c| fields.inverse_checked(comm, &c, true))
+        .transpose()?;
+    let pbe_core = if o.functional == Functional::Pbe {
+        core_density
+            .as_ref()
+            .map(|core| {
+                let density_g = fields.forward(comm, core)?;
+                Ok::<_, ScfError>(PbeCore {
+                    total_density_g: vec![C::default(); density_g.len()],
+                    total_density: vec![0.; core.len()],
+                    density_g,
+                })
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let offsets = fields.plane_offsets();
+    let local: Vec<Vec<f64>> = density
+        .iter()
+        .map(|n| {
+            let full: Vec<_> = n.iter().copied().collect();
+            offsets.iter().map(|&i| full[i]).collect()
+        })
+        .collect();
+    let total: Vec<_> = (0..offsets.len())
+        .map(|i| local.iter().map(|n| n[i]).sum())
+        .collect();
+    let density_g = fields.forward(comm, &total)?;
+    // The common real adapter is metadata for the existing field interface;
+    // no Gamma eigenproblem is solved for fixed-density bands.
+    let rows = owned_projector_indices(&basis, &grid, comm.rank(), comm.size()).map_err(err)?;
+    let nl = NonlocalOperator::new_owned_with_rule(&basis, volume, &[], o.radial_even_rule, &rows)?;
+    let operator = DistributedRealHamiltonian::new_owned(
+        &basis,
+        &grid,
+        &nl,
+        1,
+        comm.rank(),
+        comm.size(),
+        WorkerPool::new(o.threads).map_err(err)?,
+    )
+    .map_err(err)?;
+    let common = StartState {
+        setup: Default::default(),
+        basis,
+        grid,
+        half,
+        operator,
+        fields,
+        density: total,
+        density_g,
+        ionic,
+        core_density,
+        pbe_core,
+        potential: Vec::new(),
+        diagonal_static: Vec::new(),
+        orbitals: RealMatrix::zeros(0, bands).map_err(err)?,
+        ritz_values_hartree: Vec::new(),
+        electrons,
+        ewald: ewald_owned(
+            cell,
+            &input
+                .atoms
+                .iter()
+                .map(|a| Ion {
+                    charge: input
+                        .potentials
+                        .iter()
+                        .find(|p| p.label == a.species)
+                        .unwrap()
+                        .potential
+                        .z_valence(),
+                    fractional_position: a.fractional_position,
+                })
+                .collect::<Vec<_>>(),
+            comm,
+        )?
+        .0,
+        memory: StartMemory {
+            atomic_columns: species
+                .iter()
+                .map(|s| {
+                    s.positions_bohr.len()
+                        * s.potential
+                            .atomic_wavefunctions()
+                            .unwrap()
+                            .iter()
+                            .map(|c| 2 * c.l + 1)
+                            .sum::<usize>()
+                })
+                .sum(),
+            bands,
+            ..Default::default()
+        },
+    };
+    let mut state = KStartState {
+        initial_h_columns: 0,
+        common,
+        blocks: Vec::new(),
+        orbitals: KOrbitals(Vec::new()),
+    };
+    let potentials = crate::refscf::nscf::potentials(&mut state, comm, cell, o.functional, &local)?;
+    state.common.potential = potentials[0].clone();
+    let state = finish_kpoints(input, points, comm, bases, &db, state.common)?;
+    Ok((state, potentials))
 }

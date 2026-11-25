@@ -1,0 +1,1 @@
+Approved: apply /private/tmp/r6a-run-cleanup.patch (test-only in crates/dft-cli/src/run.rs), remove G4B_FALLBACK, rerun the full check (CHECK_SCCACHE=0, BAANDI_TEST_TMP outside the checkout) and clippy. Report in English; leave changes uncommitted.

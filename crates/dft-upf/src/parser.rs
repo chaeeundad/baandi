@@ -286,6 +286,55 @@ fn attr<'a>(tag: &'a Tag, key: &str) -> Result<&'a str, UpfError> {
         .map(String::as_str)
         .ok_or_else(|| UpfError::Missing(format!("{}/{key}", tag.name)))
 }
+
+/// One last printed significant digit, relative to the projector maximum.
+/// Use the most precise nonzero supported sample: short zeros or a coarsely
+/// printed sample must not widen the budget. Plain integers give no budget.
+fn beta_tail_precision(text: &str, tag: &Tag, prefix: &[f64]) -> Result<f64, UpfError> {
+    let end = text[tag.end..]
+        .find(&format!("</{}>", tag.name))
+        .ok_or_else(|| invalid(&tag.name, "missing closing tag"))?;
+    let mut body = text[tag.end..tag.end + end].to_string();
+    while let Some(start) = body.find("<!--") {
+        let end = body[start..]
+            .find("-->")
+            .ok_or_else(|| invalid(&tag.name, "unterminated comment"))?
+            + start
+            + 3;
+        body.replace_range(start..end, " ");
+    }
+    let mut precision = 0;
+    let mut tokens = body.split_ascii_whitespace();
+    for &value in prefix {
+        let token = tokens
+            .next()
+            .ok_or_else(|| invalid(&tag.name, "missing numeric token"))?;
+        if token.parse::<f64>().ok() != Some(value) {
+            return Err(invalid(
+                &tag.name,
+                "cannot determine printed beta precision",
+            ));
+        }
+        if value == 0.0 || !token.contains(['.', 'e', 'E']) {
+            continue;
+        }
+        let mantissa = token.split(['e', 'E']).next().unwrap();
+        let digits = mantissa
+            .bytes()
+            .filter(u8::is_ascii_digit)
+            .skip_while(|&b| b == b'0')
+            .count();
+        precision = precision.max(digits);
+    }
+    if precision == 0 {
+        return Ok(0.0);
+    }
+    // A coarse print format is not permission to discard macroscopic support.
+    // The half-binary-precision ceiling is independent of element/generator.
+    Ok(10.0_f64
+        .powf(1.0 - precision as f64)
+        .min(f64::EPSILON.sqrt()))
+}
 fn flag(s: &str) -> Option<bool> {
     match s.trim().to_ascii_lowercase().as_str() {
         "t" | ".t." | "true" | ".true." | "1" => Some(true),
@@ -654,10 +703,18 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
             ));
         }
         let t = find(&format!("PP_BETA.{}", i + 1))?;
-        let cutoff: usize = attr(t, "cutoff_radius_index")?
-            .trim()
-            .parse()
-            .map_err(|_| invalid("cutoff_radius_index", "not an integer"))?;
+        let cutoff: usize = if let Some(index) = t.attrs.get("cutoff_radius_index") {
+            index
+                .trim()
+                .parse()
+                .map_err(|_| invalid("cutoff_radius_index", "not an integer"))?
+        } else {
+            // The index is authoritative when both attributes are present.
+            // Radius-only files retain the last sampled radius <= the cutoff;
+            // no off-mesh endpoint or interpolated sample is introduced.
+            attr(t, "cutoff_radius")?;
+            mesh.r().partition_point(|&r| r <= b.cutoff_radius)
+        };
         if cutoff == 0
             || cutoff > mesh.r().len()
             || (b.values.len() != cutoff && b.values.len() != mesh.r().len())
@@ -667,11 +724,41 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
                 "inconsistent projector length",
             ));
         }
-        if b.values.iter().any(|x| !x.is_finite()) || b.values[cutoff..].iter().any(|x| *x != 0.0) {
+        if let Some(index) = b.values.iter().position(|x| !x.is_finite()) {
             return Err(invalid(
-                "PP_BETA",
-                "non-finite samples or nonzero samples beyond cutoff",
+                &t.name,
+                &format!(
+                    "non-finite sample at index {} (cutoff index {cutoff})",
+                    index + 1
+                ),
             ));
+        }
+        let maximum = b.values[..cutoff]
+            .iter()
+            .map(|x| x.abs())
+            .fold(0.0, f64::max);
+        let (tail_index, tail) = b.values.iter().enumerate().skip(cutoff).fold(
+            (cutoff, 0.0_f64),
+            |largest, (index, value)| {
+                if value.abs() > largest.1 {
+                    (index, value.abs())
+                } else {
+                    largest
+                }
+            },
+        );
+        if tail > 0.0 {
+            let relative = beta_tail_precision(text, t, &b.values[..cutoff])?;
+            // Division avoids underflow/overflow in a scaled absolute bound.
+            if maximum == 0.0 || relative == 0.0 || tail / maximum > relative {
+                return Err(invalid(
+                    &t.name,
+                    &format!(
+                        "cutoff index {cutoff}: largest tail magnitude {tail:.17e} Bohr^-1/2 at index {}; relative tolerance {relative:.17e}, projector maximum {maximum:.17e} Bohr^-1/2",
+                        tail_index + 1
+                    ),
+                ));
+            }
         }
         // A finite endpoint sample at r=0 has exactly zero weight in r*u*j_l.
         // Preserve the supplied value (ONCV interpolation can leave a residual);
@@ -759,6 +846,11 @@ fn reader_normalization(text: &str, metadata: &[Tag]) -> Result<String, UpfError
                 for key in ["dx", "xmin", "rmax", "zmesh"] {
                     attrs.entry(key.into()).or_insert("0".into());
                 }
+            }
+            name if name.starts_with("PP_BETA.") => {
+                // Reader-only default; the original metadata below still must
+                // declare an index or radius. Never infer numerical support here.
+                attrs.entry("cutoff_radius".into()).or_insert("0".into());
             }
             _ => (),
         }

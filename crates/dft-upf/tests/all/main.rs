@@ -10,6 +10,7 @@
 // includes); kept as they were, so a fixture file may be loaded by several modules.
 #![allow(clippy::duplicate_mod)]
 mod atomic_wavefunctions;
+mod beta_tail;
 mod parser;
 mod radial;
 mod real_nc;

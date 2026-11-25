@@ -186,3 +186,23 @@ fn build_text(
         xml.replace("<PP_DIJ></PP_DIJ>", "")
     }
 }
+
+/// G1 synthetic NC dataset: analytic Gaussian core with unit charge and width
+/// parameter a=0.5 Bohr^-2, plus the existing atomic charge and s/p span.
+#[allow(dead_code)]
+pub fn potential_with_nlcc(nonlocal: bool, functional: &str) -> Pseudopotential {
+    let text = build_text(2., 1.8, nonlocal, 401, functional, true);
+    let pp = parse_upf(&text).unwrap();
+    let samples =
+        |f: &dyn Fn(f64) -> f64| array(&pp.mesh().r().iter().map(|&r| f(r)).collect::<Vec<_>>());
+    let text = text
+        .replace("core_correction=\"F\"", "core_correction=\"T\"")
+        .replace("number_of_wfc=\"0\"", "number_of_wfc=\"2\"")
+        .replace("</UPF>", &format!(
+            "<PP_NLCC>{}</PP_NLCC><PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1><PP_CHI.2 l=\"1\" label=\"p\" occupation=\"0\">{}</PP_CHI.2></PP_PSWFC></UPF>",
+            samples(&|r| (0.5 / PI).powf(1.5) * (-0.5 * r * r).exp()),
+            samples(&|r| r * (-0.6 * r * r).exp()),
+            samples(&|r| r * r * (-0.5 * r * r).exp()),
+        ));
+    parse_upf(&text).unwrap()
+}

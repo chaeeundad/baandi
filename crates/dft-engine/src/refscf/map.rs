@@ -13,6 +13,7 @@ pub(super) struct Fields {
     pub hartree: f64,
     pub xc: f64,
     pub xc_integral: f64,
+    pub nlcc: Option<crate::energy::CoreXcLedger>,
     pub hxc: Vec<f64>,
     pub vh: Vec<f64>,
 }
@@ -66,7 +67,15 @@ pub(super) fn fields<K: Collective>(
     } else {
         let n = Array3::from_shape_vec(
             [density.len(), 1, 1],
-            density.iter().map(|n| n.abs()).collect(),
+            if let Some(core) = &state.core_density {
+                density
+                    .iter()
+                    .zip(core)
+                    .map(|(n, c)| (n + c).abs())
+                    .collect()
+            } else {
+                density.iter().map(|n| n.abs()).collect()
+            },
         )
         .map_err(numerical)?;
         let x = match functional {
@@ -93,12 +102,30 @@ pub(super) fn fields<K: Collective>(
     // The SCF-cycle note specifies |rho| for LDA evaluation; the signed
     // mixed density itself is never clipped, damped or renormalized.
     let vx = dv * density.iter().zip(&vxc).map(|(n, v)| n * v).sum::<f64>();
+    let core_integrals = state.core_density.as_ref().map(|core| {
+        [
+            dv * core.iter().sum::<f64>(),
+            dv * core.iter().zip(&vxc).map(|(c, v)| c * v).sum::<f64>(),
+        ]
+    });
     let vh = hxc.clone();
     for (h, x) in hxc.iter_mut().zip(vxc) {
         *h += x;
     }
-    let e = sum(comm, &[eh, ex, vx])?;
+    // Add the core ledger to the existing energy reduction. No extra field
+    // transform or collective is needed, and the no-core reduction is unchanged.
+    let e = if let Some(v) = core_integrals {
+        sum(comm, &[eh, ex, vx, v[0], v[1]])?
+    } else {
+        sum(comm, &[eh, ex, vx])?
+    };
+    let nlcc = core_integrals.map(|_| crate::energy::CoreXcLedger {
+        core_electrons: e[3],
+        core_potential_integral_ha: e[4],
+        valence_potential_integral_ha: e[2],
+    });
     Ok(Fields {
+        nlcc,
         hartree: e[0],
         xc: e[1],
         xc_integral: e[2],
@@ -407,7 +434,7 @@ fn audit<K: Collective>(
     let ewald = state.ewald.energy.0;
     let energy = EnergyAudit {
         xc_floor: None,
-        nlcc: None,
+        nlcc: output_fields.nlcc.clone(),
         kinetic: integrals[0],
         local: integrals[1],
         nonlocal,
@@ -520,5 +547,89 @@ mod tests {
                 assert_eq!(cached.vh, fresh.vh);
             }
         });
+    }
+    #[test]
+    fn nlcc_fields_use_total_xc_but_valence_hartree_and_integrals() {
+        for ranks in [1, 3, 8] {
+            dft_mpi::simulate(ranks, |comm| {
+                let pp = crate::scf::pool_fixture::potential_with_atomic_start(
+                    2., 1.8, false, 161, "SLA PZ",
+                );
+                let cell =
+                    Cell::from_user_rows_bohr([[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]).unwrap();
+                let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+                let potentials = [crate::SpeciesPotential {
+                    label: "Xx",
+                    potential: &pp,
+                }];
+                let options = crate::ScfOptions {
+                    gamma_real: crate::GammaReal::On,
+                    cutoff_hartree: 1.,
+                    bands: Some(3),
+                    ..Default::default()
+                };
+                let mut state = crate::refstart::start(
+                    crate::refstart::StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    comm,
+                )
+                .unwrap();
+                let mut density = state.density.clone();
+                // Exercise signed mixed input without putting core into Hartree.
+                if let Some(n) = density.first_mut() {
+                    *n = -1e-5;
+                }
+                let dv = cell.volume_bohr3() / state.grid.dims().iter().product::<usize>() as f64;
+                for functional in [Functional::LdaPz, Functional::LdaPw] {
+                    state.core_density = None;
+                    let bare = fields(&mut state, comm, &cell, functional, &density).unwrap();
+                    state.core_density = Some(vec![0.02; density.len()]);
+                    let with_core = fields(&mut state, comm, &cell, functional, &density).unwrap();
+                    assert_eq!(bare.hartree.to_bits(), with_core.hartree.to_bits());
+                    assert_eq!(bare.vh, with_core.vh);
+                    let total = Array3::from_shape_vec(
+                        [density.len(), 1, 1],
+                        density.iter().map(|n| (n + 0.02).abs()).collect(),
+                    )
+                    .unwrap();
+                    let mut local = [0.; 3];
+                    if !density.is_empty() {
+                        let x = match functional {
+                            Functional::LdaPz => {
+                                dft_physics::xc::evaluate(&total, dv * total.len() as f64)
+                            }
+                            Functional::LdaPw => {
+                                dft_physics::spin::unpolarized_pw(&total, dv * total.len() as f64)
+                            }
+                            Functional::Pbe => unreachable!(),
+                        }
+                        .unwrap();
+                        local = [
+                            x.energy.0,
+                            dv * density
+                                .iter()
+                                .zip(&x.potential)
+                                .map(|(n, v)| n * v)
+                                .sum::<f64>(),
+                            dv * 0.02 * x.potential.iter().sum::<f64>(),
+                        ];
+                        for ((v, h), x) in with_core.hxc.iter().zip(&bare.vh).zip(&x.potential) {
+                            assert_eq!(v.to_bits(), (h + x).to_bits());
+                        }
+                    }
+                    let expected = sum(comm, &local).unwrap();
+                    let ledger = with_core.nlcc.unwrap();
+                    assert!((with_core.xc - expected[0]).abs() < 1e-13);
+                    assert!((with_core.xc_integral - expected[1]).abs() < 1e-13);
+                    assert!((ledger.valence_potential_integral_ha - expected[1]).abs() < 1e-13);
+                    assert!((ledger.core_potential_integral_ha - expected[2]).abs() < 1e-13);
+                    assert!((ledger.core_electrons - 0.02 * cell.volume_bohr3()).abs() < 1e-12);
+                }
+            });
+        }
     }
 }

@@ -5363,3 +5363,437 @@ fn denskeep_density_probe() {
         }
     });
 }
+
+#[allow(dead_code)]
+#[path = "common/rank_rule.rs"]
+mod nlcc_rank_rule;
+
+#[test]
+fn nlcc_owned_start_matches_legacy_and_gaussian_fourier() {
+    use dft_engine::{Functional, GammaReal, ScfOptions, ScfProblem, SpeciesPotential};
+    use dft_numerics::switches::RunConfig;
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 8.]])
+            .unwrap();
+    let atoms = [
+        dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+        dft_geometry::Atom::new("Yy", [0.57, 0.68, 0.71]),
+    ];
+    for functional in [Functional::LdaPz, Functional::LdaPw] {
+        let name = if functional == Functional::LdaPz {
+            "SLA PZ"
+        } else {
+            "SLA PW"
+        };
+        let pp = common::potential_with_nlcc(true, name);
+        let no_core = common::potential_with_atomic_start(2., 1.8, false, 401, name);
+        let species = [
+            SpeciesPotential {
+                label: "Xx",
+                potential: &pp,
+            },
+            SpeciesPotential {
+                label: "Yy",
+                potential: &no_core,
+            },
+        ];
+        let options = ScfOptions {
+            functional,
+            start_density: dft_engine::StartDensity::Atomic,
+            cutoff_hartree: 1.,
+            bands: Some(3),
+            gamma_real: GammaReal::On,
+            ..Default::default()
+        };
+        let old = ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+        let density = old.starting_density();
+        let core = old.core_density().unwrap();
+        let mut fft = dft_physics::data::FftPlan3d::new(old.grid_dimensions()).unwrap();
+        let h = dft_physics::hartree::evaluate(&density, &cell, &mut fft).unwrap();
+        let xc = functional
+            .evaluate_with_core(
+                &density,
+                Some(core),
+                &mut Array3::zeros(density.raw_dim()),
+                &cell,
+                &mut fft,
+            )
+            .unwrap();
+        let ionic = old.ionic_potential().clone();
+        for shells in ["off", "on"] {
+            for ranks in [1, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    let config =
+                        RunConfig::from_pairs(&[("refstart_local_shells", shells)]).unwrap();
+                    let _scope = config.enter();
+                    let mut state = dft_engine::refstart::start(
+                        dft_engine::refstart::StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &species,
+                            options: &options,
+                        },
+                        comm,
+                    )
+                    .unwrap();
+                    let actual = state
+                        .fields
+                        .gather(comm, state.core_density.as_ref().unwrap())
+                        .unwrap();
+                    for (a, b) in actual.iter().zip(core) {
+                        assert!((a - b).abs() < 2e-14);
+                    }
+                    let n = state.fields.gather(comm, &state.density).unwrap();
+                    for (a, b) in n.iter().zip(&density) {
+                        assert!((a - b).abs() < 2e-14);
+                    }
+                    let v = state.fields.gather(comm, &state.potential).unwrap();
+                    for (((a, ion), h), x) in
+                        v.iter().zip(&ionic).zip(&h.potential).zip(&xc.potential)
+                    {
+                        assert!((a - (ion + h.re + x)).abs() < 2e-13);
+                    }
+                    // Independent analytic Fourier coefficients, including G=0.
+                    let cg = state
+                        .fields
+                        .forward(comm, state.core_density.as_ref().unwrap())
+                        .unwrap();
+                    let dims = state.grid.dims();
+                    let b = cell.reciprocal_columns_inverse_bohr();
+                    for (&z, &g) in cg.iter().zip(state.fields.reciprocal_indices()) {
+                        let ijk = [g / (dims[1] * dims[2]), g / dims[2] % dims[1], g % dims[2]];
+                        let m: [f64; 3] = std::array::from_fn(|a| {
+                            if ijk[a] <= (dims[a] - 1) / 2 {
+                                ijk[a] as f64
+                            } else {
+                                ijk[a] as f64 - dims[a] as f64
+                            }
+                        });
+                        let cart: [f64; 3] =
+                            std::array::from_fn(|a| (0..3).map(|k| b[a][k] * m[k]).sum());
+                        let g2: f64 = cart.iter().map(|v| v * v).sum();
+                        // Only the density sphere is populated (cutoff=4 Ha).
+                        if g2 < 7.9 {
+                            let angle = -TAU
+                                * m.iter()
+                                    .zip(atoms[0].fractional_position)
+                                    .map(|(m, r)| m * r)
+                                    .sum::<f64>();
+                            let expected =
+                                C::from_polar((-g2 / 2.).exp() / cell.volume_bohr3(), angle);
+                            assert!(
+                                (z - expected).norm() < 2e-14,
+                                "G={m:?} error={:e}",
+                                (z - expected).norm()
+                            );
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+fn nlcc_delivered_fixture(nonlocal: bool, functional: dft_engine::Functional) {
+    use dft_engine::{GammaReal, ScfOptions, ScfProblem, SpeciesPotential, StartWavefunctions};
+    use dft_numerics::switches::RunConfig;
+    let name = if functional == dft_engine::Functional::LdaPz {
+        "SLA PZ"
+    } else {
+        "SLA PW"
+    };
+    let pp = common::potential_with_nlcc(nonlocal, name);
+    let cell = dft_geometry::Cell::from_user_rows_bohr(if nonlocal {
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 8.]]
+    } else {
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]
+    })
+    .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        functional,
+        cutoff_hartree: 2.,
+        bands: Some(3),
+        max_iterations: 120,
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    let old = ScfProblem::new(
+        &cell,
+        &atoms,
+        &species,
+        ScfOptions {
+            standard: None,
+            verification: dft_engine::Verification::Off,
+            start_wavefunctions: StartWavefunctions::FreeElectron,
+            free_electron_initial_guess: false,
+            eigen_tolerance: 1e-11,
+            energy_tolerance: 1e-12,
+            density_tolerance: 1e-9,
+            ..options.clone()
+        },
+    )
+    .unwrap()
+    .run()
+    .unwrap();
+    assert!(old.certified);
+    for threshold_ry in [1e-8, 1e-12] {
+        let mut baseline = None;
+        for ranks in [1, 3, 8] {
+            let run_layout = || {
+                dft_mpi::simulate(ranks, |comm| {
+                    let config = RunConfig::from_pairs(&[("davidson_stages", "on")]).unwrap();
+                    let _scope = config.enter();
+                    dft_engine::refscf::driver::run_with(
+                        dft_engine::refstart::StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &species,
+                            options: &options,
+                        },
+                        Profile {
+                            threshold_ry,
+                            ..Default::default()
+                        },
+                        comm,
+                    )
+                    .unwrap()
+                })
+            };
+            let runs = run_layout();
+            let repeats = run_layout();
+            for (run, repeat) in runs.iter().zip(&repeats) {
+                assert_eq!(
+                    nlcc_rank_rule::fingerprint(run),
+                    nlcc_rank_rule::fingerprint(repeat)
+                );
+                let branches = nlcc_rank_rule::accept(
+                    baseline.as_ref().unwrap_or(&runs[0]),
+                    run,
+                    old.total_hartree(),
+                    2.,
+                )
+                .unwrap();
+                for branch in branches {
+                    eprintln!("G1_NLCC_BRANCH {branch:?}");
+                }
+                let r = &run.outcome.result;
+                let de = (r.total_hartree() - old.total_hartree()).abs();
+                assert!(de < if threshold_ry < 1e-8 { 1e-10 } else { 5e-9 });
+                let dn = r
+                    .density
+                    .iter()
+                    .zip(&old.density)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0., f64::max);
+                // Empty-band Ritz threshold is 1e-5 Ry; retain a separate cap.
+                let ev = (r.eigenvalues[0] - old.eigenvalues[0]).abs();
+                let all_ev = r
+                    .eigenvalues
+                    .iter()
+                    .zip(&old.eigenvalues)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0., f64::max);
+                assert!(all_ev < 1e-5, "all eigenvalues {all_ev:e} Ha");
+                assert!(
+                    dn < if threshold_ry < 1e-8 { 1e-7 } else { 1e-6 },
+                    "density {dn:e} e/Bohr^3"
+                );
+                assert!(ev < 1e-5, "occupied eigenvalue {ev:e} Ha");
+                let ledger = r.energy.nlcc.as_ref().unwrap();
+                assert!((ledger.core_electrons - 1.).abs() < 1e-12);
+                assert!(
+                    (ledger.core_potential_integral_ha
+                        - old.energy.nlcc.as_ref().unwrap().core_potential_integral_ha)
+                        .abs()
+                        < 1e-5
+                );
+                assert!((r.energy.band_form - r.total_hartree()).abs() < 1e-10);
+                if std::ptr::eq(run, &runs[0]) {
+                    eprintln!(
+                        "G1_NLCC {functional:?} nonlocal={nonlocal} ranks={ranks} threshold={threshold_ry:e} Ry E={:.17e} Ha dE={de:e} Ha dn={dn:e} e/Bohr^3 deig={ev:e} Ha all_deig={all_ev:e} Ha maps={}",
+                        r.total_hartree(),
+                        run.records.len()
+                    );
+                }
+            }
+            if baseline.is_none() {
+                baseline = runs.into_iter().next();
+            }
+        }
+    }
+}
+
+// Slow full convergence/repeatability matrices: run each in release with
+// cargo test --release -p dft-engine --test refscf nlcc_delivered -- --ignored --nocapture
+#[test]
+#[ignore = "full convergence and rank-count matrix; run in release"]
+fn nlcc_delivered_pz_local() {
+    nlcc_delivered_fixture(false, dft_engine::Functional::LdaPz);
+}
+#[test]
+#[ignore = "full convergence and rank-count matrix; run in release"]
+fn nlcc_delivered_pw_nonlocal() {
+    nlcc_delivered_fixture(true, dft_engine::Functional::LdaPw);
+}
+
+/// Before/after build fingerprint for the external no-core Si fixture. The
+/// pseudopotential is never written into this repository.
+#[test]
+#[ignore = "external UPF and full SCF; run in release with DFT_SI_UPF"]
+fn nlcc_no_core_silicon_fingerprint() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential};
+    let pp = dft_upf::parse_upf(
+        &std::fs::read_to_string(std::env::var("DFT_SI_UPF").expect("DFT_SI_UPF required"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(pp.core_density().is_none());
+    let cell = common::cell();
+    let atoms = common::atoms();
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 4.,
+        bands: Some(5),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    for ranks in [1, 3, 8] {
+        let runs = dft_mpi::simulate(ranks, |comm| {
+            let config =
+                dft_numerics::switches::RunConfig::from_pairs(&[("davidson_stages", "on")])
+                    .unwrap();
+            let _scope = config.enter();
+            dft_engine::refscf::driver::run_with(
+                dft_engine::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                comm,
+            )
+            .unwrap()
+        });
+        let run = &runs[0];
+        assert!(run.outcome.converged);
+        assert!(run.outcome.result.verification.as_ref().unwrap().passed());
+        let fingerprint = nlcc_rank_rule::fingerprint(run);
+        let hash = fingerprint.bytes().fold(0xcbf29ce484222325_u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+        });
+        eprintln!(
+            "G1_SI_NO_CORE ranks={ranks} hash={hash:016x} E={:.17e} Ha",
+            run.outcome.result.total_hartree()
+        );
+    }
+}
+
+/// Run this exact test alone under mpirun, with dft-mpi/mpi enabled. Without
+/// that feature it also checks the harness through the serial World adapter.
+#[test]
+#[ignore = "dev08 real MPI harness; one exact test per process invocation"]
+fn nlcc_real_mpi_legacy_comparison() {
+    use dft_engine::{GammaReal, ScfOptions, ScfProblem, SpeciesPotential};
+    let universe = dft_mpi::Universe::init().unwrap();
+    let world = universe.world();
+    let config =
+        dft_numerics::switches::RunConfig::from_pairs(&[("davidson_stages", "on")]).unwrap();
+    let _scope = config.enter();
+    for nonlocal in [false, true] {
+        let functional = if nonlocal {
+            dft_engine::Functional::LdaPw
+        } else {
+            dft_engine::Functional::LdaPz
+        };
+        let pp = common::potential_with_nlcc(nonlocal, if nonlocal { "SLA PW" } else { "SLA PZ" });
+        let cell = dft_geometry::Cell::from_user_rows_bohr(if nonlocal {
+            [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 8.]]
+        } else {
+            [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]
+        })
+        .unwrap();
+        let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            functional,
+            cutoff_hartree: 2.,
+            bands: Some(3),
+            max_iterations: 120,
+            gamma_real: GammaReal::On,
+            ..Default::default()
+        };
+        // World is Copy in the serial adapter, Clone in the MPI adapter.
+        #[allow(clippy::clone_on_copy)]
+        dft_engine::parallel::set_communicator(Some(std::sync::Arc::new(world.clone())));
+        let old = ScfProblem::new(
+            &cell,
+            &atoms,
+            &species,
+            ScfOptions {
+                standard: None,
+                verification: dft_engine::Verification::Off,
+                start_wavefunctions: dft_engine::StartWavefunctions::FreeElectron,
+                free_electron_initial_guess: false,
+                eigen_tolerance: 1e-11,
+                energy_tolerance: 1e-12,
+                density_tolerance: 1e-9,
+                ..options.clone()
+            },
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        dft_engine::parallel::set_communicator(None);
+        for threshold_ry in [1e-8, 1e-12] {
+            let run = dft_engine::refscf::driver::run_with(
+                dft_engine::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &species,
+                    options: &options,
+                },
+                Profile {
+                    threshold_ry,
+                    ..Default::default()
+                },
+                &world,
+            )
+            .unwrap();
+            assert!(nlcc_rank_rule::delivered(&run, old.total_hartree(), 2.));
+            let r = &run.outcome.result;
+            let de = (r.total_hartree() - old.total_hartree()).abs();
+            assert!(de < if threshold_ry < 1e-8 { 1e-10 } else { 5e-9 });
+            let dn = r
+                .density
+                .iter()
+                .zip(&old.density)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f64::max);
+            let ev = (r.eigenvalues[0] - old.eigenvalues[0]).abs();
+            assert!(
+                dn < 1e-6 && ev < 1e-5,
+                "dE={de:e} Ha dn={dn:e} e/Bohr^3 deig={ev:e} Ha"
+            );
+            assert!(r.energy.nlcc.is_some());
+            if world.rank() == 0 {
+                eprintln!(
+                    "G1_NLCC_MPI ranks={} nonlocal={nonlocal} threshold={threshold_ry:e} Ry E={:.17e} Ha dE={de:e} Ha dn={dn:e} e/Bohr^3 deig={ev:e} Ha",
+                    world.size(),
+                    r.total_hartree()
+                );
+            }
+        }
+    }
+}

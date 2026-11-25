@@ -5797,3 +5797,387 @@ fn nlcc_real_mpi_legacy_comparison() {
         }
     }
 }
+
+// G2: full-grid objects below are independent test oracles only. Production
+// gradients and XC retain exclusively owned slabs and reciprocal sticks.
+#[test]
+fn pbe_distributed_gradients_start_and_variational_potential() {
+    use dft_engine::{
+        Functional, ScfOptions, SpeciesPotential,
+        refstart::{self, StartInput},
+    };
+    use dft_physics::{data::FftPlan3d, gga};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "PBE");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.5, 6., 0.], [0.3, 0.2, 5.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for dims in [[8, 10, 12], [9, 11, 7], [7, 8, 9]] {
+        let options = ScfOptions {
+            functional: Functional::Pbe,
+            cutoff_hartree: 1.,
+            bands: Some(3),
+            grid_override: Some(dims),
+            ..Default::default()
+        };
+        let n = Array3::from_shape_fn(dims, |(i, j, k)| {
+            let q = [i, j, k];
+            0.03 + (0..3)
+                .map(|a| 0.003 * (TAU * q[a] as f64 / dims[a] as f64).sin())
+                .sum::<f64>()
+                + if dims[0] % 2 == 0 {
+                    0.002 * (PI * i as f64).cos() * (TAU * j as f64 / dims[1] as f64).sin()
+                } else {
+                    0.
+                }
+        });
+        let mut fft = FftPlan3d::new(dims).unwrap();
+        let serial = gga::evaluate(&n, &cell, &mut fft).unwrap();
+        let delta = Array3::from_shape_fn(dims, |(i, j, _)| {
+            (TAU * i as f64 / dims[0] as f64).sin()
+                + 0.3 * (TAU * (i as f64 / dims[0] as f64 + j as f64 / dims[1] as f64)).cos()
+        });
+        let h = 1e-6;
+        let derivative = (gga::evaluate(&(&n + &delta.mapv(|v| h * v)), &cell, &mut fft)
+            .unwrap()
+            .energy
+            .0
+            - gga::evaluate(&(&n - &delta.mapv(|v| h * v)), &cell, &mut fft)
+                .unwrap()
+                .energy
+                .0)
+            / (2. * h);
+        assert!(
+            derivative.abs() > 1e-3,
+            "nonzero directional derivative oracle"
+        );
+        for ranks in [1, 3, 8] {
+            let errors = dft_mpi::simulate(ranks, |comm| {
+                let mut max_gradient = 0.0_f64;
+                let mut max_potential = 0.0_f64;
+                let mut state = refstart::start(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    comm,
+                )
+                .unwrap();
+                // Start potential must also use the GGA divergence, not vrho alone.
+                let start_n = state.fields.gather(comm, &state.density).unwrap();
+                let mut fft = FftPlan3d::new(dims).unwrap();
+                let sx = gga::evaluate(&start_n, &cell, &mut fft).unwrap();
+                let sh = dft_physics::hartree::evaluate(&start_n, &cell, &mut fft).unwrap();
+                let offsets = state.fields.plane_offsets();
+                for (j, &i) in offsets.iter().enumerate() {
+                    assert!(
+                        (state.potential[j]
+                            - state.ionic[j]
+                            - sh.potential.as_slice().unwrap()[i].re
+                            - sx.potential.as_slice().unwrap()[i])
+                            .abs()
+                            < 2e-12
+                    );
+                }
+                let local: Vec<_> = offsets.iter().map(|&i| n.as_slice().unwrap()[i]).collect();
+                let coeff = state.fields.forward(comm, &local).unwrap();
+                let owned_comm = PbeNoGather(comm);
+                let grad =
+                    gga::distributed::gradient(&mut state.fields, &owned_comm, &cell, &coeff)
+                        .unwrap();
+                let b = cell.reciprocal_columns_inverse_bohr();
+                for axis in 0..3 {
+                    for (j, &index) in offsets.iter().enumerate() {
+                        let q = [
+                            index / (dims[1] * dims[2]),
+                            index / dims[2] % dims[1],
+                            index % dims[2],
+                        ];
+                        let mut exact: f64 = (0..3)
+                            .map(|a| {
+                                0.003 * b[axis][a] * (TAU * q[a] as f64 / dims[a] as f64).cos()
+                            })
+                            .sum();
+                        if dims[0] % 2 == 0 {
+                            exact += 0.002
+                                * b[axis][1]
+                                * (PI * q[0] as f64).cos()
+                                * (TAU * q[1] as f64 / dims[1] as f64).cos();
+                        }
+                        max_gradient = max_gradient.max((grad[axis][j] - exact).abs());
+                        assert!(
+                            (grad[axis][j] - exact).abs() < 3e-15,
+                            "P={ranks} dims={dims:?} axis={axis} gradient {} vs {exact}",
+                            grad[axis][j]
+                        );
+                    }
+                }
+                let x = gga::distributed::evaluate(
+                    &mut state.fields,
+                    &owned_comm,
+                    &cell,
+                    &local,
+                    &coeff,
+                )
+                .unwrap();
+                for (&v, &i) in x.potential.iter().zip(&offsets) {
+                    max_potential =
+                        max_potential.max((v - serial.potential.as_slice().unwrap()[i]).abs());
+                    assert!((v - serial.potential.as_slice().unwrap()[i]).abs() < 2e-12);
+                }
+                let dv = cell.volume_bohr3() / n.len() as f64;
+                let dot = dv
+                    * x.potential
+                        .iter()
+                        .zip(&offsets)
+                        .map(|(v, &i)| v * delta.as_slice().unwrap()[i])
+                        .sum::<f64>();
+                let mut sums = [0.; 2];
+                comm.tree_sum_f64(&[x.energy, dot], &mut sums).unwrap();
+                assert!((sums[0] - serial.energy.0).abs() < 2e-12);
+                assert!(
+                    (sums[1] - derivative).abs() < 1e-8,
+                    "variational derivative Ha"
+                );
+                // One-rank invalid density must fail collectively before any FFT.
+                let mut bad = local.clone();
+                if comm.rank() == 0 && !bad.is_empty() {
+                    bad[0] = -1e-15;
+                }
+                assert!(
+                    gga::distributed::evaluate(&mut state.fields, &owned_comm, &cell, &bad, &coeff)
+                        .is_err()
+                );
+                [
+                    max_gradient,
+                    max_potential,
+                    (sums[0] - serial.energy.0).abs(),
+                    (sums[1] - derivative).abs(),
+                ]
+            });
+            let maxima: [f64; 4] =
+                std::array::from_fn(|i| errors.iter().map(|v| v[i]).fold(0., f64::max));
+            eprintln!(
+                "G2-PBE grid={dims:?} P={ranks} max gradient={} Bohr^-4 potential={} Ha energy={} Ha derivative={} Ha",
+                maxima[0], maxima[1], maxima[2], maxima[3]
+            );
+        }
+    }
+}
+
+fn pbe_legacy_fixture(label: &str, cell: dft_geometry::Cell, one_atom: bool) {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, ScfProblem, SpeciesPotential, StartWavefunctions,
+        refstart::StartInput,
+    };
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, false, 161, "PBE");
+    let all_atoms = [
+        dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+        dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+    ];
+    let atoms = if one_atom {
+        &all_atoms[..1]
+    } else {
+        &all_atoms[..]
+    };
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let base = ScfOptions {
+        functional: Functional::Pbe,
+        cutoff_hartree: 2.,
+        bands: Some(if one_atom { 3 } else { 5 }),
+        max_iterations: 160,
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    let strict = ScfProblem::new(
+        &cell,
+        atoms,
+        &potentials,
+        ScfOptions {
+            functional: base.functional,
+            cutoff_hartree: base.cutoff_hartree,
+            bands: base.bands,
+            max_iterations: base.max_iterations,
+            gamma_real: base.gamma_real,
+            free_electron_initial_guess: false,
+            start_wavefunctions: StartWavefunctions::FreeElectron,
+            ..ScfOptions::strict_reference()
+        },
+    )
+    .unwrap()
+    .run()
+    .unwrap();
+    assert!(strict.certified);
+    let reference = strict.energy.total_hartree();
+    let mut energies = Vec::new();
+    for ranks in [1, 3, 8] {
+        let answers = dft_mpi::simulate(ranks, |comm| {
+            let mut values = Vec::new();
+            for threshold_ry in [1e-8, 1e-12] {
+                let mut full = None;
+                for lean in ["off", "on"] {
+                    let config = RunConfig::from_pairs(&[("refscf_lean_energy", lean)]).unwrap();
+                    let _scope = config.enter();
+                    let run = dft_engine::refscf::driver::run_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms,
+                            potentials: &potentials,
+                            options: &base,
+                        },
+                        Profile {
+                            threshold_ry,
+                            ..Default::default()
+                        },
+                        comm,
+                    )
+                    .unwrap();
+                    assert!(
+                        run.outcome.converged,
+                        "{label} P={ranks}: {}",
+                        run.exit_reason
+                    );
+                    let r = &run.outcome.result;
+                    assert!(r.verification.as_ref().unwrap().passed());
+                    let e = r.energy.total_hartree();
+                    let cap = if threshold_ry == 1e-8 { 5e-9 } else { 1e-10 };
+                    assert!(
+                        (e - reference).abs() < cap,
+                        "{label} P={ranks}: E-Estrict={} Ha",
+                        e - reference
+                    );
+                    assert!((e - r.energy.band_form).abs() < 1e-10);
+                    assert!(
+                        (e - r.energy.harris_foulkes).abs()
+                            <= r.energy.functional_difference_bound + 1e-12
+                    );
+                    if let Some((energy, density)) = &full {
+                        assert_eq!(*energy, e.to_bits(), "lean delivery energy");
+                        assert_eq!(density, &r.density, "lean delivery density");
+                    } else {
+                        full = Some((e.to_bits(), r.density.clone()));
+                    }
+                    if comm.rank() == 0 {
+                        eprintln!(
+                            "G2-PBE {label} P={ranks} lean={lean} thr={threshold_ry:e} Ry E={e:.17e} Ha delta={:.9e} Ha maps={}",
+                            e - reference,
+                            run.records.len()
+                        );
+                    }
+                    values.push(e);
+                }
+            }
+            values
+        });
+        for a in &answers[1..] {
+            assert_eq!(a, &answers[0]);
+        }
+        energies.push(answers[0].clone());
+    }
+    for e in &energies[1..] {
+        for (a, b) in e.iter().zip(&energies[0]) {
+            assert!((a - b).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+#[ignore = "SCF matrix; cargo test --release -p dft-engine --test refscf pbe_legacy -- --ignored --nocapture"]
+fn pbe_legacy_silicon_geometry_synthetic() {
+    pbe_legacy_fixture("synthetic-diamond", common::cell(), false);
+}
+#[test]
+#[ignore = "SCF matrix; cargo test --release -p dft-engine --test refscf pbe_legacy -- --ignored --nocapture"]
+fn pbe_legacy_skew_local() {
+    pbe_legacy_fixture(
+        "synthetic-skew-local",
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap(),
+        true,
+    );
+}
+
+// Field evaluation can transpose owned values and reduce scalars, not gather.
+struct PbeNoGather<'a, K>(&'a K);
+impl<K: Collective> Collective for PbeNoGather<'_, K> {
+    fn rank(&self) -> usize {
+        self.0.rank()
+    }
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+    fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+        self.0.barrier()
+    }
+    fn tree_sum_f64(&self, a: &[f64], b: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+        assert!(a.len() <= 2, "no field reductions");
+        self.0.tree_sum_f64(a, b)
+    }
+    fn bcast_f64(&self, _: &mut [f64], _: usize) -> Result<(), dft_mpi::MpiError> {
+        panic!("no field broadcasts");
+    }
+    fn allgatherv_f64(
+        &self,
+        _: &[f64],
+        _: &[usize],
+        _: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        panic!("no field gathers");
+    }
+    fn alltoall_f64(&self, a: &[f64], n: usize, b: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+        self.0.alltoall_f64(a, n, b)
+    }
+}
+
+#[test]
+fn pbe_negative_mixed_density_fails_collectively() {
+    use dft_engine::{Functional, GammaReal, ScfOptions, SpeciesPotential, refstart::StartInput};
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "PBE");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [
+        dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32]),
+        dft_geometry::Atom::new("Xx", [0.57, 0.68, 0.71]),
+    ];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        cutoff_hartree: 2.,
+        bands: Some(5),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    dft_mpi::simulate(3, |comm| {
+        let result = dft_engine::refscf::driver::run_with(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            Profile::default(),
+            comm,
+        );
+        let Err(error) = result else {
+            panic!("negative PBE density must not be silently repaired")
+        };
+        assert!(
+            error.to_string().contains("finite nonnegative density"),
+            "{error}"
+        );
+    });
+}

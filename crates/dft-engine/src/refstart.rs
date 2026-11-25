@@ -95,6 +95,24 @@ pub struct StartFields {
     fft: DistributedPairFft,
     dims: [usize; 3],
 }
+impl<K: Collective> dft_physics::gga::distributed::Fields<K> for StartFields {
+    type Error = ScfError;
+    fn dims(&self) -> [usize; 3] {
+        self.dims
+    }
+    fn reciprocal_indices(&self) -> &[usize] {
+        self.reciprocal_indices()
+    }
+    fn plane_points(&self) -> usize {
+        self.fft.plane_points()
+    }
+    fn forward(&mut self, comm: &K, n: &[f64]) -> Result<Vec<C>, ScfError> {
+        self.forward(comm, n)
+    }
+    fn inverse(&mut self, comm: &K, n: &[C]) -> Result<Vec<f64>, ScfError> {
+        self.inverse(comm, n)
+    }
+}
 impl StartFields {
     fn new<K: Collective>(dims: [usize; 3], comm: &K) -> Result<Self, ScfError> {
         let indices: Vec<_> = (0..dims[0])
@@ -283,8 +301,9 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
 
 /// Build the final-cutoff cold start, collective on `comm` (including size 1).
 /// Atomic charge/orbitals are required, never silently replaced with uniform
-/// density or random waves. LDA-PZ and library LDA-PW support NC data with
-/// optional NLCC. PBE and frozen-strain inputs fail explicitly before setup.
+/// density or random waves. LDA-PZ, library LDA-PW (both with optional NLCC)
+/// and distributed PBE (without NLCC for now: PBE + core charge fails
+/// explicitly until the core gradient is wired, ticket G2B-PBE-NLCC).
 /// Randomization rule: none. Atomic columns retain species/orbital/atom/m
 /// order; missing bands are completed by deterministic kinetic-ordered ORC
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
@@ -330,11 +349,6 @@ fn start_inner<K: Collective>(
     {
         return Err(ScfError::InvalidInput(
             "reference start: unsupported problem",
-        ));
-    }
-    if o.functional == Functional::Pbe {
-        return Err(ScfError::InvalidInput(
-            "reference start: PBE requires distributed gradients",
         ));
     }
     let mut positions = vec![Vec::new(); potentials.len()];
@@ -548,6 +562,11 @@ fn start_inner<K: Collective>(
     let clock = Instant::now();
     let ionic = fields.inverse(comm, &ion_hat)?;
     drop(ion_hat);
+    if o.functional == Functional::Pbe && core_hat.is_some() {
+        return Err(ScfError::InvalidInput(
+            "reference start: PBE with core charge (NLCC) is not supported yet",
+        ));
+    }
     let core_density = core_hat
         .map(|c| fields.inverse_checked(comm, &c, true))
         .transpose()?;
@@ -610,7 +629,10 @@ fn start_inner<K: Collective>(
     drop(vh_hat);
     // Prolongation is not clipped or rescaled. Signed Fourier roundoff uses
     // the same absolute-density LDA evaluation as a reference SCF map.
-    let xc = if let Some(core) = &core_density {
+    let xc = if o.functional == Functional::Pbe {
+        dft_physics::gga::distributed::evaluate(&mut fields, comm, cell, &density, &density_g)
+            .map(|x| x.potential)
+    } else if let Some(core) = &core_density {
         local_xc(
             o.functional,
             &density
@@ -764,7 +786,7 @@ fn local_xc(functional: Functional, n: &[f64]) -> Result<Vec<f64>, ScfError> {
         .into_raw_vec_and_offset()
         .0),
         Functional::Pbe => Err(ScfError::InvalidInput(
-            "reference start: PBE requires distributed gradients",
+            "reference start: PBE must use the distributed GGA evaluator",
         )),
     }
 }

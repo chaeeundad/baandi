@@ -516,6 +516,7 @@ fn deterministic_seed_and_library_pw() {
         assert_eq!(a.density, b.density);
         assert_eq!(a.density_g, b.density_g);
         assert_eq!(a.potential, b.potential);
+        // Unpolarized PBE is supported by the reference start since G2-PBE (2026-11-26).
         changed.functional = Functional::Pbe;
         assert!(
             refstart::start(
@@ -527,7 +528,7 @@ fn deterministic_seed_and_library_pw() {
                 },
                 comm
             )
-            .is_err()
+            .is_ok()
         );
     });
 }

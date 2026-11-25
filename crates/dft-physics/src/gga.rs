@@ -1,4 +1,5 @@
 //! Spin-unpolarized PBE with a discrete variational spectral gradient.
+pub mod distributed;
 use crate::{PhysicsError, xc::XcGrid};
 use dft_geometry::Cell;
 use dft_numerics::Fft3d;

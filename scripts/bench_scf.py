@@ -11,14 +11,14 @@ legacy/strict label is recognized only when its recorded switches prove the
 strict oracle ran (REFERENCE_SCF off, REFERENCE_STRICT on).
 The pseudopotential is not in the repository: pass --upf (never commit it).
 
-Select the driver explicitly; choosing a baseline never changes run routing:
-  BAANDI_REFERENCE_SCF=on BAANDI_REFERENCE_STRICT=off python3 -I scripts/bench_scf.py \
+The default driver and baseline are reference; choosing a baseline never changes run routing:
+  python3 -I scripts/bench_scf.py \
       --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
       --cases gamma,k222s,k222 --baseline docs/performance/baseline-reference.json --require-identical
-  BAANDI_REFERENCE_SCF=off BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py \
+  BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py \
       --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
       --cases gamma,k222s,k222 --baseline docs/performance/baseline-oracle.json --require-identical
-  ... --record docs/performance/baseline.json     # write a new baseline (initial or after a decision)
+  ... --record /path/new-baseline.json     # write a new baseline (initial or after a decision)
 Exit codes: 0 all cases within tolerance, 5 energy outside tolerance or density not
 identical when --require-identical, 3 inconsistent inputs, 1 usage or I/O error.
 """
@@ -186,7 +186,8 @@ def main(argv):
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--threads", type=int, help="total thread budget (0 means 1); omitted preserves the input default")
     ap.add_argument("--extra-toml", action="append", default=[], help="append TOML lines (initially in [scf]); repeatable")
-    ap.add_argument("--baseline")
+    ap.add_argument("--baseline", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                   "docs/performance/baseline-reference.json"))
     ap.add_argument("--record")
     ap.add_argument("--require-identical", action="store_true", help="fail unless the density is bit-identical to the baseline")
     ap.add_argument("--skip-legacy-si8-anchor", action="store_true",
@@ -206,6 +207,9 @@ def main(argv):
     if a.baseline and os.path.isfile(a.baseline):
         with open(a.baseline) as stream:
             base = json.load(stream)["cases"]
+    if a.require_identical and any(k not in base for k in keys):
+        print("I/O error: --require-identical needs a baseline entry for every selected case")
+        return 1
     result, status = {}, 0
     print(f"{'case':8} {'wall med (s)':>13} {'engine (s)':>11} {'diag (s)':>9} {'iters':>5} {'dE vs base (Ha)':>16} {'density':>10} {'speedup':>8}")
     for k in keys:

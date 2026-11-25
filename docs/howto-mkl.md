@@ -85,7 +85,7 @@ Success requires all of the following, not just the last printed line:
 ```sh
 python3 -I scripts/bench_scf.py --binary "$PWD/target/p10b-mkl/release/dft-cli" \
   --upf "$P10B_UPF" --cases gamma,k222 --threads 1 --repeats 3 \
-  --baseline docs/performance/baseline.json
+  --baseline docs/performance/baseline-reference.json
 ```
 
 Near-zero Fourier coefficients can expose failure of the strict per-element

@@ -11,6 +11,10 @@ use dft_engine::{
 
 #[test]
 fn key_validation_and_engine_plumbing() {
+    // R2: gamma_real off/auto/on are controls of the legacy driver.
+    let _scope = dft_numerics::switches::RunConfig::from_pairs(&[("reference_scf", "off")])
+        .unwrap()
+        .enter();
     let text = include_str!("../../../examples/si_lda.toml");
     let config = Config::parse(text).unwrap();
     assert_eq!(run::options(&config).unwrap().gamma_real, GammaReal::Auto);

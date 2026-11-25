@@ -119,7 +119,7 @@ fn corpus_precedence_and_fallback_matrix() {
                 let pp = parsed.unwrap_or_else(|e| panic!("{name}: {e}"));
                 let selection = route::select(&config, mode, command, &[&pp]);
                 let wants_reference =
-                    input == Some("reference") || (input.is_none() && env == Some("on"));
+                    input == Some("reference") || (input.is_none() && env != Some("off"));
                 let fallback = expected["reference_reason"].as_str().map(reason);
                 let driver = if strict {
                     Driver::StrictOracle
@@ -235,7 +235,7 @@ fn cli_records_executed_driver_and_strict_precedence() {
     let base = "[system]\nname='routing'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='Si'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nSi='syn.xml'\n[basis]\necutwfc_ry=2.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=2\n";
     for strict in [false, true] {
         for (index, (env, input, driver, source)) in [
-            (None, None, "legacy", "default"),
+            (None, None, "reference", "default"),
             (Some("on"), None, "reference", "env"),
             (None, Some("reference"), "reference", "input"),
             (Some("on"), Some("legacy"), "legacy", "input"),

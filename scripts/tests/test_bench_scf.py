@@ -68,6 +68,29 @@ class AnchorSelection(unittest.TestCase):
 
 
 class RoutingMetadata(unittest.TestCase):
+    def test_default_baseline_checks_reference_without_selecting_switches(self):
+        root = Path(__file__).resolve().parents[2]
+        stored = json.loads((root / "docs/performance/baseline-reference.json").read_text())
+        result = copy.deepcopy(stored["cases"]["gamma"])
+        result["scf"]["driver_source"] = "default"
+        result["scf"]["driver_reason"] = None
+        with tempfile.TemporaryDirectory() as tmp:
+            binary, upf = [Path(tmp) / n for n in ("binary", "upf")]
+            binary.touch()
+            upf.touch()
+            args = ["--binary", str(binary), "--upf", str(upf), "--cases", "gamma",
+                    "--require-identical"]
+            with patch.object(BENCH, "run_case", return_value=result) as run, \
+                    patch.dict(BENCH.os.environ, {}, clear=True), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(BENCH.main(args), 0)
+                run.assert_called_once_with(str(binary), str(upf), "gamma", 3, None, [])
+                self.assertFalse(any(k.startswith("BAANDI_") for k in BENCH.os.environ))
+                result["density_sha256"] = "changed"
+                self.assertEqual(BENCH.main(args), 5)
+                self.assertEqual(BENCH.main(args + ["--baseline", str(Path(tmp) / "missing")]), 1)
+                self.assertEqual(BENCH.main(args + ["--cases", "k444s"]), 1)
+
     def test_template_does_not_force_legacy_but_explicit_controls_remain(self):
         for case in BENCH.CASES:
             text = BENCH.case_input("synthetic.upf", case)

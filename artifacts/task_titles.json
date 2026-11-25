@@ -213,5 +213,6 @@
  "R8D-PY-MCP-STEP": "리팩토링 R8d: 파이썬 단계 실행·MCP 도구를 새 경로로",
  "R6B-COMPAT-MODE": "리팩토링 R6b: QE 호환 모드를 새 경로로",
  "R6C-NO-ATOMIC-START": "리팩토링 R6c: 원자 데이터 없는 의사퍼텐셜도 새 경로에서 시작",
- "R10BC-LEGACY-STANDARD": "리팩토링 R10b·c: 기존 표준 경로·전용 입력 키 삭제(엄격 기준만 남김)"
+ "R10BC-LEGACY-STANDARD": "리팩토링 R10b·c: 기존 표준 경로·전용 입력 키 삭제(엄격 기준만 남김)",
+ "G7-UPF-BETA-TAIL": "G7: SG15 ONCV·HGH 의사퍼텐셜 읽기(투영자 꼬리 처리 규칙)"
 }

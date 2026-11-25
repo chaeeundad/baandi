@@ -48,7 +48,7 @@ fn run(kind: usize, pp: &dft_upf::Pseudopotential) -> ScfResult {
             cutoff_hartree: 3.,
             bands: Some(6),
             threads: 1,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -76,7 +76,6 @@ fn ranks_run_mix(
 ) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
-        dft_engine::set_stop_metric_override(Some(true));
         dft_engine::grid_dist::set_override(grid);
         dft_engine::mix_dist::set_override(mix);
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
@@ -85,7 +84,6 @@ fn ranks_run_mix(
         parallel::set_communicator(None);
         dft_engine::mix_dist::set_override(None);
         dft_engine::grid_dist::set_override(None);
-        dft_engine::set_stop_metric_override(None);
         parallel::set_m2_override(None);
         r
     })
@@ -136,11 +134,11 @@ fn distributed_grid_stages_keep_the_standard_class() {
             c1
         );
         assert!(c1[1] - c0[1] >= 2 * maps, "audits");
-        assert!(c1[2] > c0[2], "stop-rule estimates");
+        assert_eq!(c1[2], c0[2], "strict has no standard stop-rule estimates");
         assert_eq!(c1[4], c0[4], "no declined map");
         for (p, arm) in [(2, &on), (3, &on3)] {
             for r in arm.iter() {
-                assert!(r.verification.as_ref().is_some_and(|v| v.passed()));
+                assert!(r.certified);
                 assert_eq!(bits(r), bits(&arm[0]), "ranks agree, P={p}");
             }
             let d_off = (arm[0].total_hartree() - off[0].total_hartree()).abs();
@@ -195,7 +193,7 @@ fn distributed_mixing_keeps_the_standard_class() {
             ("mix+grid P=3", &both3),
         ] {
             for r in arm.iter() {
-                assert!(r.verification.as_ref().is_some_and(|v| v.passed()));
+                assert!(r.certified);
                 assert_eq!(bits(r), bits(&arm[0]), "ranks agree, {label}");
             }
             let d_off = (arm[0].total_hartree() - off[0].total_hartree()).abs();

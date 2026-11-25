@@ -1,10 +1,11 @@
 //! Incremental execution of the existing SCF iteration, with immutable boundaries.
+use super::convergence::CoulombMetric;
 use super::*;
+
 use crate::events::{EventKind, EventQueue, ExecutionConfig, ExecutionMode, FailureCode};
 use crate::policy::{PolicyChange, ToleranceFloors, prepare_policy};
 use crate::runtime::ControlError;
 use crate::state_view::StateSnapshot;
-use dft_solvers::mixing::DensityMixer as _;
 
 /// Prepared under the runtime's exclusive session ownership. All fallible work
 /// precedes journal publication; commit performs only owned replacements.
@@ -39,17 +40,10 @@ pub struct StepReport {
     pub mixing_applied: bool,
 }
 struct Continuation {
-    /// Next input density; an EMPTY array in the owned density loop
-    /// (`owned`), whose input lives in `problem.owned.input`.
+    /// Next input density.
     n: Array3<f64>,
     mixer: Box<dyn MixerHistory>,
-    /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the plane-mode distributed Pulay
-    /// mixer of the owned density loop (then `mixer` is not used).
-    owned: Option<crate::mix_dist::DistributedPulay<crate::parallel::SharedComm>>,
     previous: Option<Vec<ComplexMatrix>>,
-    /// MPI-LAZY-ORBITALS: distributed rows of the blocks of `previous` that are
-    /// 0 x B placeholders (same order; empty when none is lazy).
-    previous_lazy: Vec<Option<crate::gamma_real::LazyOrbitals>>,
     history: Vec<IterationRecord>,
     weight: f64,
     best: f64,
@@ -70,8 +64,6 @@ pub struct ScfSession {
     state_version: u64,
     events: Option<EventQueue>,
     certificate_attempted: bool,
-    /// ADR 0043: attempts of the post-convergence verification.
-    verification: VerificationReport,
 }
 type WarmState<'a> = (&'a Array3<f64>, Option<Vec<ComplexMatrix>>);
 
@@ -216,7 +208,6 @@ impl ScfSession {
             state_version: 0,
             events,
             certificate_attempted: false,
-            verification: VerificationReport::default(),
         })
     }
 
@@ -324,14 +315,8 @@ impl ScfSession {
             "distributed Coulomb guard without the M2 path",
         ))?;
         let dims = self.problem.grid.dims();
-        let built;
-        let weights = match self.problem.coulomb.as_ref() {
-            Some(c) => c.weights(),
-            None => {
-                built = CoulombMetric::new(&self.problem.cell, &self.problem.options, dims)?;
-                built.weights()
-            }
-        };
+        let built = CoulombMetric::new(&self.problem.cell, &self.problem.options, dims)?;
+        let weights = built.weights();
         let plan = crate::grid_dist::GridPlan::new(
             &comm,
             dims,
@@ -448,42 +433,11 @@ impl ScfSession {
         )?;
         mixer.reset();
         let weight = self.problem.cell.volume_bohr3() / n.len() as f64;
-        // M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`, default off): the density stays
-        // on the slab planes through the audit, the mixer and the next
-        // potential; static replicated eligibility (no spectral audit here).
-        let owned = if self.problem.owned_density_eligible() {
-            let Mixing::Pulay { beta, history } = self.problem.options.mixing else {
-                unreachable!("eligibility requires plain Pulay");
-            };
-            let input = self.problem.owned_from_full(&n)?;
-            let total = n.len();
-            let (comm, plan) = self.problem.grid_plan()?;
-            let (len, counts) = (plan.plane_len(), plan.plane_counts().to_vec());
-            let mut m = crate::mix_dist::DistributedPulay::new_planes(
-                comm, beta, history, total, len, &counts,
-            )?;
-            if let Some((plan, refit)) = self.guard_plan()? {
-                m.set_coulomb_guard(plan, refit);
-            }
-            self.problem.owned.input = Some(input);
-            self.problem.owned.density_mode = true;
-            Some(m)
-        } else {
-            self.problem.owned.input = None;
-            self.problem.owned.density_mode = false;
-            None
-        };
-        let n = if owned.is_some() {
-            Array3::zeros((0, 0, 0))
-        } else {
-            n
-        };
+        self.problem.record_owned_density_decline();
         self.continuation = Some(Continuation {
             n,
             mixer,
-            owned,
             previous: None,
-            previous_lazy: Vec::new(),
             history: Vec::new(),
             weight,
             best: f64::INFINITY,
@@ -499,9 +453,7 @@ impl ScfSession {
         let Continuation {
             n,
             mixer,
-            owned,
             previous,
-            previous_lazy,
             history,
             weight,
             best,
@@ -510,42 +462,16 @@ impl ScfSession {
             start,
         } = self.continuation.as_mut().unwrap();
         let weight = *weight;
-        if owned.is_some() && !n.is_empty() {
-            // A materialized copy (`materialize_density`) of the owned input:
-            // the owned planes stay authoritative; the copy is dropped so that
-            // it cannot go stale.
-            *n = Array3::zeros((0, 0, 0));
-        }
-        let invalid = if owned.is_some() {
-            self.problem.owned_input_invalid()?
-        } else {
-            n.iter()
-                .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
-        };
+        let invalid = n
+            .iter()
+            .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF);
         if invalid {
             return Err(ScfError::Diverged {
                 reason: "mixed density is nonfinite or negative beyond 1e-14 Bohr^-3".into(),
                 history: std::mem::take(history),
             });
         }
-        let standard = self.problem.options.standard;
-        let mut tolerance = if standard.is_some() {
-            let first = StandardProfile::CAP_HA;
-            let ordinary = history.last().map_or(first, |r| {
-                StandardProfile::ratchet(
-                    r.requested_eigen_tolerance,
-                    r.standard_error_ha.expect("standard history metric"),
-                    self.problem.electrons,
-                )
-            });
-            if self.problem.options.standard_density_forcing {
-                StandardProfile::density_forcing(ordinary, history)
-            } else if self.problem.options.standard_stall_guard {
-                StandardProfile::stall_guard(ordinary, history)
-            } else {
-                ordinary
-            }
-        } else if self.problem.options.residual_eigen_schedule {
+        let tolerance = if self.problem.options.residual_eigen_schedule {
             residual_schedule(
                 &self.problem.options,
                 self.problem.sw.eigen_factor,
@@ -581,10 +507,9 @@ impl ScfSession {
         });
         let mut step = self
             .problem
-            .step_session(
+            .step_kpoints_with_certification(
                 n,
                 previous.as_deref(),
-                previous_lazy,
                 tolerance,
                 tolerance <= self.problem.options.eigen_tolerance,
             )
@@ -595,51 +520,12 @@ impl ScfSession {
                 },
                 other => other,
             })?;
-        let stop_clock = crate::profile::clock();
-        let mut standard_error_ha =
-            self.problem
-                .stop_error_step(n, &step.density, step.owned_density.as_ref())?;
-        crate::profile::between(crate::profile::BetweenPart::StopRule, stop_clock);
         crate::profile::map_commit(crate::profile::MapKind::Ordinary);
-        let standard_redo = iteration == 1
-            && standard_error_ha.is_some_and(|e| e < tolerance * self.problem.electrons.max(1.0));
-        if standard_redo {
-            tolerance = StandardProfile::ratchet(
-                tolerance,
-                standard_error_ha.unwrap(),
-                self.problem.electrons,
-            );
-            let (warm, warm_lazy) = split_warm(Some(&step.k_points));
-            crate::profile::set_context(crate::profile::Context {
-                kind: "redo",
-                iteration,
-                ..context
-            });
-            let mut redo =
-                self.problem
-                    .step_session(n, warm.as_deref(), &warm_lazy, tolerance, false)?;
-            crate::profile::map_commit(crate::profile::MapKind::Redo);
-            // Charge every discarded first solve, including its potential,
-            // density and audit work. No mixer history exists before the redo.
-            for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
-                new.solution.iterations += old.solution.iterations;
-                new.solution.operator_applications += old.solution.operator_applications;
-            }
-            redo.timings.potential += step.timings.potential;
-            redo.timings.diagonalization += step.timings.diagonalization;
-            redo.timings.density += step.timings.density;
-            redo.timings.energy += step.timings.energy;
-            step = redo;
-            standard_error_ha =
-                self.problem
-                    .stop_error_step(n, &step.density, step.owned_density.as_ref())?;
-        }
         let stop_clock = crate::profile::clock();
         // M2-OWNED: owned pairs reduce their per-plane partials (one
         // allgatherv); full pairs keep the row-major arithmetic.
         let (residual, output_sum, input_sum, min_density) =
-            self.problem
-                .step_metrics(n, &step.density, step.owned_density.as_ref())?;
+            self.problem.step_metrics(n, &step.density)?;
         let charge = output_sum * weight;
         let charge_error = (charge - self.problem.electrons).abs() / self.problem.electrons;
         let input_charge_error =
@@ -655,8 +541,8 @@ impl ScfSession {
             .map(|(r, _)| *r)
             .fold(0.0, f64::max);
         let record = IterationRecord {
-            standard_error_ha,
-            standard_redo,
+            standard_error_ha: None,
+            standard_redo: false,
             fixed_point_certificate: None,
             mixing_fraction: 1.0,
             mixer_reset: false,
@@ -695,41 +581,7 @@ impl ScfSession {
             timings: step.timings,
             pulay: None,
         };
-        let converged = if let Some(p) = standard {
-            let stop = standard_error_ha.is_some_and(|e| {
-                e < p.threshold_ha
-                    || (self.problem.sw.standard_stop_confirm
-                        && history
-                            .last()
-                            .and_then(|r| r.standard_error_ha)
-                            .is_some_and(|previous| {
-                                // Confirmed stop (offline fit on 60 dev08 trajectories, ledger
-                                // STANDARD-STOP): within 2x the threshold, the previous step
-                                // within 20x, and a contraction of at least 3.3x.
-                                e < 2.0 * p.threshold_ha
-                                    && previous <= 20.0 * p.threshold_ha
-                                    && e <= 0.3 * previous
-                            }))
-            });
-            // Residual guard (default on; StandardProfile::residual_energy_estimate,
-            // an empirical estimator, not a bound: review F03): the Coulomb
-            // estimator does not see the second-order band-energy error of loose
-            // eigensolves, so also require that estimate below the class
-            // threshold. Only evaluated when the density rule already stops.
-            if stop && self.problem.sw.residual_guard {
-                let bound = StandardProfile::residual_energy_estimate(
-                    step.k_points
-                        .iter()
-                        .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
-                    &self.problem.occupations,
-                );
-                StandardProfile::residual_guard(stop, bound, p.threshold_ha)
-            } else {
-                stop
-            }
-        } else {
-            converged(&record, &self.problem.options)
-        };
+        let converged = { converged(&record, &self.problem.options) };
         history.push(record);
         if !residual.is_finite()
             || !step.energy.total_hartree().is_finite()
@@ -760,9 +612,6 @@ impl ScfSession {
         // Certify the returned output density itself, not just the input
         // fixed-point residual. A small-gap response can amplify that residual.
         self.problem.energy_identity = false;
-        // VERIFY-REUSE (`BAANDI_VERIFY_REUSE=warm|feed`): orbitals and output
-        // density F(rho_out) of a failed verification solve.
-        let mut verification_reuse: Option<(VerifyReuse, VerificationMap)> = None;
         // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
@@ -781,7 +630,7 @@ impl ScfSession {
             )
         });
         let screen_start = Instant::now();
-        let screen = if converged && standard.is_none() {
+        let screen = if converged {
             match self.problem.sw.cert_screen {
                 CertScreen::Off => None,
                 mode => self
@@ -846,114 +695,6 @@ impl ScfSession {
                 timings: PhaseTimings::default(),
             });
             false
-        } else if converged && let Some(profile) = standard {
-            // The standard stop is certified by its fixed-point verification.
-            let mut passed = true;
-            if passed && self.problem.options.verification == Verification::FixedPoint {
-                // No scheduling branch, call or bookkeeping on ordinary maps.
-                // The default predictor runs only after a real failure; the opt-in
-                // first-attempt model also runs at eligible initial boundaries.
-                let defer = (self.verification.attempts.last().is_some_and(|a| !a.passed)
-                    || matches!(self.problem.sw.verify_schedule, "first" | "first-trace"))
-                    && self.problem.sw.verify_schedule != "off"
-                    && {
-                        if self.verification.attempts.is_empty() {
-                            schedule_first_attempt(
-                                history,
-                                &mut self.verification,
-                                self.problem.sw.verify_schedule,
-                                self.problem.options.max_iterations,
-                                true,
-                                profile.threshold_ha,
-                            )
-                        } else {
-                            schedule_attempt(
-                                history,
-                                &mut self.verification,
-                                self.problem.sw.verify_schedule,
-                                self.problem.options.max_iterations,
-                                true,
-                            )
-                        }
-                    };
-                if defer {
-                    passed = false;
-                } else {
-                    // ADR 0043: one more map at the delivered density; the delivered
-                    // state stays the converged step's own (V4).
-                    self.certificate_attempted = true;
-                    let (attempt, record, clipped, reuse) = verify_fixed_point(
-                        &mut self.problem,
-                        &step.density,
-                        step.owned_density.as_ref(),
-                        &step.k_points,
-                        tolerance,
-                        standard_error_ha.expect("standard history metric"),
-                        iteration,
-                        (n, step.energy.total_hartree()),
-                    )
-                    .map_err(|e| match e {
-                        ScfError::NonFinite => ScfError::Diverged {
-                            reason: "nonfinite verification arithmetic".into(),
-                            history: history.clone(),
-                        },
-                        other => other,
-                    })?;
-                    if let Some(reason) = clipped {
-                        return Err(ScfError::Diverged {
-                            reason,
-                            history: std::mem::take(history),
-                        });
-                    }
-                    passed = attempt.passed;
-                    if !passed {
-                        // feed2: the first failed attempt keeps the default
-                        // continuation; repeated failures feed.
-                        let earlier_failures = self
-                            .verification
-                            .attempts
-                            .iter()
-                            .filter(|a| !a.passed)
-                            .count();
-                        verification_reuse = match verify_reuse(&self.problem) {
-                            VerifyReuse::Off => None,
-                            VerifyReuse::Feed2 if earlier_failures == 0 => None,
-                            mode => Some((mode, reuse)),
-                        };
-                    }
-                    // The first failure creates the retry journal. A passing
-                    // first attempt needs only its existing attempt record;
-                    // its diagnostic row is constructed with the final output.
-                    if !passed
-                        && self.problem.sw.verify_schedule != "off"
-                        && self.verification.schedule.is_none()
-                    {
-                        self.verification.schedule = Some(first_schedule_record(
-                            self.problem.sw.verify_schedule,
-                            &attempt,
-                            self.problem.options.max_iterations,
-                        ));
-                    }
-                    if let Some(schedule) = &mut self.verification.schedule {
-                        let decision = schedule.records.last_mut().expect("attempt decision");
-                        decision.coulomb_error_ha = Some(attempt.coulomb_error_ha);
-                        decision.ratio_to_previous_attempt = self
-                            .verification
-                            .attempts
-                            .last()
-                            .filter(|a| a.coulomb_error_ha > 0.0)
-                            .map(|a| attempt.coulomb_error_ha / a.coulomb_error_ha)
-                            .filter(|ratio| ratio.is_finite());
-                        decision.passed = Some(attempt.passed);
-                    }
-                    self.verification.attempts.push(attempt);
-                    history.last_mut().unwrap().fixed_point_certificate = Some(record);
-                }
-            }
-            if passed {
-                self.problem.check_gap(&step.k_points)?;
-            }
-            passed
         } else if converged {
             self.certificate_attempted = true;
             let warm: Vec<_> = step
@@ -1081,22 +822,6 @@ impl ScfSession {
             crate::phase_clock::add_certificate(certificate_clock);
         }
         if certified || (retain_last && iteration == self.problem.options.max_iterations) {
-            // MPI-LAZY-ORBITALS: the delivered state carries full blocks (one
-            // gather per lazy k block; every rank reaches this point together).
-            // LAZY-RESULT: kept distributed when the caller declared it reads
-            // no delivered orbitals (replicated decision) and the identity
-            // audit below does not need them; `ScfResult::materialize_orbitals`
-            // gathers them later. `orbitals` is then the 0 x B placeholder.
-            if step.k_points.iter().any(|k| k.lazy.is_some()) {
-                if step.nonlocal_from_identity || !crate::gamma_real::lazy_result_allowed() {
-                    materialize_kpoints(&mut step.k_points)?;
-                } else {
-                    crate::m2::count(crate::m2::Count::LazyResults);
-                }
-                if let Some(first) = step.k_points.first() {
-                    step.solution.eigenvectors = first.solution.eigenvectors.clone();
-                }
-            }
             // B2: the final state always carries the explicit nonlocal audit.
             let energy_identity = if step.nonlocal_from_identity {
                 let audit = self.problem.explicit_nonlocal_energy(&step.k_points)?;
@@ -1112,9 +837,7 @@ impl ScfSession {
                 None
             };
             // M2-OWNED: the delivered density is gathered once here (output).
-            if let Some(o) = step.owned_density.take() {
-                step.density = self.problem.materialize_owned(&o)?;
-            }
+
             let gap_hartree = if certified {
                 self.problem.check_gap(&step.k_points)?
             } else {
@@ -1150,33 +873,9 @@ impl ScfSession {
                             None,
                         ),
                     ),
-                    standard,
-                    certified: certified && standard.is_none(),
-                    verification: (standard.is_some()
-                        && self.problem.options.verification != Verification::Off)
-                        .then(|| {
-                            // The terminal session no longer needs the diagnostic
-                            // journal. Move it instead of cloning its allocation.
-                            let schedule = self.verification.schedule.take();
-                            let mut report = self.verification.clone();
-                            report.schedule = schedule.or_else(|| {
-                                report
-                                    .attempts
-                                    .last()
-                                    .filter(|a| {
-                                        a.iteration == iteration
-                                            && self.problem.sw.verify_schedule != "off"
-                                    })
-                                    .map(|attempt| {
-                                        first_schedule_record(
-                                            self.problem.sw.verify_schedule,
-                                            attempt,
-                                            1,
-                                        )
-                                    })
-                            });
-                            report
-                        }),
+                    standard: None,
+                    certified,
+                    verification: None,
                     spectral_completeness: None,
                     k_points: step.k_points,
                     gap_hartree,
@@ -1214,125 +913,20 @@ impl ScfSession {
                 record.mixing_resets = *mixing_resets;
             }
         }
-        // VERIFY-REUSE: the failed verification evaluated the map at rho_out.
-        // feed/feed2/half: its pair enters the mixer after the step's own and the
-        // next input is mixed from it (half: midpoint with the step's proposal);
-        // replace: only its pair enters (the step's pair is not recorded).
-        let feed = verification_reuse
-            .as_ref()
-            .filter(|(mode, _)| *mode != VerifyReuse::Warm)
-            .map(|(mode, (_, d, _))| (*mode, d));
         let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
         let diverged = |e: dft_solvers::SolverError| ScfError::Diverged {
             reason: e.to_string(),
             history: history.clone(),
         };
-        if let Some(om) = owned.as_mut() {
-            // M2-OWNED: the Pulay update, the feed of a failed verification and
-            // the convex safeguard on this rank's planes; the next input stays
-            // owned (no gather). The same branch structure as below.
-            if history.last().is_some_and(|r| r.mixer_reset) {
-                om.reset();
-            }
-            let input = self
-                .problem
-                .owned
-                .input
-                .take()
-                .ok_or(ScfError::InvalidInput("M2 owned mixing without input"))?;
-            let out = step
-                .owned_density
-                .as_ref()
-                .ok_or(ScfError::InvalidInput("M2 owned mixing without output"))?;
-            let fed = verification_reuse
-                .as_ref()
-                .filter(|(mode, _)| *mode != VerifyReuse::Warm)
-                .map(|(mode, (_, _, d))| (*mode, d.as_ref()));
-            let mut mixed = match fed {
-                Some((VerifyReuse::Replace, _)) => Vec::new(),
-                _ => om
-                    .mix_block(&input.values, &out.values, mean)
-                    .map_err(diverged)?,
-            };
-            if let Some((mode, fed)) = fed {
-                let fed = fed.ok_or(ScfError::InvalidInput("M2 owned feed without density"))?;
-                let step_proposal = std::mem::take(&mut mixed);
-                mixed = om
-                    .mix_block(&out.values, &fed.values, mean)
-                    .map_err(diverged)?;
-                if mode == VerifyReuse::Half {
-                    for (m, s) in mixed.iter_mut().zip(&step_proposal) {
-                        *m = 0.5 * (*m + s);
-                    }
-                }
-            }
-            let base: &[f64] = if fed.is_some() {
-                &out.values
-            } else {
-                &input.values
-            };
-            history.last_mut().unwrap().mixing_history_used =
-                Some(om.history_len().saturating_sub(1));
-            history.last_mut().unwrap().mixing_raw_recovery = om.used_raw_recovery();
-            history.last_mut().unwrap().pulay = om.pulay_step();
-            let fraction = self.problem.owned_convex_fraction(base, &mixed)?;
-            if fraction < 1.0 {
-                for (b, a) in mixed.iter_mut().zip(base) {
-                    *b = a + fraction * (*b - a);
-                }
-                om.reset();
-                let record = history.last_mut().unwrap();
-                record.mixing_fraction = fraction;
-                record.mixer_reset = true;
-                *mixing_resets += 1;
-                record.mixing_resets = *mixing_resets;
-            }
-            let epoch = self.problem.owned.next_epoch();
-            self.problem.owned.input = Some(crate::grid_dist::Owned {
-                epoch,
-                values: mixed,
-            });
-            history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-            crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
-            let verification_orbitals = verification_reuse.map(|(_, (o, _, _))| o);
-            let (warm, lazy) = match verification_orbitals {
-                Some(points) => split_points(points),
-                None => split_points(step.k_points),
-            };
-            *previous = Some(warm);
-            *previous_lazy = lazy;
-            return if iteration == self.problem.options.max_iterations {
-                Ok(StepStatus::NotConverged)
-            } else {
-                Ok(StepStatus::Ready)
-            };
-        }
-        let mut mixed = match feed {
-            Some((VerifyReuse::Replace, _)) => Vec::new(),
-            _ => mixer
-                .mix(
-                    n.as_slice().unwrap(),
-                    step.density.as_slice().unwrap(),
-                    mean,
-                )
-                .map_err(diverged)?,
-        };
-        if let Some((mode, fed)) = feed {
-            let step_proposal = std::mem::take(&mut mixed);
-            mixed = mixer
-                .mix(
-                    step.density.as_slice().unwrap(),
-                    fed.as_slice().unwrap(),
-                    mean,
-                )
-                .map_err(diverged)?;
-            if mode == VerifyReuse::Half {
-                for (m, s) in mixed.iter_mut().zip(&step_proposal) {
-                    *m = 0.5 * (*m + s);
-                }
-            }
-        }
-        let base: &Array3<f64> = if feed.is_some() { &step.density } else { n };
+
+        let mut mixed = mixer
+            .mix(
+                n.as_slice().unwrap(),
+                step.density.as_slice().unwrap(),
+                mean,
+            )
+            .map_err(diverged)?;
+        let base: &Array3<f64> = n;
         history.last_mut().unwrap().mixing_history_used =
             Some(mixer.history_len().saturating_sub(1));
         history.last_mut().unwrap().mixing_raw_recovery = mixer.used_raw_recovery();
@@ -1365,14 +959,12 @@ impl ScfSession {
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
         crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
-        // MPI-LAZY-ORBITALS: lazy blocks travel with their distributed rows.
-        let verification_orbitals = verification_reuse.map(|(_, (o, _, _))| o);
-        let (warm, lazy) = match verification_orbitals {
-            Some(points) => split_points(points),
-            None => split_points(step.k_points),
-        };
-        *previous = Some(warm);
-        *previous_lazy = lazy;
+        *previous = Some(
+            step.k_points
+                .into_iter()
+                .map(|k| k.solution.eigenvectors)
+                .collect(),
+        );
         if iteration == self.problem.options.max_iterations {
             Ok(StepStatus::NotConverged)
         } else {
@@ -1516,56 +1108,18 @@ impl ScfSession {
             .unwrap_or(&[])
     }
     /// Next input density at an active boundary, returned output at a terminal one.
-    /// None at an active boundary of the owned density loop
-    /// (`BAANDI_M2_LOCAL_DENSITY`): the input is held on the ranks' planes;
-    /// `materialize_density` gathers it (collective).
     pub fn density(&self) -> Option<&Array3<f64>> {
         self.outcome
             .as_ref()
             .map(|o| &o.result.density)
-            .or_else(|| {
-                self.continuation
-                    .as_ref()
-                    .filter(|c| c.owned.is_none() || !c.n.is_empty())
-                    .map(|c| &c.n)
-            })
+            .or_else(|| self.continuation.as_ref().map(|c| &c.n))
     }
-    /// M2-OWNED: gather the owned next input density into the continuation so
-    /// that `density()` returns it (one allgatherv, charged as a
-    /// materialization; a no-op otherwise). Collective: every rank calls it at
-    /// the same boundary. The owned loop continues from its owned input.
+    /// Compatibility hook: strict sessions already hold the full density.
     pub fn materialize_density(&mut self) -> Result<(), ScfError> {
-        let Some(c) = self.continuation.as_mut() else {
-            return Ok(());
-        };
-        if c.owned.is_none() || !c.n.is_empty() {
-            return Ok(());
-        }
-        let input = self
-            .problem
-            .owned
-            .input
-            .take()
-            .ok_or(ScfError::InvalidInput("M2 owned boundary without input"))?;
-        let full = self.problem.materialize_owned(&input);
-        self.problem.owned.input = Some(input);
-        c.n = full?;
         Ok(())
     }
-    /// The next input density of an active boundary: kept on the planes in
-    /// the owned loop (the full array is cleared so it cannot go stale).
+    /// Replace the next input density at an active boundary.
     fn set_next_input(&mut self, n: Array3<f64>) -> Result<(), ScfError> {
-        let owned = self
-            .continuation
-            .as_ref()
-            .is_some_and(|c| c.owned.is_some());
-        let n = if owned {
-            let o = self.problem.owned_from_full(&n)?;
-            self.problem.owned.input = Some(o);
-            Array3::zeros((0, 0, 0))
-        } else {
-            n
-        };
         if let Some(c) = self.continuation.as_mut() {
             c.n = n;
         }
@@ -1677,10 +1231,6 @@ impl ScfSession {
             // MPI-LAZY-ORBITALS: lazy blocks are gathered (every rank runs the
             // same capture, so the collective is entered by all of them).
             match self.continuation.as_ref() {
-                Some(c) if c.previous_lazy.iter().any(Option::is_some) => full_previous(c)
-                    .map_err(|_| Rejection::Orbitals)?
-                    .map(|v| v.iter().map(orbitals).collect())
-                    .unwrap_or_default(),
                 Some(c) => c
                     .previous
                     .as_ref()
@@ -1702,10 +1252,9 @@ impl ScfSession {
             if self.status != StepStatus::Ready {
                 return Err(Rejection::Boundary);
             }
-            self.problem.forget_real_reuse();
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
             Some(ContinuationState {
-                verification_attempts: self.verification.attempts.clone(),
+                verification_attempts: Vec::new(),
                 atomic_start: (self.problem.options.start_wavefunctions
                     == StartWavefunctions::Atomic)
                     .then(|| self.problem.atomic_start.clone()),
@@ -1851,11 +1400,9 @@ impl ScfSession {
         if self.continuation.is_none() {
             return Err(R::Boundary);
         }
-        // M2-OWNED: the imported density becomes the owned input of the loop.
         self.set_next_input(n).map_err(|_| R::Grid)?;
         let c = self.continuation.as_mut().ok_or(R::Boundary)?;
         c.previous = previous;
-        c.previous_lazy = Vec::new();
         Ok(())
     }
     pub fn restore_exact(
@@ -1913,22 +1460,9 @@ impl ScfSession {
                 r.iteration != i + 1
                     || !r.energy.total_hartree().is_finite()
                     || !r.density_residual.is_finite()
-                    || r.standard_error_ha.is_some() != c.options.standard.is_some()
-                    || r.standard_error_ha
-                        .is_some_and(|v| !v.is_finite() || v < 0.0)
-                    || (c.options.standard.is_some()
-                        && (!r.requested_eigen_tolerance.is_finite()
-                            || !(StandardProfile::FLOOR_HA..=StandardProfile::CAP_HA)
-                                .contains(&r.requested_eigen_tolerance)
-                            // A standard history holds a certificate record
-                            // only for a verification attempt (ONEPATH-4).
-                            || (r.fixed_point_certificate.is_some()
-                                && !c
-                                    .verification_attempts
-                                    .iter()
-                                    .any(|a| a.iteration == r.iteration))))
+                    || r.standard_error_ha.is_some()
             })
-            || !verification_attempts_consistent(c)
+            || !c.verification_attempts.is_empty()
             || (c.iteration > 0 && checkpoint.electronic_state.orbitals.is_empty())
             || c.best.is_some_and(|v| !v.is_finite() || v < 0.0)
             || (c.iteration > 0 && c.best.is_none())
@@ -1956,7 +1490,6 @@ impl ScfSession {
         session.initialize().map_err(|_| Rejection::Mixer)?;
         session.import_electronic(&checkpoint.electronic_state)?;
         session.problem.atomic_start = c.atomic_start.clone().unwrap_or_default();
-        session.verification.attempts = c.verification_attempts.clone();
         let state = session.continuation.as_mut().unwrap();
         state
             .mixer
@@ -2004,589 +1537,7 @@ impl ScfSession {
     }
 }
 
-/// ONEPATH-4: the saved verification attempts of an exact continuation are
-/// the failed attempts of its history, one per history entry that carries a
-/// verification record, in iteration order, each with finite numbers and the
-/// session's threshold. Without the verification there are none.
-fn verification_attempts_consistent(c: &crate::checkpoint::ContinuationState) -> bool {
-    let attempts = &c.verification_attempts;
-    if c.options.verification != Verification::FixedPoint || c.options.standard.is_none() {
-        return attempts.is_empty();
-    }
-    let threshold = c.options.standard.map(|p| p.threshold_ha);
-    let recorded: Vec<usize> = c
-        .history
-        .iter()
-        .filter(|r| r.fixed_point_certificate.is_some())
-        .map(|r| r.iteration)
-        .collect();
-    recorded.len() == attempts.len()
-        && attempts.iter().zip(&recorded).all(|(a, &iteration)| {
-            a.iteration == iteration
-                && !a.passed
-                && Some(a.threshold_ha.to_bits()) == threshold.map(f64::to_bits)
-                && [
-                    a.coulomb_error_ha,
-                    a.eigen_tolerance_ha,
-                    a.density_residual,
-                    a.occupied_eigenvalue_change_ha,
-                ]
-                .iter()
-                .chain(a.residual_bound_ha.iter())
-                .all(|v| v.is_finite() && *v >= 0.0)
-        })
-}
-
-/// Attempt, its history record, a clipped-charge failure, and the solve's
-/// orbitals and output density F(rho_out) (VERIFY-REUSE).
-/// The continuation's warm-start blocks with every lazy one gathered
-/// (MPI-LAZY-ORBITALS; collective when any is lazy).
-fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
-    let Some(previous) = c.previous.as_ref() else {
-        return Ok(None);
-    };
-    let mut out = Vec::with_capacity(previous.len());
-    for (i, m) in previous.iter().enumerate() {
-        out.push(match c.previous_lazy.get(i).and_then(Option::as_ref) {
-            Some(lazy) if m.rows() == 0 => lazy.materialize()?.clone(),
-            _ => m.clone(),
-        });
-    }
-    Ok(Some(out))
-}
-
-/// Called exclusively at an otherwise eligible attempt, never per ordinary map.
-/// Allocation is confined to boundaries after a failure. Prediction uses
-/// existing scalar history and stack storage only; there is no logging here.
-#[cold]
-#[inline(never)]
-pub(crate) fn schedule_attempt(
-    history: &[IterationRecord],
-    report: &mut VerificationReport,
-    mode: &'static str,
-    max_iterations: usize,
-    eligible: bool,
-) -> bool {
-    use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
-    if !report.attempts.last().is_some_and(|a| !a.passed) {
-        return false;
-    }
-    let iteration = history.last().expect("attempt history").iteration;
-    let schedule = report.schedule.get_or_insert_with(|| VerificationSchedule {
-        mode,
-        prediction_evaluations: 0,
-        records: Vec::with_capacity(max_iterations),
-    });
-    let prediction = if eligible && report.attempts.last().is_some_and(|a| !a.passed) {
-        schedule.prediction_evaluations += 1;
-        verification_schedule(history, &report.attempts)
-    } else {
-        VerificationPrediction::default()
-    };
-    let would_wait = prediction.extra_maps > 0 && iteration < max_iterations;
-    let wait = matches!(mode, "on" | "first" | "first-trace") && would_wait;
-    schedule.records.push(VerificationScheduleEntry {
-        iteration,
-        predicted_additional_maps: prediction.extra_maps,
-        action: if wait { "wait" } else { "attempt" },
-        would_wait,
-        coulomb_error_ha: None,
-        ratio_to_previous_attempt: None,
-        passed: None,
-    });
-    wait
-}
-
-/// A geometric-tail envelope for the first verification. Pulay contraction is
-/// not the unmixed Kohn-Sham response: this is a scheduling heuristic, never
-/// a bound or a certificate. Start at the last above-threshold Coulomb error,
-/// then contract by the slower of Coulomb and squared L2 residual ratios.
-/// The first threshold crossing anchors a maximum two-map delay, reconstructed
-/// from scientific history so checkpoint continuation needs no hidden state.
-pub(crate) fn first_verification_prediction(
-    history: &[IterationRecord],
-    threshold: f64,
-) -> VerificationPrediction {
-    let fallback = VerificationPrediction::default();
-    if !threshold.is_finite() || threshold <= 0.0 || history.len() < 2 {
-        return fallback;
-    }
-    let below = |r: &IterationRecord| {
-        r.standard_error_ha
-            .is_some_and(|e| e.is_finite() && e > 0.0 && e < threshold)
-    };
-    if !below(history.last().unwrap()) {
-        return fallback;
-    }
-    let Some(anchor) = history.iter().position(below).filter(|&i| i > 0) else {
-        return fallback;
-    };
-    let elapsed = history
-        .last()
-        .unwrap()
-        .iteration
-        .saturating_sub(history[anchor].iteration);
-    if elapsed >= 2
-        || history[anchor - 1..]
-            .iter()
-            .any(|r| r.mixer_reset || r.mixing_raw_recovery)
-    {
-        return fallback;
-    }
-    let previous = &history[anchor - 1];
-    let current = &history[anchor];
-    // No evidence of accelerated mixing: do not apply the lag hypothesis.
-    if previous.mixing_history_used.unwrap_or(0) < 2 {
-        return fallback;
-    }
-    let Some(old) = previous
-        .standard_error_ha
-        .filter(|e| e.is_finite() && *e > 0.0)
-    else {
-        return fallback;
-    };
-    let now = current.standard_error_ha.unwrap();
-    if !previous.density_residual.is_finite()
-        || previous.density_residual <= 0.0
-        || !current.density_residual.is_finite()
-        || current.density_residual <= 0.0
-    {
-        return fallback;
-    }
-    let q = (now / old).max((current.density_residual / previous.density_residual).powi(2));
-    if !q.is_finite() || q <= 0.0 || q >= 1.0 {
-        return fallback;
-    }
-    let remaining = 2 - elapsed;
-    // Sum a geometric envelope of residual amplitudes before squaring:
-    // (sqrt(old) * sum sqrt(q)^k)^2 = old / (1 - sqrt(q))^2.
-    // This tail surrogate is still not a bound on the unmixed response.
-    let estimate = old / (1.0 - q.sqrt()).powi(2) * q.powi(elapsed as i32);
-    if !estimate.is_finite() {
-        return fallback;
-    }
-    VerificationPrediction {
-        extra_maps: (0..=remaining)
-            .find(|&n| estimate * q.powi(n as i32) < threshold)
-            .unwrap_or(remaining),
-    }
-}
-
-#[cold]
-pub(crate) fn schedule_first_attempt(
-    history: &[IterationRecord],
-    report: &mut VerificationReport,
-    mode: &'static str,
-    max_iterations: usize,
-    eligible: bool,
-    threshold: f64,
-) -> bool {
-    use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
-    let iteration = history.last().expect("attempt history").iteration;
-    let prediction = if eligible {
-        first_verification_prediction(history, threshold)
-    } else {
-        VerificationPrediction::default()
-    };
-    let would_wait = prediction.extra_maps > 0 && iteration < max_iterations;
-    let wait = mode == "first" && would_wait;
-    let schedule = report.schedule.get_or_insert_with(|| VerificationSchedule {
-        mode,
-        prediction_evaluations: 0,
-        records: Vec::with_capacity(max_iterations),
-    });
-    schedule.prediction_evaluations += usize::from(eligible);
-    schedule.records.push(VerificationScheduleEntry {
-        iteration,
-        predicted_additional_maps: prediction.extra_maps,
-        action: if wait { "wait" } else { "attempt" },
-        would_wait,
-        coulomb_error_ha: None,
-        ratio_to_previous_attempt: None,
-        passed: None,
-    });
-    wait
-}
-
-/// A first actual attempt has no forecast or previous-attempt ratio. Called
-/// on first failure (retry storage) or at output (one passing diagnostic row).
-#[cold]
-fn first_schedule_record(
-    mode: &'static str,
-    attempt: &VerificationAttempt,
-    capacity: usize,
-) -> super::convergence::VerificationSchedule {
-    use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
-    let mut records = Vec::with_capacity(capacity);
-    records.push(VerificationScheduleEntry {
-        iteration: attempt.iteration,
-        predicted_additional_maps: 0,
-        action: "attempt",
-        would_wait: false,
-        coulomb_error_ha: Some(attempt.coulomb_error_ha),
-        ratio_to_previous_attempt: None,
-        passed: Some(attempt.passed),
-    });
-    VerificationSchedule {
-        mode,
-        prediction_evaluations: 0,
-        records,
-    }
-}
-
-/// Cost proxy from the measured attempt/map ratio: m / (m + 1.3 m).
-const VERIFY_WAIT_BREAK_EVEN: f64 = 1.0 / 2.3;
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct VerificationPrediction {
-    pub(crate) extra_maps: usize,
-}
-
-/// A stateless retry forecast. Only existing scalar history is inspected; this
-/// does not evaluate a density, alter a tolerance or certify a state. Keeping
-/// all inputs in history also preserves exact checkpoint continuation.
-pub(crate) fn verification_schedule(
-    history: &[IterationRecord],
-    attempts: &[VerificationAttempt],
-) -> VerificationPrediction {
-    let fallback = VerificationPrediction::default();
-    let Some(last) = attempts.last().filter(|a| !a.passed) else {
-        return fallback;
-    };
-    let Some(current) = history.last() else {
-        return fallback;
-    };
-    let elapsed = current.iteration.saturating_sub(last.iteration);
-    // Three maps is a bounded experiment, never an unbounded convergence veto.
-    if elapsed >= 3
-        || !last.coulomb_error_ha.is_finite()
-        || last.coulomb_error_ha <= last.threshold_ha
-    {
-        return fallback;
-    }
-    let Some(end) = history.iter().position(|r| r.iteration == last.iteration) else {
-        return fallback;
-    };
-    if history[end..]
-        .iter()
-        .any(|r| r.mixer_reset || r.mixing_raw_recovery)
-    {
-        return fallback;
-    }
-    let Some(anchor) = history[end].standard_error_ha else {
-        return fallback;
-    };
-    let Some(now) = current.standard_error_ha else {
-        return fallback;
-    };
-    if !anchor.is_finite() || anchor <= 0.0 || !now.is_finite() || now <= 0.0 {
-        return fallback;
-    }
-    // Re-anchor after the ordinary maps actually performed. Pre-failure
-    // contraction alone is poorly calibrated when a failure feeds the mixer.
-    let estimate = last.coulomb_error_ha * (now / anchor);
-    let start = history.len().saturating_sub(2);
-    let Some(previous) = history.get(start).and_then(|r| r.standard_error_ha) else {
-        return fallback;
-    };
-    let mut q = now / previous;
-    if !estimate.is_finite() || !q.is_finite() || q <= 0.0 || q >= 1.0 {
-        return fallback;
-    }
-    // A second failed attempt supplies an independent per-map rate. Combine
-    // rates geometrically, without fitting a material-dependent scale.
-    if attempts.len() >= 2 {
-        let previous = &attempts[attempts.len() - 2];
-        let distance = last.iteration.saturating_sub(previous.iteration);
-        if distance == 0 {
-            return fallback;
-        }
-        let measured =
-            (last.coulomb_error_ha / previous.coulomb_error_ha).powf(1.0 / distance as f64);
-        if !measured.is_finite() || measured <= 0.0 || measured >= 1.0 {
-            return fallback;
-        }
-        q = (q * measured).sqrt();
-    }
-    // This point forecast is a 0/1 vote, not a probabilistic bound. Its
-    // empirical calibration against real attempts is reported in the design.
-    let vote = |extra: usize| f64::from(estimate * q.powi(extra as i32) >= last.threshold_ha);
-    VerificationPrediction {
-        extra_maps: (0..=3 - elapsed)
-            .find(|&extra| vote(extra) <= VERIFY_WAIT_BREAK_EVEN)
-            .unwrap_or(3 - elapsed),
-    }
-}
-
-/// Orbitals (k points, possibly lazy) and output density F(rho_out) of a
-/// verification solve.
-/// The third entry is the owned F(rho_out) of the owned density loop (the
-/// array is then empty).
-type VerificationMap = (
-    Vec<KPointSolution>,
-    Array3<f64>,
-    Option<crate::grid_dist::Owned>,
-);
-
-/// Owned warm-start blocks and their lazy rows (MPI-LAZY-ORBITALS), moved out
-/// of k points; the lazy list is empty when no block is lazy.
-fn split_points(
-    points: Vec<KPointSolution>,
-) -> (
-    Vec<ComplexMatrix>,
-    Vec<Option<crate::gamma_real::LazyOrbitals>>,
-) {
-    let any_lazy = points.iter().any(|k| k.lazy.is_some());
-    let mut warm = Vec::with_capacity(points.len());
-    let mut lazy = Vec::new();
-    for k in points {
-        warm.push(k.solution.eigenvectors);
-        if any_lazy {
-            lazy.push(k.lazy);
-        }
-    }
-    (warm, lazy)
-}
-
-type VerificationOutcome = (
-    VerificationAttempt,
-    FixedPointCertificate,
-    Option<String>,
-    VerificationMap,
-);
-
-/// ADR 0043 verification: one more ordinary map at the converged output density
-/// (V1), pass on the Coulomb fixed-point residual at the standard threshold and,
-/// with the residual guard on, the residual estimate of that solve (V2). Strict
-/// certificate quantities are computed as information only (V3). Returns the
-/// attempt, its record for the history entry, and a clipped-charge failure.
-/// `stop_map` (input density, energy) feeds only the SCF-TAIL cross estimate.
-#[allow(clippy::too_many_arguments)]
-fn verify_fixed_point(
-    problem: &mut ScfProblem,
-    density: &Array3<f64>,
-    owned: Option<&crate::grid_dist::Owned>,
-    points: &[KPointSolution],
-    tolerance: f64,
-    standard_error_ha: f64,
-    iteration: usize,
-    stop_map: (&Array3<f64>, f64),
-) -> Result<VerificationOutcome, ScfError> {
-    // M2-OWNED: the verification map's input is the delivered (owned) output;
-    // the loop's own input is restored afterwards on every path.
-    let saved = owned.map(|o| problem.owned.input.replace(o.clone()));
-    let result = verify_fixed_point_inner(
-        problem,
-        density,
-        points,
-        tolerance,
-        standard_error_ha,
-        iteration,
-        stop_map,
-    );
-    if let Some(s) = saved {
-        problem.owned.input = s;
-    }
-    result
-}
-
-#[allow(clippy::too_many_arguments)]
-fn verify_fixed_point_inner(
-    problem: &mut ScfProblem,
-    density: &Array3<f64>,
-    points: &[KPointSolution],
-    tolerance: f64,
-    standard_error_ha: f64,
-    iteration: usize,
-    (stop_input, stop_energy_ha): (&Array3<f64>, f64),
-) -> Result<VerificationOutcome, ScfError> {
-    let clock = Instant::now();
-    let threshold = problem
-        .options
-        .standard
-        .expect("verification requires the standard profile")
-        .threshold_ha;
-    let eigen_tolerance = StandardProfile::ratchet(tolerance, standard_error_ha, problem.electrons);
-    let (warm, warm_lazy) = split_warm(Some(points));
-    crate::profile::set_context(crate::profile::Context {
-        stage: "verification",
-        kind: "verify",
-        iteration,
-    });
-    problem
-        .run
-        .count(dft_numerics::switches::RunCounter::Verifications, 1);
-    let check = problem.step_session(
-        density,
-        warm.as_deref(),
-        &warm_lazy,
-        eigen_tolerance,
-        // Same flag as an ordinary step (the standard path ignores it).
-        eigen_tolerance <= problem.options.eigen_tolerance,
-    )?;
-    let glue_clock = crate::profile::clock();
-    let coulomb_error_ha = problem
-        .stop_error_step(density, &check.density, check.owned_density.as_ref())?
-        .expect("standard Coulomb metric");
-    let residual_bound_ha = problem.sw.residual_guard.then(|| {
-        StandardProfile::residual_energy_estimate(
-            check
-                .k_points
-                .iter()
-                .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
-            &problem.occupations,
-        )
-    });
-    let (density_residual, _, _, _) =
-        problem.step_metrics(density, &check.density, check.owned_density.as_ref())?;
-    let occupied_eigenvalue_change_ha = check
-        .k_points
-        .iter()
-        .zip(points)
-        .flat_map(|(a, b)| {
-            a.solution
-                .eigenvalues
-                .iter()
-                .zip(&b.solution.eigenvalues)
-                .zip(&problem.occupations)
-        })
-        .filter(|(_, f)| **f > 0.0)
-        .map(|((a, b), _)| (a - b).abs())
-        .fold(0.0, f64::max);
-    if !coulomb_error_ha.is_finite()
-        || !density_residual.is_finite()
-        || !occupied_eigenvalue_change_ha.is_finite()
-    {
-        return Err(ScfError::NonFinite);
-    }
-    let guard_ok = residual_bound_ha.is_none_or(|b| b < threshold);
-    #[allow(unused_mut)]
-    let mut passed = coulomb_error_ha < threshold && guard_ok;
-    // SCF-TAIL (`BAANDI_STOP_PREDICTOR`): the cross estimate needs the stop
-    // map's input and both outputs as full arrays (the owned-plane loop keeps
-    // them on the planes: old criterion only).
-    if problem.sw.stop_predictor != StopPredictor::Off
-        && !stop_input.is_empty()
-        && !density.is_empty()
-        && !check.density.is_empty()
-        && let Some(metric) = problem.coulomb.as_mut()
-    {
-        let sum_ha = metric.error(stop_input, &check.density)?;
-        let cross_ha = verification_cross(standard_error_ha, coulomb_error_ha, sum_ha);
-        let cross_pass = cross_ha > 0.0
-            && cross_ha < threshold / CROSS_SAFETY
-            && standard_error_ha < threshold
-            && guard_ok;
-        eprintln!(
-            "STOP-PREDICTOR iter={iteration} stop_ha={standard_error_ha:.6e} verify_ha={coulomb_error_ha:.6e} cross_ha={cross_ha:.6e} verify_energy_change_ha={:.6e} stop_energy_ha={stop_energy_ha:.15e} threshold_ha={threshold:.3e} old_pass={passed} cross_pass={cross_pass}",
-            check.energy.total_hartree() - stop_energy_ha,
-        );
-        if problem.sw.stop_predictor == StopPredictor::On && !passed && cross_pass {
-            passed = true;
-        }
-    }
-    #[cfg(test)]
-    if problem.force_verification_failures > 0 {
-        problem.force_verification_failures -= 1;
-        passed = false;
-    }
-    let mut clipped = None;
-    if passed && problem.density_floor.is_some() {
-        let charge = problem
-            .negative_charge(density)
-            .max(problem.negative_charge(&check.density));
-        clipped = ScfProblem::validate_clipped_charge(charge, problem.electrons).err();
-    }
-    // Phase profile: file the verification map by its outcome; the snapshot
-    // manifest of this map records it too (outside any timed phase).
-    crate::profile::map_commit(if passed && clipped.is_none() {
-        crate::profile::MapKind::VerifyPass
-    } else {
-        crate::profile::MapKind::VerifyFail
-    });
-    crate::snapshot::annotate_verification(passed && clipped.is_none());
-    if passed && clipped.is_none() {
-        problem.check_gap(&check.k_points)?;
-    }
-    crate::profile::between(crate::profile::BetweenPart::VerifyGlue, glue_clock);
-    let residuals = |buffered: bool| -> Vec<Vec<f64>> {
-        check
-            .k_points
-            .iter()
-            .map(|k| {
-                k.solution
-                    .residuals
-                    .iter()
-                    .zip(&k.solution.buffer)
-                    .filter_map(|(&r, &buffer)| (buffer == buffered).then_some(r))
-                    .collect()
-            })
-            .collect()
-    };
-    let strict_residuals_per_k = residuals(false);
-    let davidson_iterations = check.k_points.iter().map(|k| k.solution.iterations).sum();
-    let operator_applications = check
-        .k_points
-        .iter()
-        .map(|k| k.solution.operator_applications)
-        .sum();
-    let record = FixedPointCertificate {
-        strict_residuals_per_k,
-        buffer_residuals_per_k: residuals(true),
-        density_residual,
-        occupied_eigenvalue_change: occupied_eigenvalue_change_ha,
-        davidson_iterations,
-        operator_applications,
-        davidson_iterations_per_k: check
-            .k_points
-            .iter()
-            .map(|k| k.solution.iterations)
-            .collect(),
-        operator_applications_per_k: check
-            .k_points
-            .iter()
-            .map(|k| k.solution.operator_applications)
-            .collect(),
-        timings: check.timings,
-    };
-    let mut attempt = assess_fixed_point(
-        &problem.options,
-        iteration,
-        eigen_tolerance,
-        coulomb_error_ha,
-        residual_bound_ha,
-        &record,
-        clock.elapsed(),
-    );
-    // Preserve legacy predictor, forced-test failure and clipping decisions.
-    attempt.passed = passed && clipped.is_none();
-    Ok((
-        attempt,
-        record,
-        clipped,
-        (check.k_points, check.density, check.owned_density),
-    ))
-}
-
 pub use crate::model::assess_fixed_point;
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum VerifyReuse {
-    Off,
-    Warm,
-    Feed,
-    Feed2,
-    Replace,
-    Half,
-}
-/// `BAANDI_VERIFY_REUSE=off|warm|feed` (default off; ledger VERIFY-REUSE).
-fn verify_reuse(#[allow(unused_variables)] problem: &ScfProblem) -> VerifyReuse {
-    #[cfg(test)]
-    if let Some(mode) = problem.force_verify_reuse {
-        return mode;
-    }
-    problem.sw.verify_reuse
-}
 
 /// RUN-CONFIG (2026-11-18): the switches of the SCF session, resolved once
 /// from the problem's run configuration at construction (and again by
@@ -2594,14 +1545,8 @@ fn verify_reuse(#[allow(unused_variables)] problem: &ScfProblem) -> VerifyReuse 
 /// parsing rules are those of the former per-process accessors.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SessionSwitches {
-    /// `BAANDI_STANDARD_STOP=confirm`.
-    pub(crate) standard_stop_confirm: bool,
-    /// `BAANDI_STANDARD_RESIDUAL_GUARD=on`.
-    pub(crate) residual_guard: bool,
     /// `BAANDI_IMPORT_CHECK=split`.
     pub(crate) import_split: bool,
-    /// `BAANDI_VERIFY_REUSE`.
-    pub(crate) verify_reuse: VerifyReuse,
     /// `BAANDI_CERT_SCREEN`.
     pub(crate) cert_screen: CertScreen,
     /// `BAANDI_POTENTIAL_REUSE=on`.
@@ -2610,59 +1555,13 @@ pub(crate) struct SessionSwitches {
     pub(crate) growth_reset: Option<f64>,
     /// `BAANDI_EIGEN_FACTOR` (default 0.1).
     pub(crate) eigen_factor: f64,
-    /// `BAANDI_STOP_PREDICTOR` (SCF-TAIL, default off).
-    pub(crate) stop_predictor: StopPredictor,
-    /// F-VERIFY-SCHEDULE: resolved once; no environment reads in the loop.
-    pub(crate) verify_schedule: &'static str,
 }
 
-/// SCF-TAIL (`BAANDI_STOP_PREDICTOR=off|trace|on`, default off): the cross
-/// estimate of the fixed-point verification (`verification_cross`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StopPredictor {
-    Off,
-    Trace,
-    On,
-}
-
-/// Safety factor of the cross estimate (SCF-TAIL calibration, ledger
-/// SCF-TAIL-PREDICTOR): an attempt passes on it only below threshold / factor;
-/// the smallest measured -X / T (calibration systems) is 0.654, so 4 leaves a
-/// margin of 2.6 over it.
-pub(crate) const CROSS_SAFETY: f64 = 4.0;
-
-/// Cross estimate of a verification (SCF-TAIL), returned as -X >= 0 in the
-/// model. With r0 = rho_out - rho_in (the stop map's residual, E_H[r0] =
-/// `stop_ha`) and r1 = F(rho_out) - rho_out (the verification's, E_H[r1] =
-/// `verify_ha`), `sum_ha` = E_H[r0 + r1] = E_H[F(rho_out) - rho_in] gives the
-/// Coulomb form X = r0 K r1 by polarization. Linear Hartree model
-/// (rho_out = rho* + J delta, J = chi0 v = -v^-1/2 A v^1/2, A = v^1/2 (-chi0)
-/// v^1/2 >= 0, x = v^1/2 delta): r0 = -(1 + A) x, r1 = A (1 + A) x; true
-/// energy error of the delivered output T = x A (1 + A) x / 2, E_H[r0] =
-/// x (1 + A)^2 x / 2, E_H[r1] = x A^2 (1 + A)^2 x / 2 and -X =
-/// x A (1 + A)^2 x / 2, so -X / T = 1 + A >= 1 per mode while E_H[r1] / T =
-/// A (1 + A) (below 1 for A < 0.618, eps (eps - 1) for screened long-wavelength
-/// modes). Not a proof for the real map (XC kernel, inexact solves,
-/// nonlinearity): measured -X / T reaches 0.654 (ledger SCF-TAIL-PREDICTOR), so
-/// the pass rule carries the safety factor `CROSS_SAFETY`.
-pub(crate) fn verification_cross(stop_ha: f64, verify_ha: f64, sum_ha: f64) -> f64 {
-    -0.5 * (sum_ha - stop_ha - verify_ha)
-}
 impl SessionSwitches {
     pub(crate) fn resolve(run: dft_numerics::switches::RunConfig) -> Self {
         use dft_numerics::switches::Id;
         Self {
-            standard_stop_confirm: run.choice(Id::STANDARD_STOP) == "confirm",
-            residual_guard: run.on(Id::STANDARD_RESIDUAL_GUARD),
             import_split: run.choice(Id::IMPORT_CHECK) == "split",
-            verify_reuse: match run.choice(Id::VERIFY_REUSE) {
-                "warm" => VerifyReuse::Warm,
-                "feed" => VerifyReuse::Feed,
-                "feed2" => VerifyReuse::Feed2,
-                "replace" => VerifyReuse::Replace,
-                "half" => VerifyReuse::Half,
-                _ => VerifyReuse::Off,
-            },
             cert_screen: match run.choice(Id::CERT_SCREEN) {
                 "off" => CertScreen::Off,
                 "trace" => CertScreen::Trace,
@@ -2671,12 +1570,6 @@ impl SessionSwitches {
             potential_reuse: run.on(Id::POTENTIAL_REUSE),
             growth_reset: run.number(Id::MIX_GROWTH_RESET),
             eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
-            verify_schedule: run.choice(Id::VERIFY_SCHEDULE),
-            stop_predictor: match run.choice(Id::STOP_PREDICTOR) {
-                "trace" => StopPredictor::Trace,
-                "on" => StopPredictor::On,
-                _ => StopPredictor::Off,
-            },
         }
     }
 }
@@ -2789,6 +1682,10 @@ pub(crate) fn orthonormal_split(
     let mut flag = [0.0];
     c.tree_sum_f64(&[f64::from(u8::from(bad))], &mut flag)?;
     Ok(flag[0] == 0.0)
+}
+
+fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
+    Ok(c.previous.clone())
 }
 
 #[cfg(test)]

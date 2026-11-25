@@ -180,8 +180,6 @@ table! {
     ENERGY_IDENTITY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "nonlocal energy of SCF iterations from the band-sum identity";
     // D1 ladder hand-off scan (work order 2026-11-14); defaults are the adopted ladder.
-    STANDARD_STOP: Kind::Choice { allowed: &["plain", "confirm"], default: "plain" }, "plain",
-        "plain, confirm", "standard-class stop rule: plain threshold, or confirm (also stop when the estimator is within 2x the threshold, the previous step within 20x, and it contracted by 0.3 or better)";
     STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold";
     DENSITY_PAIR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -200,10 +198,6 @@ table! {
         "batched FFT transposes of the M2 path";
     PHASE_THREADS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
-    REUSE_PSI: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "C2: a lean real Gamma Davidson solve that starts from the previous solve's orbitals X takes H X from that solve's rotated H images plus (V_new - V_old) X, formed from the psi(r) the density build kept (one forward transform per pair; no inverse transform, nonlocal product or kinetic pass); falls back to the plain apply when X, the operator or the grid changed or the cache exceeds its memory gate; rounding class";
-    VERIFY_REUSE: Kind::Choice { allowed: &["off", "warm", "feed", "feed2", "replace", "half"], default: "half" }, "half", "off, warm, feed, feed2, replace, half",
-        "reuse of a failed fixed-point verification solve (F at the delivered density rho_out): warm = the next SCF step starts from its orbitals (so the REUSE_PSI kept start is taken); feed = warm and the pair (rho_out, F(rho_out)) also enters the mixer after the step's own pair, so the next input density is mixed from it (the verification map counts as an SCF map); off = discarded; rounding class (trajectory changes, acceptance still needs a passed verification)";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
     M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson rotations and projections and the M2 nonlocal products through the per-panel dgemm at any width (MKL builds: rounding class; pure builds bit-identical)";
@@ -238,8 +232,6 @@ table! {
         "bands, fused",
         "M2 distributed density on the standard path: bands (per-band plane contributions kept, then summed) or fused (plane density accumulated in ascending band order, no bands x plane buffer; the per-band data only serves the strict certificate screen); bit-identical";
     // MPI kept start (ticket MPI-KEPT-START, docs/design/mpi-kept-start.md); default off until dev08.
-    M2_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "MPI-KEPT-START: a standard (Ritz-change) M2 stick-row solve that starts from the previous solve's orbitals X takes X and H X from that solve's local rows (the return rotation of the H images) plus (V_new - V_old) X, formed from the plane slabs the M2 density build kept (one forward transform per occupied pair, no inverse transform, nonlocal product or kinetic pass), when initial equals X to 1e-14 and the Gram defect of X is at most 1e-12; the local rows of X come from the solver (no extraction from the gathered block); falls back to the plain start otherwise; rounding class";
     // MPI scaling gap (ticket MPI-SCALING-GAP, docs/performance/mpi-scaling-gap.md); default off.
     M2_STICKS: Kind::Choice { allowed: &["greedy", "mirror"], default: "mirror" }, "mirror",
         "greedy, mirror",
@@ -251,8 +243,6 @@ table! {
     M2_LEAN_ALGEBRA: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "MPI-OVERLAP-DAVIDSON: standard (Ritz-change) distributed Davidson solves run the serial lean algebra: unit-norm corrections appended without Gram-Schmidt, the overlap S = V^T V kept beside H_r with its inverse Cholesky factor (pivot rule eps/1e-12, reprojection and Ritz-basis fallbacks), reduced problem T H_r T^T; the S border, the H border and the selected residual norms share one tree sum per iteration; strict solves unchanged; implies the workspace path; rounding class";
     // MPI lazy orbitals (ticket MPI-LAZY-ORBITALS, docs/design/mpi-lazy-orbitals.md); default off.
-    M2_LAZY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "MPI-LAZY-ORBITALS: a standard (Ritz-change) M2 solve inside the SCF session returns only this rank's stick rows of the eigenvectors (no N x B allgatherv, no complex unpack); the next solve starts from those rows, the density, nonlocal and kinetic energy are formed from them (kinetic: one reduction of B values), and the full complex block is gathered once, on first demand (result, checkpoint, ladder hand-off, spectral audit, explicit nonlocal audit), and cached; gathered blocks are bit-identical, the energy is rounding class (distributed kinetic sum)";
     MPI_TREE: Kind::Choice { allowed: &["binomial", "rd", "rhd"], default: "rd" }, "rd",
         "binomial, rd, rhd",
         "message pattern of the deterministic MPI tree sum: binomial (reduce to rank 0 plus broadcast, 2 log2 P rounds), rd (recursive doubling with MPI_Sendrecv, log2 P rounds) or rhd (REL-TREE-RHD: payloads of at least 2048 doubles by a recursive-halving reduce-scatter plus a recursive-doubling allgather, 2 (P-1)/P of the payload moved instead of log2 P times it; smaller payloads rd); all bit-identical for power-of-two rank counts, other counts stay binomial; read by the CLI at MPI start";
@@ -266,8 +256,6 @@ table! {
     M2_ATOMIC_BLOCK: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "INIT-SCALE: with M2_ATOMIC=split, every rank fills its contiguous block of span rows (same elementwise arithmetic) and the span is orthonormalized by a row-distributed CholQR2 (local Gram GEMM, one tree_sum, replicated Cholesky and triangular inverse, local update; twice; one allgatherv of the rows) instead of the column-cyclic two-pass Gram-Schmidt whose second pass is a serial chain over the columns; falls back to the split Gram-Schmidt when a pivot is below the dependence guard or data is nonfinite; rounding class (span and trajectory change)";
     // Replicated grid stages outside the solve (ticket MPI-REMAINING, docs/performance/mpi-remaining.md); default off.
-    STOP_METRIC: Kind::Choice { allowed: &["fft", "kept"], default: "kept" }, "kept", "fft, kept",
-        "standard stop-rule Coulomb estimate E_H[rho_out - rho_in]: fft (transform the residual forward and back on the full grid) or kept (Parseval sum over the map's own Fourier coefficients of rho_in, kept from the Hartree potential, and rho_out, kept from the energy audit; no FFT; falls back to fft when a density was clamped or the kept coefficients do not belong to the two densities; rounding class of the estimate only)";
     M2_GRID: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "M2-GRID: on the M2 path (2+ ranks, LDA PZ/PW, no core density, density floor or symmetry) the full-grid stages outside the solve run on a slab-decomposed full-grid FFT (owned real-space planes, owned sticks, two transposes per transform): the input density's Hartree FFT pair, the LDA XC and the effective potential on the planes with one allgatherv of the effective potential and the partial sums; the energy audit's output-density Hartree FFT and grid sums on the planes with one allgatherv of partial sums; the stop-rule Coulomb estimate from the kept owned coefficients; every sum in a canonical plane/stick order, so results do not depend on the rank count; rounding class against the replicated path";
     M2_MIX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -279,10 +267,6 @@ table! {
     // Solvers (dft-solvers).
     MIX_COULOMB_GUARD: Kind::Choice { allowed: &["off", "trace", "on"], default: "off" }, "off", "off, trace, on",
         "SCF-TRAJECTORY: plain Pulay (L2 fit) measures the residual its least squares predicts, R - dR gamma, in the Coulomb (Hartree-energy) metric; on: when that predicted residual is larger than the current one in the Coulomb metric, this step's coefficients are refitted in the Coulomb metric (no tuned constant: the rule is 'the fit must not predict a larger long-wavelength error'); trace: compute and record the ratio, never act; replicated PulayMixer and the M2 distributed mixer (chunk and owned-plane modes, Coulomb forms on the owned sticks; MIX-COULOMB-GUARD-DIST); not kerker-pulay, not mixing_metric = hartree";
-    VERIFY_SCHEDULE: Kind::Choice { allowed: &["off", "trace", "on", "first", "first-trace"], default: "on" }, "on", "off, trace, on, first, first-trace",
-        "F-VERIFY-SCHEDULE: geometric retry prediction from existing Coulomb errors; off preserves the original path, trace records predictions, on defers predicted failures with a bounded retry horizon; certificate and stop threshold unchanged; first adds an experimental two-map-bounded first-attempt lag/contraction forecast, first-trace records that forecast without acting on it (both retain on retry scheduling); default remains on";
-    STOP_PREDICTOR: Kind::Choice { allowed: &["off", "trace", "on"], default: "off" }, "off", "off, trace, on",
-        "SCF-TAIL: second estimate of the ADR 0043 fixed-point verification from the two maps it already has, -X = -E_H-form <rho_out - rho_in, F(rho_out) - rho_out> (one extra Coulomb-metric evaluation, no extra solve); in the linear Hartree model -X / (true energy error of the delivered state) = 1 + A >= 1, while the old criterion E_H[F(rho_out) - rho_out] reads A (1 + A) (A = Coulomb-weighted static response); measured on the Mac set -X / T >= 0.654, so it is not a bound; trace: print both and the verification energy change, never act; on: an attempt whose old criterion fails also passes when 0 < -X < threshold / 4 (safety factor from the held-out calibration), the stop estimate is below the threshold and the residual guard passes; replicated densities only (the owned-plane loop keeps the old criterion)";
     MIX_INCREMENTAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "Pulay mixer keeps its difference vectors (and their metric images) and the Gram matrix entries across calls and forms only the newest difference and Gram row per step (O(m N) instead of O(m^2 N) grid work, no per-step difference allocation; ticket MPI-REMAINING); bit-identical";
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
@@ -377,15 +361,11 @@ table! {
         default: if crate::MKL_BACKEND { "pruned" } else { "grid" },
     }, if crate::MKL_BACKEND { "pruned" } else { "grid" }, "grid, pruned",
         "pair FFT plan of MKL builds (pruned: stick lanes)";
-    SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "share exactly degenerate fixed-sector standard spin solves (bit-identical effective potentials and occupations; default on since 2026-11-17: dev08 si8 -18.1 %, si16 -23.8 %; mpi, strict and unequal-sector fallbacks verified clean)";
     // CLI (dft-cli).
     BINARY_HASH_CACHE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "LANE-LAUNCHIO: cache executable SHA-256 in a metadata-keyed sibling sidecar on Unix; preserves provenance, falls back to fresh hashing; trusted build directories only";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",
         "none, first_order, second_order", "overrides the relaxation density extrapolation of the input file";
-    REFERENCE_SCF: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "production driver; off = legacy standard path, deprecated, removed in R10";
     REFERENCE_STRICT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification";
     DGEMM_TIMERS: Kind::Presence, "off", "any value (presence)",
@@ -399,16 +379,12 @@ table! {
         "bounded per-rank collective arrivals in maps; requires PHASE_PROFILE, clocks follow STAGE_TIMERS";
     FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
-    SERIAL_DENSITY_FUSED: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "LANE-GLUE: serial one-core standard Gamma density sink; preserves band addition order, no MPI dispatch";
     GLUE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-GLUE Phase 0: rank-local grid and mixer spans/work; requires PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
     M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "BREAKTHROUGH-4: on the M2 path the replicated serial real Gamma Hamiltonian of a solve state (rebuilt at every new problem and ladder stage) is built with the minimal block capacity 2 instead of the Davidson capacity: one pair FFT plan and scratch instead of capacity / 2 full-grid plans per rank; it only supplies the ORC half sphere there and is never applied (the full operator is built if the distributed operator is unavailable); bit-identical";
-    M2_OWNED_INPUT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G-OWNED-ROWS: pack a replicated complex warm start directly into owned ORC rows for the standard M2 workspace path; retain full-column validation and coefficient arithmetic; other paths retain global packing; bit-identical, default off pending dev08";
     M2_LAZY_SERIAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "ISSUE-20: an M2 real Gamma solve state owns only the ORC half-sphere descriptor and the distributed operator; the serial real Gamma Hamiltonian (pair plans, real projector table) is built lazily only when a fallback applies it (distributed operator unavailable, threads path); supersedes M2_LIGHT_STATE on the M2 path when on; bit-identical";
     M2_LAYOUT_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -1413,7 +1389,7 @@ impl RunConfig {
     }
 
     /// `(key, text)` pairs of the `[performance]` table plus `[profile]` ones,
-    /// convenience for tests: `RunConfig::from_pairs(&[("stop_metric", "fft")])`
+    /// convenience for tests: `RunConfig::from_pairs(&[("m2_screen", "fft")])`
     /// (the table is taken from the registry).
     pub fn from_pairs(pairs: &[(&str, &str)]) -> Result<Self, String> {
         let input: Vec<_> = pairs
@@ -1946,19 +1922,19 @@ mod tests {
 
     #[test]
     fn run_config_scopes_are_per_thread_and_follow_the_pool() {
-        let a = RunConfig::from_pairs(&[("stop_metric", "fft")]).unwrap();
-        let b = RunConfig::from_pairs(&[("stop_metric", "kept")]).unwrap();
+        let a = RunConfig::from_pairs(&[("m2_screen", "replicated")]).unwrap();
+        let b = RunConfig::from_pairs(&[("m2_screen", "dist")]).unwrap();
         let pool = crate::pool::WorkerPool::new(3).unwrap();
         let run = |c: RunConfig, want: &'static str| {
             let pool = pool.clone();
             std::thread::spawn(move || {
                 let _g = c.enter();
                 for _ in 0..200 {
-                    assert_eq!(choice(Id::STOP_METRIC), want);
+                    assert_eq!(choice(Id::M2_SCREEN), want);
                     let (l, r) = pool.install(|| {
                         crate::pool::WorkerPool::join(
-                            || choice(Id::STOP_METRIC),
-                            || choice(Id::STOP_METRIC),
+                            || choice(Id::M2_SCREEN),
+                            || choice(Id::M2_SCREEN),
                         )
                     });
                     assert_eq!((l, r), (want, want));
@@ -1966,7 +1942,7 @@ mod tests {
                 }
             })
         };
-        let (ta, tb) = (run(a, "fft"), run(b, "kept"));
+        let (ta, tb) = (run(a, "replicated"), run(b, "dist"));
         ta.join().unwrap();
         tb.join().unwrap();
         assert_eq!(a.counters()[RunCounter::SessionSteps as usize], 200);

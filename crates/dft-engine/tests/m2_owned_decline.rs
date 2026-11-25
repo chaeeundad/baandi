@@ -11,8 +11,8 @@ mod common;
 use dft_engine::checkpoint::{CheckpointKind, ExecutionIdentity, ModelIdentity};
 use dft_engine::grid_dist::OwnedDecline;
 use dft_engine::{
-    CompletionMode, ExecutionConfig, ExecutionMode, ForceState, Functional, GammaReal, ScfOptions,
-    ScfProblem, ScfResult, ScfSession, SpeciesPotential, StepStatus, parallel,
+    CompletionMode, ExecutionConfig, ExecutionMode, Functional, GammaReal, ScfOptions, ScfProblem,
+    ScfResult, ScfSession, SpeciesPotential, StepStatus, parallel,
 };
 use dft_geometry::{Atom, Cell};
 use dft_mpi::{Collective, SimRank, simulate};
@@ -36,7 +36,7 @@ fn options(functional: Functional) -> ScfOptions {
         bands: Some(6),
         threads: 1,
         functional,
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn problem(pp: &dft_upf::Pseudopotential, functional: Functional) -> ScfProblem {
@@ -55,7 +55,6 @@ fn problem(pp: &dft_upf::Pseudopotential, functional: Functional) -> ScfProblem 
 /// (grid, mix, local fields, local density) on this rank thread around `f`.
 fn with_arm<T>(comm: &SimRank, arm: (bool, bool, bool, bool), f: impl FnOnce() -> T) -> T {
     parallel::set_m2_override(Some(true));
-    dft_engine::set_stop_metric_override(Some(true));
     dft_engine::grid_dist::set_override(Some(arm.0));
     dft_engine::mix_dist::set_override(Some(arm.1));
     dft_engine::grid_dist::set_owned_override(Some((arm.2, arm.3)));
@@ -66,7 +65,6 @@ fn with_arm<T>(comm: &SimRank, arm: (bool, bool, bool, bool), f: impl FnOnce() -
     dft_engine::grid_dist::set_owned_override(None);
     dft_engine::mix_dist::set_override(None);
     dft_engine::grid_dist::set_override(None);
-    dft_engine::set_stop_metric_override(None);
     parallel::set_m2_override(None);
     out
 }
@@ -227,90 +225,6 @@ fn agent_controlled_session_declines_and_exposes_boundary_density() {
     assert!(delta(&c0, &c1, "fields_declined.runtime_control") > 0);
     assert_eq!(delta(&c0, &c1, "fields_owned_maps"), 0);
     assert_eq!(delta(&c0, &c1, "density_owned_maps"), 0);
-}
-
-/// Forces, stress and density output read the DELIVERED result, gathered at
-/// delivery: no decline is needed. LOCAL_FIELDS alone is bit-identical to the
-/// gathered path (energy, density, forces, stress); with LOCAL_DENSITY the
-/// standard class (|dE| <= 5e-9 Ha) and the measured force/stress bounds
-/// below hold; the delivered density carries the electron count.
-#[test]
-fn forces_stress_and_density_output_need_no_decline() {
-    let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let pp = common::potential(4., 1., true, 401);
-    let species = [SpeciesPotential {
-        label: "Xx",
-        potential: &pp,
-    }];
-    let ranks = 2;
-    let arm_run = |arm| {
-        simulate(ranks, |comm: &SimRank| {
-            with_arm(comm, arm, || {
-                let r = problem(&pp, Functional::LdaPz).run().unwrap();
-                let (cell, atoms, opts) = (cell(), atoms(), options(Functional::LdaPz));
-                let state = ForceState {
-                    cell: &cell,
-                    atoms: &atoms,
-                    potentials: &species,
-                    options: &opts,
-                    electronic: dft_engine::ElectronicState::Fixed(&r),
-                    density_floor: None,
-                    symmetry: &[],
-                };
-                let f = dft_engine::forces(&state).expect("forces").values;
-                let s = dft_engine::stress::frozen_stress(&state)
-                    .expect("stress")
-                    .values;
-                (r, f, s)
-            })
-        })
-    };
-    let g = arm_run(GATHERED);
-    let c0 = owned();
-    let fields = arm_run((true, true, true, false));
-    let all = arm_run(ALL);
-    let c1 = owned();
-    let fbits =
-        |f: &Vec<[f64; 3]>| -> Vec<u64> { f.iter().flatten().map(|x| x.to_bits()).collect() };
-    let sbits =
-        |s: &[[f64; 3]; 3]| -> Vec<u64> { s.iter().flatten().map(|x| x.to_bits()).collect() };
-    assert_eq!(bits(&fields[0].0), bits(&g[0].0));
-    assert_eq!(fbits(&fields[0].1), fbits(&g[0].1), "forces bit-identical");
-    assert_eq!(sbits(&fields[0].2), sbits(&g[0].2), "stress bit-identical");
-    let de = (all[0].0.total_hartree() - g[0].0.total_hartree()).abs();
-    let df = all[0]
-        .1
-        .iter()
-        .flatten()
-        .zip(g[0].1.iter().flatten())
-        .fold(0.0_f64, |m, (a, b)| m.max((a - b).abs()));
-    let ds = all[0]
-        .2
-        .iter()
-        .flatten()
-        .zip(g[0].2.iter().flatten())
-        .fold(0.0_f64, |m, (a, b)| m.max((a - b).abs()));
-    let r = &all[0].0;
-    let electrons = 8.0;
-    let charge = r.density.sum() * cell().volume_bohr3() / r.density.len() as f64;
-    println!(
-        "owned density: |dE| {de:.3e} Ha, max |dF| {df:.3e} Ha/Bohr, max |dsigma| {ds:.3e} Ha/Bohr^3, charge {charge:.15} (electrons {electrons})"
-    );
-    assert!(de <= 5e-9, "standard class");
-    // Rounding class (per-plane instead of per-chunk canonical sums; same SCF
-    // count): measured 6.0e-14 Ha/Bohr and 4.2e-17 Ha/Bohr^3 (2026-11-18);
-    // the bounds leave three to four orders of headroom.
-    assert!(df <= 1e-10 && ds <= 1e-12, "forces {df:e}, stress {ds:e}");
-    assert!((charge - electrons).abs() <= 1e-8 * electrons);
-    for (a, b) in all.iter().zip(&all[1..]) {
-        assert_eq!(bits(&a.0), bits(&b.0), "ranks agree");
-    }
-    assert!(delta(&c0, &c1, "fields_owned_maps") > 0);
-    assert!(delta(&c0, &c1, "density_owned_maps") > 0);
-    for reason in ["checkpoint", "runtime_control", "spin", "functional"] {
-        assert_eq!(delta(&c0, &c1, &format!("density_declined.{reason}")), 0);
-        assert_eq!(delta(&c0, &c1, &format!("fields_declined.{reason}")), 0);
-    }
 }
 
 /// Reason `functional`: PBE is not on the distributed grid path; with the

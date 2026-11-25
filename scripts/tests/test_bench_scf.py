@@ -102,13 +102,16 @@ class RoutingMetadata(unittest.TestCase):
         self.assertIn("energy_tolerance_ha = 1e-8", text)
 
     def test_selected_driver_provenance_is_copied_from_result(self):
-        scf = {"driver": "legacy", "driver_reason": "L11: missing atomic data",
+        scf = {"driver": "strict_oracle", "driver_reason": "G4D",
                "driver_source": "input", "switches": {
-                   "BAANDI_REFERENCE_SCF": {"value": "on"},
                    "BAANDI_REFERENCE_STRICT": {"value": "off"}}}
         metadata = BENCH.driver_metadata({"scf": scf})
         for key in ("driver", "driver_reason", "driver_source"):
             self.assertEqual(metadata[key], scf[key])
+        rejected = copy.deepcopy(scf)
+        rejected["driver"] = "legacy"
+        with self.assertRaises(RuntimeError):
+            BENCH.driver_metadata({"scf": rejected})
         for key in ("driver", "driver_source", "driver_reason", "switches"):
             incomplete = dict(scf)
             del incomplete[key]
@@ -127,7 +130,7 @@ class RoutingMetadata(unittest.TestCase):
                         incomplete = copy.deepcopy(case)
                         del incomplete[field]
                         self.assertNotEqual(BENCH.baseline_driver(incomplete), "strict_oracle")
-                    for switch in BENCH.DRIVER_SWITCHES:
+                    for switch in ("BAANDI_REFERENCE_SCF", "BAANDI_REFERENCE_STRICT"):
                         incomplete = copy.deepcopy(case)
                         del incomplete["scf"]["reference_switches"][switch]
                         self.assertEqual(BENCH.baseline_driver(incomplete), "legacy")

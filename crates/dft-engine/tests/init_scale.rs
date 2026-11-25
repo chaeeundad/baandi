@@ -84,7 +84,7 @@ fn construction_bits(kind: usize, mesh: dft_upf::radial::LocalMesh, fast: bool) 
             threads: 1,
             local_mesh: mesh,
             start_density: dft_engine::StartDensity::Atomic,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap();

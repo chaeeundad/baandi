@@ -72,12 +72,10 @@ fn reference_and_strict_oracle_identity() {
         // Isolate the two drivers without changing process environment. STRICT
         // currently loses to REFERENCE_SCF, so explicitly disable the latter.
         let reference = name == "reference";
-        let _scope = RunConfig::from_pairs(&[
-            ("reference_scf", if reference { "on" } else { "off" }),
-            ("reference_strict", if reference { "off" } else { "on" }),
-        ])
-        .unwrap()
-        .enter();
+        let _scope =
+            RunConfig::from_pairs(&[("reference_strict", if reference { "off" } else { "on" })])
+                .unwrap()
+                .enter();
         let config = Config::parse(
             "\
 [system]

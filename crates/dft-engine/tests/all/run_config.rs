@@ -40,7 +40,7 @@ fn run(pp: &dft_upf::Pseudopotential, rc: Option<RunConfig>) -> ScfResult {
                 cutoff_hartree: 3.,
                 bands: Some(6),
                 threads: 2,
-                ..ScfOptions::default()
+                ..ScfOptions::strict_reference()
             },
         )
         .unwrap()
@@ -78,8 +78,8 @@ fn bits(r: &ScfResult) -> (u64, Vec<u64>, Vec<u64>, usize) {
 #[test]
 fn concurrent_runs_with_opposite_settings_are_independent() {
     let pp = common::potential(4., 1., true, 401);
-    let kept = || RunConfig::from_pairs(&[("stop_metric", "kept")]).unwrap();
-    let fft = || RunConfig::from_pairs(&[("stop_metric", "fft")]).unwrap();
+    let kept = || RunConfig::from_pairs(&[("cert_screen", "on")]).unwrap();
+    let fft = || RunConfig::from_pairs(&[("cert_screen", "off")]).unwrap();
     // References, one at a time.
     let (ka, fa) = (kept(), fft());
     let ref_kept = bits(&run(&pp, Some(ka)));
@@ -95,7 +95,7 @@ fn concurrent_runs_with_opposite_settings_are_independent() {
     assert_eq!(out_fft, ref_fft, "fft run changed under concurrency");
     // The default science output: the registry default (kept) equals a run
     // under the process configuration when the environment leaves it unset.
-    if std::env::var_os("BAANDI_STOP_METRIC").is_none() {
+    if std::env::var_os("BAANDI_CERT_SCREEN").is_none() {
         assert_eq!(bits(&run(&pp, None)), ref_kept);
     }
     let de = f64::from_bits(ref_kept.0) - f64::from_bits(ref_fft.0);
@@ -103,16 +103,8 @@ fn concurrent_runs_with_opposite_settings_are_independent() {
     // Independent run-local counters.
     for (rc, label) in [(ka, "kept ref"), (kb, "kept concurrent")] {
         let c = rc.counters();
-        assert!(c[RunCounter::StopKept as usize] > 0, "{label}: {c:?}");
-        assert_eq!(c[RunCounter::StopFft as usize], 0, "{label}: {c:?}");
         assert_eq!(c[RunCounter::Problems as usize], 1, "{label}");
         assert!(c[RunCounter::SessionSteps as usize] > 0, "{label}");
-        assert!(c[RunCounter::Verifications as usize] > 0, "{label}");
-    }
-    for (rc, label) in [(fa, "fft ref"), (fb, "fft concurrent")] {
-        let c = rc.counters();
-        assert_eq!(c[RunCounter::StopKept as usize], 0, "{label}: {c:?}");
-        assert!(c[RunCounter::StopFft as usize] > 0, "{label}: {c:?}");
     }
     // Same run, same SCF counts. The Ewald slots may differ: the Ewald cache
     // is per construction thread (the second reference run on the main
@@ -134,9 +126,8 @@ fn concurrent_runs_with_opposite_settings_are_independent() {
     assert_eq!(scf(fb), scf(fa), "same run, same counts");
     // Consulted marks belong to the configuration that was read.
     for rc in [ka, fa, kb, fb] {
-        assert!(rc.consulted(Id::STOP_METRIC));
-        assert!(rc.consulted(Id::VERIFY_REUSE));
+        assert!(rc.consulted(Id::CERT_SCREEN));
     }
     let untouched = RunConfig::from_input(&[]).unwrap();
-    assert!(!untouched.consulted(Id::STOP_METRIC));
+    assert!(!untouched.consulted(Id::CERT_SCREEN));
 }

@@ -37,175 +37,77 @@ fn atomic(name: &str) -> String {
     }
     pp
 }
-fn reason(key: &str) -> &'static str {
-    match key {
-        "G4D_FALLBACK" => route::G4D_FALLBACK,
-        "VARIABLE_CELL" => route::VARIABLE_CELL,
-        "EXTRAPOLATION" => route::EXTRAPOLATION,
-        "CHECKPOINT" => route::CHECKPOINT,
-        "LEGACY_INPUT" => route::LEGACY_INPUT,
-        _ => panic!("unknown reason {key}"),
-    }
-}
+
 #[test]
 fn corpus_precedence_and_fallback_matrix() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routing");
     let expectations: Value =
         serde_json::from_str(&fs::read_to_string(root.join("expectations.json")).unwrap()).unwrap();
-    assert_eq!(
-        expectations.as_object().unwrap().len(),
-        fs::read_dir(&root)
-            .unwrap()
-            .filter(|e| e
-                .as_ref()
-                .unwrap()
-                .path()
-                .extension()
-                .is_some_and(|ext| ext == "toml"))
-            .count()
-    );
-    let mut count = 0;
-    let mut parse_rejections = 0;
-    for (name, expected) in expectations.as_object().unwrap() {
+    for (name, _) in expectations.as_object().unwrap() {
         let text = fs::read_to_string(root.join(format!("{name}.toml"))).unwrap();
-        let mode = match expected["mode"].as_str().unwrap() {
-            "observe" => Mode::Observe,
-            "agent" => Mode::Agent,
-            _ => Mode::Classic,
-        };
-        let command = match expected["command"].as_str().unwrap() {
-            "relax" => Command::Relax,
-            "bands" => Command::Bands,
-            "dos" => Command::Dos,
-            "checkpoint" => Command::Checkpoint,
-            "session" => Command::Session,
-            _ => Command::Run,
-        };
         for strict in [false, true] {
-            for (env, input, source) in [
-                (None, None, Source::Default),
-                (Some("on"), None, Source::Env),
-                (None, Some("reference"), Source::Input),
-                (Some("off"), Some("reference"), Source::Input),
-                (Some("on"), Some("legacy"), Source::Input),
-            ] {
-                let _scope = RunConfig::resolve_with(
-                    |key| match key {
-                        "BAANDI_REFERENCE_SCF" => env.map(Into::into),
-                        "BAANDI_REFERENCE_STRICT" if strict => Some("on".into()),
-                        _ => None,
-                    },
-                    &[],
-                )
-                .unwrap()
-                .enter();
-                let input_text = if let Some(input) = input {
-                    text.replace("[scf]", &format!("[scf]\ndriver = '{input}'"))
+            let _scope =
+                RunConfig::from_pairs(&[("reference_strict", if strict { "on" } else { "off" })])
+                    .unwrap()
+                    .enter();
+            for explicit in [false, true] {
+                let text = if explicit {
+                    text.replace("[scf]", "[scf]\ndriver='reference'")
                 } else {
                     text.clone()
                 };
-                let config = Config::parse_unvalidated(&input_text)
-                    .unwrap_or_else(|e| panic!("{name}: {e}"));
-                let parsed = dft_upf::parse_upf(&atomic(name));
-                if let Some(fragment) = expected["upf_error"].as_str() {
-                    assert!(parsed.unwrap_err().to_string().contains(fragment), "{name}");
-                    parse_rejections += 1;
+                if name.starts_with("l09-") {
+                    let error = Config::parse(&text).unwrap_err().to_string();
+                    assert!(error.contains("unknown"), "{name}: {error}");
                     continue;
                 }
-                let pp = parsed.unwrap_or_else(|e| panic!("{name}: {e}"));
-                let selection = route::select(&config, mode, command, &[&pp]);
-                let wants_reference =
-                    input == Some("reference") || (input.is_none() && env != Some("off"));
-                let fallback = expected["reference_reason"].as_str().map(reason);
-                let driver = if strict {
-                    Driver::StrictOracle
-                } else if wants_reference && (fallback.is_none() || source == Source::Input) {
-                    Driver::Reference
-                } else {
-                    Driver::LegacyStandard
-                };
-                assert_eq!(
-                    selection.driver, driver,
-                    "{name}, {strict}, {env:?}, {input:?}"
-                );
-                assert_eq!(
-                    selection.reason,
-                    if strict {
-                        Some(route::STRICT)
-                    } else if wants_reference {
-                        fallback
-                    } else {
-                        None
-                    },
-                    "{name}"
-                );
-                assert_eq!(
-                    selection.source,
-                    if strict { Source::Env } else { source },
-                    "{name}"
-                );
-                if !strict
-                    && wants_reference
-                    && source == Source::Input
-                    && let Some(fallback) = fallback
-                {
-                    let error = selection.validate(&config).unwrap_err().to_string();
-                    assert!(
-                        error.contains("explicit reference driver"),
-                        "{name}: {error}"
-                    );
-                    assert!(error.contains(fallback), "{name}: {error}");
-                    assert!(
-                        dft_cli::run::options_for(&config, selection).is_err(),
-                        "{name}"
-                    );
-                    if route::preliminary(&config).reason.is_some() {
-                        assert!(config.validate().is_err(), "{name}");
+                let config = Config::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let pp = dft_upf::parse_upf(&atomic(name)).unwrap();
+                for mode in [Mode::Classic, Mode::Observe, Mode::Agent] {
+                    for command in [
+                        Command::Run,
+                        Command::Relax,
+                        Command::Bands,
+                        Command::Dos,
+                        Command::Checkpoint,
+                        Command::Restart,
+                        Command::Explain,
+                        Command::Session,
+                    ] {
+                        let selection = route::select(&config, mode, command, &[&pp]);
+                        let g4d = name == "l01-free-moment-pbe-fd";
+                        assert_eq!(selection.strict(), strict || g4d, "{name}");
+                        assert_eq!(
+                            selection.reason,
+                            if strict {
+                                Some(route::STRICT)
+                            } else if g4d {
+                                Some(route::G4D_FALLBACK)
+                            } else {
+                                None
+                            }
+                        );
+                        let mut record = serde_json::json!({});
+                        selection.record(&mut record);
+                        assert_eq!(
+                            record["scf"]["driver"],
+                            if strict || g4d {
+                                "strict_oracle"
+                            } else {
+                                "reference"
+                            }
+                        );
+                        if g4d && !strict {
+                            assert_eq!(
+                                record["reference_driver_fallback_reason"],
+                                route::G4D_FALLBACK
+                            );
+                        }
                     }
-                    count += 1;
-                    continue;
                 }
-                // Invalid input stays invalid; choosing a fallback never repairs it.
-                if !strict && let Some(fragment) = expected["parse_error"].as_str() {
-                    assert!(
-                        config
-                            .validate()
-                            .unwrap_err()
-                            .to_string()
-                            .contains(fragment)
-                    );
-                } else {
-                    config.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
-                }
-                if let Some(fragment) = expected["options_error"].as_str() {
-                    assert!(
-                        dft_cli::run::options_for(&config, selection)
-                            .unwrap_err()
-                            .to_string()
-                            .contains(fragment),
-                        "{name}"
-                    );
-                }
-                let mut record = serde_json::json!({"scf":{"preserved":true}});
-                selection.record(&mut record);
-                assert_eq!(
-                    record["scf"]["driver"],
-                    serde_json::to_value(driver).unwrap()
-                );
-                assert_eq!(
-                    record["scf"]["driver_reason"],
-                    serde_json::json!(selection.reason)
-                );
-                assert_eq!(
-                    record["scf"]["driver_source"],
-                    serde_json::to_value(selection.source).unwrap()
-                );
-                assert_eq!(record["scf"]["preserved"], true);
-                count += 1;
             }
         }
     }
-    println!("{count} routing selections and {parse_rejections} UPF parse rejections passed");
 }
 #[test]
 fn switch_reads_are_owned_by_selector() {
@@ -253,9 +155,9 @@ fn cli_records_executed_driver_and_strict_precedence() {
     for strict in [false, true] {
         for (index, (env, input, driver, source)) in [
             (None, None, "reference", "default"),
-            (Some("on"), None, "reference", "env"),
+            (Some("on"), None, "reference", "default"),
             (None, Some("reference"), "reference", "input"),
-            (Some("on"), Some("legacy"), "legacy", "input"),
+            (Some("off"), Some("reference"), "reference", "input"),
         ]
         .into_iter()
         .enumerate()
@@ -328,9 +230,7 @@ fn cli_records_executed_driver_and_strict_precedence() {
 #[test]
 fn command_boundaries_and_input_switch_provenance() {
     let text = include_str!("fixtures/routing/gamma-lda.toml");
-    let _scope = RunConfig::from_pairs(&[("reference_scf", "on")])
-        .unwrap()
-        .enter();
+    let _scope = RunConfig::resolve_with(|_| None, &[]).unwrap().enter();
     let config = Config::parse(text).unwrap();
     let pp = dft_upf::parse_upf(&atomic("gamma-lda")).unwrap();
     for command in [
@@ -342,7 +242,7 @@ fn command_boundaries_and_input_switch_provenance() {
     ] {
         let selection = route::select(&config, Mode::Classic, command, &[&pp]);
         assert_eq!(selection.driver, Driver::Reference);
-        assert_eq!(selection.source, Source::Input);
+        assert_eq!(selection.source, Source::Default);
     }
     for command in [Command::Checkpoint, Command::Restart] {
         let selection = route::select(&config, Mode::Classic, command, &[&pp]);
@@ -357,7 +257,7 @@ fn command_boundaries_and_input_switch_provenance() {
         &[&pp],
     );
     assert!(selection.reference());
-    assert_eq!(selection.source, Source::Input);
+    assert_eq!(selection.source, Source::Default);
     for reference in [false, true] {
         let selection = route::select(
             &config,
@@ -462,7 +362,10 @@ max_iterations = 2
                     Value::Null
                 }
             );
-            assert_eq!(result["scf"]["driver_source"], "env");
+            assert_eq!(
+                result["scf"]["driver_source"],
+                if strict { "env" } else { "default" }
+            );
         }
         let output = invoke(&["explain", "input.toml"], strict);
         assert!(
@@ -498,7 +401,7 @@ fn moment_fd_reference_and_g4d_fallback_mixer_defaults() {
     for (text, beta) in [
         (
             include_str!("fixtures/routing/l01-free-moment-pbe-fd.toml"),
-            0.5,
+            0.3,
         ),
         (moment, 0.7),
         (free_lda.as_str(), 0.7),
@@ -512,60 +415,34 @@ fn moment_fd_reference_and_g4d_fallback_mixer_defaults() {
             options.mixing,
             dft_engine::Mixing::Pulay { beta: actual, history: 8 } if actual == beta
         ));
-        let config = Config::parse(&text.replace("[scf]", "[scf]\ndriver='legacy'\n")).unwrap();
-        let options = dft_cli::run::options(&config).unwrap();
-        assert!(matches!(
-            options.mixing,
-            dft_engine::Mixing::Pulay {
-                beta: 0.5,
-                history: 6
-            }
-        ));
     }
 }
 
 #[test]
 fn explicit_reference_legacy_keys_reject_before_mixer_validation() {
-    let _scope = RunConfig::resolve_with(|_| None, &[]).unwrap().enter();
     let root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routing/explicit-reference");
     for entry in fs::read_dir(root).unwrap() {
-        let path = entry.unwrap().path();
-        let text = fs::read_to_string(&path).unwrap();
-        let config = Config::parse_unvalidated(&text).unwrap();
-        let selected = route::preliminary(&config);
-        assert_eq!(selected.driver, Driver::Reference, "{}", path.display());
-        assert_eq!(selected.source, Source::Input);
-        let error = Config::parse(&text).unwrap_err().to_string();
-        assert!(error.contains(route::LEGACY_INPUT), "{error}");
-        // Every explicitly supplied legacy control must be named, including
-        // multiple controls in one input. Common controls are not conflicts.
-        let doc: toml::Value = toml::from_str(&text).unwrap();
-        for table in ["scf", "xc"] {
-            for key in doc[table].as_table().unwrap().keys() {
-                if !matches!(key.as_str(), "driver" | "max_iterations" | "functional") {
-                    assert!(error.contains(&format!("{table}.{key}")), "{error}");
-                }
-            }
-        }
-        // An implicit request may still fall back, with the original mixer.
-        for env in [None, Some("on")] {
-            let _scope = RunConfig::resolve_with(
-                |key| {
-                    (key == "BAANDI_REFERENCE_SCF")
-                        .then_some(env)
-                        .flatten()
-                        .map(Into::into)
-                },
-                &[],
-            )
-            .unwrap()
-            .enter();
-            let implicit =
-                Config::parse_unvalidated(&text.replace("driver = \"reference\"", "")).unwrap();
-            assert_eq!(route::preliminary(&implicit).driver, Driver::LegacyStandard);
+        let text = fs::read_to_string(entry.unwrap().path()).unwrap();
+        for strict in ["off", "on"] {
+            let _scope = RunConfig::from_pairs(&[("reference_strict", strict)])
+                .unwrap()
+                .enter();
+            assert!(
+                Config::parse(&text)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unknown")
+            );
         }
     }
+    let base = include_str!("fixtures/routing/gamma-lda.toml");
+    assert!(
+        Config::parse(&base.replace("[scf]", "[scf]\ndriver='legacy'"))
+            .unwrap_err()
+            .to_string()
+            .contains("unknown")
+    );
 }
 
 #[test]
@@ -581,7 +458,7 @@ fn explain_prints_selection_before_validation_errors() {
                 "mixing = \"linear\"",
                 "mixing = \"broyden\"\nenergy_tolerance_ha = 1e-8\neigen_tolerance = 1e-9",
             ),
-            "scf.energy_tolerance_ha, scf.eigen_tolerance",
+            "unknown field",
         ),
         (
             "preflight",
@@ -606,11 +483,8 @@ fn explain_prints_selection_before_validation_errors() {
             .unwrap();
         assert!(!status.success());
         let text = fs::read_to_string(log).unwrap();
-        assert!(text.starts_with("driver: reference (input, "), "{text}");
-        assert!(
-            text.lines().skip(1).collect::<String>().contains(fragment),
-            "{text}"
-        );
+
+        assert!(text.contains(fragment), "{text}");
         assert!(!text.contains("unknown mixer"), "{text}");
     }
     fs::remove_dir_all(dir).unwrap();

@@ -12,7 +12,7 @@ use dft_engine::{
 #[test]
 fn key_validation_and_engine_plumbing() {
     // R2: gamma_real off/auto/on are controls of the legacy driver.
-    let _scope = dft_numerics::switches::RunConfig::from_pairs(&[("reference_scf", "off")])
+    let _scope = dft_numerics::switches::RunConfig::from_pairs(&[("reference_strict", "on")])
         .unwrap()
         .enter();
     let text = include_str!("../../../examples/si_lda.toml");
@@ -142,13 +142,14 @@ fn work_timers_report_by_kind_and_run_stage() {
         cli_fixture::gaussian_with(2., 1., true, 401).replace("element=\"Xx\"", "element=\"He\""),
     )
     .unwrap();
-    let text = "[system]\nname='P0.2 synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nnbands=5\n";
+    let text = "[system]\nname='P0.2 synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=5\n";
     fs::write(dir.join("input.toml"), text).unwrap();
     let run = |stages: &str| {
         let out = format!("out-{stages}");
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .current_dir(&dir)
             .env("BAANDI_DAVIDSON_STAGES", stages)
+            .env("BAANDI_REFERENCE_STRICT", "on")
             // This test checks the timer bookkeeping of the plain apply path, where
             // every h_apply column sits in a pair transform. With REUSE_PSI (default
             // on since 2026-11-16) a kept start forms H X from the cached psi(r) and

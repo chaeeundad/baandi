@@ -150,10 +150,7 @@ fn unit_strings_resolve_to_legacy_input() {
     }
     let new =
         format!("{new}\n[scf]\nenergy_tolerance = '2e-8 Ry'\neigen_tolerance_energy = '1e-8 Ha'\n");
-    let config = Config::parse(&new).unwrap();
-    let scf = config.scf.unwrap();
-    assert_eq!(scf.energy_tolerance_ha, Some(1e-8));
-    assert_eq!(scf.eigen_tolerance, Some(1e-8));
+    assert!(Config::parse(&new).is_err());
     for field in ["energy_tolerance_ha = 1e-8", "eigen_tolerance = 1e-8"] {
         assert!(Config::parse(&format!("{new}{field}\n")).is_err());
     }
@@ -224,13 +221,13 @@ fn numeric_field_allowlist_and_errors() {
     let text = old.replace("2.715", "'5.43/2'")
         .replace("[0.25, 0.25, 0.25]", "['1/4', 0.25, '1/4']")
         .replace("ecutwfc_ry = 30.0", "ecutwfc_ry = '60/2'\nkgrid = ['8/2', 1, 1]\nkshift = ['1/2', 0, '0']\nfft_grid = ['54/2', 27, 27]")
-        + "\n[scf]\nmax_iterations='400/2'\nnbands='16/2'\nextra_bands='8/2'\nseed='4052/2'\nmixing_beta='3/10'\ndensity_residual_tolerance='1e-7'\nenergy_tolerance='2e-8/2 Ha'\neigen_tolerance_energy='2e-8/2 Ha'\n";
+        + "\n[scf]\nmax_iterations='400/2'\nnbands='16/2'\nextra_bands='8/2'\nseed='4052/2'\nmixing_beta='3/10'\nstandard_threshold_ha='1e-8'\n";
     let c = Config::parse(&text).unwrap();
     assert_eq!(c.basis.kgrid, Some([4, 1, 1]));
     assert_eq!(c.basis.fft_grid, Some([27; 3]));
     assert_eq!(c.system.atoms[1].fractional, [0.25; 3]);
     assert_eq!(c.scf.as_ref().unwrap().nbands, Some(8));
-    assert_eq!(c.scf.as_ref().unwrap().energy_tolerance_ha, Some(1e-8));
+    assert_eq!(c.scf.as_ref().unwrap().standard_threshold_ha, Some(1e-8));
     let explicit = old.replace(
         "[[0.0, 0.0, 0.0]]",
         "[['1/4', 0, 0, '1/2'], ['-1/4', 0, 0, '1/2']]",
@@ -253,7 +250,7 @@ fn numeric_field_allowlist_and_errors() {
             "system.atoms[1].fractional[2]",
             "1/0",
         ),
-        ("'2e-8/2 Ha'", "'1/0 Ha'", "scf.energy_tolerance", "1/0 Ha"),
+        ("'1e-8'", "'1/0'", "scf.standard_threshold_ha", "1/0"),
         ("seed='4052/2'", "seed='-1'", "scf.seed", "-1"),
     ] {
         let err = Config::parse(&text.replace(from, to))

@@ -1,4 +1,4 @@
-# expected_driver = legacy
+# expected_driver = strict_oracle
 # expected_reason = G4D_FALLBACK: free-moment collinear FD with PBE not yet qualified; R6a retains L1 regardless of G4B switches
 # command = run
 # expected_parse = ok

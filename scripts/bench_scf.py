@@ -63,7 +63,7 @@ CASES = {
     "k444s": ("4x4x4 shifted (32 k), 30 Ry", 30.0, "kgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]"),
 }
 ENERGY_TOL_HA = 1e-12
-DRIVER_SWITCHES = ("BAANDI_REFERENCE_SCF", "BAANDI_REFERENCE_STRICT")
+DRIVER_SWITCHES = ("BAANDI_REFERENCE_STRICT",)
 
 
 def driver_metadata(report):
@@ -71,7 +71,7 @@ def driver_metadata(report):
     scf = report.get("scf", {})
     driver = scf.get("driver")
     switches = scf.get("switches", {})
-    if driver not in ("reference", "legacy", "strict_oracle"):
+    if driver not in ("reference", "strict_oracle"):
         raise RuntimeError("results.json is missing scf.driver; cannot establish identity")
     if scf.get("driver_source") not in ("default", "env", "input") or "driver_reason" not in scf:
         raise RuntimeError("results.json is missing R1 driver source/reason metadata")

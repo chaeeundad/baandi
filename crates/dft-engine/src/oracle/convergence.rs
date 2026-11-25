@@ -19,11 +19,6 @@ pub(crate) fn cell_kerker_scale(cell: &Cell, basis: &PlaneWaveBasis) -> Option<f
     (q02 > 64.0 * f64::EPSILON * cube2).then(|| q02.sqrt())
 }
 
-pub use crate::model::verify::{
-    StandardProfile, Verification, VerificationAttempt, VerificationReport, VerificationSchedule,
-    VerificationScheduleEntry,
-};
-
 /// K maps a signed density to half its Hartree potential times voxel volume.
 /// Thus r.K.r = E_H[r] in Ha. G=0 and modes outside the density sphere vanish.
 /// All FFT buffers and sphere weights are created once, outside SCF steps.
@@ -112,6 +107,7 @@ impl CoulombMetric {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub(crate) fn error(
         &mut self,
         input: &Array3<f64>,
@@ -138,6 +134,7 @@ impl CoulombMetric {
     /// N sum_G w(G) |d(G)|^2 for the real residual d and the symmetric weights
     /// w, so no transform is needed. Rounding class against `error` (the
     /// residual is transformed as two densities; Parseval order of summation).
+    #[cfg(test)]
     pub(crate) fn error_reciprocal(
         &self,
         input: &Array3<Complex64>,
@@ -170,6 +167,7 @@ impl CoulombMetric {
     /// E_0 = N_grid * max weight * <d_m>^2 = (Omega/2) (4 pi / G_min^2) <d_m>^2.
     /// An estimator, not an energy bound. Unpolarized limit (d_up = d_down):
     /// exactly `error` of the total densities.
+    #[cfg(test)]
     pub(crate) fn spin_error(
         &mut self,
         input: &[Array3<f64>; 2],
@@ -263,88 +261,6 @@ mod tests {
         // Unimodular re-basing: the shortest represented G need not be a column.
         let rebased = scale([[8., 0., 0.], [8., 8., 0.], [0., 0., 32.]]).unwrap();
         assert!((rebased - q).abs() < 1e-14);
-    }
-
-    fn plateau_record() -> IterationRecord {
-        IterationRecord {
-            standard_error_ha: Some(1.0),
-            standard_redo: false,
-            iteration: 1,
-            energy: EnergyAudit {
-                xc_floor: None,
-                nlcc: None,
-                kinetic: 0.0,
-                local: 0.0,
-                local_zero_mode: 0.0,
-                nonlocal: 0.0,
-                hartree: 0.0,
-                xc: 0.0,
-                ewald: 0.0,
-                band_sum: 0.0,
-                double_counting: 0.0,
-                band_form: 0.0,
-                harris_foulkes: 0.0,
-                functional_difference_bound: 0.0,
-            },
-            energy_change: None,
-            density_residual: 1.0,
-            max_eigen_residual: 1.0,
-            requested_eigen_tolerance: 1e-4,
-            davidson_iterations: 2,
-            operator_applications: 0,
-            davidson_iterations_per_k: vec![],
-            operator_applications_per_k: vec![],
-            charge_error: 0.0,
-            input_charge_error: 0.0,
-            min_density: 0.0,
-            mixing_fraction: 1.0,
-            mixer_reset: false,
-            density_contraction: None,
-            mixing_history_used: None,
-            mixing_resets: 0,
-            mixing_raw_recovery: false,
-            fixed_point_certificate: None,
-            timings: PhaseTimings::default(),
-            pulay: None,
-        }
-    }
-
-    #[test]
-    fn stall_window_progress_floor_and_no_repeated_compounding() {
-        let mut history = vec![plateau_record(); 6];
-        let tolerance = 1e-4;
-        assert_eq!(
-            StandardProfile::stall_guard(tolerance, &history[..5]),
-            tolerance
-        );
-        let tightened = StandardProfile::stall_guard(tolerance, &history);
-        assert!(tightened < tolerance);
-        // The same plateau cannot compound the cut before the window advances.
-        assert_eq!(StandardProfile::stall_guard(tightened, &history), tightened);
-        assert_eq!(
-            StandardProfile::stall_guard(StandardProfile::FLOOR_HA, &history),
-            StandardProfile::FLOOR_HA
-        );
-        history[3].standard_error_ha = Some(0.5);
-        assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
-        history[3].standard_error_ha = None;
-        assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
-        history[3].standard_error_ha = Some(0.49);
-        history[5].standard_error_ha = Some(2.0);
-        assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
-    }
-
-    #[test]
-    fn density_forcing_never_loosens_and_respects_floor() {
-        assert_eq!(StandardProfile::density_forcing(1e-4, &[]), 1e-4);
-        let mut r = plateau_record();
-        for residual in [0.0, 1e-10, 1e-5, 0.01, 1.0] {
-            r.density_residual = residual;
-            let t = StandardProfile::density_forcing(1e-4, &[r.clone()]);
-            assert!((StandardProfile::FLOOR_HA..=1e-4).contains(&t));
-        }
-        r.density_residual = 1e-4;
-        assert_eq!(StandardProfile::density_forcing(1e-4, &[r]), 1e-8);
     }
 
     #[test]

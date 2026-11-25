@@ -107,12 +107,6 @@ impl Context {
                 "occupations: bands/DOS requires fixed mode; use the finite-T SCF band data",
             ));
         }
-        if config.xc.density_floor.is_some() {
-            return Err(err(
-                1,
-                "xc.density_floor: bands/DOS does not yet support the XC floor policy; use run",
-            ));
-        }
         let cell = config.cell().map_err(|e| err(1, e))?;
         let atoms = config
             .system

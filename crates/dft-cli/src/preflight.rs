@@ -205,24 +205,6 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let (mut findings, metrics) = structure::review(config)?;
     drop(span);
     config.validate()?;
-    if config
-        .xc
-        .density_floor
-        .is_some_and(|v| !v.is_finite() || v <= 0.0)
-    {
-        return Err(fail(
-            "xc.density_floor",
-            "invalid density floor",
-            "use finite positive electrons/Bohr^3",
-        ));
-    }
-    if config.xc.density_floor.is_some() && config.collinear() {
-        return Err(fail(
-            "xc.density_floor",
-            "polarized floor is unavailable",
-            "use spin.mode = unpolarized",
-        ));
-    }
     if config.system.atoms.is_empty() {
         return Err(fail(
             "system.atoms",
@@ -231,24 +213,14 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         ));
     }
     if let Some(s) = &config.scf {
-        for (key, value) in [
-            ("energy_tolerance_ha", s.energy_tolerance_ha),
-            ("density_residual_tolerance", s.density_residual_tolerance),
-            ("eigen_tolerance", s.eigen_tolerance),
-            ("mixing_beta", s.mixing_beta),
-        ] {
-            if value.is_some_and(|x| !x.is_finite() || x <= 0. || (key == "mixing_beta" && x > 1.))
-            {
-                return Err(fail(
-                    &format!("scf.{key}"),
-                    "invalid value",
-                    if key == "mixing_beta" {
-                        "set a finite value in (0, 1]"
-                    } else {
-                        "set a positive finite tolerance"
-                    },
-                ));
-            }
+        if s.mixing_beta
+            .is_some_and(|x| !x.is_finite() || x <= 0. || x > 1.)
+        {
+            return Err(fail(
+                "scf.mixing_beta",
+                "invalid value",
+                "set a finite value in (0, 1]",
+            ));
         }
         if s.max_iterations.is_some_and(|n| n <= 0) {
             return Err(fail(
@@ -432,7 +404,6 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     if finite
         && (config.bands.is_some()
             || config.dos.is_some()
-            || config.xc.density_floor.is_some()
             || config
                 .output
                 .as_ref()

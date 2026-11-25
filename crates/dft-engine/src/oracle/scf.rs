@@ -7,8 +7,7 @@ pub use dft_solvers::DavidsonPreconditioner;
 pub use start_density::StartDensity;
 #[path = "convergence.rs"]
 pub(crate) mod convergence;
-use convergence::CoulombMetric;
-pub use convergence::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
+pub use crate::model::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
 #[path = "collinear.rs"]
 pub mod collinear;
 /// Compatibility exports for reference prolongation.
@@ -39,8 +38,6 @@ use dft_solvers::{
     kerker::{Kerker, MixerHistory, PreconditionedPulay},
     mixing::{LinearMixer, PulayMixer},
 };
-#[cfg(test)]
-use dft_upf::Pseudopotential;
 use session::{CompletionMode, ScfSession, StepStatus};
 use std::time::{Duration, Instant};
 
@@ -65,12 +62,6 @@ pub struct ScfProblem {
     force_real_rebuild: bool,
     #[cfg(test)]
     force_energy_identity: bool,
-    /// Test hook: the next this-many verifications fail regardless of the criterion.
-    #[cfg(test)]
-    pub(crate) force_verification_failures: usize,
-    /// Test hook: the VERIFY-REUSE mode regardless of the environment.
-    #[cfg(test)]
-    pub(crate) force_verify_reuse: Option<session::VerifyReuse>,
     force_model: crate::force_identity::ModelDescription,
     /// RUN-CONFIG: the run's switch configuration (the calling thread's at
     /// construction; `set_run_config` replaces it) and the session switches
@@ -79,11 +70,6 @@ pub struct ScfProblem {
     pub(crate) sw: session::SessionSwitches,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
-    coulomb: Option<CoulombMetric>,
-    /// `BAANDI_STOP_METRIC=kept` (ticket MPI-REMAINING): Fourier coefficients
-    /// of the latest map's input and output densities for the stop-rule
-    /// estimate; None when the switch is off or there is no Coulomb metric.
-    stop_kept: Option<StopKept>,
     /// `BAANDI_M2_GRID=on` (ticket M2-GRID, default off): slab plan of the
     /// distributed full-grid stages, built at the first eligible map.
     grid_dist: Option<crate::grid_dist::GridPlan>,
@@ -188,54 +174,6 @@ fn ordered_solves_at<T: Send, R: Send>(
     let mut results = left?;
     results.extend(right?);
     Ok(results)
-}
-
-/// Kept Fourier coefficients of one map's densities for the standard
-/// stop-rule estimate (`BAANDI_STOP_METRIC=kept`, ticket MPI-REMAINING). Each
-/// side stores the density it was computed from; `matches` compares those bits
-/// with the densities handed to the estimate, so a stale or foreign entry is
-/// never used (the estimate then transforms the residual as before). A side is
-/// usable only when its density needed no clamping (the coefficients of the
-/// checked density then equal those of the raw density).
-pub(crate) struct StopKept {
-    input: Vec<f64>,
-    input_hat: Array3<Complex64>,
-    input_ok: bool,
-    output: Vec<f64>,
-    output_hat: Array3<Complex64>,
-    output_ok: bool,
-    /// M2-GRID: the distributed plan holds the owned coefficients of `input`
-    /// (set by the distributed potential) and of `output` (distributed audit).
-    dist_input: bool,
-    dist_output: bool,
-    /// M2-OWNED: epochs of the owned (input, output) densities the plan's
-    /// kept coefficients belong to (None: full densities, compared by bits).
-    owned_tags: (Option<u64>, Option<u64>),
-}
-static STOP_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static STOP_FFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// (stop-rule estimates from kept coefficients, estimates that transformed
-/// the residual: one forward and one inverse full-grid FFT each) since process
-/// start; ticket MPI-REMAINING.
-pub fn stop_metric_counters() -> [u64; 2] {
-    use std::sync::atomic::Ordering::Relaxed;
-    [STOP_KEPT.load(Relaxed), STOP_FFT.load(Relaxed)]
-}
-thread_local! {
-    static STOP_METRIC_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-}
-/// Override `BAANDI_STOP_METRIC` (true = kept) for problems constructed on the
-/// calling thread (simulated ranks in tests); `None` restores the environment.
-pub fn set_stop_metric_override(kept: Option<bool>) {
-    STOP_METRIC_OVERRIDE.with(|o| o.set(kept));
-}
-fn stop_metric_kept(run: dft_numerics::switches::RunConfig) -> bool {
-    STOP_METRIC_OVERRIDE
-        .with(|o| o.get())
-        .unwrap_or_else(|| run.choice(dft_numerics::switches::Id::STOP_METRIC) == "kept")
-}
-fn unclamped(n: &Array3<f64>) -> bool {
-    n.iter().all(|v| v.to_bits() == v.max(0.0).to_bits())
 }
 
 // BREAKTHROUGH-4 (`BAANDI_EWALD_CACHE=on`, default off): constructions on the
@@ -453,94 +391,6 @@ fn ewald_energy(
     EWALD_LAST.with(|l| *l.borrow_mut() = Some((key, e.clone())));
     Ok(e)
 }
-fn same_bits(kept: &[f64], n: &Array3<f64>) -> bool {
-    kept.len() == n.len()
-        && kept
-            .iter()
-            .zip(n.iter())
-            .all(|(a, b)| a.to_bits() == b.to_bits())
-}
-impl StopKept {
-    fn new(dims: [usize; 3]) -> Self {
-        Self {
-            input: Vec::new(),
-            input_hat: Array3::zeros(dims),
-            input_ok: false,
-            output: Vec::new(),
-            output_hat: Array3::zeros(dims),
-            output_ok: false,
-            dist_input: false,
-            dist_output: false,
-            owned_tags: (None, None),
-        }
-    }
-    fn set_input(&mut self, n: &Array3<f64>) {
-        self.input.clear();
-        self.input.extend(n.iter());
-        self.input_ok = unclamped(n);
-        self.dist_input = false;
-        self.owned_tags.0 = None;
-    }
-    /// M2-GRID: the input density whose owned coefficients the plan keeps.
-    fn set_input_dist(&mut self, n: &Array3<f64>) {
-        self.input.clear();
-        self.input.extend(n.iter());
-        self.input_ok = false;
-        self.dist_input = true;
-        self.owned_tags.0 = None;
-    }
-    /// M2-GRID: the output density whose owned coefficients the plan keeps.
-    fn set_output_dist(&mut self, n: &Array3<f64>) {
-        self.output.clear();
-        self.output.extend(n.iter());
-        self.output_ok = false;
-        self.dist_output = true;
-        self.owned_tags.1 = None;
-    }
-    /// M2-OWNED: the plan keeps the coefficients of the owned input density
-    /// of this epoch (no full-grid copy; the epoch identifies the density).
-    fn set_input_owned(&mut self, epoch: u64) {
-        self.input.clear();
-        self.input_ok = false;
-        self.dist_input = true;
-        self.owned_tags.0 = Some(epoch);
-    }
-    /// M2-OWNED: as `set_input_owned` for the output density.
-    fn set_output_owned(&mut self, epoch: u64) {
-        self.output.clear();
-        self.output_ok = false;
-        self.dist_output = true;
-        self.owned_tags.1 = Some(epoch);
-    }
-    fn matches_dist(&self, input: &Array3<f64>, output: &Array3<f64>) -> bool {
-        self.dist_input
-            && self.dist_output
-            && self.owned_tags == (None, None)
-            && !input.is_empty()
-            && same_bits(&self.input, input)
-            && same_bits(&self.output, output)
-    }
-    fn matches_owned(&self, input: u64, output: u64) -> bool {
-        self.dist_input && self.dist_output && self.owned_tags == (Some(input), Some(output))
-    }
-    fn set_output(&mut self, n: &Array3<f64>, hat: Array3<Complex64>) {
-        self.dist_output = false;
-        self.owned_tags.1 = None;
-        self.output.clear();
-        self.output.extend(n.iter());
-        self.output_ok = hat.shape() == self.output_hat.shape() && unclamped(n);
-        if self.output_ok {
-            self.output_hat = hat;
-        }
-    }
-    fn matches(&self, input: &Array3<f64>, output: &Array3<f64>) -> bool {
-        self.input_ok
-            && self.output_ok
-            && same_bits(&self.input, input)
-            && same_bits(&self.output, output)
-    }
-}
-
 /// Cluster matrix sums sum_r conj(psi_i) dV psi_j of the certificate pre-screen,
 /// one serial sum per entry, entries split over the pool (order-independent).
 fn cluster_entries(psi: &[&[Complex64]], delta: &[f64], entries: &mut [(usize, usize, Complex64)]) {
@@ -595,18 +445,6 @@ pub use crate::model::ScfOutcome;
 
 pub use crate::model::ScfStep;
 impl ScfProblem {
-    /// Exact-continuation checkpoint hook: the kept REUSE-PSI state is not part of
-    /// checkpoint v1, so the live session forgets it at the checkpoint instant and
-    /// continues exactly like a session restored from that checkpoint.
-    pub(crate) fn forget_real_reuse(&self) {
-        for state in &self.states {
-            if let Some(rs) = state.real_solve.as_ref() {
-                rs.forget_reuse
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
-    }
-
     /// Dispatch evidence in input k order for the latest solve.
     pub fn gamma_real_diagnostics(&self) -> impl Iterator<Item = &crate::GammaRealDiagnostics> {
         self.states.iter().map(|s| &s.gamma_real)
@@ -678,6 +516,11 @@ impl ScfProblem {
     ) -> Result<Self, ScfError> {
         // RUN-CONFIG: construction resolves its switches from the calling
         // thread's configuration (scope or process) once.
+        if options.standard.is_some() || options.verification != crate::Verification::Off {
+            return Err(ScfError::InvalidInput(
+                "the strict oracle requires ScfOptions::strict_reference()",
+            ));
+        }
         let run = dft_numerics::switches::RunConfig::current();
         run.count(dft_numerics::switches::RunCounter::Problems, 1);
         use dft_numerics::switches::{InitProfile, RunCounter as IC};
@@ -715,52 +558,9 @@ impl ScfProblem {
         {
             gamma_real.fallback(options.gamma_real, reason)?;
         }
-        if options.standard_density_forcing
-            && (options.standard.is_none() || options.standard_stall_guard)
-        {
-            return Err(ScfError::InvalidInput(
-                "standard_density_forcing requires standard and stall guard off",
-            ));
-        }
-        if options.standard_stall_guard && options.standard.is_none() {
-            return Err(ScfError::InvalidInput(
-                "standard_stall_guard requires the standard profile",
-            ));
-        }
-        if options.verification != Verification::Off && options.standard.is_none() {
-            return Err(ScfError::InvalidInput(
-                "verification requires the standard profile; the strict profile always runs its certificate",
-            ));
-        }
-        if options
-            .standard
-            .is_some_and(|p| !p.threshold_ha.is_finite() || p.threshold_ha <= 0.0)
-        {
-            return Err(ScfError::InvalidInput(
-                "positive finite standard_threshold_ha required",
-            ));
-        }
-        // ONEPATH-3: the standard profile (with its verification) runs collinear
-        // spin and Fermi-Dirac drivers; the Hartree mixing metric and the
-        // experimental stall guard / density forcing stay closed-shell only.
-        if channel.is_some() && options.hartree_mixing {
-            return Err(ScfError::InvalidInput(
-                "Hartree mixing metric currently requires closed-shell fixed occupations (not collinear spin or Fermi-Dirac smearing runs); use the default l2 mixing metric",
-            ));
-        }
-        if channel.is_some() && (options.standard_stall_guard || options.standard_density_forcing) {
-            return Err(ScfError::InvalidInput(
-                "standard_stall_guard and standard_density_forcing apply to closed-shell fixed occupations only (not collinear spin or Fermi-Dirac smearing runs); remove them",
-            ));
-        }
-        if options.standard.is_some()
-            && !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson)
-        {
-            return Err(ScfError::InvalidInput("standard profile requires Davidson"));
-        }
+
         if options.locking == dft_solvers::locking::Locking::Auto
-            && (options.standard.is_some()
-                || !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson))
+            && !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson)
         {
             return Err(ScfError::InvalidInput("locking requires strict Davidson"));
         }
@@ -1142,10 +942,6 @@ impl ScfProblem {
                 }
             })
             .collect();
-        let coulomb = options
-            .standard
-            .map(|_| CoulombMetric::with_sphere(cell, &density_basis, grid.dims()))
-            .transpose()?;
         let force_model = crate::force_identity::ModelDescription::new(
             cell,
             atoms,
@@ -1160,10 +956,6 @@ impl ScfProblem {
             force_real_rebuild: false,
             #[cfg(test)]
             force_energy_identity: false,
-            #[cfg(test)]
-            force_verification_failures: 0,
-            #[cfg(test)]
-            force_verify_reuse: None,
             gamma_real_exclusion,
             reused_fields: None,
             screen_ffts: Vec::new(),
@@ -1172,13 +964,10 @@ impl ScfProblem {
             atomic_species,
             atomic_start,
             force_model,
-            stop_kept: (coulomb.is_some() && stop_metric_kept(run))
-                .then(|| StopKept::new(grid.dims())),
             run,
             sw: session::SessionSwitches::resolve(run),
             grid_dist: None,
             owned: Default::default(),
-            coulomb,
             cell: cell.clone(),
             states,
             grid,
@@ -1369,66 +1158,13 @@ impl ScfProblem {
         self.step_with_occupations(n, initial, tolerance, certify, None)
     }
 
-    /// The standard stop-rule Coulomb estimate E_H[output - input] (Ha), None
-    /// without the standard profile. With `BAANDI_STOP_METRIC=kept` and kept
-    /// coefficients of exactly these two densities, a Parseval sum without a
-    /// transform; otherwise the residual is transformed (forward and back).
-    pub(crate) fn stop_error(
-        &mut self,
-        input: &Array3<f64>,
-        output: &Array3<f64>,
-    ) -> Result<Option<f64>, ScfError> {
-        let Some(metric) = self.coulomb.as_mut() else {
-            return Ok(None);
-        };
-        // M2-GRID: owned coefficients of both densities on the slab plan
-        // (replicated conditions; one small allgatherv).
-        if self
-            .stop_kept
-            .as_ref()
-            .is_some_and(|k| k.matches_dist(input, output))
-            && let Some(comm) = crate::m2::active()
-            && let Some(plan) = self.grid_dist.as_mut().filter(|p| p.stop_ready())
-        {
-            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.run
-                .count(dft_numerics::switches::RunCounter::StopKept, 1);
-            return plan.stop_error(&comm).map(Some);
-        }
-        if let Some(kept) = self.stop_kept.as_ref().filter(|k| k.matches(input, output)) {
-            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.run
-                .count(dft_numerics::switches::RunCounter::StopKept, 1);
-            return metric
-                .error_reciprocal(&kept.input_hat, &kept.output_hat)
-                .map(Some);
-        }
-        STOP_FFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.run
-            .count(dft_numerics::switches::RunCounter::StopFft, 1);
-        metric.error(input, output).map(Some)
-    }
-
     /// Hartree and XC fields of an input density and the effective local
     /// potential built from them (ionic + Hartree + XC), in Ha.
     fn input_fields(
         &mut self,
         n: &Array3<f64>,
     ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>), ScfError> {
-        let h = match self.stop_kept.as_mut() {
-            Some(kept) => {
-                kept.input_ok = false;
-                let h = hartree::evaluate_keeping_density(
-                    n,
-                    &self.cell,
-                    &mut self.fft,
-                    &mut kept.input_hat,
-                )?;
-                kept.set_input(n);
-                h
-            }
-            None => hartree::evaluate(n, &self.cell, &mut self.fft)?,
-        };
+        let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
         // M2d: pointwise LDA XC split over ranks (bit-identical potential).
         let m2_xc = crate::m2::active().and_then(|comm| {
             crate::m2::xc(
@@ -1487,7 +1223,7 @@ impl ScfProblem {
     /// previous map used the distributed operator, a warm start so that no
     /// atomic start applies the complex Hamiltonian, no snapshot capture, no
     /// finite temperature). Counts the reason of a decline.
-    fn local_fields_eligible(&self, warm: bool, finite: bool) -> bool {
+    fn local_fields_eligible(&self, _warm: bool, _finite: bool) -> bool {
         use crate::grid_dist as g;
         if !g::local_fields_requested() || crate::m2::active().is_none() {
             return false;
@@ -1496,26 +1232,8 @@ impl ScfProblem {
             Some(d.index())
         } else if self.grid_dist_lda().is_none() {
             Some(self.grid_path_reason())
-        } else if self.options.standard.is_none() {
-            Some(1)
-        } else if self.states.len() != 1 {
-            Some(2)
-        } else if !warm {
-            Some(3)
-        } else if self.states[0]
-            .real_solve
-            .as_ref()
-            .is_none_or(|r| r.dist.is_none())
-            || !self.states[0].gamma_real.gamma_real_used
-            || self.gamma_real_exclusion.is_some()
-        {
-            Some(4)
-        } else if crate::snapshot::dir().is_some() {
-            Some(5)
-        } else if finite {
-            Some(6)
         } else {
-            None
+            Some(1)
         };
         if let Some(r) = reason {
             g::owned_declined(r);
@@ -1524,39 +1242,8 @@ impl ScfProblem {
         true
     }
 
-    /// M2-OWNED: the complex Hamiltonians hold the potential of the latest map
-    /// again (one allgatherv of the owned effective potential, charged as a
-    /// consumer gather) when an owned map left them stale; a no-op otherwise.
-    /// Every consumer of the full local potential calls it first. Collective
-    /// (the stale flag is replicated).
+    /// Strict maps always keep the full complex potential current.
     pub(crate) fn ensure_complex_potential(&mut self) -> Result<(), ScfError> {
-        if !self.owned.complex_stale {
-            return Ok(());
-        }
-        let comm = crate::m2::active().ok_or(ScfError::InvalidInput(
-            "M2 owned potential without a communicator",
-        ))?;
-        let plan = self
-            .grid_dist
-            .as_mut()
-            .ok_or(ScfError::InvalidInput("M2 owned potential without a plan"))?;
-        let clock = dft_numerics::stage_clock::start();
-        let mut full = Array3::zeros(self.grid.dims());
-        let local = std::mem::take(&mut self.owned.scratch);
-        let mut local = local;
-        local.clear();
-        local.extend_from_slice(plan.effective_planes());
-        let gathered = plan.gather_field(&comm, &local, full.as_slice_mut().expect("standard"));
-        self.owned.scratch = local;
-        gathered?;
-        for state in &mut self.states {
-            state.hamiltonian.set_local_potential(full.clone())?;
-        }
-        use crate::grid_dist as g;
-        g::owned_add(g::O_CONSUMER_GATHERS, 1);
-        g::owned_add(g::O_CONSUMER_GATHER_VALUES, full.len() as u64);
-        g::owned_time(g::T_CONSUMER_GATHER, clock);
-        self.owned.complex_stale = false;
         Ok(())
     }
 
@@ -1565,10 +1252,10 @@ impl ScfProblem {
     /// M2 path, the distributed grid path, the standard profile, one k state,
     /// plain Pulay without a Hartree metric, no symmetry, no snapshot capture,
     /// no replay capture. A requested but ineligible loop is counted.
-    pub(crate) fn owned_density_eligible(&self) -> bool {
+    pub(crate) fn record_owned_density_decline(&self) {
         use crate::grid_dist as g;
         if !g::local_density_requested() {
-            return false;
+            return;
         }
         let reason = if let Some(d) = self.owned.declined {
             Some(d.index())
@@ -1576,25 +1263,12 @@ impl ScfProblem {
             Some(g::R_GRID_PATH)
         } else if self.grid_dist_lda().is_none() {
             Some(self.grid_path_reason())
-        } else if self.options.standard.is_none() {
-            Some(1)
-        } else if self.states.len() != 1 {
-            Some(2)
-        } else if crate::snapshot::dir().is_some() || dft_solvers::replay::ENABLED {
-            Some(5)
-        } else if !g::local_fields_requested()
-            || !matches!(self.options.mixing, Mixing::Pulay { .. })
-            || self.options.hartree_mixing
-        {
-            Some(g::R_GRID_PATH)
         } else {
-            None
+            Some(1)
         };
         if let Some(r) = reason {
             g::density_declined(r);
-            return false;
         }
-        true
     }
 
     /// Why `grid_dist_lda` is None: `functional` for a non-LDA functional
@@ -1630,191 +1304,6 @@ impl ScfProblem {
         self.owned.declined
     }
 
-    /// The slab plan of the distributed grid stages (built once per grid).
-    pub(crate) fn grid_plan(
-        &mut self,
-    ) -> Result<(crate::parallel::SharedComm, &mut crate::grid_dist::GridPlan), ScfError> {
-        let comm = crate::m2::active()
-            .ok_or(ScfError::InvalidInput("M2 owned density without M2 path"))?;
-        let lda = self
-            .grid_dist_lda()
-            .ok_or(ScfError::InvalidInput("M2 owned density without grid path"))?;
-        let dims = self.grid.dims();
-        if self.grid_dist.as_ref().map(|p| p.dims()) != Some(dims) {
-            let weights = self.coulomb.as_ref().map(|c| c.weights());
-            self.grid_dist = Some(crate::grid_dist::GridPlan::new(
-                &comm,
-                dims,
-                self.cell.reciprocal_columns_inverse_bohr(),
-                self.cell.volume_bohr3(),
-                lda,
-                weights,
-            )?);
-        }
-        Ok((comm, self.grid_dist.as_mut().expect("built above")))
-    }
-
-    /// This rank's planes of a replicated full density, tagged with a new
-    /// epoch (no collective).
-    pub(crate) fn owned_from_full(
-        &mut self,
-        n: &Array3<f64>,
-    ) -> Result<crate::grid_dist::Owned, ScfError> {
-        let full = n
-            .as_slice()
-            .ok_or(ScfError::InvalidInput("M2 owned density layout"))?;
-        let (_, plan) = self.grid_plan()?;
-        let mut values = Vec::new();
-        plan.planes_of(full, &mut values);
-        Ok(crate::grid_dist::Owned {
-            epoch: self.owned.next_epoch(),
-            values,
-        })
-    }
-
-    /// The full replicated density of an owned one (one allgatherv, charged as
-    /// a materialization: delivered result, hand-off, fallback). Collective.
-    pub(crate) fn materialize_owned(
-        &mut self,
-        o: &crate::grid_dist::Owned,
-    ) -> Result<Array3<f64>, ScfError> {
-        let dims = self.grid.dims();
-        let clock = dft_numerics::stage_clock::start();
-        let (comm, plan) = self.grid_plan()?;
-        let mut full = Array3::zeros(dims);
-        plan.gather_field(&comm, &o.values, full.as_slice_mut().expect("standard"))?;
-        use crate::grid_dist as g;
-        g::owned_add(g::O_MATERIALIZATIONS, 1);
-        g::owned_add(g::O_MATERIALIZATION_VALUES, full.len() as u64);
-        g::owned_time(g::T_MATERIALIZE, clock);
-        Ok(full)
-    }
-
-    /// M2-OWNED session metrics of an (input, output) pair: (density residual
-    /// as `density_distance(output, input)`, output sum, input sum, output
-    /// minimum). Canonical per-plane sums (one allgatherv): rank-count
-    /// independent, rounding class against the row-major full-grid sums; the
-    /// minimum is exact. Collective.
-    pub(crate) fn owned_metrics(
-        &mut self,
-        input: &crate::grid_dist::Owned,
-        output: &crate::grid_dist::Owned,
-    ) -> Result<(f64, f64, f64, f64), ScfError> {
-        let (volume, electrons) = (self.cell.volume_bohr3(), self.electrons);
-        let points: usize = self.grid.dims().iter().product();
-        let clock = dft_numerics::stage_clock::start();
-        let (comm, plan) = self.grid_plan()?;
-        let pl = plan.plane_len();
-        let local_min = output.values.iter().copied().fold(f64::INFINITY, f64::min);
-        let (sums, max) = plan.plane_reduce(
-            &comm,
-            3,
-            |i, out| {
-                let (o, a) = (
-                    &output.values[i * pl..(i + 1) * pl],
-                    &input.values[i * pl..(i + 1) * pl],
-                );
-                out[0] = o.iter().zip(a).map(|(o, a)| (o - a).powi(2)).sum::<f64>();
-                out[1] = o.iter().sum::<f64>();
-                out[2] = a.iter().sum::<f64>();
-            },
-            &[-local_min],
-        )?;
-        use crate::grid_dist as g;
-        g::owned_add(g::O_OWNED_REDUCTIONS, 1);
-        g::owned_time(g::T_OWNED_REDUCE, clock);
-        let residual = (volume / points as f64 * sums[0]).sqrt() / electrons;
-        Ok((residual, sums[1], sums[2], -max[0]))
-    }
-
-    /// M2-OWNED: true when the owned density has a nonfinite value or one below
-    /// -NEGATIVE_ROUNDOFF on any rank (replicated verdict). Collective.
-    pub(crate) fn owned_invalid(&mut self, n: &crate::grid_dist::Owned) -> Result<bool, ScfError> {
-        let bad = n
-            .values
-            .iter()
-            .any(|v| !v.is_finite() || *v < -xc::NEGATIVE_ROUNDOFF);
-        let (comm, plan) = self.grid_plan()?;
-        let (_, max) = plan.plane_reduce(&comm, 0, |_, _| {}, &[f64::from(u8::from(bad))])?;
-        crate::grid_dist::owned_add(crate::grid_dist::O_OWNED_REDUCTIONS, 1);
-        Ok(max[0] != 0.0 || max[0].is_nan())
-    }
-
-    /// M2-OWNED: the convex fraction of the session's Anderson safeguard,
-    /// min over points with mixed < 0 of 0.9 base / (base - mixed) (1 when
-    /// none): the exact global minimum, the bits of the full-grid fold.
-    /// Collective.
-    pub(crate) fn owned_convex_fraction(
-        &mut self,
-        base: &[f64],
-        mixed: &[f64],
-    ) -> Result<f64, ScfError> {
-        let local = base
-            .iter()
-            .zip(mixed)
-            .filter(|(_, b)| **b < 0.0)
-            .map(|(a, b)| 0.9 * a / (a - b))
-            .fold(1.0, f64::min);
-        let (comm, plan) = self.grid_plan()?;
-        let (_, max) = plan.plane_reduce(&comm, 0, |_, _| {}, &[-local])?;
-        crate::grid_dist::owned_add(crate::grid_dist::O_OWNED_REDUCTIONS, 1);
-        Ok(-max[0])
-    }
-
-    /// M2-OWNED stop-rule estimate of an owned (input, output) pair: the kept
-    /// owned coefficients when the plan's epochs are exactly these; otherwise
-    /// (a clamped density) both densities are materialized and transformed.
-    pub(crate) fn stop_error_owned(
-        &mut self,
-        input: &crate::grid_dist::Owned,
-        output: &crate::grid_dist::Owned,
-    ) -> Result<Option<f64>, ScfError> {
-        if self.coulomb.is_none() {
-            return Ok(None);
-        }
-        if self
-            .stop_kept
-            .as_ref()
-            .is_some_and(|k| k.matches_owned(input.epoch, output.epoch))
-            && let Some(comm) = crate::m2::active()
-            && let Some(plan) = self.grid_dist.as_mut().filter(|p| p.stop_ready())
-        {
-            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            return plan.stop_error(&comm).map(Some);
-        }
-        let (a, b) = (
-            self.materialize_owned(input)?,
-            self.materialize_owned(output)?,
-        );
-        STOP_FFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.coulomb
-            .as_mut()
-            .expect("checked")
-            .error(&a, &b)
-            .map(Some)
-    }
-
-    /// Stop-rule estimate of a map: the owned pair (the problem's owned input
-    /// and `owned`) when the map kept its densities owned, else the full pair.
-    pub(crate) fn stop_error_step(
-        &mut self,
-        input: &Array3<f64>,
-        output: &Array3<f64>,
-        owned: Option<&crate::grid_dist::Owned>,
-    ) -> Result<Option<f64>, ScfError> {
-        let Some(out) = owned else {
-            return self.stop_error(input, output);
-        };
-        let n = self
-            .owned
-            .input
-            .take()
-            .ok_or(ScfError::InvalidInput("M2 owned stop rule without input"))?;
-        let r = self.stop_error_owned(&n, out);
-        self.owned.input = Some(n);
-        r
-    }
-
     /// Session metrics of a map: (residual `density_distance(output, input)`,
     /// output sum, input sum, output minimum); the full-array arithmetic of
     /// the session, or `owned_metrics` for an owned pair. Collective when owned.
@@ -1822,73 +1311,34 @@ impl ScfProblem {
         &mut self,
         input: &Array3<f64>,
         output: &Array3<f64>,
-        owned: Option<&crate::grid_dist::Owned>,
     ) -> Result<(f64, f64, f64, f64), ScfError> {
-        let Some(out) = owned else {
-            return Ok((
-                density_distance(output, input, self.cell.volume_bohr3(), self.electrons),
-                output.sum(),
-                input.sum(),
-                output.iter().copied().fold(f64::INFINITY, f64::min),
-            ));
-        };
-        let n = self
-            .owned
-            .input
-            .take()
-            .ok_or(ScfError::InvalidInput("M2 owned metrics without input"))?;
-        let r = self.owned_metrics(&n, out);
-        self.owned.input = Some(n);
-        r
-    }
-
-    /// M2-OWNED: true when the owned input density is invalid on any rank
-    /// (nonfinite or below -NEGATIVE_ROUNDOFF). Collective.
-    pub(crate) fn owned_input_invalid(&mut self) -> Result<bool, ScfError> {
-        let n = self
-            .owned
-            .input
-            .take()
-            .ok_or(ScfError::InvalidInput("M2 owned check without input"))?;
-        let r = self.owned_invalid(&n);
-        self.owned.input = Some(n);
-        r
+        Ok((
+            density_distance(output, input, self.cell.volume_bohr3(), self.electrons),
+            output.sum(),
+            input.sum(),
+            output.iter().copied().fold(f64::INFINITY, f64::min),
+        ))
     }
 
     fn map_fields(
         &mut self,
         n: &Array3<f64>,
-        owned_ok: bool,
-    ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>, bool, bool), ScfError> {
+    ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>, bool), ScfError> {
         let comm = crate::m2::active();
         let lda = comm.as_ref().and(self.grid_dist_lda());
-        // M2-OWNED: an empty input array means the owned input density.
-        let owned_input = if n.is_empty() {
-            self.owned.input.take()
-        } else {
-            None
-        };
         let (Some(comm), Some(lda), Some(values), Some(ionic)) =
             (comm, lda, n.as_slice(), self.ionic_real.as_slice())
         else {
-            if owned_input.is_some() {
-                return Err(ScfError::InvalidInput(
-                    "M2 owned input density outside the distributed grid path",
-                ));
-            }
             if crate::grid_dist::requested() && crate::m2::active().is_some() {
                 crate::grid_dist::count_declined();
             }
             let (h, x, effective) = self.input_fields(n)?;
-            return Ok((h, x, effective, false, false));
+            return Ok((h, x, effective, false));
         };
-        let field = match owned_input.as_ref() {
-            Some(o) => crate::grid_dist::Field::Planes(&o.values),
-            None => crate::grid_dist::Field::Full(values),
-        };
+        let field = crate::grid_dist::Field::Full(values);
         let dims = self.grid.dims();
         if self.grid_dist.as_ref().map(|p| p.dims()) != Some(dims) {
-            let weights = self.coulomb.as_ref().map(|c| c.weights());
+            let weights = None;
             self.grid_dist = Some(crate::grid_dist::GridPlan::new(
                 &comm,
                 dims,
@@ -1899,49 +1349,7 @@ impl ScfProblem {
             )?);
         }
         let plan = self.grid_dist.as_mut().expect("plan built above");
-        let (effective, (hartree_energy, xc_energy, xc_integral)) = if owned_ok {
-            // M2-OWNED: the effective potential stays on the planes; the
-            // distributed operator takes its planes (moved to the operator's
-            // plane layout when the axes differ). No full-grid gather.
-            let energies = plan.potential_field(&comm, field, ionic, None)?;
-            let first_b = self.states[0]
-                .real_solve
-                .as_ref()
-                .and_then(|r| r.dist.as_ref())
-                .map(|d| d.plane_layout().0)
-                .ok_or(ScfError::InvalidInput("M2 owned fields without operator"))?;
-            let first_a = plan.first_axis();
-            let rank = dft_mpi::Collective::rank(&comm);
-            let ranks = dft_mpi::Collective::size(&comm);
-            if !self
-                .owned
-                .map
-                .as_ref()
-                .is_some_and(|m| m.matches(dims, first_a, first_b))
-            {
-                self.owned.map = Some(crate::grid_dist::PlaneMap::new(
-                    dims, rank, ranks, first_a, first_b,
-                ));
-            }
-            let epoch = self.owned.next_epoch();
-            let mut values = self
-                .owned
-                .potential
-                .take()
-                .map(|o| o.values)
-                .unwrap_or_default();
-            self.owned.map.as_mut().expect("built above").a_to_b(
-                &comm,
-                plan.effective_planes(),
-                &mut values,
-            )?;
-            use crate::grid_dist as g;
-            g::owned_add(g::O_FIELDS_OWNED_MAPS, 1);
-            g::owned_max(g::O_PLANE_VALUES, values.len() as u64);
-            self.owned.potential = Some(crate::grid_dist::Owned { epoch, values });
-            self.owned.complex_stale = true;
-            (Array3::zeros((0, 0, 0)), energies)
-        } else {
+        let (effective, (hartree_energy, xc_energy, xc_integral)) = {
             let mut effective = Array3::zeros(dims);
             let energies = plan.potential_field(
                 &comm,
@@ -1951,15 +1359,7 @@ impl ScfProblem {
             )?;
             (effective, energies)
         };
-        if let Some(kept) = self.stop_kept.as_mut() {
-            match owned_input.as_ref() {
-                Some(o) => kept.set_input_owned(o.epoch),
-                None => kept.set_input_dist(n),
-            }
-        }
-        if owned_input.is_some() {
-            self.owned.input = owned_input;
-        }
+
         let empty = (0, 0, 0);
         Ok((
             hartree::HartreeGrid {
@@ -1974,7 +1374,6 @@ impl ScfProblem {
             },
             effective,
             true,
-            owned_ok,
         ))
     }
 
@@ -2043,41 +1442,8 @@ impl ScfProblem {
         let points = md.points;
         md.bands = bands;
         let mut local = vec![0.0; points];
-        // BAANDI_M2_DENSITY=fused: the per-band contributions only serve the
-        // certificate screen, which runs on the strict path only; the standard
-        // path accumulates the plane density directly (bit-identical sum order).
-        let fused = self.options.standard.is_some()
-            && dft_numerics::switches::choice(dft_numerics::switches::Id::M2_DENSITY) == "fused";
-        // MPI-KEPT-START: keep the plane slabs of the leading fully occupied
-        // pairs of the stored X for the next start's potential change. The
-        // pair count and the memory gate are replicated decisions.
-        let mut no_keep: [Complex64; 0] = [];
-        let mut kept_pairs = 0;
-        let keep: &mut [Complex64] = match rs.m2_reuse.as_mut() {
-            Some(r) => {
-                let pairs = occupations[..m]
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .take_while(|w| w[0] != 0.0 && w[1] != 0.0)
-                    .count();
-                r.kept_pairs = 0;
-                let ranks = dft_mpi::Collective::size(&comm);
-                match r.plane_slots(pairs, points, dims.iter().product(), ranks) {
-                    Some(slots) => {
-                        kept_pairs = pairs;
-                        slots
-                    }
-                    None => &mut no_keep,
-                }
-            }
-            None => &mut no_keep,
-        };
-        if fused {
-            md.contributions.clear();
-            dist.band_density_sum_keeping(&comm, &xm, &occupations[..m], volume, &mut local, keep)
-                .map_err(err)?;
-        } else {
+        let keep: &mut [Complex64] = &mut [];
+        {
             md.contributions.clear();
             md.contributions.resize(bands * points, 0.);
             dist.band_densities_keeping(
@@ -2099,49 +1465,7 @@ impl ScfProblem {
                 }
             }
         }
-        let output = if self.owned.density_mode {
-            // M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the weighted output stays
-            // on the planes (the per-point arithmetic of the gathered path),
-            // moved to the slab layout when the plane axes differ. A
-            // nonfinite value is not tested here (no local early exit): it
-            // reaches every rank through the audit's flags and sums.
-            let mut weighted: Vec<f64> = local
-                .iter()
-                .map(|n| {
-                    let mut out = 0.0;
-                    out += weight * n;
-                    out
-                })
-                .collect();
-            let plan = self
-                .grid_dist
-                .as_mut()
-                .ok_or(ScfError::InvalidInput("M2 owned density without a plan"))?;
-            let (first_a, first_b) = (plan.first_axis(), dist.plane_layout().0);
-            let rank = dft_mpi::Collective::rank(&comm);
-            let ranks = dft_mpi::Collective::size(&comm);
-            if !self
-                .owned
-                .map
-                .as_ref()
-                .is_some_and(|m| m.matches(dims, first_a, first_b))
-            {
-                self.owned.map = Some(crate::grid_dist::PlaneMap::new(
-                    dims, rank, ranks, first_a, first_b,
-                ));
-            }
-            let map = self.owned.map.as_mut().expect("built above");
-            let mut values = Vec::new();
-            if map.identity() {
-                values = std::mem::take(&mut weighted);
-            } else {
-                map.b_to_a(&comm, &weighted, &mut values)?;
-            }
-            let epoch = self.owned.next_epoch();
-            self.owned.output = Some(crate::grid_dist::Owned { epoch, values });
-            crate::grid_dist::owned_add(crate::grid_dist::O_DENSITY_OWNED_MAPS, 1);
-            Array3::zeros((0, 0, 0))
-        } else {
+        let output = {
             let mut full = Array3::zeros(dims);
             let gather_clock = dft_numerics::stage_clock::start();
             dist.gather_planes(&comm, &local, full.as_slice_mut().unwrap())
@@ -2162,13 +1486,7 @@ impl ScfProblem {
             output
         };
         // Without per-band contributions the screen data is not held.
-        md.valid = !fused;
-        if kept_pairs > 0
-            && let Some(r) = rs.m2_reuse.as_mut()
-        {
-            r.kept_pairs = kept_pairs;
-            crate::m2::count(crate::m2::Count::ReusePlaneKeeps);
-        }
+        md.valid = true;
         crate::m2::add(crate::m2::Stage::Density, start);
         crate::m2::count(crate::m2::Count::Density);
         Ok(Some(output))
@@ -2613,7 +1931,6 @@ impl ScfProblem {
         )?;
         // M2-OWNED: the complex Hamiltonians now hold the potential of `n`;
         // an earlier owned map's planes must not overwrite it.
-        self.owned.complex_stale = false;
         self.atomic_guesses()
     }
 
@@ -2625,15 +1942,10 @@ impl ScfProblem {
         certify: bool,
         finite: Option<&mut finite_temperature::OccupationWorkspace>,
     ) -> Result<ScfStep, ScfError> {
-        self.step_map(n, initial, &[], false, tolerance, certify, finite)
+        self.step_map(n, initial, &[], tolerance, certify, finite)
     }
 
-    /// MPI-LAZY-ORBITALS session entry: one map whose warm start may hold lazy
-    /// blocks (0 x B placeholders in `initial` with their rows in
-    /// `initial_lazy`, quadrature order; empty = none) and whose standard M2
-    /// solves return lazy blocks when `BAANDI_M2_LAZY` is on. The returned k
-    /// points then carry `lazy` handles and 0 x B placeholders; callers
-    /// materialize them (`materialize_orbitals`) where the full block is needed.
+    /// Fixed-potential map accepting materializable warm-start blocks.
     pub(crate) fn step_session(
         &mut self,
         n: &Array3<f64>,
@@ -2642,15 +1954,10 @@ impl ScfProblem {
         tolerance: f64,
         certify: bool,
     ) -> Result<ScfStep, ScfError> {
-        let lazy = crate::gamma_real::m2_lazy();
-        self.step_map(n, initial, initial_lazy, lazy, tolerance, certify, None)
+        self.step_map(n, initial, initial_lazy, tolerance, certify, None)
     }
 
-    /// Stage-0 measurement access (`dft-cli/examples/davidson_bench.rs`): the
-    /// session's map. `initial` may hold 0 x B placeholders whose rows are in
-    /// `initial_lazy` (`split_warm` of earlier k points); lazy blocks are left
-    /// in the result when `BAANDI_M2_LAZY` is on. With the switch off it is
-    /// `step_kpoints_with_certification`.
+    /// Compatibility map entry; delivered orbitals are always materialized.
     #[doc(hidden)]
     pub fn step_kpoints_lazy(
         &mut self,
@@ -2864,7 +2171,6 @@ impl ScfProblem {
         n: &Array3<f64>,
         initial: Option<&[ComplexMatrix]>,
         initial_lazy: &[Option<crate::gamma_real::LazyOrbitals>],
-        lazy: bool,
         tolerance: f64,
         certify: bool,
         mut finite: Option<&mut finite_temperature::OccupationWorkspace>,
@@ -2890,18 +2196,11 @@ impl ScfProblem {
         if initial.is_some_and(|v| v.len() != self.states.len()) {
             return Err(ScfError::InvalidInput("one warm start required per k"));
         }
-        // MPI-LAZY-ORBITALS: lazy returns only for one k point with integer
-        // occupations on the M2 standard path (replicated conditions); a lazy
-        // warm start of any other map is gathered first.
-        let lazy = lazy
-            && crate::m2::active().is_some()
-            && self.states.len() == 1
-            && finite.is_none()
-            && self.options.standard.is_some();
+        // The strict residual solve always materializes its result.
         let gathered_initial: Option<Vec<ComplexMatrix>>;
         let lazy_of = |i: usize| initial_lazy.get(i).and_then(Option::as_ref);
         let initial = match initial {
-            Some(v) if !lazy && v.iter().any(|m| m.rows() == 0) => {
+            Some(v) if v.iter().any(|m| m.rows() == 0) => {
                 let mut full = Vec::with_capacity(v.len());
                 for (i, m) in v.iter().enumerate() {
                     full.push(match lazy_of(i) {
@@ -2914,16 +2213,13 @@ impl ScfProblem {
             }
             other => other,
         };
-        // M2-OWNED: an empty input array with an owned input density set by
-        // the session (`BAANDI_M2_LOCAL_DENSITY`; no snapshot, no symmetry).
-        let owned_in = n.is_empty() && self.owned.density_mode && self.owned.input.is_some();
-        if !owned_in && n.shape() != self.grid.dims() {
+        if n.shape() != self.grid.dims() {
             return Err(ScfError::InvalidInput("input density grid"));
         }
         // BREAKTHROUGH-0-INSTRUMENT: a new map for the phase profile; the
         // snapshot capture takes a copy of the input density (both default off).
         crate::profile::map_begin();
-        if !owned_in {
+        {
             crate::snapshot::set_density(n);
         }
         // ISSUE-18: the operator fingerprint of the captured map (capture only).
@@ -2938,7 +2234,7 @@ impl ScfProblem {
                 "symmetry.density: input breaks the selected symmetry; use full mesh",
             ));
         }
-        let (h, x, effective, dist_fields, owned_fields) = match self.reused_fields.take() {
+        let (h, x, effective, dist_fields) = match self.reused_fields.take() {
             Some(r)
                 if r.density.shape() == n.shape()
                     && r.density
@@ -2946,18 +2242,14 @@ impl ScfProblem {
                         .zip(n.iter())
                         .all(|(a, b)| a.to_bits() == b.to_bits()) =>
             {
-                (r.hartree, r.xc, r.effective, false, false)
+                (r.hartree, r.xc, r.effective, false)
             }
             _ => {
-                let owned_ok = self.local_fields_eligible(initial.is_some(), finite.is_some());
-                self.map_fields(n, owned_ok)?
+                self.local_fields_eligible(initial.is_some(), finite.is_some());
+                self.map_fields(n)?
             }
         };
-        if owned_fields {
-            // M2-OWNED: the complex Hamiltonians keep their older potential
-            // (`owned.complex_stale`); the distributed operator takes the
-            // owned planes in the solve below.
-        } else {
+        {
             ordered_solves(
                 &mut self.states,
                 self.options.threads,
@@ -2975,15 +2267,7 @@ impl ScfProblem {
                     (self.states.len() * effective.len()) as u64,
                 );
             }
-            self.owned.complex_stale = false;
-            self.owned.potential = None;
         }
-        // Taken for the solve and put back after it (no copy).
-        let owned_potential = if owned_fields {
-            self.owned.potential.take()
-        } else {
-            None
-        };
         // Only a cold map may create atomic vectors. Existing restart/warm
         // vectors pass unchanged through both solver bridges.
         let atomic_initial = if self.options.start_wavefunctions == StartWavefunctions::Atomic {
@@ -3067,7 +2351,6 @@ impl ScfProblem {
                         &state.basis,
                         initial.map(|v| &v[i]),
                         lazy_of(i),
-                        lazy,
                         state.hamiltonian.kinetic_diagonal(),
                         self.occupations.len(),
                         tolerance,
@@ -3081,7 +2364,6 @@ impl ScfProblem {
                             .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
                         &mut state.gamma_real,
                         &mut state.real_solve,
-                        owned_potential.as_ref().map(|o| (&o.values[..], o.epoch)),
                     )?;
                     let solution = if let Some(solution) = real_solution {
                         solution
@@ -3090,26 +2372,7 @@ impl ScfProblem {
                         // potential; gather the owned one first (the same
                         // gather as `ensure_complex_potential`, replicated
                         // fallback decision).
-                        if owned_fields && self.owned.complex_stale {
-                            let comm = crate::m2::active()
-                                .ok_or(ScfError::InvalidInput("M2 owned fallback"))?;
-                            let plan = self
-                                .grid_dist
-                                .as_mut()
-                                .ok_or(ScfError::InvalidInput("M2 owned fallback"))?;
-                            let clock = dft_numerics::stage_clock::start();
-                            let mut full = Array3::zeros(state.grid.dims());
-                            let local = plan.effective_planes().to_vec();
-                            plan.gather_field(&comm, &local, full.as_slice_mut().unwrap())?;
-                            let values = full.len() as u64;
-                            state.hamiltonian.set_local_potential(full)?;
-                            use crate::grid_dist as g;
-                            g::owned_add(g::O_CONSUMER_GATHERS, 1);
-                            g::owned_add(g::O_CONSUMER_GATHER_VALUES, values);
-                            g::owned_time(g::T_CONSUMER_GATHER, clock);
-                            // One state (eligibility): every Hamiltonian is current.
-                            self.owned.complex_stale = false;
-                        }
+
                         // A lazy warm start of a solve that left the real path
                         // (replicated options) is gathered first.
                         let gathered;
@@ -3121,14 +2384,7 @@ impl ScfProblem {
                             (w, _) => w,
                         };
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            if self.options.standard.is_some() {
-                                solver.solve_ritz_changes(
-                                    &state.hamiltonian,
-                                    warm.or(guess.as_ref()),
-                                    Some(&preconditioner),
-                                    policy,
-                                )
-                            } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                            if self.options.locking == dft_solvers::locking::Locking::Auto {
                                 solver.solve_locked(
                                     &state.hamiltonian,
                                     warm.or(guess.as_ref()),
@@ -3151,11 +2407,10 @@ impl ScfProblem {
                         .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
                         .map_err(|e| ScfError::Numerical(format!("k index {i}: {e}")))?
                     };
-                    let lazy = state.real_solve.as_mut().and_then(|r| r.lazy_latest.take());
                     k_points.push(KPointSolution {
                         point: state.point,
                         solution,
-                        lazy,
+                        lazy: None,
                     });
                 }
                 k_points
@@ -3185,7 +2440,6 @@ impl ScfProblem {
                             &state.basis,
                             initial.map(|v| &v[i]),
                             None,
-                            false,
                             state.hamiltonian.kinetic_diagonal(),
                             bands,
                             tolerance,
@@ -3199,19 +2453,11 @@ impl ScfProblem {
                                 .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
                             &mut state.gamma_real,
                             &mut state.real_solve,
-                            None,
                         )?;
                         let solution = if let Some(solution) = real_solution {
                             solution
                         } else {
-                            if self.options.standard.is_some() {
-                                solver.solve_ritz_changes(
-                                    &state.hamiltonian,
-                                    initial.map(|v| &v[i]).or(guess.as_ref()),
-                                    Some(&preconditioner),
-                                    policy,
-                                )
-                            } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                            if self.options.locking == dft_solvers::locking::Locking::Auto {
                                 solver.solve_locked(
                                     &state.hamiltonian,
                                     initial.map(|v| &v[i]).or(guess.as_ref()),
@@ -3240,9 +2486,7 @@ impl ScfProblem {
                 )?
             };
         timings.diagonalization = start.elapsed();
-        if owned_potential.is_some() {
-            self.owned.potential = owned_potential;
-        }
+
         // Snapshot file writing (inside the solve window) is not solve time.
         let io = crate::snapshot::take_io_seconds();
         if io > 0.0 {
@@ -3280,11 +2524,7 @@ impl ScfProblem {
         let occupations = &self.occupations;
         let finite = finite.as_deref();
         let volume = self.cell.volume_bohr3();
-        let allow_density_fusion = crate::band_density::fusion_allowed(
-            self.options.standard.is_some(),
-            self.options.threads,
-        );
-        let mut orbitals = ordered_solves(
+        let orbitals = ordered_solves(
             &mut self.states,
             self.options.threads,
             &self.pool,
@@ -3298,33 +2538,13 @@ impl ScfProblem {
                 // from the distributed eigenvectors.
                 if !m2 {
                     let weights = finite.map_or(occupations.as_slice(), |w| w.block(0, i));
-                    // REUSE-PSI: pair transforms of the leading occupied pairs
-                    // keep psi(r) for the next solve's start.
                     let real = state.gamma_real.gamma_real_used;
-                    let keep =
-                        if real && crate::gamma_real::reuse_psi() && state.band_density.pairs() {
-                            let pairs = weights
-                                .as_chunks::<2>()
-                                .0
-                                .iter()
-                                .take_while(|w| w[0] != 0.0 && w[1] != 0.0)
-                                .count();
-                            state
-                                .real_solve
-                                .as_mut()
-                                .filter(|_| pairs > 0)
-                                .and_then(|r| r.psi_keep(pairs, state.grid.dims()))
-                        } else {
-                            None
-                        };
-                    state.band_density.compute_keep_for_map(
+                    state.band_density.compute_with(
                         &orbitals,
                         weights,
                         &state.grid,
                         volume,
                         real,
-                        keep,
-                        allow_density_fusion,
                     )?;
                 }
                 Ok(orbitals)
@@ -3346,24 +2566,6 @@ impl ScfProblem {
         if let Some(symmetry) = &mut self.symmetry {
             symmetry.apply(&mut output, &mut self.fft)?;
         }
-        // M2-OWNED: in the owned density loop the output is always owned (a
-        // replicated band-density fallback is cut to this rank's planes, no
-        // collective).
-        let owned_out = if self.owned.density_mode {
-            if !output.is_empty() {
-                let o = self.owned_from_full(&output)?;
-                self.owned.output = Some(o);
-                output = Array3::zeros((0, 0, 0));
-            }
-            self.owned.output.take()
-        } else {
-            None
-        };
-        if owned_in != owned_out.is_some() && self.owned.density_mode {
-            return Err(ScfError::InvalidInput(
-                "M2 owned density: input and output representations differ",
-            ));
-        }
         timings.density = start.elapsed();
         crate::profile::map_phase(
             crate::profile::Phase::Density,
@@ -3382,23 +2584,13 @@ impl ScfProblem {
         ) {
             (true, Some(comm), Some(plan), Some(input), Some(out), Some(ionic)) => {
                 use crate::grid_dist::Field;
-                let in_field = match self.owned.input.as_ref().filter(|_| owned_in) {
-                    Some(o) => Field::Planes(&o.values),
-                    None => Field::Full(input),
-                };
-                let out_field = match owned_out.as_ref() {
-                    Some(o) => Field::Planes(&o.values),
-                    None => Field::Full(out),
-                };
+                let in_field = Field::Full(input);
+                let out_field = Field::Full(out);
                 Some(plan.audit(&comm, in_field, out_field, ionic)?)
             }
             _ => None,
         };
-        if owned_out.is_some() && dist_terms.is_none() {
-            return Err(ScfError::InvalidInput(
-                "M2 owned density outside the distributed audit",
-            ));
-        }
+
         let m2_xc = if dist_terms.is_some() {
             None
         } else {
@@ -3432,13 +2624,7 @@ impl ScfProblem {
         } else {
             None
         };
-        let mut shared_audit = if let Some(terms) = dist_terms {
-            if let Some(kept) = self.stop_kept.as_mut() {
-                match owned_out.as_ref() {
-                    Some(o) => kept.set_output_owned(o.epoch),
-                    None => kept.set_output_dist(&output),
-                }
-            }
+        let shared_audit = if let Some(terms) = dist_terms {
             energy::SharedAudit::from_distributed(terms.values(), self.ionic_g[[0, 0, 0]].re)
         } else {
             energy::prepare_shared(
@@ -3464,9 +2650,7 @@ impl ScfProblem {
                 self.core_density.as_ref(),
             )?
         };
-        if !dist_fields && let Some(kept) = self.stop_kept.as_mut() {
-            kept.set_output(&output, shared_audit.take_density_reciprocal());
-        }
+
         // B2: Fermi-Dirac occupations fall back to the explicit audit.
         let identity = self.energy_identity && finite.is_none();
         // M2d: nonlocal energy from the distributed projections (one tree_sum).
@@ -3475,28 +2659,6 @@ impl ScfProblem {
         } else {
             None
         };
-        // MPI-LAZY-ORBITALS: the kinetic energy of a lazy block from its local
-        // rows (one tree sum); the nonlocal energy then comes from the
-        // distributed projections or the identity. Otherwise gather it first.
-        let mut lazy_kinetic = None;
-        if let Some(lazy) = k_points.first().and_then(|k| k.lazy.as_ref()) {
-            match self.states[0].real_solve.as_ref() {
-                Some(rs) if m2 && (identity || m2_nonlocal.is_some()) => {
-                    lazy_kinetic = Some(crate::gamma_real::lazy_kinetic_energy(
-                        rs,
-                        lazy,
-                        &self.occupations,
-                    )?);
-                }
-                _ => {
-                    materialize_kpoints(&mut k_points)?;
-                    for (o, k) in orbitals.iter_mut().zip(&k_points) {
-                        let v = &k.solution.eigenvectors;
-                        *o = (0..v.cols()).map(|b| v.column(b).to_vec()).collect();
-                    }
-                }
-            }
-        }
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
@@ -3530,7 +2692,7 @@ impl ScfProblem {
                     &shared_audit,
                     !identity && m2_nonlocal.is_none(),
                     partials,
-                    if i == 0 { lazy_kinetic } else { None },
+                    None,
                 )?;
                 Ok((state.point.weight, audit))
             },
@@ -3558,7 +2720,6 @@ impl ScfProblem {
             energy,
             timings,
             nonlocal_from_identity: identity,
-            owned_density: owned_out,
         })
     }
     /// RUN-CONFIG: the run configuration of this problem.
@@ -3576,10 +2737,6 @@ impl ScfProblem {
     pub fn set_run_config(&mut self, run: dft_numerics::switches::RunConfig) {
         self.run = run;
         self.sw = session::SessionSwitches::resolve(run);
-        let want = self.coulomb.is_some() && stop_metric_kept(run);
-        if want != self.stop_kept.is_some() {
-            self.stop_kept = want.then(|| StopKept::new(self.grid.dims()));
-        }
     }
     /// Original success-only API; exhausted budgets remain errors.
     pub fn run(self) -> Result<ScfResult, ScfError> {
@@ -3655,16 +2812,12 @@ pub(crate) fn band_tolerances(
     tolerance: f64,
     options: &ScfOptions,
 ) -> BandTolerances {
-    let intermediate = empty_loose()
-        && options.standard.is_none()
-        && tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
+    let intermediate = empty_loose() && tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
     BandTolerances {
         strict_bands: (occupied_count + usize::from(!intermediate))
             .min(bands)
             .max(1),
-        buffer_tolerance: if options.standard.is_some() {
-            StandardProfile::empty_threshold(tolerance)
-        } else if intermediate {
+        buffer_tolerance: if intermediate {
             tolerance.max(buffer_loose_floor())
         } else {
             tolerance.max(1e-5)
@@ -4241,10 +3394,6 @@ mod threading_tests {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "verification_tests.rs"]
-mod verification_tests;
 
 #[cfg(test)]
 mod bands_fit_tests {

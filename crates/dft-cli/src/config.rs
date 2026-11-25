@@ -288,7 +288,6 @@ impl Basis {
 #[serde(deny_unknown_fields)]
 pub struct Xc {
     pub pw92_prefactor: Option<String>,
-    pub density_floor: Option<f64>,
     pub functional: Functional,
     #[serde(default)]
     pub allow_functional_override: bool,
@@ -417,7 +416,6 @@ pub const REFERENCE_STRICT_REASON: &str = crate::driver_select::STRICT;
 /// Error for the removed `scf.convergence_profile` key (user decision 2026-11-16).
 pub const CONVERGENCE_PROFILE_REMOVED: &str = "scf.convergence_profile was removed (user decision 2026-11-16, ADR 0043): every run uses the single standard SCF path with the fixed-point verification after convergence; set the accuracy with scf.standard_threshold_ha (default 5e-9 Ha) and the verification with scf.verify = \"fixed_point\" (default) or \"off\"; the strict path is a reference tool only (environment BAANDI_REFERENCE_STRICT=on); delete the key";
 /// Error for `scf.locking = "auto"` on the standard path (ONEPATH-4).
-pub const LOCKING_REFERENCE_ONLY: &str = "scf.locking = \"auto\" is an experimental option of the strict reference eigensolver (residual Davidson with hard locking); the standard SCF path solves with the Ritz-change Davidson, which retests every root and has no locking (ADR 0043 amendment ONEPATH-4); remove scf.locking, or run the strict reference path with BAANDI_REFERENCE_STRICT=on";
 impl Config {
     /// Path selection (ADR 0043, default flipped 2026-11-16; single path
     /// complete since ONEPATH-4). Every command (`run` in every execution mode,
@@ -435,7 +433,7 @@ impl Config {
         selection.driver = if reference_strict {
             crate::driver_select::Driver::StrictOracle
         } else {
-            crate::driver_select::Driver::LegacyStandard
+            crate::driver_select::Driver::Reference
         };
         self.scf_path_selected(selection)
     }
@@ -463,34 +461,16 @@ impl Config {
                 standard: None,
                 verification: dft_engine::Verification::Off,
                 status: "reference_strict",
-                reason: Some(REFERENCE_STRICT_REASON),
+                reason: selection.reason,
                 threshold_source: None,
             });
         }
-        // The last strict fallback (`scf.locking = "auto"`) is an input error
-        // since ONEPATH-4; the reference switch above still accepts it.
         self.check_single_path_input()?;
         let verification = if verify == Some(false) {
             dft_engine::Verification::Off
         } else {
             dft_engine::Verification::FixedPoint
         };
-        if verification == dft_engine::Verification::Off
-            && !selection.reference()
-            && self.output.as_ref().is_some_and(|o| o.forces)
-        {
-            return Err(invalid(
-                "output.forces requires the fixed-point verification (ADR 0043 item 5); remove scf.verify = \"off\"".into(),
-            ));
-        }
-        if verification == dft_engine::Verification::Off
-            && !selection.reference()
-            && self.output.as_ref().is_some_and(|o| o.stress)
-        {
-            return Err(invalid(
-                "output.stress requires the fixed-point verification (ADR 0043 item 5, ONEPATH-2); remove scf.verify = \"off\"".into(),
-            ));
-        }
         if verification == dft_engine::Verification::Off && self.relax.is_some() {
             return Err(invalid(
                 "relax needs forces from a passed fixed-point verification on every ionic step (ADR 0043 item 5, ONEPATH-1); remove scf.verify = \"off\"".into(),
@@ -531,15 +511,6 @@ impl Config {
     /// locking eigensolver exists only for the strict residual Davidson).
     fn check_single_path_input(&self) -> Result<(), ConfigError> {
         self.finite_temperature()?;
-        if self
-            .scf
-            .as_ref()
-            .map(Scf::locking)
-            .transpose()?
-            .is_some_and(|l| l == dft_engine::Locking::Auto)
-        {
-            return Err(ConfigError::Invalid(LOCKING_REFERENCE_ONLY.into()));
-        }
         Ok(())
     }
     pub fn collinear(&self) -> bool {
@@ -658,14 +629,12 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
-    /// Independent issue #25 driver; absent/legacy keeps the existing path.
+    /// Optional reference selector, accepted as a no-op.
     pub driver: Option<String>,
     /// Reference-driver-only screening: plain (default) or tf.
     pub reference_preconditioning: Option<String>,
     pub start_wavefunctions: Option<String>,
     pub start_density: Option<String>,
-    pub davidson_capacity_per_band: Option<usize>,
-    pub preconditioner: Option<String>,
     pub gamma_real: Option<String>,
     /// Removed key (user decision 2026-11-16): kept only so that an input that
     /// still names it fails with `CONVERGENCE_PROFILE_REMOVED` instead of a
@@ -674,68 +643,38 @@ pub struct Scf {
     pub removed_convergence_profile: Option<toml::Value>,
     /// Threshold of the standard stop rule in Ha (default 5e-9 Ha, ADR 0035).
     pub standard_threshold_ha: Option<f64>,
-    pub standard_stall_guard: Option<String>,
-    pub standard_density_forcing: Option<String>,
     /// ADR 0043: "fixed_point" (default) or "off".
     pub verify: Option<String>,
-    pub mixing_metric: Option<String>,
-    pub spectral_guard: Option<String>,
-    pub locking: Option<String>,
     pub threads: Option<usize>,
     pub max_iterations: Option<i64>,
     pub mixing: Option<String>,
     /// Original reference-only spelling before the shared preflight adapter.
     #[serde(skip)]
     pub reference_mixing_input: Option<String>,
-    pub energy_tolerance_ha: Option<f64>,
-    pub density_residual_tolerance: Option<f64>,
     pub mixing_beta: Option<f64>,
     pub mixing_history: Option<usize>,
-    pub mixing_q0_inverse_bohr: Option<f64>,
     pub nbands: Option<usize>,
     pub extra_bands: Option<usize>,
-    pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
     /// Oracle compatibility pin: "off" keeps the full-cutoff cold start;
     /// omission keeps the historical fixed-default ladder. Other values reject.
     pub cutoff_ladder: Option<String>,
-    /// Retired legacy input; a supplied value is rejected.
-    pub cutoff_ladder_fraction: Option<f64>,
 }
 impl Scf {
-    pub fn preconditioner(&self) -> Result<dft_engine::DavidsonPreconditioner, ConfigError> {
-        match self.preconditioner.as_deref().unwrap_or("default") {
-            "default" => Ok(dft_engine::DavidsonPreconditioner::Default),
-            "tpa" => Ok(dft_engine::DavidsonPreconditioner::Tpa),
-            "ritz_shift" => Ok(dft_engine::DavidsonPreconditioner::RitzShift),
-            _ => Err(ConfigError::Invalid(
-                "scf.preconditioner must be default, tpa, or ritz_shift".into(),
-            )),
-        }
-    }
-
-    pub fn davidson_capacity_per_band(&self) -> Result<usize, ConfigError> {
-        let value = self.davidson_capacity_per_band.unwrap_or(6);
-        if !(2..=12).contains(&value) {
-            return Err(ConfigError::Invalid("scf.davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)".into()));
-        }
-        Ok(value)
-    }
     pub fn start_density(&self) -> Result<dft_engine::StartDensity, ConfigError> {
         match self.start_density.as_deref().unwrap_or("uniform") {
-            "uniform" => Ok(dft_engine::StartDensity::Uniform),
+            "uniform" if self.start_density.is_none() => Ok(dft_engine::StartDensity::Uniform),
             "atomic" => Ok(dft_engine::StartDensity::Atomic),
             _ => Err(ConfigError::Invalid(
-                "scf.start_density must be uniform or atomic".into(),
+                "unknown scf.start_density value; expected atomic".into(),
             )),
         }
     }
     pub fn start_wavefunctions(&self) -> Result<dft_engine::StartWavefunctions, ConfigError> {
         match self.start_wavefunctions.as_deref().unwrap_or("atomic") {
-            "free_electron" => Ok(dft_engine::StartWavefunctions::FreeElectron),
             "atomic" => Ok(dft_engine::StartWavefunctions::Atomic),
             _ => Err(ConfigError::Invalid(
-                "scf.start_wavefunctions must be free_electron or atomic".into(),
+                "unknown scf.start_wavefunctions value; expected atomic".into(),
             )),
         }
     }
@@ -756,8 +695,6 @@ impl Scf {
         if self.removed_convergence_profile.is_some() {
             return Err(ConfigError::Invalid(CONVERGENCE_PROFILE_REMOVED.into()));
         }
-        self.standard_stall_guard()?;
-        self.standard_density_forcing()?;
         Ok(())
     }
     /// `scf.verify`: Some(true) = fixed_point, Some(false) = off, None = default.
@@ -771,59 +708,7 @@ impl Scf {
             )),
         }
     }
-    /// Applies on the standard path only (`Config::scf_path` rejects it on an
-    /// input that falls back to strict).
-    pub fn standard_stall_guard(&self) -> Result<bool, ConfigError> {
-        match self.standard_stall_guard.as_deref().unwrap_or("off") {
-            "off" => Ok(false),
-            "on" => Ok(true),
-            _ => Err(ConfigError::Invalid(
-                "scf.standard_stall_guard must be off or on".into(),
-            )),
-        }
-    }
-    pub fn standard_density_forcing(&self) -> Result<bool, ConfigError> {
-        match self.standard_density_forcing.as_deref().unwrap_or("off") {
-            "off" => Ok(false),
-            "on" if !self.standard_stall_guard()? => Ok(true),
-            "on" => Err(ConfigError::Invalid(
-                "standard_density_forcing=on requires standard_stall_guard off".into(),
-            )),
-            _ => Err(ConfigError::Invalid(
-                "scf.standard_density_forcing must be off or on".into(),
-            )),
-        }
-    }
-    pub fn hartree_mixing(&self) -> Result<bool, ConfigError> {
-        match self.mixing_metric.as_deref().unwrap_or("l2") {
-            "l2" => Ok(false),
-            "hartree" => Ok(true),
-            _ => Err(ConfigError::Invalid(
-                "scf.mixing_metric must be l2 or hartree".into(),
-            )),
-        }
-    }
-
-    pub fn locking(&self) -> Result<dft_engine::Locking, ConfigError> {
-        match self.locking.as_deref().unwrap_or("off") {
-            "off" => Ok(dft_engine::Locking::Off),
-            "auto" => Ok(dft_engine::Locking::Auto),
-            _ => Err(ConfigError::Invalid(
-                "scf.locking must be 'off' or 'auto'".into(),
-            )),
-        }
-    }
-
-    pub fn spectral_guard(&self) -> Result<dft_engine::SpectralGuard, ConfigError> {
-        match self.spectral_guard.as_deref().unwrap_or("off") {
-            "off" => Ok(dft_engine::SpectralGuard::Off),
-            "final" => Ok(dft_engine::SpectralGuard::Final),
-            _ => Err(ConfigError::Invalid(
-                "scf.spectral_guard must be 'final' or 'off'".into(),
-            )),
-        }
-    }
-
+    /// Mixing strategy for the strict oracle; reference mixing is resolved separately.
     pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
         let invalid = |message: &str| ConfigError::Invalid(message.into());
         let beta = self.mixing_beta.unwrap_or(0.3);
@@ -835,31 +720,11 @@ impl Scf {
             return Err(invalid("mixing_history must be positive and representable"));
         }
         let method = self.mixing.as_deref().unwrap_or("pulay");
-        if method != "kerker-pulay" && self.mixing_q0_inverse_bohr.is_some() {
-            return Err(invalid(
-                "mixing_q0_inverse_bohr requires mixing = 'kerker-pulay'",
-            ));
-        }
         match method {
-            "linear" if self.mixing_history.is_none() => Ok(dft_engine::Mixing::Linear { beta }),
-            "linear" => Err(invalid("mixing_history does not apply to linear mixing")),
-            "pulay" => Ok(dft_engine::Mixing::Pulay { beta, history }),
-            "kerker-pulay" => {
-                let q0 = self.mixing_q0_inverse_bohr.ok_or_else(|| {
-                    invalid("kerker-pulay requires mixing_q0_inverse_bohr in Bohr^-1")
-                })?;
-                if !q0.is_finite() || q0 <= 0.0 || !(q0 * q0).is_finite() || q0 * q0 == 0.0 {
-                    return Err(invalid(
-                        "mixing_q0_inverse_bohr must be positive with finite nonzero square",
-                    ));
-                }
-                Ok(dft_engine::Mixing::KerkerPulay {
-                    beta,
-                    history,
-                    q0_inverse_bohr: q0,
-                })
-            }
-            _ => Err(invalid("mixing must be linear, pulay or kerker-pulay")),
+            "pulay" | "broyden" | "plain" => Ok(dft_engine::Mixing::Pulay { beta, history }),
+            _ => Err(invalid(
+                "unknown scf.mixing value; expected plain, broyden or pulay",
+            )),
         }
     }
 }
@@ -1014,14 +879,7 @@ fn normalize(
         ),
         (
             "scf",
-            &[
-                "standard_threshold_ha",
-                "energy_tolerance_ha",
-                "density_residual_tolerance",
-                "mixing_beta",
-                "mixing_q0_inverse_bohr",
-                "eigen_tolerance",
-            ][..],
+            &["standard_threshold_ha", "mixing_beta"][..],
             &[
                 "max_iterations",
                 "nbands",
@@ -1047,18 +905,6 @@ fn normalize(
             "cutoff",
             "ecutwfc_ry",
             Scalar::Energy(dft_units::EnergyUnit::Rydberg),
-        ),
-        (
-            "scf",
-            "energy_tolerance",
-            "energy_tolerance_ha",
-            Scalar::Energy(dft_units::EnergyUnit::Hartree),
-        ),
-        (
-            "scf",
-            "eigen_tolerance_energy",
-            "eigen_tolerance",
-            Scalar::Energy(dft_units::EnergyUnit::Hartree),
         ),
         (
             "system",
@@ -1254,9 +1100,17 @@ impl Config {
         crate::driver_select::preliminary(self).validate(self)?;
         self.validate_reference_scope()?;
         if let Some(s) = &self.scf {
-            if !matches!(s.driver.as_deref(), None | Some("legacy" | "reference")) {
+            s.start_density()?;
+            s.start_wavefunctions()?;
+            s.mixing_strategy()?;
+            if !matches!(s.cutoff_ladder.as_deref(), None | Some("off")) {
                 return Err(ConfigError::Invalid(
-                    "scf.driver must be legacy or reference".into(),
+                    "unknown scf.cutoff_ladder value; expected off".into(),
+                ));
+            }
+            if !matches!(s.driver.as_deref(), None | Some("reference")) {
+                return Err(ConfigError::Invalid(
+                    "unknown scf.driver value; expected reference".into(),
                 ));
             }
             if !matches!(
@@ -1316,21 +1170,11 @@ impl Config {
             }
         }
         if let Some(s) = &self.scf {
-            if s.cutoff_ladder.as_deref().is_some_and(|v| v != "off")
-                || s.cutoff_ladder_fraction.is_some()
-            {
-                return Err(invalid("legacy cutoff_ladder is unavailable"));
-            }
-            s.spectral_guard()?;
-            s.locking()?;
             s.gamma_real()?;
             s.start_wavefunctions()?;
             s.start_density()?;
-            s.davidson_capacity_per_band()?;
-            s.preconditioner()?;
             s.reject_removed_keys()?;
             s.verify()?;
-            s.hartree_mixing()?;
         }
         self.scf_path()?;
         self.cell()?;
@@ -1381,22 +1225,6 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn capacity_config_range_and_integer_type() {
-        for value in ["0", "1", "13", "-1", "2.5", "\"2\""] {
-            let text = format!("davidson_capacity_per_band = {value}");
-            if let Ok(scf) = toml::from_str::<super::Scf>(&text) {
-                assert!(scf.davidson_capacity_per_band().is_err());
-            }
-        }
-        for value in 2..=12 {
-            let scf: super::Scf =
-                toml::from_str(&format!("davidson_capacity_per_band = {value}")).unwrap();
-            assert_eq!(scf.davidson_capacity_per_band().unwrap(), value);
-        }
-        let scf: super::Scf = toml::from_str("").unwrap();
-        assert_eq!(scf.davidson_capacity_per_band().unwrap(), 6);
-    }
 
     use super::*;
     const EXAMPLE: &str = include_str!("../../../examples/si_lda.toml");
@@ -1452,36 +1280,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn standard_stall_guard_values() {
-        for (settings, expected) in [
-            ("", Some(false)),
-            ("standard_stall_guard = \"off\"", Some(false)),
-            ("standard_stall_guard = \"on\"", Some(true)),
-            ("standard_stall_guard = \"typo\"", None),
-        ] {
-            let scf: Scf = toml::from_str(settings).unwrap();
-            assert_eq!(scf.standard_stall_guard().ok(), expected);
-            assert_eq!(scf.reject_removed_keys().is_ok(), expected.is_some());
-        }
-    }
-    #[test]
-    fn standard_density_forcing_requires_stall_guard_off() {
-        for (settings, expected) in [
-            (
-                "standard_density_forcing = \"on\"\nstandard_stall_guard = \"on\"",
-                None,
-            ),
-            ("", Some(false)),
-            ("standard_density_forcing = \"off\"", Some(false)),
-            ("standard_density_forcing = \"on\"", Some(true)),
-            ("standard_density_forcing = \"typo\"", None),
-        ] {
-            let scf: Scf = toml::from_str(settings).unwrap();
-            assert_eq!(scf.standard_density_forcing().ok(), expected);
-            assert_eq!(scf.reject_removed_keys().is_ok(), expected.is_some());
-        }
-    }
     /// User decision 2026-11-16: the profile key is removed; every value of it
     /// (including the old "strict" and "standard") fails with a message that
     /// names the replacement controls.
@@ -1502,158 +1300,6 @@ mod tests {
                 assert!(err.contains(needle), "{value}: {err}");
             }
         }
-    }
-    /// Plain inputs take the single standard path with verification; since
-    /// ONEPATH-4 there is no strict fallback: `scf.locking = "auto"` (the last
-    /// one) is an input error that names the reference switch.
-    #[test]
-    fn single_path_selection() {
-        // R2: these preflight contracts belong to the legacy standard driver.
-        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[("reference_scf", "off")])
-            .unwrap()
-            .enter();
-        let parse = |tail: &str| Config::parse(&format!("{EXAMPLE}\n{tail}\n"));
-        let plain = parse("").unwrap().scf_path().unwrap();
-        assert_eq!(plain.status, "applied");
-        assert_eq!(plain.standard.unwrap().threshold_ha, 5e-9);
-        assert_eq!(plain.verification, dft_engine::Verification::FixedPoint);
-        let off = parse("[scf]\nverify = 'off'").unwrap().scf_path().unwrap();
-        assert_eq!(off.verification, dft_engine::Verification::Off);
-        let tight = parse("[scf]\nstandard_threshold_ha = 5e-11")
-            .unwrap()
-            .scf_path()
-            .unwrap();
-        assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
-        assert!(parse("[scf]\nstandard_threshold_ha = 0.0").is_err());
-        assert!(parse("[scf]\nverify = 'off'\n[output]\nforces = true").is_err());
-        for tail in [
-            "[scf]\nlocking = 'auto'",
-            "[scf]\nlocking = 'auto'\nstandard_threshold_ha = 5e-11",
-            "[scf]\nlocking = 'auto'\n[output]\nstress = true",
-        ] {
-            let err = parse(tail).unwrap_err().to_string();
-            for needle in [
-                "scf.locking",
-                "strict reference",
-                "BAANDI_REFERENCE_STRICT=on",
-            ] {
-                assert!(err.contains(needle), "{tail}: {err}");
-            }
-        }
-        // ONEPATH-1: fixed-cell relaxation takes the standard path with the
-        // verification (also with a tighter threshold); verify = off is an input
-        // error there; variable-cell relaxation and stress keep strict.
-        for tail in ["[relax]", "[relax]\nmode = 'ions'"] {
-            let relax = parse(tail).unwrap().scf_path().unwrap();
-            assert_eq!(relax.status, "applied");
-            assert_eq!(relax.verification, dft_engine::Verification::FixedPoint);
-            assert_eq!(relax.standard.unwrap().threshold_ha, 5e-9);
-        }
-        let tight = parse("[scf]\nstandard_threshold_ha = 5e-11\n[relax]")
-            .unwrap()
-            .scf_path()
-            .unwrap();
-        assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
-        let err = parse("[scf]\nverify = 'off'\n[relax]")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("verification"), "{err}");
-        // ONEPATH-2: variable-cell relaxation and stress take the standard path
-        // with the verification (also with a tighter threshold); verify = off
-        // is an input error there.
-        for mode in ["cell", "ions_cell"] {
-            let cell = parse(&format!("[relax]\nmode = '{mode}'"))
-                .unwrap()
-                .scf_path()
-                .unwrap();
-            assert_eq!((cell.status, cell.reason), ("applied", None));
-            assert_eq!(cell.verification, dft_engine::Verification::FixedPoint);
-            assert_eq!(
-                cell.standard.unwrap().threshold_ha,
-                STRESS_DEFAULT_THRESHOLD_HA
-            );
-            assert_eq!(cell.threshold_source, Some("stress_default"));
-            // An explicit value always wins, tighter or looser.
-            for user in [5e-13, 5e-9] {
-                let set = parse(&format!(
-                    "[scf]\nstandard_threshold_ha = {user:e}\n[relax]\nmode = '{mode}'"
-                ))
-                .unwrap()
-                .scf_path()
-                .unwrap();
-                assert_eq!(set.standard.unwrap().threshold_ha, user);
-                assert_eq!(set.threshold_source, Some("user"));
-            }
-            let err = parse(&format!("[scf]\nverify = 'off'\n[relax]\nmode = '{mode}'"))
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("verification"), "{err}");
-        }
-        for tail in [
-            "[output]\nstress = true",
-            "[output]\nstress = true\n[relax]",
-        ] {
-            let stress = parse(tail).unwrap().scf_path().unwrap();
-            assert_eq!((stress.status, stress.reason), ("applied", None));
-            assert_eq!(stress.verification, dft_engine::Verification::FixedPoint);
-            assert_eq!(
-                (
-                    stress.standard.unwrap().threshold_ha,
-                    stress.threshold_source
-                ),
-                (STRESS_DEFAULT_THRESHOLD_HA, Some("stress_default"))
-            );
-        }
-        // Forces, ions relaxation and plain runs keep the class default.
-        for tail in [
-            "",
-            "[output]\nforces = true",
-            "[relax]",
-            "[relax]\nmode = 'ions'",
-        ] {
-            let p = parse(tail).unwrap().scf_path().unwrap();
-            assert_eq!(
-                (p.standard.unwrap().threshold_ha, p.threshold_source),
-                (5e-9, Some("default")),
-                "{tail}"
-            );
-        }
-        let user = parse("[scf]\nstandard_threshold_ha = 1e-8\n[output]\nstress = true")
-            .unwrap()
-            .scf_path()
-            .unwrap();
-        assert_eq!(
-            (user.standard.unwrap().threshold_ha, user.threshold_source),
-            (1e-8, Some("user"))
-        );
-        let err = parse("[scf]\nverify = 'off'\n[output]\nstress = true")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("output.stress"), "{err}");
-        // ONEPATH-3: collinear spin and Fermi-Dirac occupations take the
-        // standard path with the verification; standard-only keys are accepted.
-        for tail in [
-            "[spin]\nmode = 'collinear'\ntotal_moment = 0.0",
-            "[occupations]\nmode = 'fermi_dirac'\nsmearing_ha = 0.01",
-            "[spin]\nmode = 'collinear'\n[occupations]\nmode = 'fermi_dirac'\nsmearing_ha = 0.01",
-        ] {
-            let p = parse(tail).unwrap().scf_path().unwrap();
-            assert_eq!((p.status, p.reason), ("applied", None), "{tail}");
-            assert_eq!(p.verification, dft_engine::Verification::FixedPoint);
-            assert_eq!(p.standard.unwrap().threshold_ha, 5e-9);
-            let tight = parse(&format!("[scf]\nstandard_threshold_ha = 5e-11\n{tail}"))
-                .unwrap()
-                .scf_path()
-                .unwrap();
-            assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
-            let off = parse(&format!("[scf]\nverify = 'off'\n{tail}"))
-                .unwrap()
-                .scf_path()
-                .unwrap();
-            assert_eq!(off.verification, dft_engine::Verification::Off);
-        }
-        // The reference switch is unaffected (strict for every input) and is
-        // covered by the CLI tests, which set the environment per process.
     }
     #[test]
     fn example_and_units_and_rows() {
@@ -1751,44 +1397,37 @@ mod tests {
                 history: 6
             }
         ));
-        let keys = "mixing='kerker-pulay'\nmixing_beta='1/2'\nmixing_history='2*3'\nmixing_q0_inverse_bohr='1/2'";
+        let keys = "mixing='pulay'\nmixing_beta='1/2'\nmixing_history='2*3'";
         assert!(matches!(
             parse(keys).mixing_strategy().unwrap(),
-            dft_engine::Mixing::KerkerPulay {
+            dft_engine::Mixing::Pulay {
                 beta: 0.5,
-                history: 6,
-                q0_inverse_bohr: 0.5
+                history: 6
             }
         ));
         for keys in [
             "mixing='kerker-pulay'",
+            "mixing='linear'",
             "mixing='unknown'",
-            "mixing_history=0",
-            "mixing='linear'\nmixing_history=2",
             "mixing_q0_inverse_bohr=1.0",
-            "mixing_beta=nan",
-            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=0.0",
-            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=nan",
-            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=-1.0",
         ] {
-            assert!(parse(keys).mixing_strategy().is_err(), "{keys}");
+            assert!(
+                Config::parse(&format!("{EXAMPLE}\n[scf]\n{keys}\n")).is_err(),
+                "{keys}"
+            );
         }
     }
     #[test]
     fn typed_optional_sections() {
-        let optional = "\n[scf]\nmax_iterations = 80\nmixing = 'linear'\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-6\nmixing_beta = 0.3\n[output]\ndirectory = 'results'\n";
+        let optional = "\n[scf]\nmax_iterations = 80\nmixing = 'pulay'\nstandard_threshold_ha = 1e-8\nmixing_beta = 0.3\n[output]\ndirectory = 'results'\n";
         assert!(Config::parse(&format!("{EXAMPLE}{optional}")).is_ok());
         assert!(Config::parse(&format!("{EXAMPLE}\n[scf]\n[output]\n")).is_ok());
         for (from, to) in [
             ("max_iterations = 80", "max_iterations = '7/2'"),
-            ("mixing = 'linear'", "mixing = 1"),
+            ("mixing = 'pulay'", "mixing = 1"),
             (
-                "energy_tolerance_ha = 1e-8",
-                "energy_tolerance_ha = 'small'",
-            ),
-            (
-                "density_residual_tolerance = 1e-6",
-                "density_residual_tolerance = false",
+                "standard_threshold_ha = 1e-8",
+                "standard_threshold_ha = 'small'",
             ),
             ("mixing_beta = 0.3", "mixing_beta = '1/0'"),
             ("directory = 'results'", "directory = 1"),

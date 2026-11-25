@@ -44,7 +44,7 @@ fn problem(pp: &dft_upf::Pseudopotential, skew: bool) -> ScfProblem {
             cutoff_hartree: 3.,
             bands: Some(6),
             threads: 1,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -59,7 +59,7 @@ struct Arm {
 fn results(ranks: usize, pp: &dft_upf::Pseudopotential, skew: bool, arm: Arm) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
-        dft_engine::gamma_real::set_m2_reuse_override(Some(true));
+
         dft_engine::gamma_real::set_m2_light_state_override(Some(arm.light));
         dft_solvers::distributed_davidson::set_layout_cache_override(Some(arm.layout));
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
@@ -69,7 +69,7 @@ fn results(ranks: usize, pp: &dft_upf::Pseudopotential, skew: bool, arm: Arm) ->
         parallel::set_communicator(None);
         dft_solvers::distributed_davidson::set_layout_cache_override(None);
         dft_engine::gamma_real::set_m2_light_state_override(None);
-        dft_engine::gamma_real::set_m2_reuse_override(None);
+
         parallel::set_m2_override(None);
         r
     })
@@ -120,12 +120,7 @@ fn light_state_and_layout_cache_are_bit_identical() {
                 bits(&switched[r]),
                 "skew {skew} rank {r}: results changed"
             );
-            assert!(
-                switched[r]
-                    .verification
-                    .as_ref()
-                    .is_some_and(|v| v.passed())
-            );
+            assert!(switched[r].certified);
             assert_eq!(plain[r].history.len(), switched[r].history.len());
         }
         assert_eq!(bits(&switched[0]), bits(&switched[1]), "ranks agree");
@@ -208,7 +203,7 @@ fn finer_labels_classify_the_m2_solve() {
     assert!(get("solve.solver_total") > 0.0, "solver container timed");
     assert!(get("solve.real_state") > 0.0, "real state labelled");
     assert!(get("solve.setup") > 0.0, "solver setup labelled");
-    assert!(get("solve.kept_update") > 0.0, "kept update labelled");
+    assert_eq!(get("solve.kept_update"), 0.0, "strict does not keep H X");
     // Exclusive split: per rank other = other_solver + other_engine; the
     // report takes each maximum over ranks separately, so only bounds hold.
     let other = get("solve.other");

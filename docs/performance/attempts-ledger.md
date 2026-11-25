@@ -3933,3 +3933,56 @@ Complete reader/retention inventory and validation: [switch-retirement.md](switc
 | `REFSTART_LOCAL_SHELLS` | P3t (line 3659) | retired in R11a, recreate from git `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1` if needed |
 | `REF_DAV_STACK_ROTATE` | GEN-2432530 (line 3732) | retired in R11a, recreate from git `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1` if needed |
 | `REF_DAV_SETUP_FUSED` | GEN-2432530 (line 3732) | retired in R11a, recreate from git `6537cb6fa063a2b5ee382e1cbf72a92a2949feb1` if needed |
+
+
+## R10BC-LEGACY-STANDARD (2026-11-25): legacy standard switch retirement
+
+The two CLI routes are Reference and StrictOracle; the negative G4D qualification
+routes to StrictOracle with the reason recorded. L9 input keys are unknown keys.
+This is deletion work, not a performance adoption claim. No dev08 timing was run.
+
+| Removed registry switch | Reason |
+| --- | --- |
+| `REFERENCE_SCF` | Reference is the production route; strict oracle has its own switch. |
+| `STANDARD_STOP` | The legacy standard stop rule has been deleted from the oracle session. |
+| `VERIFY_REUSE` | Legacy standard verification retry/reuse has been deleted. |
+| `STOP_METRIC` | Legacy standard Coulomb stopping estimates have been deleted. |
+| `VERIFY_SCHEDULE` | Legacy standard verification scheduling has been deleted. |
+| `STOP_PREDICTOR` | Legacy standard cross-estimate verification has been deleted. |
+| `REUSE_PSI` | Standard-only retained real-space start and H-X update deleted. |
+| `M2_REUSE` | Standard-only distributed kept-start solver branch deleted. |
+| `M2_LAZY` | Standard-only lazy solve return/start branch deleted; strict solves retain full delivered orbitals. |
+| `M2_OWNED_INPUT` | Standard-only direct owned-row input packing branch deleted. |
+| `SPIN_SHARE` | Standard-only shared spin-channel solve deleted; strict channels retain independent solves. |
+| `SERIAL_DENSITY_FUSED` | Standard-only direct density sink deleted; strict per-band certificate grids retained. |
+
+The registry shrinks from 133 to 121 entries (127 at the continuation start).
+`STANDARD_RESIDUAL_GUARD` stays because `refscf/electronic.rs` consumes it.
+`CERT_SCREEN` stays because the strict oracle consumes it; deleting that screen
+would change the protected arithmetic. Shared reference lazy-result and owned-grid
+switches remain because the reference driver consumes them.
+
+Mac identity evidence from the checked-in benchmark script: release
+Gamma/k222s/k222 against `baseline-reference.json` and `baseline-oracle.json`
+each passes `--require-identical`: delta energy 0 Ha and identical density hashes,
+reference iteration counts 7/7/7 and oracle counts 8/10/10. The script now requires
+only the retained strict switch metadata and recognizes historical oracle labels
+without changing any stored numbers. Ten benchmark metadata tests pass.
+Local records: `/tmp/r10bc-cont/{reference,oracle}-approved.json` and
+`/tmp/r10bc-cont/bench-{reference,oracle}-approved.log`. No tolerance was relaxed.
+
+Final continuation test pass: 103 binaries, 953 passed, 0 failed, 217 ignored.
+Seven native Python binding tests pass, including same-build Si2 Gamma/k222
+CLI identity. The README generator and its nine tests pass without generated
+changes. After the approved shared-orphan cleanup, the full gate passes:
+build, tests, formatting, workspace clippy, production-only check and
+production-only clippy. Command: `CHECK_SCCACHE=0 BAANDI_TEST_TMP=/tmp/r10bc-cont scripts/check.sh`; exit 0, log `/tmp/r10bc-cont/full-check-approved.log`.
+The remaining clippy cleanup simplified the mixing-beta validation and the
+strict-only Davidson profile test, and removed detached legacy test comments.
+
+Continuation inventory (base `ca846fd6f3371052b5c8b8399518d5c8db87365a`):
+all `crates/**/*.rs` excluding target, 205595 -> 196470 physical lines;
+1231 -> 1180 literal test attributes. Nine obsolete engine test targets and
+the 1914-line legacy Davidson example are removed. Each retired test and its
+reason is listed in `/tmp/r10bc-cont/test-migration.md`; no comparison tolerance
+was relaxed. New changes remain uncommitted for review.

@@ -82,10 +82,7 @@ pub use dft_solvers::real_davidson::{
     stage_seconds, stage_seconds_by_run_stage,
 };
 #[cfg(feature = "strict-oracle")]
-pub use gamma_real::{
-    GammaReal, GammaRealDiagnostics, PSI_KEEP_MAX_BYTES, ReusePsiCounters, nl_audit_counters,
-    reuse_psi_counters,
-};
+pub use gamma_real::{GammaReal, GammaRealDiagnostics, nl_audit_counters};
 
 /// Research radial conventions; default variants retain the legacy path.
 pub use dft_upf::radial::{LocalMesh, RadialEvenRule};

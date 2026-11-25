@@ -11,7 +11,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path, process::Command};
 
-const BASE: &str = "[system]\nname='synthetic run config'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\ndriver='legacy'\nnbands=4\n";
+const BASE: &str = "[system]\nname='synthetic run config'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\n";
 
 struct Run {
     code: Option<i32>,
@@ -25,9 +25,11 @@ fn run(dir: &Path, name: &str, tables: &str, env: &[(&str, &str)]) -> Run {
     let input = format!("{name}.toml");
     fs::write(dir.join(&input), text).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
-    cmd.current_dir(dir).args(["run", &input]);
+    cmd.env("BAANDI_REFERENCE_STRICT", "on")
+        .current_dir(dir)
+        .args(["run", &input]);
     for name in [
-        "BAANDI_STOP_METRIC",
+        "BAANDI_CERT_SCREEN",
         "BAANDI_PHASE_PROFILE",
         "BAANDI_M2_GRID",
     ] {
@@ -75,11 +77,10 @@ fn input_tables_precedence_manifest_and_run_block() {
         format!("{:x}", Sha256::digest(&exe))
     );
     assert!(r["counters"]["session_steps"].as_u64().unwrap() > 0);
-    let sw = &b["scf"]["switches"]["BAANDI_STOP_METRIC"];
+    let sw = &b["scf"]["switches"]["BAANDI_CERT_SCREEN"];
     assert_eq!(sw["source"], "default");
     assert_eq!(sw["consulted"], true);
     assert_eq!(sw["requested"], Value::Null);
-    assert_eq!(sw["path"], "kept");
     // MPI-only switch: not consulted by a one-rank run.
     assert_eq!(b["scf"]["switches"]["BAANDI_M2_STICKS"]["consulted"], false);
 
@@ -87,14 +88,14 @@ fn input_tables_precedence_manifest_and_run_block() {
     let same = run(
         &dir,
         "explicit_defaults",
-        "[performance]\nstop_metric='kept'\nm2_grid=true\n",
+        "[performance]\ncert_screen='on'\nm2_grid=true\n",
         &[],
     );
     let s = ok(&same);
     assert_eq!(same.density_sha, base.density_sha);
     assert_eq!(s["total_energy"]["ha"], b["total_energy"]["ha"]);
     assert_eq!(
-        s["scf"]["switches"]["BAANDI_STOP_METRIC"]["source"],
+        s["scf"]["switches"]["BAANDI_CERT_SCREEN"]["source"],
         "input"
     );
     assert_eq!(
@@ -106,23 +107,22 @@ fn input_tables_precedence_manifest_and_run_block() {
     // Input value acts; profile table; path recorded.
     let fft = run(
         &dir,
-        "fft",
-        "[performance]\nstop_metric='fft'\n[profile]\nphase_profile=true\n",
+        "off",
+        "[performance]\ncert_screen='off'\n[profile]\nphase_profile=true\n",
         &[],
     );
     let f = ok(&fft);
-    let sw = &f["scf"]["switches"]["BAANDI_STOP_METRIC"];
-    assert_eq!(sw["value"], "fft");
+    let sw = &f["scf"]["switches"]["BAANDI_CERT_SCREEN"];
+    assert_eq!(sw["value"], "off");
     assert_eq!(sw["source"], "input");
-    assert_eq!(sw["requested"], "fft");
-    assert_eq!(sw["path"], "fft");
+    assert_eq!(sw["requested"], "off");
     assert_eq!(
         f["scf"]["switches"]["BAANDI_PHASE_PROFILE"]["source"],
         "input"
     );
     assert!(f.get("phase_profile").is_some(), "profile table acts");
     assert_eq!(f["run"]["counters"]["stop_kept"], 0);
-    assert!(f["run"]["counters"]["stop_fft"].as_u64().unwrap() > 0);
+    assert_eq!(f["run"]["counters"]["stop_fft"], 0);
     assert_ne!(
         f["run"]["switch_agreement_hash"],
         b["run"]["switch_agreement_hash"]
@@ -133,7 +133,7 @@ fn input_tables_precedence_manifest_and_run_block() {
     // scripts/parse_results.py on real output: accepted with the binary that
     // wrote it; rejected when truncated (interrupted write) or stale.
     let parser = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/parse_results.py");
-    let results = dir.join("fft/results.json");
+    let results = dir.join("off/results.json");
     let parse = |file: &Path, extra: &[&str]| {
         let out = Command::new("python3")
             .arg("-I")
@@ -172,14 +172,14 @@ fn input_tables_precedence_manifest_and_run_block() {
     let env = run(
         &dir,
         "env",
-        "[performance]\nstop_metric='fft'\n",
-        &[("BAANDI_STOP_METRIC", "kept")],
+        "[performance]\ncert_screen='off'\n",
+        &[("BAANDI_CERT_SCREEN", "on")],
     );
     let e = ok(&env);
-    let sw = &e["scf"]["switches"]["BAANDI_STOP_METRIC"];
+    let sw = &e["scf"]["switches"]["BAANDI_CERT_SCREEN"];
     assert_eq!(
         (sw["value"].as_str(), sw["source"].as_str()),
-        (Some("kept"), Some("env"))
+        (Some("on"), Some("env"))
     );
     assert_eq!(env.density_sha, base.density_sha);
 
@@ -187,8 +187,8 @@ fn input_tables_precedence_manifest_and_run_block() {
     for (name, tables, message) in [
         (
             "bad_value",
-            "[performance]\nstop_metric='maybe'\n",
-            "allowed values fft, kept",
+            "[performance]\ncert_screen='maybe'\n",
+            "allowed values on, off, trace",
         ),
         (
             "bad_key",

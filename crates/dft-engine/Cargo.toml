@@ -85,45 +85,21 @@ name = "m2_grid"
 path = "tests/m2_grid.rs"
 required-features = ["strict-oracle"]
 
-[[test]]
-name = "m2_kept_start"
-path = "tests/m2_kept_start.rs"
-required-features = ["strict-oracle"]
 
-[[test]]
-name = "m2_lazy_orbitals"
-path = "tests/m2_lazy_orbitals.rs"
-required-features = ["strict-oracle"]
 
-[[test]]
-name = "m2_lazy_result"
-path = "tests/m2_lazy_result.rs"
-required-features = ["strict-oracle"]
 
 [[test]]
 name = "m2_lazy_serial"
 path = "tests/m2_lazy_serial.rs"
 required-features = ["strict-oracle"]
 
-[[test]]
-name = "m2_lean_algebra"
-path = "tests/m2_lean_algebra.rs"
-required-features = ["strict-oracle"]
 
-[[test]]
-name = "m2_owned"
-path = "tests/m2_owned.rs"
-required-features = ["strict-oracle"]
 
 [[test]]
 name = "m2_owned_decline"
 path = "tests/m2_owned_decline.rs"
 required-features = ["strict-oracle"]
 
-[[test]]
-name = "m2_remaining"
-path = "tests/m2_remaining.rs"
-required-features = ["strict-oracle"]
 
 [[test]]
 name = "m2_stage_timers"
@@ -170,25 +146,13 @@ name = "refstart"
 path = "tests/refstart.rs"
 required-features = ["strict-oracle"]
 
-[[test]]
-name = "snapshot_identity"
-path = "tests/snapshot_identity.rs"
-required-features = ["strict-oracle"]
 
-[[test]]
-name = "spin_share"
-path = "tests/spin_share.rs"
-required-features = ["strict-oracle"]
 
 [[test]]
 name = "stage_timers"
 path = "tests/stage_timers.rs"
 required-features = ["strict-oracle"]
 
-[[test]]
-name = "verify_schedule_alloc"
-path = "tests/verify_schedule_alloc.rs"
-required-features = ["strict-oracle"]
 
 [[test]]
 name = "all"

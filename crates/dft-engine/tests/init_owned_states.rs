@@ -240,7 +240,7 @@ fn scf_threads(
                 cutoff_hartree: 3.,
                 bands: Some(6),
                 threads,
-                ..ScfOptions::default()
+                ..ScfOptions::strict_reference()
             },
         )
         .unwrap();
@@ -276,7 +276,7 @@ fn compare_scf(ranks: usize, skew: bool, fallback: bool) {
             b.atomic_start.initial_h_applications
         );
         assert!(a.atomic_start.atomic_orbitals > 0);
-        assert!(b.verification.as_ref().is_some_and(|v| v.passed()));
+        assert!(b.certified);
         if ranks > 1 {
             assert_eq!(
                 counts[RunCounter::StatesFullBuilds as usize],
@@ -425,7 +425,7 @@ fn initial_atomic_ritz_energies_match() {
                             cutoff_hartree: 3.,
                             bands: Some(6),
                             threads: 1,
-                            ..ScfOptions::default()
+                            ..ScfOptions::strict_reference()
                         },
                     )
                     .unwrap();

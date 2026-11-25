@@ -23,7 +23,7 @@ fn no_mode_relaxation_outputs_are_byte_identical() {
         common::gaussian_with(1., 1.5, false, 801).replace("element=\"Xx\"", "element=\"H\""),
     )
     .unwrap();
-    let base = "[system]\nname='relaxation oracle'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\nenergy_tolerance_ha=1e-12\ndensity_residual_tolerance=1e-10\neigen_tolerance=1e-11\n[relax]\nmax_steps=4\nforce_tol_ha_bohr=1e-8\n";
+    let base = "[system]\nname='relaxation oracle'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\n[relax]\nmax_steps=4\nforce_tol_ha_bohr=1e-8\n";
     for (case, extra) in [
         (
             "ions",
@@ -39,6 +39,7 @@ fn no_mode_relaxation_outputs_are_byte_identical() {
         ] {
             let out = dir.join(format!("{case}-{label}"));
             let output = Command::new(&binary)
+                .env("BAANDI_REFERENCE_STRICT", "on")
                 .arg("relax")
                 .arg(&inp)
                 .arg("--output-dir")

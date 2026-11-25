@@ -7,7 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 fn input() -> String {
-    "[system]\nname='relaxation oracle'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\nenergy_tolerance_ha=1e-12\ndensity_residual_tolerance=1e-10\neigen_tolerance=1e-11\n".into()
+    "[system]\nname='relaxation oracle'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\n".into()
 }
 #[test]
 #[ignore = "multi-step SCF, run cargo test --release -p dft-cli --test all relaxation:: -- --ignored --nocapture"]
@@ -319,7 +319,7 @@ fn real_si_and_mgo() {
         let half = a / 2.;
         let displaced = t + 0.03 / a;
         let text = format!(
-            "[system]\nname='{material}'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,{half},{half}],[{half},0.0,{half}],[{half},{half},0.0]]\n[[system.atoms]]\nspecies='{}'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='{}'\nfractional=[{displaced},{displaced},{displaced}]\n[pseudopotentials]\n{pp}[basis]\necutwfc_ry={cutoff}\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{{atom=0}}]\n",
+            "[system]\nname='{material}'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,{half},{half}],[{half},0.0,{half}],[{half},{half},0.0]]\n[[system.atoms]]\nspecies='{}'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='{}'\nfractional=[{displaced},{displaced},{displaced}]\n[pseudopotentials]\n{pp}[basis]\necutwfc_ry={cutoff}\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\n[scf]\nmax_iterations=300\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{{atom=0}}]\n",
             labels[0], labels[1]
         );
         fs::write(dir.join("input.toml"), text).unwrap();

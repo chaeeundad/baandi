@@ -362,9 +362,6 @@ impl Context {
             )
             .map_err(|e| error(4, e))?;
         }
-        if let Some(floor) = self.config.xc.density_floor {
-            p.set_density_floor(floor).map_err(|e| error(4, e))?;
-        }
         Ok(p)
     }
     fn evaluate(
@@ -640,7 +637,7 @@ impl Context {
                 potentials: &self.refs(),
                 options: &self.opts,
                 electronic: dft_engine::ElectronicState::Fixed(&state),
-                density_floor: self.config.xc.density_floor,
+                density_floor: None,
                 symmetry: &ops,
             })
             .map_err(|e| error(4, e))?
@@ -657,7 +654,7 @@ impl Context {
                 potentials: &refs,
                 options: &self.opts,
                 electronic: dft_engine::ElectronicState::Fixed(&state),
-                density_floor: self.config.xc.density_floor,
+                density_floor: None,
                 symmetry: &ops,
             };
             let stress = if self.opts.strain_reference.is_none() {
@@ -1443,12 +1440,22 @@ mod reference_relax_tests {
 
     #[test]
     #[ignore = "external Si2, 3 ionic steps; DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-cli reference_relax_tests -- --ignored --nocapture"]
-    fn reference_three_step_si2_matches_legacy() {
+    fn reference_three_step_si2_matches_strict_oracle() {
         let pp = std::env::var("DFT_SI_UPF").expect("external Si UPF required");
         let root = std::env::temp_dir().join(format!("g5-si2-relax-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let mut trajectories = Vec::new();
-        for driver in ["legacy", "reference"] {
+        for driver in ["strict_oracle", "reference"] {
+            let switches = dft_numerics::switches::RunConfig::from_pairs(&[(
+                "reference_strict",
+                if driver == "strict_oracle" {
+                    "on"
+                } else {
+                    "off"
+                },
+            )])
+            .unwrap();
+            let _scope = switches.enter();
             let input = format!(
                 r#"
 [system]
@@ -1469,7 +1476,7 @@ kpoints=[[0.0,0.0,0.0]]
 [xc]
 functional='lda-pz'
 [scf]
-driver='{driver}'
+driver='reference'
 nbands=5
 max_iterations=200
 standard_threshold_ha=5e-13

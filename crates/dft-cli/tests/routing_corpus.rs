@@ -43,7 +43,7 @@ fn routing_fixtures_parse_with_current_reference_switch() {
         );
         assert!(matches!(
             comment(&text, "expected_driver"),
-            "reference" | "legacy" | "rejected"
+            "reference" | "strict_oracle" | "rejected"
         ));
         for key in ["expected_reason", "command", "switches", "upf_requirements"] {
             comment(&text, key);

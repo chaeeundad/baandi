@@ -79,78 +79,6 @@ impl Drop for Case {
         fs::remove_dir_all(&self.dir).unwrap();
     }
 }
-/// REUSE-PSI (`BAANDI_REUSE_PSI`, work order C2): on a real Gamma standard
-/// (Ritz-value) run the switch reuses H X of every solve after the first
-/// (armed and taken starts, kept psi(r) pairs, columns not applied), keeps
-/// convergence (and the exact aarch64 SCF count), and moves the energy only within the
-/// standard accuracy class, as an existing rounding-class switch does on the
-/// same toy; off leaves the counters at zero. Davidson iteration counts of
-/// this slowly converging toy shuffle under any rounding change (ledger C.11)
-/// and are not compared.
-#[test]
-fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
-    let c = Case::new(true);
-    // Standard path without the verification (the former explicit standard profile).
-    let input = format!("{}\n[scf]\nverify='off'\n", c.text);
-    fs::write(c.dir.join("input.toml"), input).unwrap();
-    let run = |mode: &str, extra: (&str, &str)| {
-        let out = format!("reuse-{mode}-{}", extra.1);
-        let o = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
-            // R6C: these counters belong to the legacy driver.
-            .env("BAANDI_REFERENCE_SCF", "off")
-            .env("BAANDI_DAVIDSON", "lean")
-            .env("BAANDI_REUSE_PSI", mode)
-            .env("BAANDI_EWALD_FAST", "off")
-            .env("BAANDI_IONIC_FAST", "off")
-            .env(extra.0, extra.1)
-            .current_dir(&c.dir)
-            .args(["run", "input.toml", "--output-dir", &out])
-            .output()
-            .unwrap();
-        status(&o, 0);
-        c.json(&out, "results.json")
-    };
-    let none = ("BAANDI_DAVIDSON_STAGES", "off");
-    let (off, on) = (run("off", none), run("on", none));
-    let control = run("off", ("BAANDI_DENSITY_PAIR", "off"));
-    let reuse = &on["convergence"]["work"]["reuse_psi"];
-    assert_eq!(reuse["mode"], "on");
-    let iterations = on["convergence"]["iterations"].as_u64().unwrap();
-    assert!(iterations >= 3, "{iterations}");
-    assert_eq!(reuse["armed_starts"], reuse["kept_starts"]);
-    assert_eq!(reuse["declined_starts"], 0);
-    assert!(reuse["kept_starts"].as_u64().unwrap() + 1 >= iterations);
-    assert!(reuse["kept_pairs"].as_u64().unwrap() > 0);
-    assert!(reuse["h_columns_not_applied"].as_u64().unwrap() > 0);
-    let offr = &off["convergence"]["work"]["reuse_psi"];
-    assert_eq!(offr["mode"], "off");
-    assert_eq!(offr["armed_starts"], 0);
-    assert_eq!(
-        on["convergence"]["converged"],
-        off["convergence"]["converged"]
-    );
-    let off_iterations = off["convergence"]["iterations"].as_u64().unwrap();
-    #[cfg(target_arch = "aarch64")]
-    assert_eq!(iterations, off_iterations);
-    // This rounding-class switch changes the toy's trajectory on x86 too:
-    // allow at most three SCF steps, retaining the 5e-9 Ha energy gate below.
-    // The reuse work identities above remain exact on every platform.
-    #[cfg(not(target_arch = "aarch64"))]
-    assert!(
-        iterations.abs_diff(off_iterations) <= 3,
-        "SCF iterations {iterations} vs {off_iterations}"
-    );
-    // Standard accuracy class (5e-9 Ha). This toy stops at a threshold whose
-    // delivered energy moves by a few 1e-9 Ha under any rounding change: the
-    // existing rounding-class switch DENSITY_PAIR=off moves it by 2.2e-9 Ha,
-    // REUSE-PSI by 1.6e-9 Ha (Mac, 2026-11-16); both stay in the class.
-    let e = |v: &Value| v["total_energy"]["ha"].as_f64().unwrap();
-    for (label, run) in [("reuse", &on), ("density_pair=off control", &control)] {
-        assert_eq!(run["convergence"]["converged"], true, "{label}");
-        let d = (e(run) - e(&off)).abs();
-        assert!(d <= 5e-9, "{label}: {} vs {}", e(run), e(&off));
-    }
-}
 fn status(o: &Output, code: i32) {
     assert_eq!(
         o.status.code(),
@@ -586,7 +514,7 @@ fn kpoint_scf() {
     c.fixture = c.fixture.replace("z_valence=\"4\"", "z_valence=\"2\"");
     fs::write(c.dir.join("synthetic.xml"), &c.fixture).unwrap();
     let original = c.text.clone();
-    let controls = "\n[scf]\nnbands=3\ndensity_residual_tolerance=1e-12\nenergy_tolerance_ha=1e-13\neigen_tolerance=1e-12\nmax_iterations=300\n";
+    let controls = "\n[scf]\nnbands=3\nmax_iterations=300\n";
     let forms = [
         "kgrid=[2,1,1]\nkshift=[0.5,0,0]\nktime_reversal=false",
         "kpoints=[[0.25,0,0,0.5],[-0.25,0,0,0.5]]",
@@ -713,7 +641,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 133);
+    assert_eq!(switches.len(), 121);
     if std::env::var_os("BAANDI_BUFFER_TOL").is_none() {
         let tol = &switches["BAANDI_BUFFER_TOL"];
         assert_eq!(
@@ -1221,147 +1149,3 @@ fn observed_file_mirror_is_exact_and_logs_are_never_overwritten() {
 }
 
 // ONEPATH-5: both collinear writers expose count-only sharing diagnostics.
-#[test]
-fn spin_share_results_include_shared_and_fallback_counts() {
-    let c = Case::new(false);
-    fs::write(
-        c.dir.join("spin.xml"),
-        common::gaussian_with(2., 1., true, 401)
-            .replace("SLA PZ", "SLA PW")
-            .replace("element=\"Xx\"", "element=\"He\""),
-    )
-    .unwrap();
-    let base = "[system]\nname='spin share counters'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.5,5.0,0.0],[0.3,0.2,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='spin.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=4\n[spin]\nmode='collinear'\nn_up=1\nn_down=1\ninitial_moment_seed=0.0\n";
-    let mut fixed_counts = Vec::new();
-    for (name, mode, finite, reason) in [
-        ("shared", "on", false, None),
-        ("disabled", "off", false, Some("disabled")),
-        ("finite", "on", true, Some("finite_temperature")),
-        ("seeded", "on", false, Some("nonzero_seed")),
-    ] {
-        let mut input = base.to_owned();
-        if finite {
-            input.push_str("[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=8\n");
-        }
-        if name == "seeded" {
-            input = input.replace("initial_moment_seed=0.0", "initial_moment_seed=0.5");
-        }
-        fs::write(c.dir.join("spin.toml"), input).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
-            // R6C: these counters belong to the legacy driver.
-            .env("BAANDI_REFERENCE_SCF", "off")
-            .current_dir(&c.dir)
-            .args(["run", "spin.toml", "--output-dir", name])
-            .env("BAANDI_SPIN_SHARE", mode)
-            .env("BAANDI_REFERENCE_STRICT", "off")
-            .output()
-            .unwrap();
-        status(&output, 0);
-        let result = c.json(name, "results.json");
-        assert_eq!(result["convergence"]["converged"], true);
-        assert_eq!(result["verified"], true);
-        let report = &result["spin"]["spin_share"];
-        let shared = report["shared_maps"].as_u64().unwrap();
-        let fallback = report["fallback_maps"].as_u64().unwrap();
-        let reasons = report["fallback_counts"].as_object().unwrap();
-        assert_eq!(reasons.len(), 9);
-        assert_eq!(
-            fallback,
-            reasons.values().map(|v| v.as_u64().unwrap()).sum::<u64>()
-        );
-        assert_eq!(report.as_object().unwrap().len(), 5);
-        assert!(report["operator_applications"].as_u64().unwrap() > 0);
-        assert!(report["logical_davidson_iterations"].as_u64().unwrap() > 0);
-        if let Some(reason) = reason {
-            assert_eq!(shared, 0);
-            assert!(fallback > 0);
-            assert_eq!(reasons[reason].as_u64().unwrap(), fallback);
-        } else {
-            assert!(shared > 0);
-            assert_eq!(fallback, 0);
-        }
-        // Execution counters do not enter the physical state schema or digests.
-        assert!(
-            result["state_contracts"]["spin"]
-                .get("spin_share")
-                .is_none()
-        );
-        if name == "shared" || name == "disabled" {
-            fixed_counts.push(report.clone());
-        }
-    }
-    assert_eq!(
-        fixed_counts[0]["shared_maps"],
-        fixed_counts[1]["fallback_maps"]
-    );
-    assert_eq!(
-        fixed_counts[0]["logical_davidson_iterations"],
-        fixed_counts[1]["logical_davidson_iterations"]
-    );
-    assert_eq!(
-        2 * fixed_counts[0]["operator_applications"].as_u64().unwrap(),
-        fixed_counts[1]["operator_applications"].as_u64().unwrap()
-    );
-}
-
-/// Schedule diagnostics are durable JSON, not stderr-only messages. A first
-/// passing attempt performs zero predictor work and keeps scientific bits.
-#[test]
-fn verification_schedule_json_is_lazy_and_optional() {
-    let case = Case::new(false);
-    fs::write(
-        case.dir.join("schedule.toml"),
-        format!(
-            "{}\n[scf]\nmax_iterations=100\nstandard_threshold_ha=5e-9\n",
-            case.text
-        ),
-    )
-    .unwrap();
-    let mut results = Vec::new();
-    for mode in ["off", "trace", "on"] {
-        let dest = case.dir.join(mode);
-        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
-            // R6C: these counters belong to the legacy driver.
-            .env("BAANDI_REFERENCE_SCF", "off")
-            .current_dir(&case.dir)
-            .env("BAANDI_REFERENCE_STRICT", "off")
-            .env("BAANDI_VERIFY_SCHEDULE", mode)
-            .args(["run", "schedule.toml", "--output-dir"])
-            .arg(&dest)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let r: Value =
-            serde_json::from_slice(&fs::read(dest.join("results.json")).unwrap()).unwrap();
-        let v = &r["verification"];
-        assert_eq!(v["attempts"].as_array().unwrap().len(), 1);
-        if mode == "off" {
-            assert!(v.get("schedule").is_none());
-        } else {
-            let schedule = &v["schedule"];
-            assert_eq!(schedule["mode"], mode);
-            assert_eq!(schedule["prediction_evaluations"], 0);
-            let records = schedule["records"].as_array().unwrap();
-            assert_eq!(records.len(), 1);
-            assert_eq!(records[0]["map_index"], v["attempts"][0]["iteration"]);
-            assert_eq!(records[0]["predicted_additional_maps"], 0);
-            assert_eq!(records[0]["action"], "attempt");
-            assert_eq!(records[0]["pass"], true);
-            assert_eq!(
-                records[0]["coulomb_error_ha"],
-                v["attempts"][0]["coulomb_error_ha"]
-            );
-            assert!(records[0]["ratio_to_previous_attempt"].is_null());
-        }
-        results.push((r, fs::read(dest.join("density.bin")).unwrap()));
-    }
-    for (r, density) in &results[1..] {
-        assert_eq!(r["total_energy"], results[0].0["total_energy"]);
-        assert_eq!(*density, results[0].1);
-        assert_eq!(r["work"], results[0].0["work"]);
-    }
-}

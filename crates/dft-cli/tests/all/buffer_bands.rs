@@ -30,7 +30,7 @@ fn si8_strict_certificate_and_deterministic_threads() {
                     "[[system.atoms]]\nspecies='Si'\nfractional={site:?}\n"
                 ));
             }
-            text.push_str(&format!("[pseudopotentials]\nSi={}\n[basis]\necutwfc_ry=30.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nmax_iterations=100\nmixing='pulay'\nmixing_beta=0.5\nenergy_tolerance_ha=1e-8\ndensity_residual_tolerance=1e-7\nseed={seed}\nthreads={threads}\n", serde_json::to_string(&upf).unwrap()));
+            text.push_str(&format!("[pseudopotentials]\nSi={}\n[basis]\necutwfc_ry=30.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nmax_iterations=100\nmixing='pulay'\nmixing_beta=0.5\nseed={seed}\nthreads={threads}\n", serde_json::to_string(&upf).unwrap()));
             let input = dir.join(format!("{seed}-{threads}.toml"));
             let out = dir.join(format!("{seed}-{threads}"));
             fs::write(&input, text).unwrap();

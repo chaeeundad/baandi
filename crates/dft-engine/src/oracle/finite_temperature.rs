@@ -76,57 +76,17 @@ impl FiniteTProblem {
         let mut best: f64 = f64::INFINITY;
         let mut growing = 0;
         let mut saved = vec![0.0; self.occupations.occupations.len()];
-        // ONEPATH-3 standard path: ratchet state and verification attempts.
-        let standard = opts.standard;
-        let guard = dft_numerics::switches::on(dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD);
-        let mut verification = VerificationReport::default();
-        let mut previous_standard: Option<(f64, f64)> = None;
-        let mut standard_errors_ha = Vec::new();
         let mut requested_eigen_tolerances = Vec::new();
         for iteration in 1..=opts.max_iterations {
-            let mut tolerance = if standard.is_some() {
-                previous_standard.map_or(StandardProfile::CAP_HA, |(t, e)| {
-                    StandardProfile::ratchet(t, e, n)
-                })
-            } else {
-                0.1 * opts.eigen_tolerance
-            };
-            let mut state = p.step_with_occupations(
+            let tolerance = { 0.1 * opts.eigen_tolerance };
+            let state = p.step_with_occupations(
                 &density,
                 previous.as_deref(),
                 tolerance,
-                standard.is_none() || tolerance <= opts.eigen_tolerance,
+                true,
                 Some(&mut self.occupations),
             )?;
-            let mut standard_error = None;
-            if standard.is_some() {
-                let metric = p.coulomb.as_mut().expect("standard Coulomb metric");
-                let mut e = metric.error(&density, &state.density)?;
-                // First-iteration redo of the closed-shell standard path.
-                if iteration == 1 && e < tolerance * n.max(1.0) {
-                    tolerance = StandardProfile::ratchet(tolerance, e, n);
-                    let warm: Vec<_> = state
-                        .k_points
-                        .iter()
-                        .map(|k| k.solution.eigenvectors.clone())
-                        .collect();
-                    state = p.step_with_occupations(
-                        &density,
-                        Some(&warm),
-                        tolerance,
-                        tolerance <= opts.eigen_tolerance,
-                        Some(&mut self.occupations),
-                    )?;
-                    e = p
-                        .coulomb
-                        .as_mut()
-                        .expect("standard Coulomb metric")
-                        .error(&density, &state.density)?;
-                }
-                standard_error = Some(e);
-                standard_errors_ha.push(e);
-                previous_standard = Some((tolerance, e));
-            }
+
             requested_eigen_tolerances.push(tolerance);
             let evaluation = self.occupations.evaluation.unwrap();
             if evaluation.edge_max_fraction > 1e-8 || evaluation.edge_electrons > 1e-10 * n.max(1.0)
@@ -149,139 +109,14 @@ impl FiniteTProblem {
                     "finite-T SCF density residual exceeded configured growth limit".into(),
                 ));
             }
-            let number_ok = evaluation.electron_residual.abs() <= 1e-10 * n.max(1.0);
-            let residual_estimate = |state: &ScfStep, occupations: &OccupationWorkspace| {
-                StandardProfile::residual_energy_estimate_blocks(
-                    state.k_points.iter().enumerate().map(|(k, point)| {
-                        (
-                            point.point.weight,
-                            point.solution.residuals.as_slice(),
-                            occupations.block(0, k),
-                        )
-                    }),
-                )
-            };
-            let candidate = if let Some(p) = standard {
-                // ONEPATH-3 stop rule: E_H[n_out - n_in] and the residual guard
-                // (fractional occupations, capacity 2) below the threshold.
-                standard_error.is_some_and(|e| e < p.threshold_ha)
-                    && number_ok
-                    && (!guard || residual_estimate(&state, &self.occupations) < p.threshold_ha)
-            } else {
+            let candidate = {
                 residual <= opts.density_tolerance
                     && last_free
                         .is_some_and(|f| (ledger.free_energy_ha - f).abs() <= opts.energy_tolerance)
             };
             let mut certificate = None;
             let mut passed = false;
-            if candidate && standard.is_some() && opts.verification == Verification::Off {
-                // Unverified standard stop (`scf.verify = "off"`).
-                passed = true;
-            } else if let (true, Some(sp)) = (candidate, standard) {
-                // ADR 0043 V1: the whole map (eigenpairs, number solve,
-                // occupations, density) at the delivered density, warm started,
-                // at the next ratchet tolerance; the delivered state stays the
-                // stop step's own (V4).
-                let clock = Instant::now();
-                saved.copy_from_slice(self.occupations.occupations());
-                let eigen_tolerance_ha =
-                    StandardProfile::ratchet(tolerance, standard_error.unwrap(), n);
-                let warm: Vec<_> = state
-                    .k_points
-                    .iter()
-                    .map(|k| k.solution.eigenvectors.clone())
-                    .collect();
-                let fresh = p.step_with_occupations(
-                    &state.density,
-                    Some(&warm),
-                    eigen_tolerance_ha,
-                    eigen_tolerance_ha <= opts.eigen_tolerance,
-                    Some(&mut self.occupations),
-                )?;
-                let fresh_eval = self.occupations.evaluation.unwrap();
-                let coulomb_error_ha = p
-                    .coulomb
-                    .as_mut()
-                    .expect("standard Coulomb metric")
-                    .error(&state.density, &fresh.density)?;
-                let residual_bound_ha = guard.then(|| residual_estimate(&fresh, &self.occupations));
-                let nr = density_distance(&state.density, &fresh.density, volume, n);
-                let er = fresh
-                    .k_points
-                    .iter()
-                    .flat_map(|k| k.solution.residuals.iter())
-                    .copied()
-                    .fold(0.0, f64::max);
-                let df = (fresh.energy.total_hartree()
-                    - fresh_eval.entropy_term_ha
-                    - ledger.free_energy_ha)
-                    .abs();
-                let change = saved
-                    .iter()
-                    .zip(self.occupations.occupations())
-                    .enumerate()
-                    .map(|(i, (a, b))| {
-                        self.occupations.weights[i / self.occupations.bands] * (a - b).abs()
-                    })
-                    .sum::<f64>();
-                let eigen_change = fresh
-                    .k_points
-                    .iter()
-                    .zip(&state.k_points)
-                    .flat_map(|(a, b)| a.solution.eigenvalues.iter().zip(&b.solution.eigenvalues))
-                    .map(|(a, b)| (a - b).abs())
-                    .fold(0.0, f64::max);
-                let mu_change = evaluation
-                    .roots
-                    .iter()
-                    .zip(&fresh_eval.roots)
-                    .filter_map(|(a, b)| a.zip(*b))
-                    .map(|(a, b)| (a.mu_ha - b.mu_ha).abs())
-                    .fold(0.0, f64::max);
-                if !coulomb_error_ha.is_finite() || !nr.is_finite() {
-                    return Err(ScfError::NonFinite);
-                }
-                let valid = fresh_eval.electron_residual.abs() <= 1e-10 * n.max(1.0)
-                    && (fresh.density.sum() * volume / fresh.density.len() as f64 - n).abs()
-                        <= 1e-10 * n.max(1.0)
-                    && fresh_eval.edge_max_fraction <= 1e-8
-                    && fresh_eval.edge_electrons <= 1e-10 * n.max(1.0);
-                passed = coulomb_error_ha < sp.threshold_ha
-                    && residual_bound_ha.is_none_or(|b| b < sp.threshold_ha)
-                    && valid;
-                #[cfg(test)]
-                if p.force_verification_failures > 0 {
-                    p.force_verification_failures -= 1;
-                    passed = false;
-                }
-                verification.attempts.push(VerificationAttempt {
-                    iteration,
-                    passed,
-                    coulomb_error_ha,
-                    threshold_ha: sp.threshold_ha,
-                    eigen_tolerance_ha,
-                    residual_bound_ha,
-                    density_residual: nr,
-                    occupied_eigenvalue_change_ha: eigen_change,
-                    strict_criteria_met: nr <= opts.density_tolerance
-                        && er <= opts.eigen_tolerance
-                        && df <= opts.energy_tolerance
-                        && change <= 1e-8 * n.max(1.0),
-                    davidson_iterations: fresh.k_points.iter().map(|k| k.solution.iterations).sum(),
-                    operator_applications: fresh
-                        .k_points
-                        .iter()
-                        .map(|k| k.solution.operator_applications)
-                        .sum(),
-                    wall: clock.elapsed(),
-                    spin_density_residual: None,
-                    occupation_change_electrons: Some(change),
-                    chemical_potential_change_ha: Some(mu_change),
-                    moment_change: None,
-                });
-                self.occupations.occupations.copy_from_slice(&saved);
-                self.occupations.evaluation = Some(evaluation);
-            } else if candidate {
+            if candidate {
                 saved.copy_from_slice(self.occupations.occupations());
                 let fresh = p.step_with_occupations(
                     &state.density,
@@ -355,10 +190,9 @@ impl FiniteTProblem {
                     occupations: self.occupations,
                     thermodynamics: ledger,
                     certificate,
-                    standard,
-                    verification: (standard.is_some() && opts.verification != Verification::Off)
-                        .then_some(verification),
-                    standard_errors_ha,
+                    standard: None,
+                    verification: None,
+                    standard_errors_ha: Vec::new(),
                     requested_eigen_tolerances,
                 });
             }

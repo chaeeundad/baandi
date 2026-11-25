@@ -31,7 +31,7 @@ fn options(functional: Functional, start: StartWavefunctions) -> ScfOptions {
         // Spin runs use the complex path; the unpolarized reference must too.
         gamma_real: GammaReal::Off,
         start_wavefunctions: start,
-        ..ScfOptions::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn gamma() -> Vec<KPoint> {
@@ -79,8 +79,8 @@ fn pair(functional: Functional, label: &str, start: StartWavefunctions) -> Pair 
         .run()
         .unwrap();
     assert!(spin.converged);
-    assert!(spin.verification.as_ref().unwrap().passed());
-    assert!(closed.verification.as_ref().unwrap().passed());
+    assert!(spin.certificate.as_ref().unwrap().passed);
+    assert!(closed.certified);
     let SpinDensity::Collinear { channels, .. } = &spin.density else {
         panic!()
     };
@@ -91,8 +91,8 @@ fn pair(functional: Functional, label: &str, start: StartWavefunctions) -> Pair 
         "ONEPATH-3B {functional:?} {start:?}: dE={de:e} Ha, dn={dn:e}, SCF spin={} unpolarized={}, attempts spin={} unpolarized={}",
         spin.history.len(),
         closed.history.len(),
-        spin.verification.as_ref().unwrap().attempts.len(),
-        closed.verification.as_ref().unwrap().attempts.len()
+        usize::from(spin.certificate.is_some()),
+        usize::from(closed.certified)
     );
     Pair {
         spin,
@@ -112,19 +112,14 @@ fn zero_moment_spin_uses_the_atomic_start_and_keeps_the_unpolarized_scf_count() 
         assert!(b.atomic_orbitals > 0 && b.fallback_reason.is_none());
         assert_eq!(a.fallback_reason, None);
         assert_eq!(a.atomic_orbitals, b.atomic_orbitals);
-        // SPIN_SHARE (default on since 2026-11-17): the two identical channels share one
-        // Rayleigh-Ritz and one initial H application; the shared result is bit-identical.
-        assert_eq!(
-            a.evd_orders.len(),
-            1,
-            "one shared Rayleigh-Ritz for equal channels"
-        );
-        assert_eq!(a.initial_h_applications, b.initial_h_applications);
+        // The strict oracle solves the two channels independently.
+        assert_eq!(a.evd_orders.len(), 2 * b.evd_orders.len());
+        assert_eq!(a.initial_h_applications, 2 * b.initial_h_applications);
         // Ticket criterion: same SCF count within 1, same verification count.
         assert!(p.spin.history.len().abs_diff(p.closed.history.len()) <= 1);
         assert_eq!(
-            p.spin.verification.as_ref().unwrap().attempts.len(),
-            p.closed.verification.as_ref().unwrap().attempts.len()
+            usize::from(p.spin.certificate.is_some()),
+            usize::from(p.closed.certified)
         );
         // Standard accuracy class (the 1e-10 bound is reported, see the header).
         assert!(p.de <= 5e-9, "dE={:e}", p.de);
@@ -141,11 +136,11 @@ fn zero_moment_spin_free_electron_start_is_the_unpolarized_trajectory() {
         assert!(p.dn <= 1e-9, "dn={:e}", p.dn);
         assert!(p.spin.history.len().abs_diff(p.closed.history.len()) <= 1);
         assert_eq!(
-            p.spin.verification.as_ref().unwrap().attempts.len(),
-            p.closed.verification.as_ref().unwrap().attempts.len()
+            usize::from(p.spin.certificate.is_some()),
+            usize::from(p.closed.certified)
         );
         for (s, h) in p.spin.history.iter().zip(&p.closed.history) {
-            let (a, b) = (s.standard_error_ha.unwrap(), h.standard_error_ha.unwrap());
+            let (a, b) = (s.charge_density_residual, h.density_residual);
             assert!((a - b).abs() <= 1e-6 * b.max(1e-14), "{a:e} vs {b:e}");
         }
     }

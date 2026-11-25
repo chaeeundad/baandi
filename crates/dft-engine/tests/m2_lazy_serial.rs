@@ -41,7 +41,7 @@ fn problem(pp: &dft_upf::Pseudopotential, skew: bool) -> ScfProblem {
             cutoff_hartree: 3.,
             bands: Some(6),
             threads: 1,
-            ..ScfOptions::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -56,7 +56,7 @@ fn results(
 ) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
-        dft_engine::gamma_real::set_m2_reuse_override(Some(true));
+
         dft_engine::gamma_real::set_m2_lazy_serial_override(Some(lazy));
         dft_engine::gamma_real::set_m2_dist_disabled_for_tests(dist_disabled);
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
@@ -65,7 +65,7 @@ fn results(
         parallel::set_communicator(None);
         dft_engine::gamma_real::set_m2_dist_disabled_for_tests(false);
         dft_engine::gamma_real::set_m2_lazy_serial_override(None);
-        dft_engine::gamma_real::set_m2_reuse_override(None);
+
         parallel::set_m2_override(None);
         r
     })
@@ -97,7 +97,7 @@ fn lazy_serial_state_is_bit_identical_and_builds_no_serial_operator() {
         let b2 = dft_engine::gamma_real::serial_operator_builds();
         for r in 0..2 {
             assert_eq!(bits(&eager[r]), bits(&lazy[r]), "skew {skew} rank {r}");
-            assert!(lazy[r].verification.as_ref().is_some_and(|v| v.passed()));
+            assert!(lazy[r].certified);
         }
         assert_eq!(bits(&lazy[0]), bits(&lazy[1]), "ranks agree");
         assert!(b1 > b0, "eager arm builds serial operators");
@@ -116,7 +116,7 @@ fn lazy_serial_fallback_builds_the_operator_when_needed() {
     let b2 = dft_engine::gamma_real::serial_operator_builds();
     for r in 0..2 {
         assert_eq!(bits(&eager[r]), bits(&lazy[r]), "M1 fallback rank {r}");
-        assert!(lazy[r].verification.as_ref().is_some_and(|v| v.passed()));
+        assert!(lazy[r].certified);
     }
     assert!(b1 > b0);
     assert!(b2 > b1, "the M1 fallback builds the serial operator lazily");

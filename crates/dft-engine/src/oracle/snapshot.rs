@@ -385,10 +385,10 @@ pub(crate) fn capture_entry(e: Entry<'_>) -> Option<Capture> {
             } else {
                 "null".to_string()
             },
-            sw_reuse = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_REUSE),
+            sw_reuse = "off",
             sw_lean = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_LEAN_ALGEBRA),
-            sw_lazy = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_LAZY),
-            sw_psi = dft_numerics::switches::choice(dft_numerics::switches::Id::REUSE_PSI),
+            sw_lazy = "off",
+            sw_psi = "off",
             sw_dav = dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),
         );
         // ISSUE-18: the operator fingerprint (separate field, appended).
@@ -426,25 +426,6 @@ pub(crate) fn capture_exit(c: Capture, result: &RealEigenSolution, kept_taken: b
     }
     let _ = c.label;
     with_slot(|s| s.io_seconds += clock.elapsed().as_secs_f64());
-}
-
-/// Record the outcome of the verification whose map was captured last
-/// (rank 0 rewrites the manifest; outside any timed phase).
-pub(crate) fn annotate_verification(passed: bool) {
-    if dir().is_none() {
-        return;
-    }
-    let path = with_slot(|s| s.last_manifest.take());
-    if let Some(path) = path
-        && let Ok(text) = std::fs::read_to_string(&path)
-    {
-        let text = text.replacen(
-            "\"verification_passed\": null",
-            &format!("\"verification_passed\": {passed}"),
-            1,
-        );
-        let _ = std::fs::write(&path, text);
-    }
 }
 
 /// A start injected into the next solve of a rank (replay).

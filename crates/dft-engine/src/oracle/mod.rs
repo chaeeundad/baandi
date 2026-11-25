@@ -1,4 +1,4 @@
-//! Frozen legacy standard driver and strict oracle (R9c).
+//! Strict residual-based oracle (R10bc); production SCF lives in refscf.
 pub(crate) mod atomic_start;
 pub(crate) mod band_density;
 pub mod checkpoint;

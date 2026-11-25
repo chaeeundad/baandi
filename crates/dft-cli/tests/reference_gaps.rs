@@ -151,14 +151,7 @@ fn reference_verify_off_labels_and_stop_to_verified_k_fd_spin_outputs() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    // Legacy and ionic relaxation retain their verification precondition.
-    assert!(
-        dft_cli::config::Config::parse(
-            &(base.replace("driver='reference'", "driver='legacy'")
-                + "verify='off'\n[output]\nforces=true\n")
-        )
-        .is_err()
-    );
+    // Ionic relaxation retains its verification precondition.
     assert!(
         dft_cli::config::Config::parse(&(base + "verify='off'\n[relax]\nmax_steps=3\n")).is_err()
     );
@@ -166,11 +159,21 @@ fn reference_verify_off_labels_and_stop_to_verified_k_fd_spin_outputs() {
 
 #[test]
 #[ignore = "external Si2 trajectory; DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-cli --test reference_gaps reference_k_relax -- --ignored --nocapture"]
-fn reference_k_relax_three_steps_matches_legacy() {
+fn reference_k_relax_three_steps_matches_strict_oracle() {
     let root = directory("si2-relax");
     let pp = std::env::var("DFT_SI_UPF").unwrap();
     let mut frames = Vec::new();
-    for driver in ["legacy", "reference"] {
+    for driver in ["strict_oracle", "reference"] {
+        let switches = dft_numerics::switches::RunConfig::from_pairs(&[(
+            "reference_strict",
+            if driver == "strict_oracle" {
+                "on"
+            } else {
+                "off"
+            },
+        )])
+        .unwrap();
+        let _scope = switches.enter();
         let input = root.join(format!("{driver}.toml"));
         fs::write(
             &input,
@@ -195,7 +198,7 @@ ktime_reversal=false
 [xc]
 functional='lda-pz'
 [scf]
-driver='{driver}'
+driver='reference'
 nbands=5
 max_iterations=200
 standard_threshold_ha=5e-13

@@ -56,13 +56,16 @@ use std::ops::Range;
 use std::sync::Arc;
 
 /// `L` of the `auto` rule: collective latency of one distributed Davidson step
-/// in plane-wave rows of local work. Fitted on the dev08 MPI8 GK9 stage-1 A/B
-/// (one pool per rank against the distributed layout: GeTe 260 k, N_pw 4.6k,
-/// -11 %; B12 172 k, 6.6k, -6 %): solving T(8)/T(1) for L gives 27 and 24 rows;
-/// as the whole SCF (not only the k loop) entered the ratios this is a lower
-/// bound, rounded up to 32. Machine-level; recalibrate with the
-/// `REFSCF_K_NPOOL` scan on the target machine.
-pub const POOL_LATENCY_ROWS: f64 = 32.;
+/// in plane-wave rows of local work (machine-level, not material-level).
+/// Refitted 2026-11-27 on the dev08 MPI8 `REFSCF_K_NPOOL` scan (gen54, one run
+/// per arm): npool = 8 was fastest on all three cases against npool 4
+/// (IrI3 51 k, N_pw ~18.7k: -4 %; B12 172 k, ~6.6k: -7 %; GeTe 260 k, ~4.6k:
+/// -11 %). Solving T(8) < T(4) for L gives lower bounds of about 720 (IrI3),
+/// 77 (B12) and 35 (GeTe) rows; 1024 makes one rank per pool the choice
+/// whenever there are at least as many k points as ranks, while fewer k than
+/// ranks still yields multi-rank pools. The first fit (32 rows, from the
+/// stage-1 A/B) was a loose lower bound.
+pub const POOL_LATENCY_ROWS: f64 = 1024.;
 
 /// Pool sub-communicator of this rank: `None` for a one-rank pool (serial
 /// collective), shared so that the start's channels and maps reuse it.
@@ -784,18 +787,18 @@ mod tests {
 
     #[test]
     fn auto_rule_trades_imbalance_against_pool_width() {
-        // Many k, small N_pw: one rank per pool.
-        assert_eq!(auto_npool(&vec![4600; 260], 8), 4);
+        // Many k (at least the rank count): one rank per pool (dev08 scan).
+        assert_eq!(auto_npool(&vec![4600; 260], 8), 8);
         assert_eq!(npool_for("on", None, &vec![4600; 260], 8), 8);
         // Few k: pools of several ranks (never more pools than k); three k
-        // on eight ranks stay distributed (two pools would hold 2 and 1 k).
+        // on eight ranks use two pools of four (holding 2 and 1 k).
         assert_eq!(auto_npool(&vec![2000; 4], 8), 4);
-        assert_eq!(auto_npool(&vec![2000; 3], 8), 1);
+        assert_eq!(auto_npool(&vec![2000; 3], 8), 2);
         assert_eq!(npool_for("on", None, &vec![2000; 3], 8), 2);
         assert_eq!(auto_npool(&vec![2000; 1], 8), 1);
-        // Large N_pw with a remainder (51 k on 8 ranks): pools of two ranks
-        // remove most of the 7-of-51 imbalance.
-        assert_eq!(auto_npool(&vec![15500; 51], 8), 4);
+        // Large N_pw with a remainder (51 k on 8 ranks): one rank per pool
+        // still wins on dev08 (IrI3 npool 8 vs 4: -4 %).
+        assert_eq!(auto_npool(&vec![15500; 51], 8), 8);
         // Tiny N_pw: latency dominates, one rank per pool.
         assert_eq!(auto_npool(&vec![300; 51], 8), 8);
         // Forced counts clamp to ranks and k.

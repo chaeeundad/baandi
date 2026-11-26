@@ -35,7 +35,30 @@ pub(crate) fn lazy_result_allowed() -> bool {
 /// with the handle. Cloning shares the data. Every rank must call
 /// `materialize` at the same point of the (replicated) control flow.
 #[derive(Clone)]
-pub struct LazyOrbitals(pub(crate) Arc<LazyInner>);
+pub struct LazyOrbitals(pub(crate) Arc<LazySource>);
+/// GK18: one k block of a pooled k run (`refscf::k_pool`), delivered on
+/// demand. The owning pool's ranks keep their rows; `materialize` repeats
+/// exactly the eager delivery of that k (fill the rows, a pool sum when the
+/// pool has several ranks, one broadcast from the pool's first world rank),
+/// so the block's bits equal the eager block's. Every rank must materialize
+/// the k blocks in the same order (`ScfResult::materialize_orbitals`).
+pub(crate) struct PooledK {
+    /// This rank's rows of the block (owning pool only) and their global
+    /// basis indices (the operator's `local_rows`).
+    pub(crate) owned: Option<(ComplexMatrix, Arc<[usize]>)>,
+    /// Pool sub-communicator of the owning pool (pools of several ranks).
+    pub(crate) pool: Option<Arc<dft_mpi::Comm>>,
+    /// World rank that broadcasts the block.
+    pub(crate) root: usize,
+    pub(crate) n: usize,
+    pub(crate) bands: usize,
+    pub(crate) comm: crate::parallel::SharedComm,
+    pub(crate) full: std::sync::OnceLock<ComplexMatrix>,
+}
+pub(crate) enum LazySource {
+    Gamma(LazyInner),
+    PooledK(PooledK),
+}
 pub(crate) struct LazyInner {
     /// n_loc x bands, this rank's rows.
     pub(crate) x: RealMatrix,
@@ -52,12 +75,22 @@ pub(crate) struct LazyInner {
 }
 impl std::fmt::Debug for LazyOrbitals {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LazyOrbitals")
-            .field("n", &self.0.n)
-            .field("local_rows", &self.0.x.rows())
-            .field("bands", &self.0.x.cols())
-            .field("materialized", &self.0.full.get().is_some())
-            .finish()
+        match &*self.0 {
+            LazySource::Gamma(g) => f
+                .debug_struct("LazyOrbitals")
+                .field("n", &g.n)
+                .field("local_rows", &g.x.rows())
+                .field("bands", &g.x.cols())
+                .field("materialized", &g.full.get().is_some())
+                .finish(),
+            LazySource::PooledK(k) => f
+                .debug_struct("LazyOrbitals::PooledK")
+                .field("n", &k.n)
+                .field("owned", &k.owned.is_some())
+                .field("bands", &k.bands)
+                .field("materialized", &k.full.get().is_some())
+                .finish(),
+        }
     }
 }
 /// LAZY-ASSEMBLE-FUSED: the complex N x B block from the gathered rank
@@ -130,7 +163,7 @@ impl LazyOrbitals {
         comm: crate::parallel::SharedComm,
         zero_pairs: Vec<usize>,
     ) -> Self {
-        Self(Arc::new(LazyInner {
+        Self(Arc::new(LazySource::Gamma(LazyInner {
             n: half.full_len(),
             x,
             rows: rows.into(),
@@ -138,25 +171,67 @@ impl LazyOrbitals {
             comm,
             full: std::sync::OnceLock::new(),
             handoff_zero_pairs: Some(zero_pairs.into()),
-        }))
+        })))
+    }
+
+    /// GK18: a pooled k block (see [`PooledK`]); `owned` is `Some` exactly on
+    /// the ranks of the owning pool.
+    pub(crate) fn pooled_k(
+        owned: Option<(ComplexMatrix, Arc<[usize]>)>,
+        pool: Option<Arc<dft_mpi::Comm>>,
+        root: usize,
+        n: usize,
+        bands: usize,
+        comm: crate::parallel::SharedComm,
+    ) -> Self {
+        Self(Arc::new(LazySource::PooledK(PooledK {
+            owned,
+            pool,
+            root,
+            n,
+            bands,
+            comm,
+            full: std::sync::OnceLock::new(),
+        })))
     }
 
     pub fn bands(&self) -> usize {
-        self.0.x.cols()
+        match &*self.0 {
+            LazySource::Gamma(g) => g.x.cols(),
+            LazySource::PooledK(k) => k.bands,
+        }
     }
     /// Global plane-wave count (rows of the materialized block).
     pub fn global_len(&self) -> usize {
-        self.0.n
+        match &*self.0 {
+            LazySource::Gamma(g) => g.n,
+            LazySource::PooledK(k) => k.n,
+        }
+    }
+    fn full_cell(&self) -> &std::sync::OnceLock<ComplexMatrix> {
+        match &*self.0 {
+            LazySource::Gamma(g) => &g.full,
+            LazySource::PooledK(k) => &k.full,
+        }
     }
 
     /// The full complex N x B block (gathered once, then cached). Collective:
     /// every rank must call it at the same point.
     pub fn materialize(&self) -> Result<&ComplexMatrix, ScfError> {
-        if let Some(m) = self.0.full.get() {
+        if let Some(m) = self.full_cell().get() {
             return Ok(m);
         }
         let start = dft_numerics::stage_clock::start();
-        let inner = &*self.0;
+        let inner = match &*self.0 {
+            LazySource::Gamma(g) => g,
+            LazySource::PooledK(k) => {
+                let full = k.deliver()?;
+                let _ = k.full.set(full);
+                distributed::count(distributed::Count::LazyMaterializations);
+                distributed::add(distributed::Stage::LazyMaterialize, start);
+                return Ok(k.full.get().expect("set above"));
+            }
+        };
         let comm = &inner.comm;
         let size = comm.size();
         let (n, nl, bands) = (inner.n, inner.x.rows(), inner.x.cols());
@@ -197,8 +272,48 @@ impl LazyOrbitals {
     pub fn into_full(self) -> Result<ComplexMatrix, ScfError> {
         self.materialize()?;
         match Arc::try_unwrap(self.0) {
-            Ok(inner) => Ok(inner.full.into_inner().expect("materialized")),
-            Err(shared) => Ok(shared.full.get().expect("materialized").clone()),
+            Ok(LazySource::Gamma(inner)) => Ok(inner.full.into_inner().expect("materialized")),
+            Ok(LazySource::PooledK(inner)) => Ok(inner.full.into_inner().expect("materialized")),
+            Err(shared) => Ok(match &*shared {
+                LazySource::Gamma(g) => g.full.get(),
+                LazySource::PooledK(k) => k.full.get(),
+            }
+            .expect("materialized")
+            .clone()),
         }
+    }
+}
+
+impl PooledK {
+    /// The eager delivery of one k (`k_pool::deliver_orbitals`), same order
+    /// of operations and therefore the same bits.
+    fn deliver(&self) -> Result<ComplexMatrix, ScfError> {
+        let err = |e: dft_mpi::MpiError| ScfError::Numerical(format!("lazy k orbitals: {e}"));
+        let (n, width) = (self.n, self.bands);
+        let mut data = vec![0.; 2 * n * width];
+        if let Some((x, rows)) = &self.owned {
+            for j in 0..width {
+                for (i, &g) in rows.iter().enumerate() {
+                    data[2 * (g + j * n)] = x[(i, j)].re;
+                    data[2 * (g + j * n) + 1] = x[(i, j)].im;
+                }
+            }
+            if let Some(pool) = &self.pool {
+                let mut all = vec![0.; data.len()];
+                pool.tree_sum_f64(&data, &mut all).map_err(err)?;
+                data = all;
+            }
+        }
+        self.comm.bcast_f64(&mut data, self.root).map_err(err)?;
+        ComplexMatrix::new(
+            n,
+            width,
+            data.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| Complex64::new(p[0], p[1]))
+                .collect(),
+        )
+        .map_err(|e| ScfError::Numerical(format!("lazy k orbitals: {e}")))
     }
 }

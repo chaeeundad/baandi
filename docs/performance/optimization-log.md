@@ -5064,3 +5064,12 @@ density exchange (runs of operator planes, global k order), pool-leader records,
 bit-identical to main (46 fingerprints); npool 1 = distributed layout bit for bit; 264 class rows strict <= 6.5e-13
 Ha, standard <= 2.6e-9 Ha; fixed (P, npool) reproducible. dev08 NPOOL scan pending (calibrates the latency constant).
 Details: attempts ledger GK9B-POOL-SUBCOMM.
+
+## GK18-SETUP-SMALL — many-small-k setup and delivery (2026-11-27)
+
+Base 68bc3c27 (gen55); branch uncommitted; bit-identical, no new switch. Lazy pooled k delivery when the CLI does
+not read orbitals (`M2_LAZY_RESULT`), k-basis summaries (preflight and engine; pooled ranks build only owned k
+bases), all-(l, m) harmonics per direction, shared Bessel samples per (mesh, l, node) in the k radial tables and per
+(species, node) in the field tables with the local erf factor once per species, owned projector tile reused by the
+k operator, owned rows from the stick partition. Mac GeTe-shaped serial engine setup 1.56 -> 1.09-1.19 s (H apply
+unchanged); 60 fingerprints and the CLI density hash identical. dev08 A/B pending. Details: ledger GK18-SETUP-SMALL.

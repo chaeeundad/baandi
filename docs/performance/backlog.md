@@ -295,3 +295,14 @@ Gap is cost per unit of work, not H columns (IrI3: 0.50x QE's H columns, 0.81x i
   z-row transform only where it keeps bits (FFT_FUSED_ROWS was rounding class and slower on Gamma, P3f).
 - If dev08 shows the rustfft kernels slower than QE's per transform: calibrated per-length kernels for private
   (k) lanes (today `FFT_KERNEL_BY_LENGTH` acts only inside a plan-cache scope, which the k start does not open).
+
+## After GK18 (GK18-SETUP-SMALL, 2026-11-27)
+- Lazy delivery on the spin/FD k driver (`electronic.rs` BandBlock; IrI3: 51 k x 42 bands x ~15k rows broadcast to
+  every rank in energy-only runs) with materialize hooks in forces/stress/checkpoint/NSCF for electronic results.
+- Shared per-rank scratch for the k operators (FFT stick blocks, `back`, GEMM workspace) instead of one set per k
+  (plan GK6): memory per rank and first-touch page faults in the start H apply on Linux.
+- Per-k `FftGridSpec::new` (1.77 MB `fft_to_g` per k at 48^3) in the k start: a k-only grid spec without the inverse
+  map (the k operators read `g_to_fft` only).
+- If the GLIBC_TUNABLES arm of the GK18 dev08 request wins: set the allocator thresholds at process start (mallopt
+  in the MPI/CLI adapter) or evaluate a maintained allocator crate (ADR 0003 checks).
+- Start H apply and SCF H apply: FFT kernel speed per transform on dev08 (`M2_FFT=mkl` arm of GK17).

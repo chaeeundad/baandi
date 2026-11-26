@@ -1025,21 +1025,6 @@ struct FieldTables {
     core: Option<RadialTransformTable>,
 }
 
-/// Exact atomic-charge integral `int f(r) j0(q r) rab dr` of [`atomic_fields`]
-/// (without the volume division), shared by the direct path and the table nodes.
-fn rho_atom_integral(s: &Species<'_>, q: f64, work: &mut [f64]) -> Result<f64, ScfError> {
-    let mesh = s.potential.mesh();
-    let samples = &s.potential.raw().rhoatom.values;
-    for ((v, &r), &f) in work.iter_mut().zip(mesh.r()).zip(samples) {
-        *v = if q == 0. {
-            f
-        } else {
-            f * spherical_bessel(0, q * r).map_err(err)?
-        };
-    }
-    mesh.integrate(work).map_err(err)
-}
-
 /// Node values split round-robin over ranks and combined by one tree sum
 /// (one nonzero contribution per node, so the node bits do not depend on the
 /// rank count), as the GK14 k tables. `q_max` must be the same on every rank.
@@ -1076,29 +1061,51 @@ fn field_radial_tables<K: Collective>(
     let (rank, size) = (comm.rank(), comm.size().max(1));
     let mut failed = locals.is_err();
     if let Ok(locals) = &locals {
+        // GK18: work units are (species, node), split round-robin over the
+        // ranks; a unit evaluates j0(q r) on the species mesh once for its
+        // functions and the local factor r^2 V + Z r erf(r) is formed once
+        // per species. Same integrands and quadratures as the per-function
+        // transforms, so every node value keeps its bits and its single
+        // contributing rank.
+        let prefactors: Vec<Vec<f64>> = locals.iter().map(|l| l.short_prefactor()).collect();
         let mut work = Vec::new();
-        for j in (rank..total).step_by(size) {
-            let (c, i) = (j / nodes, j % nodes);
-            let (s, function) = channels[c];
+        let mut j0 = Vec::new();
+        for u in (rank..species.len() * nodes).step_by(size) {
+            let (s, i) = (u / nodes, u % nodes);
             let sp = &species[s];
             let q = i as f64 * STEP;
-            let value = match function {
-                0 => {
-                    work.resize(sp.potential.raw().rhoatom.values.len(), 0.);
-                    rho_atom_integral(sp, q, &mut work)
+            if dft_upf::radial::bessel_samples(sp.potential.mesh(), 0, q, &mut j0).is_err() {
+                failed = true;
+                continue;
+            }
+            for (c, &(cs, function)) in channels.iter().enumerate() {
+                if cs != s {
+                    continue;
                 }
-                1 => Ok(locals[s].short_integral_at(q)),
-                _ => dft_upf::radial::spherical_density_transform_with_rule(
-                    sp.potential.mesh(),
-                    sp.potential.core_density().expect("core channel"),
-                    q,
-                    o.radial_even_rule,
-                )
-                .map_err(err),
-            };
-            match value {
-                Ok(v) if v.is_finite() => values[j] = v,
-                _ => failed = true,
+                let value = match function {
+                    0 => {
+                        let mesh = sp.potential.mesh();
+                        let samples = &sp.potential.raw().rhoatom.values;
+                        work.resize(samples.len(), 0.);
+                        for ((v, &f), &j) in work.iter_mut().zip(samples).zip(&j0) {
+                            *v = if q == 0. { f } else { f * j };
+                        }
+                        mesh.integrate(&work).map_err(err)
+                    }
+                    1 => Ok(locals[s].short_integral_from(&prefactors[s], &j0)),
+                    _ => dft_upf::radial::spherical_density_transform_with_samples(
+                        sp.potential.mesh(),
+                        sp.potential.core_density().expect("core channel"),
+                        q,
+                        o.radial_even_rule,
+                        &j0,
+                    )
+                    .map_err(err),
+                };
+                match value {
+                    Ok(v) if v.is_finite() => values[c * nodes + i] = v,
+                    _ => failed = true,
+                }
             }
         }
     }
@@ -1967,13 +1974,42 @@ fn start_kpoints_inner<K: Collective>(
     validate_strain_grid(o)?;
     let bases_clock = Instant::now();
     let db = o.basis(cell, [0.; 3], 4.)?;
-    let bases: Vec<_> = points
-        .iter()
-        .map(|p| o.basis(cell, p.fractional, 1.))
-        .collect::<Result<_, _>>()?;
+    // GK18: without a strain reference the k bases are first known by their
+    // summaries (count, Miller extents, largest |k+G|^2: what the band check,
+    // the grid, the pool decision and the radial tables need); a pooled rank
+    // then builds only its own k bases. Same values as the built bases. One
+    // rank needs every basis anyway.
+    let summaries = (o.strain_reference.is_none() && comm.size() > 1)
+        .then(|| {
+            points
+                .iter()
+                .map(|p| {
+                    dft_basis::KBasisSummary::at_k(
+                        cell,
+                        dft_physics::data::Hartree(o.cutoff_hartree),
+                        p.fractional,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let mut bases: Vec<Option<PlaneWaveBasis>> = match &summaries {
+        Some(_) => points.iter().map(|_| None).collect(),
+        None => points
+            .iter()
+            .map(|p| o.basis(cell, p.fractional, 1.).map(Some))
+            .collect::<Result<_, _>>()?,
+    };
+    let counts: Vec<usize> = match &summaries {
+        Some(s) => s.iter().map(|s| s.count).collect(),
+        None => bases
+            .iter()
+            .map(|b| b.as_ref().map_or(0, |b| b.vectors().len()))
+            .collect(),
+    };
     if general_occupations
         && o.bands
-            .is_none_or(|n| n == 0 || bases.iter().any(|b| n > b.vectors().len()))
+            .is_none_or(|n| n == 0 || counts.iter().any(|&c| n > c))
     {
         return Err(ScfError::InvalidInput(
             "reference spin/FD start requires an explicit band count within every k basis",
@@ -1981,12 +2017,32 @@ fn start_kpoints_inner<K: Collective>(
     }
     let gamma = o.basis(cell, [0.; 3], 1.)?;
     let mut dims = FftGridSpec::new(&gamma, &db, o.grid_override)?.dims();
-    for b in &bases {
-        let d = FftGridSpec::new(b, &db, o.grid_override)?.dims();
+    for (k, b) in bases.iter().enumerate() {
+        let d = match (b, &summaries) {
+            (Some(b), _) => FftGridSpec::new(b, &db, o.grid_override)?.dims(),
+            (None, Some(s)) => FftGridSpec::dims_for_summary(&s[k], &db, o.grid_override, || {
+                o.basis(cell, points[k].fractional, 1.)
+            })?,
+            (None, None) => unreachable!("bases built without summaries"),
+        };
         for a in 0..3 {
             dims[a] = dims[a].max(d[a]);
         }
     }
+    let q_max = match &summaries {
+        Some(s) => s
+            .iter()
+            .map(|s| s.max_momentum_norm_squared)
+            .fold(0., f64::max)
+            .sqrt(),
+        None => bases
+            .iter()
+            .flatten()
+            .flat_map(|b| b.momenta())
+            .map(|m| m.norm_squared)
+            .fold(0., f64::max)
+            .sqrt(),
+    };
     let bases_s = bases_clock.elapsed().as_secs_f64();
     let mut common_options = o.clone();
     common_options.gamma_real = crate::model::GammaReal::On;
@@ -2016,17 +2072,27 @@ fn start_kpoints_inner<K: Collective>(
             .or_default() += if commons.is_empty() { bases_s } else { 0. };
         commons.push(common);
     }
-    let pool = crate::refscf::k_pool::KPool::decide(
-        points,
-        bases.iter().map(|b| b.vectors().len()).collect(),
-        comm,
-        pools,
-    )?;
+    let pool = crate::refscf::k_pool::KPool::decide(points, counts, comm, pools)?;
+    if summaries.is_some() {
+        let clock = Instant::now();
+        let owned = pool.as_ref().map(|p| p.local());
+        for (k, b) in bases.iter_mut().enumerate() {
+            if owned.as_ref().is_none_or(|r| r.contains(&k)) {
+                *b = Some(o.basis(cell, points[k].fractional, 1.)?);
+            }
+        }
+        *commons[0]
+            .setup
+            .phases
+            .entry("complex_k_bases_grids")
+            .or_default() += clock.elapsed().as_secs_f64();
+    }
     finish_kpoints(
         input,
         points,
         comm,
         bases,
+        q_max,
         &db,
         commons,
         !general_occupations,
@@ -2093,6 +2159,9 @@ struct KColumnScratch {
     radial_y: Vec<f64>,
     /// (-i)^l exp(-i q.tau) per owned row for the current atom.
     phase: Vec<C>,
+    /// GK18: every real harmonic up to the channels' largest l per owned row
+    /// (`row * (lmax + 1)^2 + l * l + l + m`; rows with q = 0 unused).
+    harmonics: Vec<f64>,
 }
 
 /// GK1: bit-identical to `atomic_k_columns_direct`. The radial transform
@@ -2118,6 +2187,29 @@ fn atomic_k_columns_memo(
     use std::collections::hash_map::Entry;
     let momenta = basis.momenta();
     let n = rows.len();
+    // GK18: the harmonics of each row once for all channels and species
+    // (bit-identical to one `real_spherical_harmonic` call per (channel, m)).
+    let lmax = species
+        .iter()
+        .filter(|sp| !sp.positions_bohr.is_empty())
+        .flat_map(|sp| atomic_orbitals(sp.potential).map(|c| c.l))
+        .max();
+    let stride = lmax.map_or(0, |l| (l + 1) * (l + 1));
+    if let Some(lmax) = lmax {
+        s.harmonics.clear();
+        s.harmonics.resize(stride * n, 0.);
+        for (r, &g) in rows.iter().enumerate() {
+            let q = &momenta[g];
+            if q.norm_squared != 0. {
+                dft_upf::radial::real_spherical_harmonics_upto(
+                    lmax,
+                    q.cartesian,
+                    &mut s.harmonics[r * stride..(r + 1) * stride],
+                )
+                .map_err(err)?;
+            }
+        }
+    }
     for (si, sp) in species.iter().enumerate() {
         if sp.positions_bohr.is_empty() {
             continue;
@@ -2154,7 +2246,7 @@ fn atomic_k_columns_memo(
                     let y = if q.norm_squared == 0. {
                         if l == 0 { 1. / (4. * PI).sqrt() } else { 0. }
                     } else {
-                        real_spherical_harmonic(l, m, q.cartesian).map_err(err)?
+                        s.harmonics[r * stride + (l * l + l).wrapping_add_signed(m)]
                     };
                     s.radial_y[mi * n + r] = radial * y;
                 }
@@ -2218,18 +2310,38 @@ fn k_radial_tables<K: Collective>(
     let mut values = vec![0.; total + 1];
     let (rank, size) = (comm.rank(), comm.size().max(1));
     let mut failed = false;
-    for j in (rank..total).step_by(size) {
-        let (c, i) = (j / nodes, j % nodes);
-        let (s, _, l, f) = channels[c];
-        match projector_transform_with_rule(
-            species[s].potential.mesh(),
-            l,
-            f,
+    // GK18: channels of one species mesh and one l share j_l(q r) at a node:
+    // work units are (species, l, node), split round-robin over the ranks;
+    // each unit evaluates the Bessel samples once and integrates all of its
+    // channels (`projector_transforms_same_l`, bit-identical to one
+    // `projector_transform_with_rule` per channel). Every (channel, node)
+    // value still has exactly one contributing rank.
+    let mut groups: Vec<(usize, usize, Vec<usize>)> = Vec::new();
+    for (c, &(s, _, l, _)) in channels.iter().enumerate() {
+        match groups.iter_mut().find(|g| g.0 == s && g.1 == l) {
+            Some(g) => g.2.push(c),
+            None => groups.push((s, l, vec![c])),
+        }
+    }
+    let mut scratch = Vec::new();
+    let mut samples: Vec<&[f64]> = Vec::new();
+    for u in (rank..groups.len() * nodes).step_by(size) {
+        let ((s, l, members), i) = (&groups[u / nodes], u % nodes);
+        samples.clear();
+        samples.extend(members.iter().map(|&c| channels[c].3));
+        let out = dft_upf::radial::projector_transforms_same_l(
+            species[*s].potential.mesh(),
+            *l,
+            &samples,
             i as f64 * STEP,
             rule,
-        ) {
-            Ok(v) => values[j] = v,
-            Err(_) => failed = true,
+            &mut scratch,
+        );
+        for (&c, v) in members.iter().zip(out) {
+            match v {
+                Ok(v) => values[c * nodes + i] = v,
+                Err(_) => failed = true,
+            }
         }
     }
     values[total] = f64::from(u8::from(failed));
@@ -2267,7 +2379,8 @@ fn finish_kpoints<K: Collective>(
     input: StartInput<'_>,
     points: &[dft_geometry::kpoints::KPoint],
     comm: &K,
-    bases: Vec<PlaneWaveBasis>,
+    bases: Vec<Option<PlaneWaveBasis>>,
+    q_max: f64,
     db: &PlaneWaveBasis,
     mut commons: Vec<StartState>,
     keep_hx: bool,
@@ -2323,12 +2436,6 @@ fn finish_kpoints<K: Collective>(
         memo && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_START);
     let (nl_tables, start_tables) = if nl_table || start_table {
         let stage = Instant::now();
-        let q_max = bases
-            .iter()
-            .flat_map(|b| b.momenta())
-            .map(|m| m.norm_squared)
-            .fold(0., f64::max)
-            .sqrt();
         let (n, s) = k_radial_tables(
             &species,
             q_max,
@@ -2372,6 +2479,9 @@ fn finish_kpoints<K: Collective>(
             .filter(|(k, _)| owned.as_ref().is_none_or(|r| r.contains(k)))
             .map(|(_, pair)| pair)
         {
+            let basis = basis.ok_or(ScfError::InvalidInput(
+                "reference k start: basis of an owned k missing",
+            ))?;
             let common = &mut commons[0];
             if bands > basis.vectors().len() {
                 return Err(ScfError::InvalidInput(
@@ -2382,10 +2492,18 @@ fn finish_kpoints<K: Collective>(
             // per k; diagnostics only, no effect on arithmetic).
             let stage = Instant::now();
             let grid = FftGridSpec::new(&basis, db, Some(dims))?;
-            let layout = DistributedPairFft::new(dims, grid.g_to_fft(), kc.rank(), kc.size())
-                .map_err(err)?;
-            let rows = layout.local_positions().to_vec();
-            drop(layout);
+            // GK18: the owned rows from the stick partition alone (the plan
+            // the operator builds below uses the same partition), without a
+            // throwaway FFT plan and its buffers.
+            let rank = kc.rank();
+            let rows: Vec<usize> =
+                dft_solvers::distributed_fft::position_owners(dims, grid.g_to_fft(), kc.size())
+                    .map_err(err)?
+                    .into_iter()
+                    .enumerate()
+                    .filter(|&(_, owner)| owner == rank)
+                    .map(|(g, _)| g)
+                    .collect();
             common.setup.record("k_start_grid_layout", stage);
             let stage = Instant::now();
             let nl = if nl_rows_only {
@@ -2819,9 +2937,16 @@ pub fn start_kpoints_from_density<K: Collective>(
                     "reference NSCF: too many bands for a k basis",
                 ));
             }
-            Ok(b)
+            Ok(Some(b))
         })
         .collect::<Result<Vec<_>, ScfError>>()?;
+    let q_max = bases
+        .iter()
+        .flatten()
+        .flat_map(|b| b.momenta())
+        .map(|m| m.norm_squared)
+        .fold(0., f64::max)
+        .sqrt();
     let half = HalfSphere::new(&basis, &grid).map_err(err)?;
     let mut fields = StartFields::new(dims, comm)?;
     // GK16: same field tables as the k SCF start, so a fixed-density run sees
@@ -2972,6 +3097,7 @@ pub fn start_kpoints_from_density<K: Collective>(
         points,
         comm,
         bases,
+        q_max,
         &db,
         vec![state.common],
         false,

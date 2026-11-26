@@ -163,6 +163,66 @@ pub fn real_spherical_harmonic(
     Ok(norm * p * angular)
 }
 
+/// GK18: every real harmonic of one direction up to `lmax`, written to
+/// `out[l * l + l + m]` (`out.len() >= (lmax + 1)^2`). Each value is
+/// `real_spherical_harmonic(l, m, direction)` bit for bit: the direction
+/// terms (norm, cos theta, phi) and sin/cos(|m| phi) are formed once with the
+/// same operations, and the per-(l, m) arithmetic is the same sequence. Same
+/// errors (checked once for the direction).
+pub fn real_spherical_harmonics_upto(
+    lmax: usize,
+    direction: [f64; 3],
+    out: &mut [f64],
+) -> Result<(), RadialError> {
+    if lmax > 3 || out.len() < (lmax + 1) * (lmax + 1) || direction.iter().any(|v| !v.is_finite()) {
+        return Err(RadialError::Argument("Y_lm index or direction"));
+    }
+    let norm = direction[0].hypot(direction[1]).hypot(direction[2]);
+    if norm == 0.0 || !norm.is_finite() {
+        return Err(RadialError::Argument("zero or unrepresentable direction"));
+    }
+    let z = (direction[2] / norm).clamp(-1.0, 1.0);
+    let phi = direction[1].atan2(direction[0]);
+    // sin/cos(a phi) for a = 1..=lmax, as the single-value function forms
+    // them: separate `sin` and `cos` calls. The opaque argument keeps the
+    // compiler from fusing the pair into one sincos call, whose last bit can
+    // differ from `sin`/`cos` (seen on aarch64 macOS).
+    let mut trig = [(0.0, 0.0); 4];
+    for (a, t) in trig.iter_mut().enumerate().take(lmax + 1).skip(1) {
+        let x = a as f64 * phi;
+        *t = (std::hint::black_box(x).sin(), std::hint::black_box(x).cos());
+    }
+    for l in 0..=lmax {
+        for m in -(l as isize)..=l as isize {
+            let a = m.unsigned_abs();
+            let mut p = 1.0;
+            for k in 1..=a {
+                p *= -((2 * k - 1) as f64) * ((1.0 - z) * (1.0 + z)).sqrt();
+            }
+            if l > a {
+                let mut prev = p;
+                p *= (2 * a + 1) as f64 * z;
+                for k in a + 2..=l {
+                    let next =
+                        ((2 * k - 1) as f64 * z * p - (k + a - 1) as f64 * prev) / (k - a) as f64;
+                    prev = p;
+                    p = next;
+                }
+            }
+            let ratio = ((l - a + 1)..=l + a).fold(1.0, |v, k| v / k as f64);
+            let norm = ((2 * l + 1) as f64 / (4.0 * PI) * ratio).sqrt();
+            let angular = if m == 0 {
+                1.0
+            } else {
+                let sign = if a.is_multiple_of(2) { 1.0 } else { -1.0 };
+                2.0_f64.sqrt() * sign * if m < 0 { trig[a].0 } else { trig[a].1 }
+            };
+            out[(l * l + l).wrapping_add_signed(m)] = norm * p * angular;
+        }
+    }
+    Ok(())
+}
+
 /// Local transform view. The endpoint is the last mesh point <= requested r_max.
 pub struct LocalTransform<'a> {
     mesh: &'a RadialMesh,
@@ -405,6 +465,29 @@ impl ConventionLocalTransform<'_> {
                 * (self.short_integral(g) - self.base.z * (-g * g / 4.0).exp() / (g * g)),
         )
     }
+    /// GK18: the g-independent factor r^2 V + Z r erf(r) of the short-range
+    /// integrand on the integration points (formed once per transform).
+    pub fn short_prefactor(&self) -> Vec<f64> {
+        let b = &self.base;
+        (0..b.n)
+            .map(|i| {
+                let r = b.mesh.r[i];
+                r * r * b.v[i] + b.z * r * libm::erf(r)
+            })
+            .collect()
+    }
+    /// GK18: [`Self::short_integral_at`] from `prefactor` ([`Self::short_prefactor`])
+    /// and `j0[i] = j_0(g r_i)` ([`bessel_samples`] of the same `g`): the
+    /// same integrand products and quadrature, so the same bits.
+    pub fn short_integral_from(&self, prefactor: &[f64], j0: &[f64]) -> f64 {
+        let b = &self.base;
+        let f = |i: usize| prefactor[i] * j0[i] * b.mesh.rab[i];
+        if self.rule == RadialEvenRule::Simpson3_8 {
+            integrate(b.n, f)
+        } else {
+            integrate_rule(b.n, f, self.rule)
+        }
+    }
     /// GK16: the Coulomb-subtracted short-range integral that [`Self::at_g`]
     /// uses at `g` (same quadrature and rule), for tabulation. Smooth and even
     /// in `g`; [`Self::at_g_with_short`] completes it to V_loc(G).
@@ -522,6 +605,107 @@ pub fn projector_transform_with_rule(
                 |i| mesh.r[i] * radial_times_r[i] * bessel(l, q * mesh.r[i]) * mesh.rab[i],
                 rule,
             ),
+    )
+}
+
+/// GK18: `projector_transform_with_rule(mesh, l, samples[c], q, rule)` for
+/// every channel `c` of one mesh and one `l`, bit for bit (same validation per
+/// channel, same integrand products, same quadrature), with j_l(q r_i)
+/// evaluated once per mesh point for all channels instead of once per channel.
+/// `bessel_scratch` is reused between calls.
+pub fn projector_transforms_same_l(
+    mesh: &RadialMesh,
+    l: usize,
+    samples: &[&[f64]],
+    q: f64,
+    rule: RadialEvenRule,
+    bessel_scratch: &mut Vec<f64>,
+) -> Vec<Result<f64, RadialError>> {
+    let valid = |s: &[f64]| {
+        let n = s.len();
+        !(l > 3
+            || !q.is_finite()
+            || q < 0.0
+            || n == 0
+            || n > mesh.r.len()
+            || s.iter().any(|x| !x.is_finite())
+            || !(q * mesh.r[n - 1]).is_finite())
+    };
+    let longest = samples
+        .iter()
+        .filter(|s| valid(s))
+        .map(|s| s.len())
+        .max()
+        .unwrap_or(0);
+    bessel_scratch.clear();
+    bessel_scratch.extend((0..longest).map(|i| bessel(l, q * mesh.r[i])));
+    let j = &bessel_scratch[..];
+    samples
+        .iter()
+        .map(|s| {
+            if !valid(s) {
+                return Err(RadialError::Argument("projector samples, l or q"));
+            }
+            let n = s.len();
+            let f = |i: usize| mesh.r[i] * s[i] * j[i] * mesh.rab[i];
+            finite(
+                4.0 * PI
+                    * if rule == RadialEvenRule::Simpson3_8 {
+                        integrate(n, f)
+                    } else {
+                        integrate_rule(n, f, rule)
+                    },
+            )
+        })
+        .collect()
+}
+
+/// GK18: `out[i] = j_l(q r_i)` for every mesh point, the exact values the
+/// transforms below use (`l <= 3`, finite `q >= 0`).
+pub fn bessel_samples(
+    mesh: &RadialMesh,
+    l: usize,
+    q: f64,
+    out: &mut Vec<f64>,
+) -> Result<(), RadialError> {
+    if l > 3 || !q.is_finite() || q < 0.0 || !(q * mesh.r[mesh.r.len() - 1]).is_finite() {
+        return Err(RadialError::Argument("j_l requires l <= 3, finite x >= 0"));
+    }
+    out.clear();
+    out.extend(mesh.r.iter().map(|r| bessel(l, q * r)));
+    Ok(())
+}
+
+/// GK18: [`spherical_density_transform_with_rule`] with `j0[i] = j_0(q r_i)`
+/// supplied ([`bessel_samples`] of the same `q`): same checks, same integrand
+/// products, same quadrature, so the same bits.
+pub fn spherical_density_transform_with_samples(
+    mesh: &RadialMesh,
+    rho: &[f64],
+    q: f64,
+    rule: RadialEvenRule,
+    j0: &[f64],
+) -> Result<f64, RadialError> {
+    if rho.len() != mesh.r.len()
+        || rho.iter().any(|v| !v.is_finite())
+        || !q.is_finite()
+        || q < 0.0
+        || !(q * mesh.r[mesh.r.len() - 1]).is_finite()
+        || j0.len() < rho.len()
+    {
+        return Err(RadialError::Argument("density samples or q"));
+    }
+    let f = |i: usize| {
+        let r = mesh.r[i];
+        r * r * rho[i] * j0[i] * mesh.rab[i]
+    };
+    finite(
+        4.0 * PI
+            * if rule == RadialEvenRule::Simpson3_8 {
+                integrate(rho.len(), f)
+            } else {
+                integrate_rule(rho.len(), f, rule)
+            },
     )
 }
 

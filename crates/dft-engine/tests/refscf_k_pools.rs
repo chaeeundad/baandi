@@ -562,6 +562,95 @@ fn pools_one_rank_identical_and_fixed_ranks_reproducible() {
     }
 }
 
+/// GK18: a pooled run whose caller does not read the orbitals delivers lazy k
+/// blocks; after `materialize_orbitals` every delivered bit (density,
+/// eigenvalues, orbitals, energy, `orbitals`) equals the eager delivery, for
+/// one rank per pool and pools of several ranks (2 x 2, unequal 2 + 1), and
+/// `M2_LAZY_RESULT=off` keeps the eager delivery.
+#[test]
+fn pooled_lazy_delivery_materializes_the_eager_bits() {
+    use std::sync::Arc;
+    let (_, cell, positions) = cells().into_iter().nth(1).unwrap();
+    let points = monkhorst_pack([2; 3], [0.5; 3]).unwrap();
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let atoms = [Atom::new("Xx", positions[0]), Atom::new("Xx", positions[1])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = options();
+    for (p, npool) in [(2usize, "2"), (3, "3"), (4, "2"), (3, "2")] {
+        let ranks = dft_mpi::simulate(p, |comm: &SimRank| {
+            let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
+            dft_engine::parallel::set_communicator(Some(shared));
+            let mut bits = Vec::new();
+            for (needed, lazy_switch) in [(true, "on"), (false, "on"), (false, "off")] {
+                let config = RunConfig::from_pairs(&[
+                    ("refscf_k_pools", "auto"),
+                    ("refscf_k_npool", npool),
+                    ("m2_lazy_result", lazy_switch),
+                ])
+                .unwrap();
+                let _scope = config.enter();
+                dft_engine::refscf::lazy::set_delivered_orbitals(needed);
+                let run = k_driver::run_with(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    profile(false),
+                    &points,
+                    comm,
+                )
+                .unwrap();
+                let mut r = run.outcome.result;
+                let lazy = !needed && lazy_switch == "on";
+                assert_eq!(r.orbitals_delivered(), !lazy, "P={p} npool={npool}");
+                if lazy {
+                    assert_eq!(r.orbitals.rows(), 0);
+                    assert!(
+                        r.k_points
+                            .iter()
+                            .all(|k| k.solution.eigenvectors.rows() == 0)
+                    );
+                }
+                r.materialize_orbitals().unwrap();
+                assert!(r.orbitals_delivered());
+                let mut b = bits_of(r.density.iter());
+                b.push(r.energy.total_hartree().to_bits());
+                for k in &r.k_points {
+                    b.extend(bits_of(k.solution.eigenvalues.iter()));
+                    b.extend(
+                        k.solution
+                            .eigenvectors
+                            .as_slice()
+                            .iter()
+                            .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                    );
+                }
+                b.extend(
+                    r.orbitals
+                        .as_slice()
+                        .iter()
+                        .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                );
+                bits.push(b);
+            }
+            dft_engine::refscf::lazy::set_delivered_orbitals(true);
+            dft_engine::parallel::set_communicator(None);
+            bits
+        });
+        for rank in &ranks {
+            for b in rank {
+                assert_eq!(b, &ranks[0][0], "P={p} npool={npool}: lazy = eager bits");
+            }
+        }
+        println!("GK18 lazy pooled delivery P={p} npool={npool}: bits equal eager on every rank");
+    }
+}
+
 /// npool 1 (forced, and `auto` when it picks one pool) is the distributed
 /// layout bit for bit; fewer k than ranks gives pools of several ranks.
 #[test]

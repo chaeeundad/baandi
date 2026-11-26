@@ -743,6 +743,61 @@ pub(super) fn deliver_orbitals<K: Collective>(
     Ok(out)
 }
 
+/// GK18: the lazy form of [`deliver_orbitals`] for a pooled start when the
+/// caller does not read the delivered orbitals (`lazy::set_delivered_orbitals`
+/// false, `M2_LAZY_RESULT` on). No collective here: each k becomes a handle
+/// whose `materialize` performs that k's eager delivery (same bits), so an
+/// energy-only run skips the N x B broadcast of every k to every rank.
+/// `owned` are this rank's blocks of its pool's k (moved into the handles).
+/// Returns `None` (caller delivers eagerly) without pools or without a
+/// registered world communicator matching `comm`.
+pub(super) fn lazy_orbitals<K: Collective>(
+    state: &crate::refstart::KStartState,
+    comm: &K,
+    owned: Vec<dft_numerics::linalg::ComplexMatrix>,
+    bands: usize,
+) -> Result<Option<Vec<super::lazy::LazyOrbitals>>, ScfError> {
+    let Some(pool) = &state.pool else {
+        return Ok(None);
+    };
+    let Some(world) = crate::parallel::SharedComm::active()
+        .filter(|w| w.size() == comm.size() && w.rank() == comm.rank())
+    else {
+        return Ok(None);
+    };
+    let local = pool.local();
+    if owned.len() != state.blocks.len() || owned.len() != local.len() {
+        return Err(ScfError::InvalidInput("k pools: delivered orbital shape"));
+    }
+    let mut owned = owned.into_iter();
+    let mut out = Vec::with_capacity(pool.nk);
+    for k in 0..pool.nk {
+        let n = pool.basis_len[k];
+        let mine = if local.contains(&k) {
+            let li = k - local.start;
+            let (block, x) = (
+                &state.blocks[li],
+                owned.next().expect("one block per local k"),
+            );
+            if x.cols() != bands || block.basis.vectors().len() != n {
+                return Err(ScfError::InvalidInput("k pools: delivered orbital shape"));
+            }
+            Some((x, block.operator.local_rows().to_vec().into()))
+        } else {
+            None
+        };
+        out.push(super::lazy::LazyOrbitals::pooled_k(
+            mine,
+            (pool.pool_size() > 1).then(|| pool.comm.clone()).flatten(),
+            pool.pool_first[pool.owner(k)],
+            n,
+            bands,
+            world.clone(),
+        ));
+    }
+    Ok(Some(out))
+}
+
 #[cfg(test)]
 #[allow(clippy::useless_vec, clippy::needless_range_loop)]
 mod tests {

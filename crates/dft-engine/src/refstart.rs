@@ -1734,6 +1734,7 @@ fn start_kpoints_inner<K: Collective>(
     let cell = input.cell;
     // Check the caller's grid before common_options installs the k-union grid.
     validate_strain_grid(o)?;
+    let bases_clock = Instant::now();
     let db = o.basis(cell, [0.; 3], 4.)?;
     let bases: Vec<_> = points
         .iter()
@@ -1755,6 +1756,7 @@ fn start_kpoints_inner<K: Collective>(
             dims[a] = dims[a].max(d[a]);
         }
     }
+    let bases_s = bases_clock.elapsed().as_secs_f64();
     let mut common_options = o.clone();
     common_options.gamma_real = crate::model::GammaReal::On;
     common_options.grid_override = Some(dims);
@@ -1774,7 +1776,147 @@ fn start_kpoints_inner<K: Collective>(
     )?;
     common.setup.total_s = common_clock.elapsed().as_secs_f64();
     common.setup.collective_s = timed.seconds();
+    *common
+        .setup
+        .phases
+        .entry("complex_k_bases_grids")
+        .or_default() += bases_s;
     finish_kpoints(input, points, comm, bases, &db, common)
+}
+
+/// Original k atomic columns (`BAANDI_K_START_MEMO=off`): one radial
+/// quadrature per (owned row, atom, m). Kept as the bit reference of the memo.
+fn atomic_k_columns_direct(
+    species: &[Species<'_>],
+    basis: &PlaneWaveBasis,
+    rows: &[usize],
+    volume: f64,
+    rule: crate::RadialEvenRule,
+    columns: &mut Vec<Vec<C>>,
+) -> Result<(), ScfError> {
+    for sp in species {
+        for channel in atomic_orbitals(sp.potential) {
+            for pos in sp.positions_bohr {
+                for m in -(channel.l as isize)..=channel.l as isize {
+                    let mut col = Vec::with_capacity(rows.len());
+                    for &g in rows {
+                        let q = &basis.momenta()[g];
+                        let radial = projector_transform_with_rule(
+                            sp.potential.mesh(),
+                            channel.l,
+                            &channel.radial_times_r,
+                            q.norm_squared.sqrt(),
+                            rule,
+                        )
+                        .map_err(err)?
+                            / volume.sqrt();
+                        let y = if q.norm_squared == 0. {
+                            if channel.l == 0 {
+                                1. / (4. * PI).sqrt()
+                            } else {
+                                0.
+                            }
+                        } else {
+                            real_spherical_harmonic(channel.l, m, q.cartesian).map_err(err)?
+                        };
+                        let angle: f64 = q.cartesian.iter().zip(pos).map(|(q, r)| q * r).sum();
+                        col.push(
+                            C::new(0., -1.).powu(channel.l as u32)
+                                * C::from_polar(1., -angle)
+                                * (radial * y),
+                        );
+                    }
+                    columns.push(col);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reused buffers of the memoized k column build (GK1).
+#[derive(Default)]
+struct KColumnScratch {
+    /// |k+G|^2 bits -> radial transform / sqrt(volume), per channel.
+    radial_by_bits: std::collections::HashMap<u64, f64>,
+    /// radial * Y_lm per (m, owned row), m-major.
+    radial_y: Vec<f64>,
+    /// (-i)^l exp(-i q.tau) per owned row for the current atom.
+    phase: Vec<C>,
+}
+
+/// GK1: bit-identical to `atomic_k_columns_direct`. The radial transform
+/// depends only on (species channel, |k+G|), so it is evaluated once per
+/// distinct |k+G|^2 bit pattern (the argument is `norm_squared.sqrt()`, so equal
+/// bits give equal arguments); `radial * y` is formed once per (m, row) and the
+/// atomic phase once per (atom, row). Every element keeps the original
+/// operands and product order `((-i)^l * phase) * (radial * y)`, and columns
+/// come out in the original (species, channel, atom, m) order. Species without
+/// atoms are skipped, as in the direct loop; on invalid input both return an
+/// error (the message may come from a different row).
+fn atomic_k_columns_memo(
+    species: &[Species<'_>],
+    basis: &PlaneWaveBasis,
+    rows: &[usize],
+    volume: f64,
+    rule: crate::RadialEvenRule,
+    s: &mut KColumnScratch,
+    columns: &mut Vec<Vec<C>>,
+) -> Result<(), ScfError> {
+    use std::collections::hash_map::Entry;
+    let momenta = basis.momenta();
+    let n = rows.len();
+    for sp in species {
+        if sp.positions_bohr.is_empty() {
+            continue;
+        }
+        for channel in atomic_orbitals(sp.potential) {
+            let l = channel.l;
+            let ms = 2 * l + 1;
+            s.radial_by_bits.clear();
+            s.radial_y.clear();
+            s.radial_y.resize(ms * n, 0.);
+            for (r, &g) in rows.iter().enumerate() {
+                let q = &momenta[g];
+                let radial = match s.radial_by_bits.entry(q.norm_squared.to_bits()) {
+                    Entry::Occupied(e) => *e.get(),
+                    Entry::Vacant(e) => *e.insert(
+                        projector_transform_with_rule(
+                            sp.potential.mesh(),
+                            l,
+                            &channel.radial_times_r,
+                            q.norm_squared.sqrt(),
+                            rule,
+                        )
+                        .map_err(err)?
+                            / volume.sqrt(),
+                    ),
+                };
+                for (mi, m) in (-(l as isize)..=l as isize).enumerate() {
+                    let y = if q.norm_squared == 0. {
+                        if l == 0 { 1. / (4. * PI).sqrt() } else { 0. }
+                    } else {
+                        real_spherical_harmonic(l, m, q.cartesian).map_err(err)?
+                    };
+                    s.radial_y[mi * n + r] = radial * y;
+                }
+            }
+            let prefactor = C::new(0., -1.).powu(l as u32);
+            for pos in sp.positions_bohr {
+                s.phase.clear();
+                s.phase.extend(rows.iter().map(|&g| {
+                    let q = &momenta[g];
+                    let angle: f64 = q.cartesian.iter().zip(pos).map(|(q, r)| q * r).sum();
+                    prefactor * C::from_polar(1., -angle)
+                }));
+                for mi in 0..ms {
+                    let ry = &s.radial_y[mi * n..(mi + 1) * n];
+                    columns.push(s.phase.iter().zip(ry).map(|(&p, &v)| p * v).collect());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 // Shared atomic-orbital Ritz construction; SCF and fixed-density starts use
@@ -1816,6 +1958,8 @@ fn finish_kpoints<K: Collective>(
     let mut blocks = Vec::new();
     let mut orbitals = Vec::new();
     let mut initial_h_columns = 0;
+    let memo = dft_numerics::switches::on(dft_numerics::switches::Id::K_START_MEMO);
+    let mut memo_scratch = KColumnScratch::default();
     let clock = Instant::now();
     for (point, basis) in points.iter().zip(bases) {
         if bands > basis.vectors().len() {
@@ -1823,11 +1967,16 @@ fn finish_kpoints<K: Collective>(
                 "reference k start: too many bands for a k basis",
             ));
         }
+        // Per-k stage split of complex_k_atomic_starts (one clock per stage
+        // per k; diagnostics only, no effect on arithmetic).
+        let stage = Instant::now();
         let grid = FftGridSpec::new(&basis, db, Some(dims))?;
         let layout = DistributedPairFft::new(dims, grid.g_to_fft(), comm.rank(), comm.size())
             .map_err(err)?;
         let rows = layout.local_positions().to_vec();
         drop(layout);
+        common.setup.record("k_start_grid_layout", stage);
+        let stage = Instant::now();
         let nl = NonlocalOperator::new_owned_with_rule(
             &basis,
             cell.volume_bohr3(),
@@ -1835,6 +1984,8 @@ fn finish_kpoints<K: Collective>(
             o.radial_even_rule,
             &rows,
         )?;
+        common.setup.record("k_start_nonlocal_tables", stage);
+        let stage = Instant::now();
         let mut op = dft_physics::distributed_complex::DistributedComplexHamiltonian::new_owned(
             &basis,
             &grid,
@@ -1857,44 +2008,31 @@ fn finish_kpoints<K: Collective>(
         let mut potential = Vec::new();
         planes.a_to_b(comm, &common.potential, &mut potential)?;
         op.set_owned_potential(&potential, 1).map_err(err)?;
+        common.setup.record("k_start_operator_potential", stage);
+        let stage = Instant::now();
         let mut columns = Vec::new();
-        for sp in &species {
-            for channel in atomic_orbitals(sp.potential) {
-                for pos in sp.positions_bohr {
-                    for m in -(channel.l as isize)..=channel.l as isize {
-                        let mut col = Vec::with_capacity(rows.len());
-                        for &g in &rows {
-                            let q = &basis.momenta()[g];
-                            let radial = projector_transform_with_rule(
-                                sp.potential.mesh(),
-                                channel.l,
-                                &channel.radial_times_r,
-                                q.norm_squared.sqrt(),
-                                o.radial_even_rule,
-                            )
-                            .map_err(err)?
-                                / cell.volume_bohr3().sqrt();
-                            let y = if q.norm_squared == 0. {
-                                if channel.l == 0 {
-                                    1. / (4. * PI).sqrt()
-                                } else {
-                                    0.
-                                }
-                            } else {
-                                real_spherical_harmonic(channel.l, m, q.cartesian).map_err(err)?
-                            };
-                            let angle: f64 = q.cartesian.iter().zip(pos).map(|(q, r)| q * r).sum();
-                            col.push(
-                                C::new(0., -1.).powu(channel.l as u32)
-                                    * C::from_polar(1., -angle)
-                                    * (radial * y),
-                            );
-                        }
-                        columns.push(col);
-                    }
-                }
-            }
+        if memo {
+            atomic_k_columns_memo(
+                &species,
+                &basis,
+                &rows,
+                cell.volume_bohr3(),
+                o.radial_even_rule,
+                &mut memo_scratch,
+                &mut columns,
+            )?;
+        } else {
+            atomic_k_columns_direct(
+                &species,
+                &basis,
+                &rows,
+                cell.volume_bohr3(),
+                o.radial_even_rule,
+                &mut columns,
+            )?;
         }
+        common.setup.record("k_start_atomic_columns", stage);
+        let stage = Instant::now();
         // Two-pass owned-row MGS, then lowest kinetic coordinate complements.
         // Complements are chosen from the actual k+G kinetic order, never G index.
         let mut order: Vec<_> = (0..basis.vectors().len()).collect();
@@ -1978,8 +2116,12 @@ fn finish_kpoints<K: Collective>(
                 "reference complex atomic start has insufficient rank",
             ));
         }
+        common.setup.record("k_start_orthonormalize", stage);
+        let stage = Instant::now();
         let mut hq = Matrix::zeros(rows.len(), q.cols()).map_err(err)?;
         op.apply_block(comm, &q, &mut hq).map_err(err)?;
+        common.setup.record("k_start_h_apply", stage);
+        let stage = Instant::now();
         initial_h_columns += q.cols();
         let mut gemm = GemmWorkspace::with_pool(
             rows.len().max(q.cols()),
@@ -2022,6 +2164,7 @@ fn finish_kpoints<K: Collective>(
         let mut x = Matrix::zeros(rows.len(), bands).map_err(err)?;
         gemm.multiply_into(&q, MatrixOp::Identity, &c, MatrixOp::Identity, &mut x)
             .map_err(err)?;
+        common.setup.record("k_start_ritz", stage);
         orbitals.push(x);
         blocks.push(KBlock {
             point: *point,

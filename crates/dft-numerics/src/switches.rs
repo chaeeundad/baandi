@@ -338,6 +338,8 @@ table! {
         "G4G research: canonical coordinates within roundoff-degenerate Ritz clusters; default off";
     REFSCF_SPIN_PULAY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4G research: per-channel real-space Pulay replaces the Broyden proposal (serial fixed-sector only); default off pending dev08 O run";
+    K_START_MEMO: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK1: k atomic start computes each orbital radial transform once per (species channel, exact |k+G|) and reuses it over atoms and m; bit-identical; off restores the per-(row, atom, m) quadrature";
 }
 
 struct Resolved {

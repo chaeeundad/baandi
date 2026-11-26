@@ -4130,3 +4130,27 @@ in the four null fields and the switch entry, density.bin identical. Mac release
 ordinary-map density phase 0.2897 -> 0.2869 s (Si8), wall 4.07 -> 4.03 s (noise level; serial has no collective
 latency). Expected gain (E) is MPI only: about 2 + (1 - 1/nk) collectives and the projector GEMM per k per map
 removed (B12 172 k: ~500 collectives per map). Needs dev08 MPI8 one run per arm (GeTe, B12, IrI3, si64 unchanged).
+
+## GK1-START-MEMO — k atomic start radial memo (2026-11-26; bit-identical, default on, dev08 pending)
+
+Change (`crates/dft-engine/src/refstart.rs`, `finish_kpoints`, shared by the unpolarized, spin/FD and
+fixed-density k starts): the atomic-orbital columns evaluate the radial transform once per (species channel,
+exact |k+G|^2 bits) per k instead of once per (owned row, atom, m); `radial * Y_lm` once per (m, row); the phase
+`(-i)^l exp(-i q.tau)` once per (atom, row). Operands and product order `((-i)^l * phase) * (radial * y)` are those
+of the former loop, which is kept verbatim behind `BAANDI_K_START_MEMO=off`. Columns were already built for owned
+rows only (no replicated work in this stage). Added per-k stage timers inside `complex_k_atomic_starts`
+(`k_start_grid_layout`, `k_start_nonlocal_tables`, `k_start_operator_potential`, `k_start_atomic_columns`,
+`k_start_orthonormalize`, `k_start_h_apply`, `k_start_ritz`) and `complex_k_bases_grids`, so dev08 can see the split.
+Evidence: `tests/k_start_memo.rs` start-orbital bits equal with memo on/off on a 2-species (5 atoms, s+p), 3-k
+(Gamma, line, generic) skewed fixture at 1 and 3 simulated ranks. Mac observation (O, release, serial, heavily
+loaded host, load average 22-27 on 12 cores; 10 atoms, 40 atomic columns, 1201-point meshes, npw ~5000, 4 generic k):
+`k_start_atomic_columns` off 42.4 / 14.0 s, on 1.2 / 4.4 / 1.7 s (three runs, noisy); radial calls per k fall from
+npw x 40 to at most npw x 4 (10x; the factor is columns per radial channel, about 7-24x on IrI3/B12/GeTe).
+After the memo the largest remaining start stage on the Mac is `k_start_nonlocal_tables` (1.7-8.7 s, noisy):
+`NonlocalOperator::new_owned_with_rule` (`crates/dft-physics/src/hamiltonian.rs:2496-2523`) builds the projector
+factor table over the FULL k sphere on every rank (radial transform per distinct |k+G| x projector, ~npw distinct at
+generic k), so on MPI8 it is replicated 8x; candidate for the next ticket (owned-row or rank-split table, plan item 2).
+Not changed: start MGS with one tree sum per column pair (`refstart.rs` k section) — batching the projections
+turns modified into classical Gram-Schmidt and changes bits; it is replaced by GK11 (generalized Ritz start).
+The start H application is already one block apply per k. Lesson: per-(row, atom, m) loops over a quantity that
+depends on (channel, |q|) only are the dominant start cost; check the inner-loop invariants of every per-k setup.

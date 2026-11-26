@@ -4952,3 +4952,15 @@ results bit-identical (test `refscf_k_lean`); Mac serial wall unchanged within n
 saving is collective latency and the projector GEMM per k under MPI, to be measured on dev08. Not done (outside the
 bit-identical class, untested): taking residual norms from the solver's own last residual instead of the true
 residual of the returned block (different arithmetic, so history `max_eigen_residual` and delivered residuals move).
+
+## GK1-START-MEMO — k atomic start radial memo (2026-11-26)
+
+Profile (relayed dev08 MPI8): `complex_k_atomic_starts` is 99.2-99.7 % of engine setup on IrI3 (472.6 of 476.2 s),
+GeTe, B12 and SnBr2. Code finding (plan `docs/performance/general-path-speed-plan.md` section 4 item 1): the radial
+quadrature of each atomic column was recomputed per (owned row, atom, m) although it depends only on (species
+channel, |k+G|). Change: `atomic_k_columns_memo` in `refstart.rs` caches it per channel by the exact bits of
+|k+G|^2, forms `radial * y` per (m, row) and the phase per (atom, row), keeping the former operands and product
+order; the former loop stays as `atomic_k_columns_direct` behind `BAANDI_K_START_MEMO=off`. Bit-identical start
+orbitals (test `k_start_memo`, 2 species, 3 k, 1 and 3 ranks). Mac (O, serial, loaded host): column stage
+14-42 s -> 1.2-4.4 s on a 40-column, npw ~5000, 4-k fixture. Per-stage timers added to the k start for dev08.
+Rejected here: batching the start MGS collectives (not bit-identical; superseded by GK11).

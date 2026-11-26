@@ -4346,3 +4346,63 @@ those exact vectors; a first draft paired the start HX with `state.orbitals` and
 wrong HX (caught by `refscf::api::seeded_symmetry_tests::prepared_seed_preserves_stepper_delivery`).
 Lesson: map 1 recomputed H X twice for vectors whose H X was already known (start Ritz HQ C, coarse solve on the same
 potential); check every "invalidate" of a product cache against whether the operator actually changed.
+
+## GK9-K-POOLS — k-point pools of size one, stage 1 (2026-11-27; rounding class, default off, dev08 A/B pending)
+
+Premise (relayed dev08 MPI8, after the bit-identical batch): GeTe (260 k, N_pw about 4.6k, 48^3, 19 bands) SCF
+42.6 s against QE -nk 4 32.3 s (-nk 1 39.1 s); B12 (172 k, N_pw about 6.6k, 54^3) 88.9 s against QE -nk 2 82.3 s.
+Every k was G/stick-distributed over all ranks and the k points ran one after another, so small-N_pw many-k cases
+paid collective latency in every Davidson iteration of every k. ADR 0041 option D; plan section 6 GK9.
+Change (`BAANDI_REFSCF_K_POOLS=off|auto|on`, default off; `auto` = `on` in stage 1): each rank owns a contiguous
+block of whole k points (`dft_mpi::block_counts`, the MPI-DERIV derivative rule), builds only those operators with
+all rows (one-rank `DistributedComplexHamiltonian`) and runs start, Davidson, kept HX, residuals, band energies and
+band densities with the serial collective (`refscf/k_pool.rs::KComm`, one code path for both layouts). Per map on
+the world communicator: one allgatherv of the field-plane potential (then a local transpose per operator axis), one
+allgatherv of record lengths (it carries a failure flag, so a rank-local Davidson error never strands the others)
+and one of the Codec-encoded per-k records (eigenvalues, residual norms, solve records, per-band kinetic and
+nonlocal terms), one alltoall of the per-k densities, which each plane owner adds in global k order. Every k sum
+(density, band sum, kinetic, nonlocal, residual bound, guard) is replayed in global k order exactly as the one-rank
+loop forms it, so the k loop's output for a given input does not depend on the k-to-rank assignment; the replayed
+kinetic term enters the existing integral tree sum from rank 0 only (x + 0 = x). Covered: the fixed-occupation k
+driver (k_driver/k_map, start in refstart `finish_kpoints`), the spin/FD driver (electronic_map: solve, record
+allgather, replicated FD occupations, density/energy replay; band growth via `extend_k_orbitals` on the serial
+collective; global `min_basis`), verification, delivery (owner broadcasts its full-row block), ionic seeds and
+checkpoints (each rank saves its own whole k; the owned range is checked; the switch is in the agreement hash; a
+pending k map is rejected as before). Falls back to the distributed layout (path note on the switch) with one rank,
+fewer k than ranks (stage 2: sub-communicators) or an external electronic trace (subspace loss/rotation probe).
+Forces/stress unchanged: they read the delivered full orbitals and already split k by the same block rule.
+Evidence (Mac, synthetic pseudopotentials, simulated ranks; never QE evidence):
+- Pools off is bit-identical to main 88e3f3f0 at P = 1, 2, 3: 18 fingerprints (energy, density, eigenvalues,
+  orbitals; skewed Gamma-in-list and MP222 shifted, strict and standard; FD and fixed-spin) from a base build of
+  `git archive 88e3f3f0` and this branch, identical bits (`diff` empty).
+- One rank: pools on = off bit for bit (layout "distributed", reason "one rank").
+- Class matrix (`dft-engine/tests/refscf_k_pools.rs`, release, `--include-ignored`): 64 rows pools-on at P = 2, 3, 8
+  against P = 1 (cubic, skewed, elongated, slab x Gamma-in-list (3 k) and MP222 shifted (8 k) x strict/standard;
+  FD and fixed spin MP222 at P = 2, 3, 8): |dE| <= 2.4e-13 Ha in strict runs, <= 4.2e-9 Ha in standard runs (the
+  slab Gamma-in-list fixture; the distributed layout shows 4.2e-9 Ha there too, all other standard rows <= 2.2e-13
+  Ha); same k count; map counts equal in 59 of 64 rows; the 5 others are the slab Gamma-in-list fixture (strict 33
+  -> 37 at P = 3/8, standard 28 -> 29), where the distributed layout itself moves the count by the same 4 / 1
+  maps over P = 2, 3, 8 (slow vacuum SCF at 1e-12 Ry; the test gates against that spread and prints it). P = 8
+  with 3 k falls back ("distributed") as designed. H columns 104363 (P = 1) vs 104613 (pools) over the matrix.
+- Fixed rank count bit-reproducible: two runs at P = 2 and P = 3 (scalar, FD, spin), every rank's delivery equal.
+- Fewer k than ranks (3 k, P = 4, `auto`): bits equal to pools off.
+- Pooled checkpoint at map 2 (P = 2, MP222 shifted, verification on) restarts bit-identically.
+- World collectives per map (P = 3, 8 k, skewed, marginal count from a 23-map strict and an 11-map standard run):
+  pools off 290 (tree_sum 230.7, alltoall 57.3, allgatherv 2.0), 63600 values; pools on 25 (tree_sum 15, alltoall
+  5, allgatherv 5), 12974 values. Totals with start and delivery (11 maps): 7355 -> 315 collectives.
+- Mac timing observation (simulated ranks are threads with barrier collectives, which overstates latency; not
+  acceptance): B12-shaped synthetic (12 atoms, 22 bands, 16 generic k, ecut 8 Ha, skewed cell), one run per arm,
+  standard class: P = 8 wall 4.43 -> 1.18 s (start 1.19 -> 0.07 s, solve 2.84 -> 0.72 s), P = 4 3.25 -> 1.80 s;
+  maps 12 and H columns 17992 in all arms; |dE| <= 1.0e-14 Ha.
+- No MPI toolchain on the Mac (ADR 0041 decision 2026-11-09): the real `mpirun` check runs on dev08.
+Memory per rank with pools: the full-grid potential (plus one transposed copy when an operator uses the other plane
+axis) and the density exchange buffers, about 2 x (owned k) x grid doubles (GeTe at MPI8: 33 k x 110592 x 8 B =
+29 MB per buffer); the per-k operators hold all rows of fewer k (net payload per rank similar to today).
+Needs dev08 (MPI8 socket 0, one thread per rank, phase profile on, one run per arm): GeTe, B12, IrI3 (spin/FD path)
+with `BAANDI_REFSCF_K_POOLS=on` against off, plus si64 (Gamma, must be unchanged: the switch is not consulted on the
+real Gamma path); real-MPI bit reproducibility (two runs) and the MPI8-vs-MPI1 class on one case. Flip the default
+to `on` (or `auto`) if the median wall improves (adoption rule 2026-11-10).
+Limits: stage 1 only (pool size one); with nk < ranks nothing changes; load balance is block-contiguous by k count,
+not by N_pw (at 260 k / 8 ranks: 33 or 32 k per rank).
+Lesson: a replayed global scalar that later enters an existing rank-partial tree sum is counted P times; the first
+pooled run gave a 1.1 Ha energy error with eigenvalues correct to 5e-12 Ha (caught by the P = 1 class check).

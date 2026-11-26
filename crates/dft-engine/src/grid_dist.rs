@@ -311,7 +311,7 @@ pub(crate) struct OwnedFields {
 
 /// Plane start of rank r for n0 planes over `ranks` ranks (the rule of
 /// `DistributedPairFft`: r * (n0 / P) + min(r, n0 % P)).
-fn plane_starts(n0: usize, ranks: usize) -> Vec<usize> {
+pub(crate) fn plane_starts(n0: usize, ranks: usize) -> Vec<usize> {
     (0..=ranks)
         .map(|r| r * (n0 / ranks) + r.min(n0 % ranks))
         .collect()

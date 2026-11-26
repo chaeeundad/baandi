@@ -18,6 +18,7 @@ mod electronic_map;
 pub mod k_driver;
 mod k_kept;
 mod k_map;
+pub(crate) mod k_pool;
 pub mod kept_hx;
 pub mod ladder;
 pub mod lazy;

@@ -20,6 +20,24 @@ pub(super) struct PerK {
     pub converged: Vec<bool>,
     pub calls: Vec<super::record::SolveRecord>,
 }
+/// One k point's map output as the k-order replay consumes it (and as GK9
+/// pools exchange it): the solve record, the per-band kinetic terms and the
+/// nonlocal term (non-lean maps), the squared residual norms (GK4 deferred
+/// maps) and whether the solve began from a kept HX.
+pub(super) struct KTerms {
+    pub per_k: PerK,
+    pub kinetic: Vec<f64>,
+    pub nonlocal: Option<f64>,
+    pub r2: Vec<f64>,
+    pub warm: bool,
+}
+/// Weights of every global k point (the pool's list with pools).
+pub(super) fn k_weights(state: &KStartState) -> Vec<f64> {
+    state.pool.as_ref().map_or_else(
+        || state.blocks.iter().map(|b| b.point.weight).collect(),
+        |p| p.weights(),
+    )
+}
 pub(super) struct Solution {
     pub eigenvectors: KOrbitals,
     pub hx: Option<KOrbitals>,
@@ -79,10 +97,6 @@ pub(super) fn evaluate<K: Collective>(
     let v0 = sum(comm, &[potential.iter().sum::<f64>()])?[0] / points as f64;
     timings.potential = clock.elapsed();
     let bands = occupations.len();
-    let mut vectors = Vec::new();
-    let mut products = Vec::new();
-    let mut per_k = Vec::new();
-    let mut warm_start = false;
     let mut density = vec![0.; input.len()];
     let mut kinetic = 0.;
     let mut nonlocal = 0.;
@@ -95,137 +109,246 @@ pub(super) fn evaluate<K: Collective>(
     // integrals share one element-wise tree sum per map.
     let deferred = dft_numerics::switches::on(dft_numerics::switches::Id::K_LEAN_ENERGY);
     let band_terms = !(deferred && lean);
-    let mut residual_local = Vec::with_capacity(if deferred {
-        state.blocks.len() * bands
+    // GK9 pools: this rank solves its own whole k points with the serial
+    // collective (`kc`); the potential is gathered once, the per-k records
+    // are allgathered and the densities exchanged once after the loop.
+    let pooled = state.pool.is_some();
+    let kc = super::k_pool::KComm::new(comm, pooled);
+    let field_axis = state.fields.first_axis();
+    let mut full_potential = if pooled {
+        Some(super::k_pool::FullField::gather(
+            comm, dims, field_axis, &potential,
+        )?)
+    } else {
+        None
+    };
+    let mut exchange = state
+        .pool
+        .as_ref()
+        .map(|p| super::k_pool::DensityExchange::new(p, dims, field_axis, 1));
+    let solved = (|| -> Result<_, ScfError> {
+        let mut vectors = Vec::new();
+        let mut products = Vec::new();
+        let mut terms = Vec::new();
+        for k in 0..state.blocks.len() {
+            let mut op_potential = Vec::new();
+            if let Some(full) = full_potential.as_mut() {
+                op_potential
+                    .extend_from_slice(full.for_axis(state.blocks[k].operator.first_axis())?);
+            } else {
+                let mut planes = crate::grid_dist::PlaneMap::new(
+                    dims,
+                    comm.rank(),
+                    comm.size(),
+                    field_axis,
+                    state.blocks[k].operator.first_axis(),
+                );
+                planes.a_to_b(comm, &potential, &mut op_potential)?;
+            }
+            let op = &mut state.blocks[k].operator;
+            let epoch = op
+                .owned_epoch()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(ScfError::InvalidInput("k potential epoch overflow"))?;
+            op.set_owned_potential(&op_potential, epoch)
+                .map_err(numerical)?;
+            let diagonal: Vec<_> = op.diagonal_static().iter().map(|v| v + v0).collect();
+            let initial_hx = kept.prepare(k, &kc, op, &state.orbitals.0[k], &op_potential)?;
+            let warm = initial_hx.is_some();
+            let mut options = ref_davidson::Options::new(
+                bands,
+                ethr_ry / 2.,
+                occupations.iter().filter(|&&f| f > 0.).count(),
+            );
+            // GK10B research (`K_FIRST_EMPTY_RULE`, default off): this driver's
+            // occupations are fixed and known before the first solve, so the
+            // first map may keep the empty-band threshold for empty bands
+            // instead of converging every band to the occupied threshold. It
+            // changes the map-1 density when no redo follows.
+            options.first_step = first_step
+                && !dft_numerics::switches::on(dft_numerics::switches::Id::K_FIRST_EMPTY_RULE);
+            options.return_hx = true;
+            options.profile = diagnostics;
+            let clock = Instant::now();
+            let mut calls = Vec::new();
+            let mut solve = ref_davidson_complex::solve_with_initial_hx(
+                &kc,
+                op,
+                &state.orbitals.0[k],
+                &diagonal,
+                options,
+                initial_hx.as_ref(),
+            )
+            .map_err(numerical)?;
+            for retry in 0..6 {
+                calls.push(super::k_driver::solve_record(
+                    &mut solve,
+                    k,
+                    ethr_ry,
+                    first_step && retry == 0,
+                    diagnostics,
+                ));
+                if solve.converged.iter().filter(|&&v| !v).count() <= 5.max(bands / 4) {
+                    break;
+                }
+                if retry == 5 {
+                    return Err(ScfError::InvalidInput(
+                        "complex reference Davidson exhausted six calls",
+                    ));
+                }
+                options.first_step = false;
+                solve =
+                    ref_davidson_complex::solve(&kc, op, &solve.eigenvectors, &diagonal, options)
+                        .map_err(numerical)?;
+            }
+            timings.diagonalization += clock.elapsed();
+            let clock = Instant::now();
+            let weight = state.blocks[k].point.weight;
+            let weights: Vec<_> = occupations.iter().map(|f| f * weight).collect();
+            let op = &mut state.blocks[k].operator;
+            let hx = solve.hx.as_ref().expect("HX requested");
+            let local: Vec<_> = (0..bands)
+                .map(|j| {
+                    (0..op.local_rows().len())
+                        .map(|i| {
+                            (hx[(i, j)] - solve.eigenvalues[j] * solve.eigenvectors[(i, j)])
+                                .norm_sqr()
+                        })
+                        .sum()
+                })
+                .collect();
+            let (rs, r2) = if deferred {
+                (Vec::new(), local)
+            } else {
+                (
+                    sum(&kc, &local)?.into_iter().map(f64::sqrt).collect(),
+                    Vec::new(),
+                )
+            };
+            let kinetic: Vec<_> = if band_terms {
+                (0..bands)
+                    .map(|j| band_kinetic(op, &solve.eigenvectors, j, weights[j]))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let nonlocal = if band_terms {
+                Some(band_nonlocal(op, &kc, &solve.eigenvectors, &weights)?)
+            } else {
+                None
+            };
+            let mut op_density = vec![0.; op.plane_points()];
+            op.band_density_sum(
+                &kc,
+                &solve.eigenvectors,
+                &weights,
+                cell.volume_bohr3(),
+                &mut op_density,
+            )
+            .map_err(numerical)?;
+            if let (Some(ex), Some(pool)) = (exchange.as_mut(), state.pool.as_ref()) {
+                ex.add(pool, 0, k, op.first_axis(), &op_density)?;
+            } else {
+                let mut planes = crate::grid_dist::PlaneMap::new(
+                    dims,
+                    comm.rank(),
+                    comm.size(),
+                    field_axis,
+                    op.first_axis(),
+                );
+                let mut local_density = Vec::new();
+                planes.b_to_a(comm, &op_density, &mut local_density)?;
+                for (a, b) in density.iter_mut().zip(local_density) {
+                    *a += b;
+                }
+            }
+            kept.retain(k, state, &solve.eigenvectors, hx, &op_potential);
+            timings.density += clock.elapsed();
+            terms.push(KTerms {
+                per_k: PerK {
+                    eigenvalues: solve.eigenvalues,
+                    residuals: rs,
+                    converged: solve.converged,
+                    calls,
+                },
+                kinetic,
+                nonlocal,
+                r2,
+                warm,
+            });
+            vectors.push(solve.eigenvectors);
+            products.push(solve.hx.unwrap());
+        }
+        Ok((vectors, products, terms))
+    })();
+    // Without pools every rank holds every k (the rows are distributed); with
+    // pools the per-k records of all ranks arrive in global k order.
+    let (vectors, products, terms) = match &state.pool {
+        None => solved?,
+        Some(pool) => {
+            let (vectors, products, terms) = match solved {
+                Ok((v, p, t)) => (v, p, Ok(t)),
+                Err(e) => (Vec::new(), Vec::new(), Err(e)),
+            };
+            let terms = super::k_pool::allgather(comm, terms)?;
+            if terms.len() != pool.nk {
+                return Err(ScfError::InvalidInput("k pools: record count"));
+            }
+            let clock = Instant::now();
+            exchange.take().expect("pooled exchange").finish(
+                comm,
+                pool,
+                std::slice::from_mut(&mut density),
+            )?;
+            timings.density += clock.elapsed();
+            (vectors, products, terms)
+        }
+    };
+    // Warm start: any k whose solve began from a kept HX (identical without
+    // pools; with pools the flags of every rank's k).
+    let warm_start = terms.iter().any(|t| t.warm);
+    let k_weights = k_weights(state);
+    let mut residual_local = Vec::with_capacity(if deferred && !pooled {
+        terms.len() * bands
     } else {
         0
     });
-    for k in 0..state.blocks.len() {
-        let mut planes = crate::grid_dist::PlaneMap::new(
-            dims,
-            comm.rank(),
-            comm.size(),
-            state.fields.first_axis(),
-            state.blocks[k].operator.first_axis(),
-        );
-        let mut op_potential = Vec::new();
-        planes.a_to_b(comm, &potential, &mut op_potential)?;
-        let op = &mut state.blocks[k].operator;
-        let epoch = op
-            .owned_epoch()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or(ScfError::InvalidInput("k potential epoch overflow"))?;
-        op.set_owned_potential(&op_potential, epoch)
-            .map_err(numerical)?;
-        let diagonal: Vec<_> = op.diagonal_static().iter().map(|v| v + v0).collect();
-        let initial_hx = kept.prepare(k, comm, op, &state.orbitals.0[k], &op_potential)?;
-        warm_start |= initial_hx.is_some();
-        let mut options = ref_davidson::Options::new(
-            bands,
-            ethr_ry / 2.,
-            occupations.iter().filter(|&&f| f > 0.).count(),
-        );
-        // GK10B research (`K_FIRST_EMPTY_RULE`, default off): this driver's
-        // occupations are fixed and known before the first solve, so the
-        // first map may keep the empty-band threshold for empty bands
-        // instead of converging every band to the occupied threshold. It
-        // changes the map-1 density when no redo follows.
-        options.first_step = first_step
-            && !dft_numerics::switches::on(dft_numerics::switches::Id::K_FIRST_EMPTY_RULE);
-        options.return_hx = true;
-        options.profile = diagnostics;
-        let clock = Instant::now();
-        let mut calls = Vec::new();
-        let mut solve = ref_davidson_complex::solve_with_initial_hx(
-            comm,
-            op,
-            &state.orbitals.0[k],
-            &diagonal,
-            options,
-            initial_hx.as_ref(),
-        )
-        .map_err(numerical)?;
-        for retry in 0..6 {
-            calls.push(super::k_driver::solve_record(
-                &mut solve,
-                k,
-                ethr_ry,
-                first_step && retry == 0,
-                diagnostics,
-            ));
-            if solve.converged.iter().filter(|&&v| !v).count() <= 5.max(bands / 4) {
-                break;
-            }
-            if retry == 5 {
-                return Err(ScfError::InvalidInput(
-                    "complex reference Davidson exhausted six calls",
-                ));
-            }
-            options.first_step = false;
-            solve = ref_davidson_complex::solve(comm, op, &solve.eigenvectors, &diagonal, options)
-                .map_err(numerical)?;
-        }
-        timings.diagonalization += clock.elapsed();
-        let clock = Instant::now();
-        let weight = state.blocks[k].point.weight;
+    let mut per_k = Vec::with_capacity(terms.len());
+    // The one-rank loop's accumulation, replayed in global k order.
+    for (t, &weight) in terms.into_iter().zip(&k_weights) {
         let weights: Vec<_> = occupations.iter().map(|f| f * weight).collect();
-        let op = &mut state.blocks[k].operator;
-        let hx = solve.hx.as_ref().expect("HX requested");
-        let local: Vec<_> = (0..bands)
-            .map(|j| {
-                (0..op.local_rows().len())
-                    .map(|i| {
-                        (hx[(i, j)] - solve.eigenvalues[j] * solve.eigenvectors[(i, j)]).norm_sqr()
-                    })
-                    .sum()
-            })
-            .collect();
-        let rs: Vec<_> = if deferred {
-            residual_local.extend(local);
-            Vec::new()
-        } else {
-            sum(comm, &local)?.into_iter().map(f64::sqrt).collect()
-        };
+        let mut info = t.per_k;
         for j in 0..bands {
             if !deferred {
-                residuals[j] = residuals[j].max(rs[j]);
+                residuals[j] = residuals[j].max(info.residuals[j]);
             }
-            band_sum += weights[j] * solve.eigenvalues[j];
+            band_sum += weights[j] * info.eigenvalues[j];
             if !deferred {
-                residual_bound += weights[j] * rs[j];
+                residual_bound += weights[j] * info.residuals[j];
             }
             if band_terms {
-                kinetic += band_kinetic(op, &solve.eigenvectors, j, weights[j]);
+                kinetic += t.kinetic[j];
             }
         }
-        if band_terms {
-            nonlocal += band_nonlocal(op, comm, &solve.eigenvectors, &weights)?;
+        if let Some(v) = t.nonlocal {
+            nonlocal += v;
         }
-        let mut op_density = vec![0.; op.plane_points()];
-        op.band_density_sum(
-            comm,
-            &solve.eigenvectors,
-            &weights,
-            cell.volume_bohr3(),
-            &mut op_density,
-        )
-        .map_err(numerical)?;
-        let mut local_density = Vec::new();
-        planes.b_to_a(comm, &op_density, &mut local_density)?;
-        for (a, b) in density.iter_mut().zip(local_density) {
-            *a += b;
+        if deferred {
+            if pooled {
+                // Full-row norms of a one-rank operator: no reduction.
+                info.residuals = t.r2.iter().map(|v| v.sqrt()).collect();
+            } else {
+                residual_local.extend(t.r2);
+            }
         }
-        kept.retain(k, state, &solve.eigenvectors, hx, &op_potential);
-        timings.density += clock.elapsed();
-        per_k.push(PerK {
-            eigenvalues: solve.eigenvalues,
-            residuals: rs,
-            converged: solve.converged,
-            calls,
-        });
-        vectors.push(solve.eigenvectors);
-        products.push(solve.hx.unwrap());
+        per_k.push(info);
+    }
+    // GK9 pools: the replayed kinetic term is already global on every rank and
+    // enters a tree sum of rank partials below; only rank 0 contributes it
+    // (x + 0 = x exactly).
+    if pooled && comm.rank() != 0 {
+        kinetic = 0.;
     }
     if let Some(s) = symmetry {
         let clock = Instant::now();
@@ -251,12 +374,13 @@ pub(super) fn evaluate<K: Collective>(
             ));
         }
         let mut total = sum(comm, &packed)?;
-        for (k, (info, block)) in per_k.iter_mut().zip(&state.blocks).enumerate() {
-            info.residuals = total[k * bands..(k + 1) * bands]
-                .iter()
-                .map(|v| v.sqrt())
-                .collect();
-            let weight = block.point.weight;
+        for (k, (info, &weight)) in per_k.iter_mut().zip(&k_weights).enumerate() {
+            if !pooled {
+                info.residuals = total[k * bands..(k + 1) * bands]
+                    .iter()
+                    .map(|v| v.sqrt())
+                    .collect();
+            }
             for j in 0..bands {
                 residuals[j] = residuals[j].max(info.residuals[j]);
                 if !lean {
@@ -377,14 +501,40 @@ pub(super) fn complete_audit<K: Collective>(
         // GK4 deferred lean map: the per-k band terms in the map's k and band
         // order, then the integrals in the map's slot order (element-wise
         // tree sums, so each slot equals the eager map's value bit for bit).
+        // GK9 pools: each rank forms the terms of its own k points with the
+        // serial collective and the replay adds all of them in k order.
+        let pooled = state.pool.is_some();
+        let kc = super::k_pool::KComm::new(comm, pooled);
+        let local = (|| -> Result<Vec<(Vec<f64>, f64)>, ScfError> {
+            let mut terms = Vec::with_capacity(state.blocks.len());
+            for (block, x) in state.blocks.iter_mut().zip(&step.solve.eigenvectors.0) {
+                let weights: Vec<_> = occupations.iter().map(|f| f * block.point.weight).collect();
+                let kinetic = (0..weights.len())
+                    .map(|j| band_kinetic(&block.operator, x, j, weights[j]))
+                    .collect();
+                terms.push((
+                    kinetic,
+                    band_nonlocal(&mut block.operator, &kc, x, &weights)?,
+                ));
+            }
+            Ok(terms)
+        })();
+        let terms = if pooled {
+            super::k_pool::allgather(comm, local)?
+        } else {
+            local?
+        };
         let mut kinetic = 0.;
         let mut nonlocal = 0.;
-        for (block, x) in state.blocks.iter_mut().zip(&step.solve.eigenvectors.0) {
-            let weights: Vec<_> = occupations.iter().map(|f| f * block.point.weight).collect();
-            for (j, &w) in weights.iter().enumerate() {
-                kinetic += band_kinetic(&block.operator, x, j, w);
+        for (band_kinetic, band_nonlocal) in terms {
+            for v in band_kinetic {
+                kinetic += v;
             }
-            nonlocal += band_nonlocal(&mut block.operator, comm, x, &weights)?;
+            nonlocal += band_nonlocal;
+        }
+        if pooled && comm.rank() != 0 {
+            // Global on every rank; only rank 0 enters the tree sum.
+            kinetic = 0.;
         }
         let points = state.grid.dims().iter().product::<usize>();
         let dv = cell.volume_bohr3() / points as f64;
@@ -459,9 +609,9 @@ pub(super) fn complete_audit<K: Collective>(
 fn residual_term(per_k: &[PerK], state: &KStartState, occupations: &[f64]) -> f64 {
     per_k
         .iter()
-        .zip(&state.blocks)
-        .map(|(s, k)| {
-            k.point.weight
+        .zip(k_weights(state))
+        .map(|(s, weight)| {
+            weight
                 * s.residuals
                     .iter()
                     .zip(occupations)
@@ -536,6 +686,13 @@ super::checkpoint::record!(PerK {
     converged,
     calls
 });
+super::checkpoint::record!(KTerms {
+    per_k,
+    kinetic,
+    nonlocal,
+    r2,
+    warm
+});
 super::checkpoint::record!(Solution {
     eigenvectors,
     hx,
@@ -557,6 +714,9 @@ impl Map {
         state: &KStartState,
         planes: usize,
     ) -> Result<(), ScfError> {
+        if state.pool.is_some() {
+            return Err(super::checkpoint::invalid("pending k map with k pools"));
+        }
         self.input_fields.validate_checkpoint(planes)?;
         if self.density.len() != planes
             || self

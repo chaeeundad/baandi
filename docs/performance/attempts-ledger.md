@@ -4692,3 +4692,32 @@ wall, density hash (must be equal A/B).
 Lesson: on dev08 the transcendental functions dominate per-k scalar setup (5-7x the Mac, against 2.4x for the FFT
 kernel); compute each direction's harmonics and each node's Bessel samples once and share them over every channel
 that needs them. And a "debug convenience" eager broadcast of all orbitals cost more than the start's MGS.
+
+## GK18B-LAZY — lazy pooled delivery actually engaged; spin/FD driver lazy too (2026-11-27; bit-identical, dev08 pending)
+
+Premise (relayed dev08 gen56 GeTe pooled, `run --observe`, energy-only): `BAANDI_M2_LAZY_RESULT` consulted=false in
+every arm; `complex_orbital_gather` still about 0.5 s (0.33 s collectives).
+Cause: the CLI counted every `--observe`/`--agent` run as reading the delivered orbitals (a rule written for the
+legacy telemetry driver), so the reference driver never saw "not needed"; the engine consults the switch only after
+that flag. The reference spin/FD dispatch also returned before the flag was set (default: needed).
+Fix: `run::orbitals_needed(config, mode, reference)` = legacy observe/agent, forces, stress (incl. cell relaxation
+via `wants_stress`), or orbital volumetric output; a `DeliveryScope` sets it for both the scalar and the spin/FD
+reference runs and restores the default. Reference observe/agent readers (events, runtime summary, control) read
+scalars only; checkpoint writers, forces, stress and seeds materialize. Spin/FD driver: `BandBlock` gains a lazy
+handle (pooled k, same `LazyOrbitals::pooled_k`), `electronic::Run::{orbitals_delivered, materialize_orbitals}`;
+`delivered::prepare_electronic` and the CLI checkpoint hash materialize; forces/stress refuse unmaterialized
+electronic blocks. Fixed-occupation output phase is `complex_orbital_lazy` (no collective) instead of
+`complex_orbital_gather` when lazy.
+Evidence (Mac, simulated ranks): CLI test `run::tests::energy_only_pooled_run_delivers_orbitals_lazily` (P=2 pools,
+4 k, fixed and Fermi-Dirac, plain and `--observe`, arms lazy on/off, forces arm): consulted=true and no gather phase
+for energy-only, consulted=false with forces; total energy, eigenvalues, occupations, iteration count and density.bin
+bytes equal to the eager arm. Engine test `electronic_lazy_delivery_materializes_the_eager_bits` (FD and fixed spin,
+P=2 one rank per pool, P=4 2x2 pools): materialized bits equal eager on every rank. `scripts/check.sh` exit 0, 998
+passed, 0 failed, 234 ignored.
+Remaining output items (not changed): `density_gather` (full-grid gather to every rank), `memory_scope.report` and
+`kept.report` collectives, `report_collectives_with_pack`, density encode/hash/write, and `binary_hash_and_run_manifest`
+(profile on only).
+dev08 request: GeTe and IrI3 MPI8 pooled, `run` and `run --observe`, energy-only: output split (`complex_orbital_lazy`
+present, no `complex_orbital_gather`), `BAANDI_M2_LAZY_RESULT` consulted=true, density hash equal to gen56.
+Lesson: an opt-out flag guarded by a broad "observe means needed" rule silently disabled the optimization in the very
+mode the benchmark uses; assert the switch's consulted flag in a CLI-level test, not only at engine level.

@@ -73,6 +73,13 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
             "stress needs the delivered orbitals: call ScfResult::materialize_orbitals",
         ));
     }
+    if let ElectronicState::Reference(r) = &state.electronic
+        && !r.orbitals_delivered()
+    {
+        return Err(ScfError::InvalidInput(
+            "stress need the delivered orbitals: call electronic::Run::materialize_orbitals",
+        ));
+    }
     if state.options.local_mesh != crate::LocalMesh::Baandi
         || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
     {

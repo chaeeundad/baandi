@@ -2763,7 +2763,8 @@ fn reference_result(
                 r.verification.as_ref().map_or(0, |v| v.attempts.len()),
             )
         }
-        Run::Electronic(run) => {
+        Run::Electronic(mut run) => {
+            run.materialize_orbitals()?;
             for channel in &run.density {
                 for &v in channel {
                     density.update(v.to_le_bytes());

@@ -89,6 +89,17 @@ pub(super) fn evaluate<K: Collective>(
     let mut band_sum = 0.;
     let mut residual_bound = 0.;
     let mut residuals = vec![0_f64; bands];
+    // GK4: ordinary (lean) maps consume only the band sum, the double counting
+    // and the residual norms; kinetic, nonlocal, local and zero-mode terms are
+    // filled by `complete_audit`. All per-k residual partials and the energy
+    // integrals share one element-wise tree sum per map.
+    let deferred = dft_numerics::switches::on(dft_numerics::switches::Id::K_LEAN_ENERGY);
+    let band_terms = !(deferred && lean);
+    let mut residual_local = Vec::with_capacity(if deferred {
+        state.blocks.len() * bands
+    } else {
+        0
+    });
     for k in 0..state.blocks.len() {
         let mut planes = crate::grid_dist::PlaneMap::new(
             dims,
@@ -164,22 +175,27 @@ pub(super) fn evaluate<K: Collective>(
                     .sum()
             })
             .collect();
-        let rs: Vec<_> = sum(comm, &local)?.into_iter().map(f64::sqrt).collect();
+        let rs: Vec<_> = if deferred {
+            residual_local.extend(local);
+            Vec::new()
+        } else {
+            sum(comm, &local)?.into_iter().map(f64::sqrt).collect()
+        };
         for j in 0..bands {
-            residuals[j] = residuals[j].max(rs[j]);
+            if !deferred {
+                residuals[j] = residuals[j].max(rs[j]);
+            }
             band_sum += weights[j] * solve.eigenvalues[j];
-            residual_bound += weights[j] * rs[j];
-            kinetic += weights[j]
-                * op.kinetic_diagonal()
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| t * solve.eigenvectors[(i, j)].norm_sqr())
-                    .sum::<f64>();
+            if !deferred {
+                residual_bound += weights[j] * rs[j];
+            }
+            if band_terms {
+                kinetic += band_kinetic(op, &solve.eigenvectors, j, weights[j]);
+            }
         }
-        let mut nl = vec![0.; bands];
-        op.nonlocal_band_energies(comm, &solve.eigenvectors, &mut nl)
-            .map_err(numerical)?;
-        nonlocal += nl.iter().zip(&weights).map(|(e, f)| e * f).sum::<f64>();
+        if band_terms {
+            nonlocal += band_nonlocal(op, comm, &solve.eigenvectors, &weights)?;
+        }
         let mut op_density = vec![0.; op.plane_points()];
         op.band_density_sum(
             comm,
@@ -212,35 +228,89 @@ pub(super) fn evaluate<K: Collective>(
     }
     let clock = Instant::now();
     let dv = cell.volume_bohr3() / points as f64;
-    let integrals = sum(
-        comm,
-        &[
-            kinetic,
-            dv * density
+    let integrals = if deferred {
+        let mut packed = residual_local;
+        let r = packed.len();
+        if lean {
+            packed.push(double_counting_local(dv, &density, &input_fields.hxc));
+        } else {
+            packed.extend(integral_locals(
+                kinetic,
+                dv,
+                &density,
+                input,
+                &state.ionic,
+                points,
+                &input_fields,
+            ));
+        }
+        let mut total = sum(comm, &packed)?;
+        for (k, (info, block)) in per_k.iter_mut().zip(&state.blocks).enumerate() {
+            info.residuals = total[k * bands..(k + 1) * bands]
                 .iter()
-                .zip(&state.ionic)
-                .map(|(n, v)| n * v)
-                .sum::<f64>(),
-            dv * density
-                .iter()
-                .zip(&input_fields.hxc)
-                .map(|(n, v)| n * v)
-                .sum::<f64>(),
-            state.ionic.iter().sum::<f64>() / points as f64,
-            dv * density
-                .iter()
-                .zip(input)
-                .zip(&input_fields.hxc)
-                .map(|((a, b), v)| (a - b) * v)
-                .sum::<f64>(),
-            dv * density
-                .iter()
-                .zip(input)
-                .zip(&input_fields.vh)
-                .map(|((a, b), v)| (a - b) * v)
-                .sum::<f64>(),
-        ],
-    )?;
+                .map(|v| v.sqrt())
+                .collect();
+            let weight = block.point.weight;
+            for j in 0..bands {
+                residuals[j] = residuals[j].max(info.residuals[j]);
+                if !lean {
+                    residual_bound += occupations[j] * weight * info.residuals[j];
+                }
+            }
+        }
+        if lean {
+            let ewald = state.ewald.energy.0;
+            // NaN is an unavailable audit slot (JSON null), never a stop input;
+            // `complete_audit` fills every slot before delivery.
+            let energy = EnergyAudit {
+                xc_floor: None,
+                nlcc: None,
+                kinetic: f64::NAN,
+                local: f64::NAN,
+                nonlocal: f64::NAN,
+                local_zero_mode: f64::NAN,
+                hartree: f64::NAN,
+                xc: f64::NAN,
+                ewald,
+                band_sum,
+                double_counting: total[r],
+                band_form: f64::NAN,
+                harris_foulkes: band_sum - input_fields.hartree + input_fields.xc
+                    - input_fields.xc_integral
+                    + ewald,
+                functional_difference_bound: f64::NAN,
+            };
+            timings.energy = clock.elapsed();
+            return Ok(Map {
+                solve: Solution {
+                    eigenvectors: KOrbitals(vectors),
+                    hx: Some(KOrbitals(products)),
+                    per_k,
+                },
+                warm_start,
+                density,
+                residuals,
+                energy,
+                timings,
+                input_fields,
+            });
+        }
+        total.drain(..r);
+        total
+    } else {
+        sum(
+            comm,
+            &integral_locals(
+                kinetic,
+                dv,
+                &density,
+                input,
+                &state.ionic,
+                points,
+                &input_fields,
+            ),
+        )?
+    };
     let output_fields = if lean {
         None
     } else {
@@ -297,7 +367,49 @@ pub(super) fn complete_audit<K: Collective>(
     occupations: &[f64],
     cache: &mut Option<(Vec<f64>, Fields)>,
 ) -> Result<(), ScfError> {
-    if step.energy.hartree.is_nan() {
+    if step.energy.kinetic.is_nan() {
+        // GK4 deferred lean map: the per-k band terms in the map's k and band
+        // order, then the integrals in the map's slot order (element-wise
+        // tree sums, so each slot equals the eager map's value bit for bit).
+        let mut kinetic = 0.;
+        let mut nonlocal = 0.;
+        for (block, x) in state.blocks.iter_mut().zip(&step.solve.eigenvectors.0) {
+            let weights: Vec<_> = occupations.iter().map(|f| f * block.point.weight).collect();
+            for (j, &w) in weights.iter().enumerate() {
+                kinetic += band_kinetic(&block.operator, x, j, w);
+            }
+            nonlocal += band_nonlocal(&mut block.operator, comm, x, &weights)?;
+        }
+        let points = state.grid.dims().iter().product::<usize>();
+        let dv = cell.volume_bohr3() / points as f64;
+        let integrals = sum(
+            comm,
+            &integral_locals(
+                kinetic,
+                dv,
+                &step.density,
+                input,
+                &state.ionic,
+                points,
+                &step.input_fields,
+            ),
+        )?;
+        let fields = cached_fields(state, comm, cell, functional, &step.density, cache)?;
+        let residual = residual_term(&step.solve.per_k, state, occupations);
+        let e = &mut step.energy;
+        e.kinetic = integrals[0];
+        e.local = integrals[1];
+        e.nonlocal = nonlocal;
+        e.local_zero_mode = state.electrons * integrals[3];
+        e.hartree = fields.hartree;
+        e.xc = fields.xc;
+        e.nlcc = fields.nlcc;
+        e.band_form = e.band_sum - e.double_counting + e.hartree + e.xc + e.ewald;
+        e.functional_difference_bound = (e.hartree - step.input_fields.hartree - integrals[5])
+            .abs()
+            + (e.xc - step.input_fields.xc - (integrals[4] - integrals[5])).abs()
+            + residual;
+    } else if step.energy.hartree.is_nan() {
         let fields = cached_fields(state, comm, cell, functional, &step.density, cache)?;
         let dv = cell.volume_bohr3() / state.grid.dims().iter().product::<usize>() as f64;
         let differences = sum(
@@ -319,6 +431,7 @@ pub(super) fn complete_audit<K: Collective>(
                     .sum::<f64>(),
             ],
         )?;
+        let residual = residual_term(&step.solve.per_k, state, occupations);
         let e = &mut step.energy;
         e.hartree = fields.hartree;
         e.xc = fields.xc;
@@ -327,25 +440,88 @@ pub(super) fn complete_audit<K: Collective>(
         e.functional_difference_bound = (e.hartree - step.input_fields.hartree - differences[1])
             .abs()
             + (e.xc - step.input_fields.xc - (differences[0] - differences[1])).abs()
-            + step
-                .solve
-                .per_k
-                .iter()
-                .zip(&state.blocks)
-                .map(|(s, k)| {
-                    k.point.weight
-                        * s.residuals
-                            .iter()
-                            .zip(occupations)
-                            .map(|(r, f)| r * f)
-                            .sum::<f64>()
-                })
-                .sum::<f64>();
+            + residual;
     }
     if !step.energy.total_hartree().is_finite() {
         return Err(ScfError::NonFinite);
     }
     Ok(())
+}
+
+/// Residual term of the functional-difference bound as the completed audit
+/// has always formed it (per-k weight times the occupied residual sum).
+fn residual_term(per_k: &[PerK], state: &KStartState, occupations: &[f64]) -> f64 {
+    per_k
+        .iter()
+        .zip(&state.blocks)
+        .map(|(s, k)| {
+            k.point.weight
+                * s.residuals
+                    .iter()
+                    .zip(occupations)
+                    .map(|(r, f)| r * f)
+                    .sum::<f64>()
+        })
+        .sum::<f64>()
+}
+/// Weighted kinetic energy of band `j` on this rank's rows (summed later).
+fn band_kinetic(
+    op: &dft_physics::distributed_complex::DistributedComplexHamiltonian,
+    x: &dft_physics::data::ComplexMatrix,
+    j: usize,
+    weight: f64,
+) -> f64 {
+    weight
+        * op.kinetic_diagonal()
+            .iter()
+            .enumerate()
+            .map(|(i, t)| t * x[(i, j)].norm_sqr())
+            .sum::<f64>()
+}
+/// Weighted nonlocal band energy of one k block (collective).
+fn band_nonlocal<K: Collective>(
+    op: &mut dft_physics::distributed_complex::DistributedComplexHamiltonian,
+    comm: &K,
+    x: &dft_physics::data::ComplexMatrix,
+    weights: &[f64],
+) -> Result<f64, ScfError> {
+    let mut nl = vec![0.; weights.len()];
+    op.nonlocal_band_energies(comm, x, &mut nl)
+        .map_err(numerical)?;
+    Ok(nl.iter().zip(weights).map(|(e, f)| e * f).sum::<f64>())
+}
+fn double_counting_local(dv: f64, density: &[f64], hxc: &[f64]) -> f64 {
+    dv * density.iter().zip(hxc).map(|(n, v)| n * v).sum::<f64>()
+}
+/// Rank-local partials of the map's energy integrals, in the fixed slot order
+/// kinetic, local, double counting, ionic mean, hxc difference, vh difference.
+fn integral_locals(
+    kinetic: f64,
+    dv: f64,
+    density: &[f64],
+    input: &[f64],
+    ionic: &[f64],
+    points: usize,
+    fields: &Fields,
+) -> [f64; 6] {
+    [
+        kinetic,
+        dv * density.iter().zip(ionic).map(|(n, v)| n * v).sum::<f64>(),
+        double_counting_local(dv, density, &fields.hxc),
+        ionic.iter().sum::<f64>() / points as f64,
+        dv * density
+            .iter()
+            .zip(input)
+            .zip(&fields.hxc)
+            .map(|((a, b), v)| (a - b) * v)
+            .sum::<f64>(),
+        dv * density
+            .iter()
+            .zip(input)
+            .zip(&fields.vh)
+            .map(|((a, b), v)| (a - b) * v)
+            .sum::<f64>(),
+    ]
 }
 
 super::checkpoint::record!(PerK {

@@ -4110,3 +4110,23 @@ calls, 1534-point mesh): radial quadrature 12.7/17.0/18.2 us per call for l = 0/
 fill 80-260 s of 560 s, removable by a bit-identical memo. No speed claim; ranking waits for the kprof phase profiles
 and a QE `-nk 1/2/4/8` scan. Lesson: before generalizing a fast path, list which Gamma optimizations the new path
 inherits; the k start and the complex solver inherited none of the P3/P4 start and Davidson work.
+
+### GK4 (2026-11-26, Mac correctness; dev08 A/B pending): K_LEAN_ENERGY deferred per-k energy terms
+
+Change (`crates/dft-engine/src/refscf/k_map.rs`, switch `BAANDI_K_LEAN_ENERGY`, default on, `off` restores the
+eager per-map terms): ordinary (lean) k maps no longer evaluate the per-k kinetic band sum, the per-k nonlocal band
+energies (`nonlocal_band_energies`: one agreement plus one projection reduction per k) or the local and zero-mode
+integrals; `complete_audit` fills them from the kept map orbitals in the map's k and band order at the stop /
+max-iteration / failure audit (the only consumers), exactly as P3q does on Gamma. All per-k residual-norm partials and
+the map's energy integrals (double counting on lean maps, the six integrals on verification maps) go into ONE
+element-wise tree sum per map instead of one residual reduction per k plus one integral reduction. Bit-identical
+class: tree sums are element-wise, accumulation orders unchanged. Intermediate fields that become null (JSON) on
+ordinary maps: `convergence.history[i].energies.{kinetic,local,local_zero_mode,nonlocal}` (hartree, xc, band_form,
+functional_difference_bound, total were already null under lean); delivered energies, last history row, density,
+eigenvalues, residuals, dr2, descf, variational energy, maps and H columns identical. Evidence: test
+`dft-engine/tests/refscf_k_lean.rs` (2 cells x 3 k incl. Gamma x {verified, verification off, max 2 maps} x P=1,3:
+every delivered bit equal on vs off); CLI Si2 fcc k444s (10 k) and Si8 cubic k444s (4 k): results.json differs only
+in the four null fields and the switch entry, density.bin identical. Mac release serial (O, one run per arm):
+ordinary-map density phase 0.2897 -> 0.2869 s (Si8), wall 4.07 -> 4.03 s (noise level; serial has no collective
+latency). Expected gain (E) is MPI only: about 2 + (1 - 1/nk) collectives and the projector GEMM per k per map
+removed (B12 172 k: ~500 collectives per map). Needs dev08 MPI8 one run per arm (GeTe, B12, IrI3, si64 unchanged).

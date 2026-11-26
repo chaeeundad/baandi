@@ -55,6 +55,8 @@ reference_strict='off'
 # The stall is a rounding-dependent trajectory (see the test); GK10 border
 # Gram rounding moves this fixture past it on macOS, so pin the full Gram.
 cdav_border_gram='off'
+# GK16 field-table rounding also moves it past the stall; pin the quadrature.
+radial_table_fields='off'
 "#
             ),
         )

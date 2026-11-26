@@ -17,6 +17,41 @@ fn error(e: impl std::fmt::Display) -> SolverError {
     SolverError::Application(e.to_string())
 }
 
+/// Kinetic plus nonlocal diagonal per owned row:
+/// `T_g + sum_atom sum_ij D_ij P_gi conj(P_gj)`, added per row in the order
+/// (atom, i, j). GK16: the pair loop is outside the row loop, so each pass
+/// reads two contiguous projector columns, and pairs with an exactly zero
+/// coupling (different l or m) are skipped. Bit-identical to the row-outer
+/// form: every row receives the same terms in the same order, and a skipped
+/// term is a signed zero (finite projectors, validated by the caller) whose
+/// addition cannot change a row value that starts at T_g >= +0 and never
+/// becomes -0 under round-to-nearest.
+fn static_diagonal(
+    kinetic: &[f64],
+    projectors: &ComplexMatrix,
+    channels: &[usize],
+    couplings: &[Vec<f64>],
+) -> Vec<f64> {
+    let mut diagonal = kinetic.to_vec();
+    let mut offset = 0;
+    for (&count, coupling) in channels.iter().zip(couplings) {
+        for i in 0..count {
+            for j in 0..count {
+                let d = coupling[i * count + j];
+                if d == 0. {
+                    continue;
+                }
+                let (pi, pj) = (projectors.column(offset + i), projectors.column(offset + j));
+                for ((value, a), b) in diagonal.iter_mut().zip(pi).zip(pj) {
+                    *value += (d * *a * b.conj()).re;
+                }
+            }
+        }
+        offset += count;
+    }
+    diagonal
+}
+
 /// The layout, k point, kinetic energy and projectors are immutable. Construct
 /// a distinct operator for each k point; a potential update changes only V(r).
 /// Scratch is bounded by `capacity` bands, with no full orbital gather.
@@ -31,8 +66,9 @@ pub struct DistributedComplexHamiltonian {
     projectors: ComplexMatrix,
     couplings: Vec<Vec<f64>>,
     channels: Vec<usize>,
+    /// GK16: V(r) on the owned planes only (`plane_points()` values in the
+    /// plane-local layout of `set_owned_potential`), not a full grid per k.
     potential: Vec<f64>,
-    delta: Vec<f64>,
     epoch: Option<u64>,
     identity: Arc<()>,
     pool: Arc<WorkerPool>,
@@ -72,6 +108,7 @@ impl DistributedComplexHamiltonian {
         let fft =
             DistributedPairFft::new(grid.dims(), grid.g_to_fft(), rank, ranks).map_err(error)?;
         let rows = fft.local_len();
+        let plane_points = fft.plane_points();
         let p = nonlocal.projector_count();
         let projectors = ComplexMatrix::new(
             rows,
@@ -92,21 +129,7 @@ impl DistributedComplexHamiltonian {
             .iter()
             .map(|&g| basis.momenta()[g].norm_squared / 2.)
             .collect();
-        let mut diagonal = kinetic.clone();
-        let mut offset = 0;
-        for (&count, coupling) in channels.iter().zip(&couplings) {
-            for (g, value) in diagonal.iter_mut().enumerate() {
-                for i in 0..count {
-                    for j in 0..count {
-                        *value += (coupling[i * count + j]
-                            * projectors[(g, offset + i)]
-                            * projectors[(g, offset + j)].conj())
-                        .re;
-                    }
-                }
-            }
-            offset += count;
-        }
+        let diagonal = static_diagonal(&kinetic, &projectors, &channels, &couplings);
         if diagonal.iter().any(|v| !v.is_finite()) {
             return Err(SolverError::InvalidParameter("complex nonfinite diagonal"));
         }
@@ -121,8 +144,7 @@ impl DistributedComplexHamiltonian {
             projectors,
             couplings,
             channels,
-            potential: vec![f64::NAN; grid.dims().iter().product()],
-            delta: vec![f64::NAN; grid.dims().iter().product()],
+            potential: vec![f64::NAN; plane_points],
             epoch: None,
             identity: Arc::new(()),
             pool: pool.clone(),
@@ -145,7 +167,6 @@ impl DistributedComplexHamiltonian {
         8 * (self.kinetic.len()
             + self.diagonal.len()
             + self.potential.len()
-            + self.delta.len()
             + self.partial.len()
             + self.reduced.len()
             + self.couplings.iter().map(Vec::len).sum::<usize>())
@@ -221,8 +242,9 @@ impl DistributedComplexHamiltonian {
             .collect()
     }
 
-    /// Callers agree errors before any subsequent collective. Only owned
-    /// planes are copied; unowned full-index storage remains poisoned.
+    /// Callers agree errors before any subsequent collective. Only the owned
+    /// planes are stored (GK16; formerly a full-grid array per operator whose
+    /// unowned part stayed poisoned).
     pub fn set_owned_potential(&mut self, values: &[f64], epoch: u64) -> Result<(), SolverError> {
         if values.len() != self.plane_points()
             || values.iter().any(|v| !v.is_finite())
@@ -232,15 +254,7 @@ impl DistributedComplexHamiltonian {
                 "complex owned potential/epoch",
             ));
         }
-        let nz = self.fft.shape()[2];
-        let mut offset = 0;
-        for i in 0..self.fft.plane_count() {
-            for j in 0..self.fft.rows() {
-                let start = self.fft.grid_start(i, j);
-                self.potential[start..start + nz].copy_from_slice(&values[offset..offset + nz]);
-                offset += nz;
-            }
-        }
+        self.potential.copy_from_slice(values);
         self.epoch = Some(epoch);
         Ok(())
     }
@@ -329,7 +343,7 @@ impl DistributedComplexHamiltonian {
         }
         out.as_mut_slice().copy_from_slice(x.as_slice());
         self.fft
-            .apply_local_batch(comm, out.as_mut_slice(), &self.potential, x.cols())
+            .apply_local_batch_planes(comm, out.as_mut_slice(), &self.potential, x.cols())
             .map_err(error)?;
         for band in 0..x.cols() {
             for (g, &t) in self.kinetic.iter().enumerate() {
@@ -379,19 +393,11 @@ impl DistributedComplexHamiltonian {
         if x.cols() == 0 {
             return Ok(());
         }
-        let nz = self.fft.shape()[2];
-        let mut offset = 0;
-        for i in 0..self.fft.plane_count() {
-            for j in 0..self.fft.rows() {
-                let start = self.fft.grid_start(i, j);
-                self.delta[start..start + nz].copy_from_slice(&change[offset..offset + nz]);
-                offset += nz;
-            }
-        }
         self.back.resize_columns(x.cols())?;
         self.back.as_mut_slice().copy_from_slice(x.as_slice());
+        // GK16: the plane-local change is used in place (no full-grid copy).
         self.fft
-            .apply_local_batch(comm, self.back.as_mut_slice(), &self.delta, x.cols())
+            .apply_local_batch_planes(comm, self.back.as_mut_slice(), change, x.cols())
             .map_err(error)?;
         for (h, d) in hx.as_mut_slice().iter_mut().zip(self.back.as_slice()) {
             *h += d;
@@ -549,6 +555,60 @@ mod tests {
         });
         let h = Hamiltonian::new_with_grid(&basis, grid.clone(), potential, nonlocal).unwrap();
         (basis, grid, h)
+    }
+
+    /// GK16: the column-pass diagonal equals the former row-outer loop bit for
+    /// bit, including skipped zero couplings and a G = 0 row with T = +0.
+    #[test]
+    fn static_diagonal_matches_row_outer_loop_bitwise() {
+        let rows = 37;
+        let channels = [4usize, 1, 3];
+        let p: usize = channels.iter().sum();
+        let mut projectors = ComplexMatrix::zeros(rows, p).unwrap();
+        for c in 0..p {
+            for g in 0..rows {
+                projectors[(g, c)] = if g == 0 && c % 2 == 0 {
+                    C::new(0., -0.)
+                } else {
+                    C::new(
+                        ((g * 5 + c * 3 + 1) as f64).sin() * 0.3,
+                        ((g * 2 + c * 7) as f64).cos() * 0.2,
+                    )
+                };
+            }
+        }
+        let couplings: Vec<Vec<f64>> = channels
+            .iter()
+            .enumerate()
+            .map(|(a, &n)| {
+                (0..n * n)
+                    .map(|k| match (k + a) % 3 {
+                        0 => 0.,
+                        1 => -0.,
+                        _ => 0.4 - 0.11 * k as f64,
+                    })
+                    .collect()
+            })
+            .collect();
+        let kinetic: Vec<f64> = (0..rows).map(|g| 0.5 * (g * g) as f64 / 7.).collect();
+        let mut reference = kinetic.clone();
+        let mut offset = 0;
+        for (&count, coupling) in channels.iter().zip(&couplings) {
+            for (g, value) in reference.iter_mut().enumerate() {
+                for i in 0..count {
+                    for j in 0..count {
+                        *value += (coupling[i * count + j]
+                            * projectors[(g, offset + i)]
+                            * projectors[(g, offset + j)].conj())
+                        .re;
+                    }
+                }
+            }
+            offset += count;
+        }
+        let fast = static_diagonal(&kinetic, &projectors, &channels, &couplings);
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&fast), bits(&reference));
     }
 
     fn waves(rows: usize, bands: usize) -> ComplexMatrix {

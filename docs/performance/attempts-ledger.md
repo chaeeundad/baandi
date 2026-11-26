@@ -4406,3 +4406,77 @@ Limits: stage 1 only (pool size one); with nk < ranks nothing changes; load bala
 not by N_pw (at 260 k / 8 ranks: 33 or 32 k per rank).
 Lesson: a replayed global scalar that later enters an existing rank-partial tree sum is counted P times; the first
 pooled run gave a 1.1 Ha energy error with eigenvalues correct to 5e-12 Ha (caught by the P = 1 class check).
+
+## GK16-SETUP-TAIL — k-path setup tail (2026-11-27; three bit-identical changes + one rounding-class switch, dev08 pending)
+
+Premise (relayed dev08 MPI8, pools on, energy-only): engine setup GeTe 4.65 s, B12 7.29 s, IrI3 11.75 s against QE
+init_run 1.2 / 3.5 / 2.9 s. Pre-pools IrI3 split: `k_start_operator_potential` 4.07 s, `k_start_h_apply` 2.71,
+`k_start_orthonormalize` 0.83, `k_start_nonlocal_tables` 0.89; outside the k start ~3.6 s, mostly
+`atomic_local_tables_structure_factors` 2.4 s. Also peak RSS +0.37 GB per rank (B12/GeTe without pools).
+Mac harness (`dft-engine/tests/k_setup_tail.rs`, ignored `timing`): IrI3-shaped cell (2 Ir + 6 I, real PseudoDojo
+Ir/I PBE+NLCC, 44 Ha, npw 19.2k, grid 75x72x60, 42 bands, 144 projector channels, 44 atomic columns), generic k,
+simulated ranks. `sample` profile (P=1, 16 k) located the costs:
+- `atomic_local_tables_structure_factors` (5.1 s at P=1, 1.0 s at P=8): one radial quadrature triple (atomic charge,
+  Coulomb-subtracted local, NLCC core) per distinct |G|^2 of the density sphere; a skewed cell has ~1/2 as many
+  distinct |G| as G vectors (exp/sin/erf/erfc/bessel = all of the samples).
+- `k_start_operator_potential` (~150 ms per k at P=1, 330 ms per k at P=8 pools): NOT the potential but the static
+  diagonal in `DistributedComplexHamiltonian::new_owned`: a row-outer loop over count^2 channel pairs per atom with
+  bounds-checked strided `projectors[(g, c)]` indexing (1149 + 420 of ~4400 k-start samples), 90 % of the pairs having
+  a zero coupling (different l or m).
+Changes:
+1. `static_diagonal` (dft-physics, bit-identical, no switch): pair loop outside the row loop on contiguous projector
+   columns, exactly-zero couplings skipped (a skipped term is a signed zero added to a row value that starts at
+   T_g >= +0 and cannot become -0; projectors validated finite). Unit test compares bits with the former loop.
+2. `RADIAL_TABLE_FIELDS` (switch, default on, rounding class): the k-path common start (and the fixed-density k
+   start, so NSCF sees the SCF's fields) reads the three |G| functions from one uniform table per species and
+   function (GK14 step 0.005 Bohr^-1, 8-point Lagrange, q_max = largest density-sphere |G|, nodes split round-robin
+   over ranks + one tree sum, so node bits do not depend on the rank count); G = 0 and q outside the table keep the
+   exact path; V_loc(G) = 4 pi/Omega (S(q) - Z exp(-q^2/4)/q^2) with only S(q) interpolated (new
+   `ConventionLocalTransform::short_integral_at` / `at_g_with_short`, `at_g_with_short(g, short_integral_at(g))` ==
+   `at_g(g)` bit for bit). Gamma-only path unchanged (si64 bit-identical by construction).
+3. One real harmonic per distinct (l, m) per row in `NonlocalOperator::new_selected` (bit-identical, no switch;
+   projectors with several radial functions per l repeated it; prefactor and sqrt(volume) hoisted). Test compares
+   the selected-row factors with the eager per-channel formula bit for bit.
+4. Memory (bit-identical, no switch): each k operator held two FULL-grid f64 arrays (`potential`, `delta`, NaN-filled
+   at construction, only owned planes written): 2 x grid x 8 B per k per rank. Now `potential` holds the owned planes
+   only and `delta` is gone (`add_local_change` passes the plane-local change straight to the new
+   `DistributedPairFft::apply_local_batch_planes`). Without pools that was 172 x 157464 x 16 B = 0.43 GB per rank on
+   B12 (54^3) and 260 x 110592 x 16 B = 0.46 GB on GeTe (48^3), now 1/8 of it at MPI8 — the size of the dev08
+   observation. It predates GK14 (G3-KPOINTS); a Mac A/B of the GK14 and GK10B switches showed no RSS difference
+   (macOS compresses the NaN-filled pages, so the waste is only visible on Linux). The engine's payload envelope on a
+   B12-shaped run (64 k, P=8, pools off) falls 552 -> 446 MB per rank. With pools the per-k arrays were already the
+   whole (one-rank) grid; unchanged.
+Accuracy evidence (Mac):
+- Bit-identity: fingerprint test `dft-engine/tests/k_setup_fingerprint.rs` (ignored) built from `git archive 69107e9e`
+  and from this branch with `radial_table_fields=off`: 60 lines (skewed Gamma-in-list 3 k and elongated shifted MP 4 k,
+  2 species incl. an NLCC core, strict 1e-12 Ry and standard 1e-8 Ry, P = 1/2/3, pools off/on; fixed spin and FD at
+  P = 1/2 pools off/on), every hash of energy/density/eigenvalue/orbital bits identical (`diff` empty).
+- Table error scan (`fields_table_error_scan_real`, real PseudoDojo Ir, I, Ge, Te, B, Si, O, Fe, Mg, Sn, Br, Au, Ga,
+  As; 4000 off-node q in (0, 20] Bohr^-1): worst |table - quadrature| / peak 6.7e-16 over all three functions.
+- SCF class, table on vs off (`fields_table_k_set_within_strict_class`, cubic/skewed/elongated/shifted mesh x
+  P = 1, 2, verified): |dE| <= 2.4e-15 Ha, equal map counts; fixed spin 1.1e-15 Ha, FD 1.1e-13 Ha (equal maps);
+  fingerprint matrix on vs main: 60 rows |dE| <= 2.7e-13 Ha, equal map counts. Real Ir/I (IrI3 cell, PBE+NLCC,
+  3 k, 42 bands, verified, 2 ranks): ecut 12 Ha |dE| 1.8e-12 Ha (E = -305.4 Ha), eigenvalues 2.4e-14 Ha, 16 maps both;
+  ecut 20 Ha |dE| 1.8e-12 Ha (E = -306.3 Ha), eigenvalues 5.2e-14 Ha, 17 maps both. All inside strict 1e-10 Ha.
+`dft-cli/tests/reference_stalls.rs` (rounding-dependent stall fixture, asserted on macOS/aarch64 only, already pinning
+`cdav_border_gram='off'` since GK10) no longer reaches its stall with the field tables on; its input now also pins
+`radial_table_fields='off'`. `scripts/check.sh full` (CHECK_SCCACHE=0): exit 0, 987 passed, 0 failed, 232 ignored.
+Mac timing (O, release, loaded host 7-16, one run per arm unless noted; max over ranks, seconds), main 69107e9e ->
+branch:
+
+| case | wall | fields (atomic_local_tables...) | k_start_operator_potential | k_start_h_apply | k_start_orthonormalize | k_start_nonlocal_tables |
+|---|---|---|---|---|---|---|
+| IrI3 P=1, 8 k | 8.75 -> 2.76 | 5.12 -> 0.28 | 1.19 -> 0.09 | 1.39 -> 1.37 | 0.33 -> 0.33 | 0.17 -> 0.13 |
+| IrI3 P=8 pools, 24 k (two runs/arm) | 3.37/3.35 -> 1.79/1.74 | 0.93 -> 0.07 | 0.89 -> 0.21 (0.07-0.21) | 0.95 -> 1.04 | 0.27 -> 0.20 | 0.13 -> 0.11 |
+| IrI3 P=8 pools off, 24 k | 5.27 -> 3.82 | 0.90 -> 0.07 | 0.81 -> 0.19 | 1.12 -> 1.08 | 1.97 -> 1.97 | 0.16 -> 0.12 |
+
+Expected dev08 IrI3 MPI8 pools (E): fields 2.4 s -> ~0.1 s; operator construction of the 7 owned k (full rows)
+mostly removed; setup 11.75 s -> about 6 s. What remains per k is the start H application (44 columns: FFTs + two
+nonlocal GEMMs with 144 projectors; QE's wfcinit pays the same) and the start MGS (~40 ms per k serial; replaced only
+by GK11, a start/trajectory change, not done here).
+Needs dev08 (MPI8, pools on = main default, phase profile on, one run per arm): GeTe, B12, IrI3 with defaults against
+`BAANDI_RADIAL_TABLE_FIELDS=off` (that arm still carries the bit-identical changes; for a three-point comparison
+also main 69107e9e/current main), plus si64 (Gamma, must be unchanged), and peak RSS per rank with pools off on B12.
+Lesson: a stage timer named after its first statement can hide its real cost (here the operator's static diagonal,
+not the potential); and per-k full-grid storage of a distributed field is invisible on macOS (page compression) but
+resident on Linux.

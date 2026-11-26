@@ -389,7 +389,9 @@ fn real_si_and_mgo() {
         if material == "Si" {
             let failure_input = fs::read_to_string(dir.join("input.toml"))
                 .unwrap()
-                .replace("max_iterations=300", "max_iterations=17");
+                // The reference path converges Si within 17 maps, so force the
+                // failure with a budget no SCF can meet.
+                .replace("max_iterations=300", "max_iterations=2");
             fs::write(dir.join("failure.toml"), failure_input).unwrap();
             let failed = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
                 .current_dir(&dir)

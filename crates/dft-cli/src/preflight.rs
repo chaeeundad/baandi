@@ -43,6 +43,79 @@ fn chemical(s: &str) -> bool {
     "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og".split_whitespace().any(|x| x == s)
 }
 
+/// D3-DISPERSION (ADR 0048): `[dispersion]` needs the `dftd3` build, a valid
+/// method and parameter set for the functional, a loadable library of the 1.x
+/// series, and a run model the term is wired into.
+fn dispersion_check(config: &Config) -> Result<(), ConfigError> {
+    #[cfg(not(feature = "dftd3"))]
+    {
+        let _ = config;
+        Err(fail(
+            "dispersion",
+            "this build has no D3 dispersion support",
+            "rebuild with `cargo build --release -p dft-cli --features dftd3` or remove [dispersion]",
+        ))
+    }
+    #[cfg(feature = "dftd3")]
+    {
+        let (_, path) = dispersion_request(config)?;
+        dft_dispersion::library_version(&path).map_err(|e| {
+            fail(
+                "dispersion.library",
+                e,
+                "run scripts/fetch_dftd3.py and set dispersion.library or BAANDI_DFTD3_LIB to libs-dftd3",
+            )
+        })?;
+        Ok(())
+    }
+}
+
+/// Parameters and library path of a `[dispersion]` table (shared by preflight
+/// and the run, so both resolve the same request).
+#[cfg(feature = "dftd3")]
+pub fn dispersion_request(
+    config: &Config,
+) -> Result<(dft_dispersion::Parameters, PathBuf), ConfigError> {
+    let Some(d) = &config.dispersion else {
+        return Err(fail("dispersion", "absent", "add a [dispersion] table"));
+    };
+    let damping = dft_dispersion::Damping::from_method(&d.method).ok_or_else(|| {
+        fail(
+            "dispersion.method",
+            format!("unknown method {:?}", d.method),
+            "use \"d3bj\" or \"d3zero\"",
+        )
+    })?;
+    // D3 parameterizes PBE; LDA has no D3 parameter set, so every damping
+    // parameter must then be given explicitly.
+    let functional = match config.xc.functional {
+        super::Functional::Pbe => Some("pbe"),
+        super::Functional::LdaPz | super::Functional::LdaPw => None,
+    };
+    let overrides = dft_dispersion::Overrides {
+        s6: d.s6,
+        s8: d.s8,
+        s9: d.s9,
+        a1: d.a1,
+        a2: d.a2,
+        rs6: d.rs6,
+        rs8: d.rs8,
+        alpha6: d.alpha6,
+    };
+    let parameters =
+        dft_dispersion::Parameters::resolve(damping, functional, &overrides).map_err(|e| {
+            fail(
+                "dispersion",
+                e,
+                "give no damping parameter (library set, PBE only) or all of them",
+            )
+        })?;
+    Ok((
+        parameters,
+        dft_dispersion::library_path(d.library.as_deref()),
+    ))
+}
+
 /// Version of the additive findings contract, independent of the legacy report.
 pub const FINDINGS_SCHEMA_VERSION: u32 = 1;
 
@@ -253,6 +326,9 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let mut warnings = Vec::new();
     if let Some(metadata) = crate::run::reference_metadata(&options) {
         warnings.push(metadata.to_string());
+    }
+    if config.dispersion.is_some() {
+        dispersion_check(config)?;
     }
     let mut overrides = Vec::new();
     let mut charges = BTreeMap::new();

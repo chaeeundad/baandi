@@ -642,6 +642,14 @@ impl Context {
             })
             .map_err(|e| error(4, e))?
         };
+        // D3-DISPERSION (ADR 0048): the D3 term of this geometry joins the
+        // physical energy, forces and stress before any projection.
+        let dispersion =
+            crate::run::dispersion_term(&self.config, &self.cell, &self.atoms(), &self.refs())?;
+        let mut forces = forces;
+        if let Some(d) = &dispersion {
+            crate::run::add_dispersion_forces(&mut forces, d);
+        }
         let mut projected: Vec<_> = forces.values.iter().flatten().copied().collect();
         settings.project(&mut projected);
         let mut pulay_assessment = None;
@@ -675,6 +683,10 @@ impl Context {
                 dft_engine::stress::frozen_stress(&view)
             }
             .map_err(|e| error(4, e))?;
+            let mut stress = stress;
+            if let Some(d) = &dispersion {
+                crate::run::add_dispersion_stress(&mut stress, d);
+            }
             pulay_assessment = stress.pulay.map(|p| {
                 json!({
                     "method":p.method, "correction_ha_bohr3":p.correction,
@@ -699,7 +711,9 @@ impl Context {
                 .iter()
                 .map(|a| a.fractional)
                 .collect(),
-            energy_ha: state.total_hartree(),
+            energy_ha: dispersion.as_ref().map_or(state.total_hartree(), |d| {
+                state.total_hartree() + d.energy_ha
+            }),
             forces_ha_bohr: forces.values,
             max_force_ha_bohr: projected.iter().map(|v| v.abs()).fold(0., f64::max),
             step_length_bohr: length,
@@ -1330,6 +1344,10 @@ fn outputs(
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});
     ctx.selection.record(&mut result);
+    if let Some(d) = &ctx.config.dispersion {
+        result["dispersion"] = json!({"method":d.method,
+            "included_in":"every frame's energy_ha, forces_ha_bohr and stress_ha_bohr3 (ADR 0048)"});
+    }
     if let Some(provenance) = ctx.config.system.provenance_json() {
         result["structure_provenance"] = provenance;
     }

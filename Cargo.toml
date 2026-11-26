@@ -12,6 +12,7 @@ members = [
     "crates/dft-cli",
     "crates/dft-mkl",
     "crates/dft-mpi",
+    "crates/dft-dispersion",
     "crates/baandi-mcp",
     "crates/baandi-py",
 ]

@@ -28,6 +28,9 @@ mkl = ["dft-numerics/mkl"]
 # MPI row-block parallel layer (ADR 0041): links Open MPI through dft-mpi; the default build links nothing.
 mpi = ["dft-mpi/mpi"]
 dgemm-timers = ["dft-numerics/dgemm-timers"]
+# Grimme D3 dispersion through simple-dftd3 loaded at run time (ADR 0048); the
+# default build has no adapter and rejects a `[dispersion]` table at preflight.
+dftd3 = ["dep:dft-dispersion", "dft-dispersion/dftd3"]
 
 [dependencies]
 dft-numerics = { path = "../dft-numerics" }
@@ -43,6 +46,7 @@ dft-units = { path = "../dft-units" }
 dft-upf = { path = "../dft-upf" }
 dft-engine = { path = "../dft-engine", features = ["strict-oracle"] }
 dft-mpi = { path = "../dft-mpi" }
+dft-dispersion = { path = "../dft-dispersion", optional = true }
 
 dft-physics = { path = "../dft-physics" }
 

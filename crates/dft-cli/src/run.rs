@@ -1637,6 +1637,18 @@ fn execute_mode_inner(
         selection.record(&mut v);
         v
     };
+    if config.dispersion.is_some()
+        && (config.collinear()
+            || config
+                .finite_temperature()
+                .map_err(|e| error(1, e))?
+                .is_some())
+    {
+        return Err(error(
+            1,
+            "dispersion: the strict-oracle spin/Fermi-Dirac drivers do not carry the D3 term; use the default (reference) path",
+        ));
+    }
     if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
         let mut record = driver_record("Fermi-Dirac occupations");
         if let Some(reason) = selection.reason.filter(|_| !selection.strict()) {
@@ -2633,6 +2645,12 @@ fn execute_mode_inner(
             })
         },
     )?;
+    // D3-DISPERSION (ADR 0048): once per geometry after the SCF; nothing runs
+    // without [dispersion].
+    let dispersion = dispersion_term(&config, &prepared.cell, &atoms, &refs)?;
+    if let Some(d) = &dispersion {
+        add_dispersion_energy(&mut result, d);
+    }
     let force = if let Some(derivatives) = &mut reference_derivatives {
         derivatives
             .evaluate_forces(
@@ -2657,7 +2675,10 @@ fn execute_mode_inner(
             density_floor,
         )?
     };
-    if let Some(force) = force {
+    if let Some(mut force) = force {
+        if let Some(d) = &dispersion {
+            add_dispersion_forces(&mut force, d);
+        }
         console.push_str(&force_table(&force));
         result["forces"] = force_json(&force);
         if reference {
@@ -2703,7 +2724,10 @@ fn execute_mode_inner(
             density_floor,
         )?
     };
-    if let Some(stress) = stress {
+    if let Some(mut stress) = stress {
+        if let Some(d) = &dispersion {
+            add_dispersion_stress(&mut stress, d);
+        }
         console.push_str(&stress_table(&stress));
         result["stress"] = stress_json(&stress);
         if reference {
@@ -2724,6 +2748,9 @@ fn execute_mode_inner(
                 "verification_residual_bound_ha":last.and_then(|a| a.residual_bound_ha),
                 "state":"converged step's own state (ADR 0043 V4); stress uses the same formulas as the strict path"});
         }
+    }
+    if let Some(d) = &dispersion {
+        annotate_dispersion(&mut result, &mut console, d);
     }
     // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (BAANDI_PHASE_PROFILE=on)
     // instrumentation; absent otherwise.
@@ -3158,6 +3185,11 @@ fn reference_electronic_run(
     result["execution"]["effective_solver"] = json!("reference_complex_davidson");
     let run_config = dft_numerics::switches::RunConfig::current();
     let mut tables = String::new();
+    // D3-DISPERSION (ADR 0048): once after the SCF, as on the scalar path.
+    let dispersion = dispersion_term(config, &prepared.cell, atoms, potentials)?;
+    if let Some(d) = &dispersion {
+        add_dispersion_energy(&mut result, d);
+    }
     let forces_requested = config.output.as_ref().is_some_and(|o| o.forces);
     let stress_requested = config.output.as_ref().is_some_and(|o| o.stress);
     if forces_requested || stress_requested {
@@ -3176,7 +3208,10 @@ fn reference_electronic_run(
             derivatives
                 .evaluate_forces_electronic(input(), &r)
                 .map_err(engine_error)?;
-            if let Some(force) = derivatives.forces.take() {
+            if let Some(mut force) = derivatives.forces.take() {
+                if let Some(d) = &dispersion {
+                    add_dispersion_forces(&mut force, d);
+                }
                 tables.push_str(&force_table(&force));
                 result["forces"] = force_json(&force);
                 result["forces"]["verification"] = json!(force.verification);
@@ -3184,7 +3219,10 @@ fn reference_electronic_run(
             derivatives
                 .evaluate_stress_electronic(input(), &r)
                 .map_err(engine_error)?;
-            if let Some(stress) = derivatives.stress.take() {
+            if let Some(mut stress) = derivatives.stress.take() {
+                if let Some(d) = &dispersion {
+                    add_dispersion_stress(&mut stress, d);
+                }
                 tables.push_str(&stress_table(&stress));
                 result["stress"] = stress_json(&stress);
                 result["stress"]["verification"] = json!(stress.verification);
@@ -3197,6 +3235,9 @@ fn reference_electronic_run(
                 }
             }
         }
+    }
+    if let Some(d) = &dispersion {
+        annotate_dispersion(&mut result, &mut tables, d);
     }
     result["scf"]["switches"] = switches_json();
     result["run"] = run_block(
@@ -3231,9 +3272,19 @@ fn reference_electronic_run(
         converged: r.converged,
         console: format!(
             "Reference spin/FD: E={:.16e} Ha; -TS={:.16e} Ha; F={:.16e} Ha; M={:.12e} mu_B; iterations={}; converged={}\n{tables}",
-            r.thermodynamics.internal_energy_ha,
+            dispersion
+                .as_ref()
+                .map_or(r.thermodynamics.internal_energy_ha, |d| r
+                    .thermodynamics
+                    .internal_energy_ha
+                    + d.energy_ha),
             -r.thermodynamics.entropy_term_ha,
-            r.thermodynamics.free_energy_ha,
+            dispersion
+                .as_ref()
+                .map_or(r.thermodynamics.free_energy_ha, |d| r
+                    .thermodynamics
+                    .free_energy_ha
+                    + d.energy_ha),
             r.moment_mu_b,
             r.history.len(),
             r.converged
@@ -3544,6 +3595,226 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
         }
     }
     text
+}
+
+/// D3-DISPERSION (ADR 0048): the D3 term of one geometry, evaluated once
+/// after the SCF (never inside it; it does not enter the Hamiltonian).
+pub(crate) struct DispersionTerm {
+    pub energy_ha: f64,
+    pub forces_ha_bohr: Vec<[f64; 3]>,
+    /// Tensile-positive (1/Omega) dE/d eps, Ha/Bohr^3, the engine's convention.
+    pub stress_ha_bohr3: [[f64; 3]; 3],
+    pub record: Value,
+}
+
+/// `None` without `[dispersion]` (no library code runs then).
+pub(crate) fn dispersion_term(
+    config: &Config,
+    cell: &dft_geometry::Cell,
+    atoms: &[dft_geometry::Atom],
+    potentials: &[SpeciesPotential<'_>],
+) -> Result<Option<DispersionTerm>, RunError> {
+    if config.dispersion.is_none() {
+        return Ok(None);
+    }
+    #[cfg(feature = "dftd3")]
+    return dispersion_d3(config, cell, atoms, potentials).map(Some);
+    #[cfg(not(feature = "dftd3"))]
+    {
+        let _ = (cell, atoms, potentials);
+        Err(error(
+            1,
+            "dispersion: this build has no D3 dispersion support; rebuild with --features dftd3",
+        ))
+    }
+}
+
+#[cfg(feature = "dftd3")]
+fn dispersion_d3(
+    config: &Config,
+    cell: &dft_geometry::Cell,
+    atoms: &[dft_geometry::Atom],
+    potentials: &[SpeciesPotential<'_>],
+) -> Result<DispersionTerm, RunError> {
+    let (parameters, library) =
+        crate::config::preflight::dispersion_request(config).map_err(|e| error(1, e))?;
+    let mut numbers = Vec::with_capacity(atoms.len());
+    for a in atoms {
+        let p = potentials
+            .iter()
+            .find(|p| p.label == a.species)
+            .ok_or_else(|| error(1, format!("dispersion: no potential for {}", a.species)))?;
+        let element = p.potential.element().trim();
+        numbers.push(dft_dispersion::atomic_number(element).ok_or_else(|| {
+            error(
+                1,
+                format!(
+                    "dispersion: element {element:?} of {} has no D3 data",
+                    a.species
+                ),
+            )
+        })?);
+    }
+    let positions: Vec<_> = atoms
+        .iter()
+        .map(|a| cell.fractional_to_cartesian_bohr(a.fractional_position))
+        .collect();
+    // Internal A has the lattice vectors as columns; the library takes rows.
+    let columns = cell.lattice_columns_bohr();
+    let rows = std::array::from_fn(|v| std::array::from_fn(|c| columns[c][v]));
+    let clock = Instant::now();
+    let d = dft_dispersion::compute(
+        &library,
+        &dft_dispersion::Structure {
+            numbers: &numbers,
+            positions_bohr: &positions,
+            lattice_rows_bohr: rows,
+        },
+        &parameters,
+    )
+    .map_err(|e| error(4, e))?;
+    let elapsed = clock.elapsed().as_secs_f64();
+    let volume = cell.volume_bohr3();
+    let forces = d.forces_ha_bohr();
+    let stress = d.stress_ha_bohr3(volume);
+    let damping = match &parameters {
+        dft_dispersion::Parameters::Library { damping, .. } => *damping,
+        dft_dispersion::Parameters::Rational { .. } => dft_dispersion::Damping::Rational,
+        dft_dispersion::Parameters::Zero { .. } => dft_dispersion::Damping::Zero,
+    };
+    let params = match &parameters {
+        dft_dispersion::Parameters::Library {
+            functional,
+            three_body,
+            ..
+        } => json!({"source":parameters.source(),"functional":functional,"three_body":three_body}),
+        dft_dispersion::Parameters::Rational {
+            s6,
+            s8,
+            s9,
+            a1,
+            a2,
+            alpha,
+        } => {
+            json!({"source":parameters.source(),"s6":s6,"s8":s8,"s9":s9,"a1":a1,"a2_bohr":a2,"alpha6":alpha})
+        }
+        dft_dispersion::Parameters::Zero {
+            s6,
+            s8,
+            s9,
+            rs6,
+            rs8,
+            alpha,
+        } => {
+            json!({"source":parameters.source(),"s6":s6,"s8":s8,"s9":s9,"rs6":rs6,"rs8":rs8,"alpha6":alpha})
+        }
+    };
+    let record = json!({"schema":"dispersion-1","model":"DFT-D3",
+        "method":damping.method(),
+        "damping":match damping {dft_dispersion::Damping::Rational=>"rational_becke_johnson",dft_dispersion::Damping::Zero=>"zero_chai_head_gordon"},
+        "parameters":params,
+        "library":{"name":"simple-dftd3","license":"LGPL-3.0-or-later","version":d.library_version,"path":d.library.display().to_string(),"loading":"dlopen at run time (not linked)"},
+        "periodic":[true,true,true],"realspace_cutoffs":"library defaults","atomic_numbers":numbers,
+        "energy_ha":d.energy_ha,"energy_ry":2.*d.energy_ha,
+        "forces_ha_bohr":forces,"gradient_ha_bohr":d.gradient_ha_bohr,
+        "virial_ha":d.virial_ha,"stress_ha_bohr3":stress,
+        "pressure_ha_bohr3":-(0..3).map(|a| stress[a][a]).sum::<f64>()/3.,
+        "stress_convention":"tensile_positive = virial / volume; virial = dE/d(strain)",
+        "evaluation":"once per geometry after the SCF; added to total energy, forces and stress, not to the Kohn-Sham potential",
+        "elapsed_seconds":elapsed});
+    Ok(DispersionTerm {
+        energy_ha: d.energy_ha,
+        forces_ha_bohr: forces,
+        stress_ha_bohr3: stress,
+        record,
+    })
+}
+
+/// Add E_disp to every total energy of a results document and record the term.
+pub(crate) fn add_dispersion_energy(result: &mut Value, d: &DispersionTerm) {
+    let e = d.energy_ha;
+    result["dispersion"] = d.record.clone();
+    if let Some(old) = result["energies"]["total"]["ha"].as_f64() {
+        result["energies"]["dispersion"] = json!({"ha":e,"ry":2.*e});
+        result["energies"]["total_without_dispersion"] = json!({"ha":old,"ry":2.*old});
+        result["energies"]["total"] = json!({"ha":old+e,"ry":2.*(old+e)});
+    }
+    if let Some(old) = result["total_energy"]["ha"].as_f64() {
+        let total = old + e;
+        result["total_energy"] = json!({"ha":total,"ry":from_hartree(total, EnergyUnit::Rydberg),
+            "ev":from_hartree(total, EnergyUnit::ElectronVolt),"dispersion_ha":e,"without_dispersion_ha":old});
+    }
+    for key in ["internal_energy_ha", "free_energy_ha"] {
+        if let Some(old) = result["thermodynamics"][key].as_f64() {
+            result["thermodynamics"][key] = json!(old + e);
+        }
+    }
+    if result["thermodynamics"].is_object() {
+        result["thermodynamics"]["dispersion_ha"] = json!(e);
+    }
+}
+
+fn dispersion_ledger(d: &DispersionTerm, quantity: &str) -> Value {
+    json!({"term_id":"dispersion","owner":"dft-dispersion (simple-dftd3)","active":true,
+        "energy_ha":d.energy_ha,"included_in":["total_energy",quantity],"dependencies":["geometry"],
+        "force_capability":"available","stress_capability":"available",
+        "reason":"analytic D3 derivative from the library, added after the SCF"})
+}
+
+/// Add the D3 forces to an engine force result (before its output).
+pub(crate) fn add_dispersion_forces(f: &mut dft_engine::forces::ForceResult, d: &DispersionTerm) {
+    for (v, x) in f.values.iter_mut().zip(&d.forces_ha_bohr) {
+        for (v, x) in v.iter_mut().zip(x) {
+            *v += x;
+        }
+    }
+    f.net_force = std::array::from_fn(|c| f.values.iter().map(|v| v[c]).sum());
+    f.maximum_absolute_component = f
+        .values
+        .iter()
+        .flatten()
+        .fold(0., |m: f64, v| m.max(v.abs()));
+}
+
+/// Add the D3 stress to an engine stress result (before its output).
+pub(crate) fn add_dispersion_stress(s: &mut dft_engine::stress::StressResult, d: &DispersionTerm) {
+    for (a, row) in d.stress_ha_bohr3.iter().enumerate() {
+        for (b, x) in row.iter().enumerate() {
+            s.values[a][b] += x;
+            s.symmetric[a][b] += x;
+        }
+    }
+    s.terms.push(("dispersion", d.stress_ha_bohr3));
+    s.pressure = -(0..3).map(|a| s.values[a][a]).sum::<f64>() / 3.;
+}
+
+/// JSON and console of forces/stress that include the D3 term.
+fn annotate_dispersion(result: &mut Value, console: &mut String, d: &DispersionTerm) {
+    if result["forces"]["values"].is_array() {
+        result["forces"]["per_term"]["dispersion"] = json!(d.forces_ha_bohr);
+        if let Some(ledger) = result["forces"]["derivative_ledger"].as_array_mut() {
+            ledger.push(dispersion_ledger(d, "forces"));
+        }
+        result["forces"]["includes_dispersion"] = json!(true);
+    }
+    if result["stress"]["values"].is_array() {
+        if let Some(ledger) = result["stress"]["derivative_ledger"].as_array_mut() {
+            ledger.push(dispersion_ledger(d, "stress"));
+        }
+        result["stress"]["includes_dispersion"] = json!(true);
+    }
+    writeln!(
+        console,
+        "\nDispersion (DFT-D3 {}, simple-dftd3 {}): E_disp = {:.16e} Ha; total energy including dispersion = {:.16e} Ha (forces and stress above include it)",
+        d.record["method"].as_str().unwrap_or(""),
+        d.record["library"]["version"].as_str().unwrap_or(""),
+        d.energy_ha,
+        result["total_energy"]["ha"]
+            .as_f64()
+            .or_else(|| result["energies"]["total"]["ha"].as_f64())
+            .unwrap_or(f64::NAN)
+    )
+    .unwrap();
 }
 
 /// LANE-FFT Phase 0: same-rank records; never sum independent rank maxima.

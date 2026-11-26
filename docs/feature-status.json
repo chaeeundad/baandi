@@ -133,9 +133,15 @@
    "note": "LDA-PW and PBE; synthetic analytic and zero-moment oracles. No validated magnetic material ground state; noncollinear and spin-orbit remain unavailable. [Evidence](crates/dft-engine/tests/collinear-evidence.json)."
   },
   {
+   "status": "done",
+   "area": "Physics",
+   "feature": "Grimme DFT-D3 dispersion (BJ and zero damping)",
+   "note": "Optional build (`--features dftd3`) that loads the official simple-dftd3 1.7.0 library at run time; added to energy, forces, stress and relaxation after the SCF. Matches the s-dftd3 program to 1e-16 Ha and finite differences to 1e-10 Ha/Bohr; comparison with QE vdw_corr='dft-d3' pending. [ADR](docs/decisions/0048-dftd3-dispersion.md)."
+  },
+  {
    "status": "planned",
    "area": "Physics",
-   "feature": "DFT+U, meta-GGA, hybrid functionals, dispersion corrections",
+   "feature": "DFT+U, meta-GGA, hybrid functionals",
    "note": "Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md."
   },
   {

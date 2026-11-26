@@ -159,6 +159,7 @@ Status as of 2026-11-26, written for people who run calculations. Source: `docs/
 | Input | Offline pseudopotential registry with license and SHA-256 checks | `pseudo` subcommands; pseudopotential files are never shipped in the repository. |
 | Physics | Fermi-Dirac occupations and chemical potential | Fermi–Dirac occupations and chemical potential for supported unpolarized/collinear models, with limited validation and empty-band checks. Reference fixed-cutoff electronic steppers support exact checkpoint v2; warm imports and legacy v1 FD restart remain unavailable. Free-moment PBE uses the G4D oracle fallback. Analytic synthetic oracles and an Al smoke run; no QE metal comparison. [Evidence](tests/reference/occupations/summary.json). |
 | Physics | Collinear spin with fixed up/down electron counts | LDA-PW and PBE; synthetic analytic and zero-moment oracles. No validated magnetic material ground state; noncollinear and spin-orbit remain unavailable. [Evidence](crates/dft-engine/tests/collinear-evidence.json). |
+| Physics | Grimme DFT-D3 dispersion (BJ and zero damping) | Optional build (`--features dftd3`) that loads the official simple-dftd3 1.7.0 library at run time; added to energy, forces, stress and relaxation after the SCF. Matches the s-dftd3 program to 1e-16 Ha and finite differences to 1e-10 Ha/Bohr; comparison with QE vdw_corr='dft-d3' pending. [ADR](docs/decisions/0048-dftd3-dispersion.md). |
 | Physics | Nonlinear core correction and PseudoDojo NC file support | Independent header checks and synthetic NLCC oracles; Si/MgO bulk smoke, comparison with QE pending. Datasets remain unqualified; ultrasoft and PAW unavailable. [Evidence](tests/reference/datasets/p13c-status.json). |
 | Physics | Atomic forces | NC LDA/PBE, NLCC, fixed spin and Fermi-Dirac, from a verified standard state (default) or a strict certified one; energy finite differences and independent scalar checks. DFT+U forces unsupported; comparison with QE pending. [Evidence](tests/reference/forces/manifest.json). |
 | Physics | Space-group symmetry (k-point reduction, density symmetrization) | Opt-in k-point reduction and density symmetrization; full/reduced, spin and finite-temperature checks. Magnetic spin swaps unsupported; comparison with QE pending. [Evidence](tests/reference/symmetry/evidence.json). |
@@ -179,7 +180,7 @@ Status as of 2026-11-26, written for people who run calculations. Source: `docs/
 
 | Area | Feature | Notes |
 |---|---|---|
-| Physics | DFT+U, meta-GGA, hybrid functionals, dispersion corrections | Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md. |
+| Physics | DFT+U, meta-GGA, hybrid functionals | Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md. |
 | Physics | RPA and cRPA correlation (research stage) | Design only; no implementation yet. |
 | Method | Electronic-state landscape exploration: several self-consistent solutions, state comparison, branch tracking | Design in docs/roadmap/esle.md; starts after the baseline is complete. |
 | Method | Coupling to outside environments (embedding, solvent, QM/MM, applied electric fields) through typed interfaces | Design in docs/architecture/scientific-coupling.md. |

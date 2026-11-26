@@ -219,5 +219,7 @@
  "R12-DOCS": "리팩토링 R12: 문서 정리, ADR 0047, README 수정 목록(승인용)",
  "G4G-OATOM-STALL": "G4G: 진공 속 산소 원자(HGH, PBE) 계산이 수렴 직전 멈추는 문제",
  "DOC-USAGE-EXAMPLES": "사용 안내: README 사용법 절과 examples 13개(검증 테스트 포함)",
- "G4D-G4G-RESEARCH": "연구: 산소 원자 정수 스핀 정체(G4G)와 자유 모멘트 PBE(G4D)"
+ "G4D-G4G-RESEARCH": "연구: 산소 원자 정수 스핀 정체(G4G)와 자유 모멘트 PBE(G4D)",
+ "D3-DISPERSION": "분산 보정(DFT-D3) 추가: 공식 라이브러리를 실행 시 불러와 에너지·힘·응력·이완에 반영",
+ "MPI-DERIV": "힘·응력 계산을 여러 프로세스로 나눔(MPI), 힘 계산 전에 에너지 결과 먼저 기록"
 }

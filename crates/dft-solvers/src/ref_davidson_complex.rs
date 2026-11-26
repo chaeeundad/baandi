@@ -854,9 +854,18 @@ mod tests {
                 None
             })[0]
         };
-        assert_eq!(calls(n), None, "cut cluster without buffer");
+        let unbuffered = calls(n);
         let (used, error) = calls(width).expect("buffer columns converge");
         assert!(used <= 2, "{used} calls");
+        // Negative control: without buffer columns the cut cluster exhausts the
+        // six calls on the native backend; with MKL rounding it may scrape
+        // through, but only with clearly more calls than the buffered solve.
+        if let Some((unbuffered_calls, _)) = unbuffered {
+            assert!(
+                unbuffered_calls > used + 2,
+                "cut cluster without buffer: {unbuffered_calls} calls vs {used} buffered"
+            );
+        }
         assert!(error < 1e-11, "{error:e} Ha");
     }
     #[test]

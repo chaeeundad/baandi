@@ -1,5 +1,6 @@
 [package]
 name = "dft-cli"
+default-run = "baandi"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

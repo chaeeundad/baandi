@@ -9245,3 +9245,367 @@ fn g4g_trace_is_observational() {
         });
     }
 }
+
+// G4D/G4G research controls are test-only. No oracle implementation is changed.
+#[test]
+#[ignore = "research SCF: cargo test --release -p dft-engine --test refscf g4g_research -- --ignored --nocapture"]
+fn g4g_research() {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+        refscf::electronic::{self, Policy, Trace},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[16., 0., 0.], [0., 16., 0.], [0., 0., 16.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let atoms = if std::env::var("G4R_CENTER").is_ok() {
+        [Atom::new("Xx", [0.; 3])]
+    } else {
+        atoms
+    };
+    let pp = g4g_potential(6., 1.);
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let sector = SpinSector {
+        n_up: 4,
+        n_down: 2,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: None,
+    };
+    let maps = std::env::var("G4R_MAPS")
+        .ok()
+        .map(|x| x.parse().unwrap())
+        .unwrap_or(200);
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        allow_functional_override: true,
+        cutoff_hartree: 6.,
+        bands: Some(6),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Uniform,
+        max_iterations: maps,
+        ..ScfOptions::strict_reference()
+    };
+    let mut options = options;
+    if std::env::var("G4R_TIGHT").is_ok() {
+        options.initial_eigen_tolerance = 1e-10;
+        options.eigen_tolerance = 1e-10;
+        options.residual_eigen_schedule = false;
+    }
+    if let Ok(beta) = std::env::var("G4R_BETA") {
+        options.mixing = dft_engine::Mixing::Pulay {
+            beta: beta.parse().unwrap(),
+            history: 8,
+        };
+    }
+    let real = std::env::var("G4R_REAL").unwrap_or_else(|_| "off".into());
+    let pulay = std::env::var("G4R_PULAY").unwrap_or_else(|_| "off".into());
+    let canon = std::env::var("G4R_CANON").unwrap_or_else(|_| "off".into());
+    let config = dft_numerics::switches::RunConfig::from_pairs(&[
+        ("refscf_real_start", &real),
+        ("refscf_canonical_cluster", &canon),
+        ("refscf_spin_pulay", &pulay),
+    ])
+    .unwrap();
+    let _scope = config.enter();
+    if std::env::var("G4R_ORACLE").is_ok() {
+        let r = CollinearProblem::new(&cell, &atoms, &potentials, options, &points, sector)
+            .unwrap()
+            .run()
+            .unwrap();
+        for t in &r.history {
+            eprintln!(
+                "G4R_ORACLE map={} E={:.17e} charge={:.10e} spin={:.10e} fraction={:.10e}",
+                t.iteration,
+                t.energy_ha,
+                t.charge_density_residual,
+                t.spin_density_residual,
+                t.mixing_fraction
+            );
+        }
+        for s in 0..2 {
+            eprintln!(
+                "G4R_ORACLE spectrum s={s} {:?}",
+                r.k_points[s][0].solution.eigenvalues
+            );
+        }
+        eprintln!(
+            "G4R_ORACLE converged={} E={:.17e} certificate={:?}",
+            r.converged,
+            r.energy.total_hartree(),
+            r.certificate
+        );
+    } else {
+        let options = ScfOptions {
+            verification: dft_engine::Verification::FixedPoint,
+            standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+            ..options
+        };
+        let mut trace = Trace::default();
+        let r = electronic::run_with_trace(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            Profile::default(),
+            &points,
+            Policy::FixedSpin(sector),
+            &Serial,
+            Some(&mut trace),
+        );
+        for t in trace.records() {
+            eprintln!(
+                "G4R real={real} map={} redo={} verify={} E={:.17e} dr2={:.10e} fraction={:.10e} spectrum={:?}",
+                t.iteration,
+                t.redo,
+                t.verification,
+                t.free_energy_ha,
+                0.5 * t.estimator_terms_ry.iter().sum::<f64>() + t.stiffness_ha,
+                t.mixing_fraction,
+                t.eigenvalues_ha
+            );
+        }
+        let r = r.unwrap();
+        eprintln!(
+            "G4R converged={} E={:.17e}",
+            r.converged,
+            r.energy.total_hartree()
+        );
+    }
+}
+
+#[test]
+#[ignore = "oracle scan: cargo test --release -p dft-engine --test refscf g4d_research_oracle -- --ignored --nocapture"]
+fn g4d_research_oracle() {
+    use dft_engine::{
+        Functional, GammaReal, Mixing, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::{CollinearProblem, SpinSector},
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    use dft_physics::occupations::Constraint;
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = g4c_potential(false);
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let config = dft_numerics::switches::RunConfig::from_pairs(&[]).unwrap();
+    let _scope = config.enter();
+    for theta in [0.01, 0.005, 0.002] {
+        for beta in [1., 0.5, 0.3, 0.1] {
+            let options = ScfOptions {
+                functional: Functional::Pbe,
+                cutoff_hartree: 2.5,
+                bands: Some(12),
+                gamma_real: GammaReal::Off,
+                start_density: StartDensity::Atomic,
+                max_iterations: 400,
+                mixing: Mixing::Linear { beta },
+                residual_eigen_schedule: false,
+                initial_eigen_tolerance: 1e-10,
+                eigen_tolerance: 1e-10,
+                density_tolerance: 1e-10,
+                energy_tolerance: 1e-11,
+                ..ScfOptions::strict_reference()
+            };
+            let sector = SpinSector {
+                n_up: 1,
+                n_down: 0,
+                axis_cartesian: [0., 0., 1.],
+                initial_moment_seed: Some(0.3),
+            };
+            let result = CollinearProblem::new_fermi_dirac(
+                &cell,
+                &atoms,
+                &potentials,
+                options,
+                &points,
+                sector,
+                theta,
+                Constraint::Total,
+                12,
+            )
+            .unwrap()
+            .run();
+            match result {
+                Ok(r) => eprintln!(
+                    "G4D_SCAN theta={theta} beta={beta} converged={} maps={} M={:.17e} thermo={:?} certificate={:?}",
+                    r.converged,
+                    r.history.len(),
+                    r.moment_mu_b,
+                    r.thermodynamics,
+                    r.finite_certificate
+                ),
+                Err(e) => eprintln!("G4D_SCAN theta={theta} beta={beta} error={e:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn g4g_canonical_cluster_is_basis_independent() {
+    use dft_numerics::linalg::ComplexMatrix;
+    use dft_solvers::ref_davidson_complex::canonicalize_clusters;
+    let rows = 5;
+    let values = [-1., 0.25, 0.25 + 1e-16, 0.7];
+    let build = |a: f64, phase: f64| {
+        let (s, c) = a.sin_cos();
+        let z = C::from_polar(1., phase);
+        let mut m = ComplexMatrix::zeros(rows, 4).unwrap();
+        m[(0, 0)] = C::new(1., 0.);
+        // Cluster columns: a unitary mix of e1 and e2 plus a common e4 tail.
+        m[(1, 1)] = z * c * 0.8;
+        m[(2, 1)] = z * s * 0.8;
+        m[(1, 2)] = -s * 0.8 * z.conj();
+        m[(2, 2)] = c * 0.8 * z.conj();
+        m[(4, 1)] = z * (c - s) * 0.6 * std::f64::consts::FRAC_1_SQRT_2;
+        m[(4, 2)] = z.conj() * (-s - c) * 0.6 * std::f64::consts::FRAC_1_SQRT_2;
+        m[(3, 3)] = C::new(1., 0.);
+        m
+    };
+    let mut scratch = vec![C::default(); rows * 4 + 4 * 4 + 4];
+    let mut first = build(0.3, 0.2);
+    let mut second = build(1.1, -0.9);
+    let span = |m: &ComplexMatrix| {
+        (0..rows)
+            .flat_map(|r| (0..rows).map(move |q| (r, q)))
+            .map(|(r, q)| (1..3).map(|j| m[(r, j)] * m[(q, j)].conj()).sum::<C>())
+            .collect::<Vec<_>>()
+    };
+    let before = span(&first);
+    canonicalize_clusters(&values, &mut first, &mut scratch);
+    canonicalize_clusters(&values, &mut second, &mut scratch);
+    // The cluster projector is unchanged, other columns are untouched, and
+    // two different bases of one degenerate cluster map to the same columns.
+    for (a, b) in before.iter().zip(span(&first)) {
+        assert!((a - b).norm() < 1e-14);
+    }
+    assert_eq!(first[(0, 0)], C::new(1., 0.));
+    assert_eq!(first[(3, 3)], C::new(1., 0.));
+    for r in 0..rows {
+        for j in 0..4 {
+            assert!((first[(r, j)] - second[(r, j)]).norm() < 1e-14, "{r} {j}");
+        }
+    }
+    // A split cluster (gap far above roundoff) is left exactly as given.
+    let mut split = build(0.3, 0.2);
+    let reference = build(0.3, 0.2);
+    canonicalize_clusters(&[-1., 0.25, 0.26, 0.7], &mut split, &mut scratch);
+    for r in 0..rows {
+        for j in 0..4 {
+            assert_eq!(split[(r, j)], reference[(r, j)]);
+        }
+    }
+}
+
+/// G4G candidates on the centred synthetic atom (grid-symmetric site, so the
+/// axial degeneracy is exact for the discrete problem). Returns converged,
+/// ordinary maps, energy and the final ordinary spectrum (up then down).
+fn g4g_centred_run(switches: &[(&str, &str)]) -> (bool, usize, f64, Vec<f64>) {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential, StartDensity,
+        collinear::SpinSector,
+        refscf::electronic::{self, Policy, Trace},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[16., 0., 0.], [0., 16., 0.], [0., 0., 16.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.; 3])];
+    let pp = g4g_potential(6., 1.);
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let sector = SpinSector {
+        n_up: 4,
+        n_down: 2,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: None,
+    };
+    let options = ScfOptions {
+        functional: Functional::Pbe,
+        allow_functional_override: true,
+        cutoff_hartree: 6.,
+        bands: Some(6),
+        gamma_real: GammaReal::Off,
+        start_density: StartDensity::Uniform,
+        max_iterations: 100,
+        verification: dft_engine::Verification::FixedPoint,
+        standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+        ..ScfOptions::strict_reference()
+    };
+    let config = dft_numerics::switches::RunConfig::from_pairs(switches).unwrap();
+    let _scope = config.enter();
+    let mut trace = Trace::default();
+    let r = electronic::run_with_trace(
+        StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        },
+        Profile::default(),
+        &points,
+        Policy::FixedSpin(sector),
+        &Serial,
+        Some(&mut trace),
+    )
+    .unwrap();
+    let last = trace
+        .records()
+        .iter()
+        .rfind(|t| !t.verification && !t.redo)
+        .unwrap();
+    let maps = trace
+        .records()
+        .iter()
+        .filter(|t| !t.verification && !t.redo)
+        .count();
+    (
+        r.converged,
+        maps,
+        r.energy.total_hartree(),
+        last.eigenvalues_ha.clone(),
+    )
+}
+
+#[test]
+#[ignore = "vacuum SCF: cargo test --release -p dft-engine --test refscf g4g_centred_candidates -- --ignored --nocapture"]
+fn g4g_centred_candidates() {
+    let (ok, maps, base, _) = g4g_centred_run(&[]);
+    eprintln!("G4G_CENTRED default converged={ok} maps={maps} E={base:.17e}");
+    assert!(ok);
+    for (name, switch) in [
+        ("canonical", "refscf_canonical_cluster"),
+        ("pulay", "refscf_spin_pulay"),
+    ] {
+        let (ok, maps, e, spectrum) = g4g_centred_run(&[(switch, "on")]);
+        let up_pair = spectrum[2] - spectrum[1];
+        let down_pair = spectrum[9] - spectrum[8];
+        eprintln!(
+            "G4G_CENTRED {name} converged={ok} maps={maps} E={e:.17e} dE={:.3e} up_pair={up_pair:.3e} down_pair={down_pair:.3e}",
+            e - base
+        );
+        assert!(ok);
+        // Standard accuracy class against the default reference.
+        assert!((e - base).abs() < 5e-9);
+    }
+}

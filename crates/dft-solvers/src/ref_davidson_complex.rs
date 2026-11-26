@@ -171,6 +171,7 @@ fn eigen<K: Collective>(
     values: &mut [f64],
     c: &mut Matrix,
     packed: &mut [f64],
+    canonical: &mut [C],
 ) -> Result<(), SolverError> {
     let t = clock(o.profile);
     let root = o.placement == ReducedPlacement::Root;
@@ -203,10 +204,72 @@ fn eigen<K: Collective>(
             *z = C::new(p[0], p[1]);
         }
     }
+    if !canonical.is_empty() {
+        canonicalize_clusters(values, c, canonical);
+    }
     r.reduced_solves += 1;
     r.reduced_order = h.rows();
     r.seconds[3] += elapsed(t);
     Ok(())
+}
+/// Choose a deterministic basis of a roundoff-degenerate Ritz cluster by
+/// projecting ordered coordinate axes into its coefficient subspace. The
+/// cluster transformation is unitary even for a generalized overlap metric.
+/// Scratch is allocated by the caller before the Davidson iteration loop.
+pub fn canonicalize_clusters(values: &[f64], c: &mut Matrix, scratch: &mut [C]) {
+    let scale = values.iter().map(|v| v.abs()).fold(0., f64::max);
+    let tolerance = 64. * f64::EPSILON * scale;
+    let mut first = 0;
+    while first < values.len() {
+        let mut end = first + 1;
+        while end < values.len() && values[end] - values[first] <= tolerance {
+            end += 1;
+        }
+        let k = end - first;
+        if k > 1 {
+            let rows = c.rows();
+            let (old, rest) = scratch.split_at_mut(rows * k);
+            let (rotation, work) = rest.split_at_mut(k * k);
+            for j in 0..k {
+                old[j * rows..(j + 1) * rows].copy_from_slice(c.column(first + j));
+            }
+            let mut kept = 0;
+            for row in 0..rows {
+                for j in 0..k {
+                    work[j] = old[j * rows + row].conj();
+                }
+                for _ in 0..2 {
+                    for j in 0..kept {
+                        let dot: C = (0..k).map(|i| rotation[j * k + i].conj() * work[i]).sum();
+                        for i in 0..k {
+                            work[i] -= dot * rotation[j * k + i];
+                        }
+                    }
+                }
+                let norm = work[..k].iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
+                if norm <= 64. * f64::EPSILON {
+                    continue;
+                }
+                for i in 0..k {
+                    rotation[kept * k + i] = work[i] / norm;
+                }
+                kept += 1;
+                if kept == k {
+                    break;
+                }
+            }
+            if kept == k {
+                for j in 0..k {
+                    for row in 0..rows {
+                        c[(row, first + j)] = (0..k)
+                            .map(|i| old[i * rows + row] * rotation[j * k + i])
+                            .sum();
+                    }
+                }
+            }
+        }
+        first = end;
+    }
 }
 fn matrix(rows: usize, cols: usize, capacity: usize) -> Result<Matrix, SolverError> {
     let mut a = Matrix::zeros(rows, cols)?;
@@ -280,6 +343,12 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
     let mut proj = s.clone();
     let mut q = matrix(rows, cap, cap)?;
     let mut hq = matrix(rows, cap, cap)?;
+    let mut canonical =
+        if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_CANONICAL_CLUSTER) {
+            vec![C::default(); cap * n + n * n + n]
+        } else {
+            Vec::new()
+        };
     let mut values = vec![0.; n];
     let mut old = vec![0.; n];
     let mut v = matrix(rows, n, cap)?;
@@ -319,6 +388,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         &mut values,
         &mut c,
         &mut products.local,
+        &mut canonical,
     )?;
     record.setup.communication = comm.snapshot();
     let mut active: Vec<_> = (0..n).collect();
@@ -490,6 +560,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
                 &mut values,
                 &mut c,
                 &mut products.local,
+                &mut canonical,
             )?;
         } else {
             r.reduced_order = m;

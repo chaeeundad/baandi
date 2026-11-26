@@ -151,19 +151,13 @@ impl Config {
         let tr = self.basis.time_reversal();
         let mut cache = self.symmetry_cache.borrow_mut();
         if let Some(prepared) = cache.as_ref()
-            && prepared.matches(&cell, &atoms, &full, self.symmetry.tolerance_bohr, tr)
+            && prepared.matches(&cell, &atoms, &full, self.detection_tolerance(), tr)
         {
             return Ok(Some(prepared.clone()));
         }
         let prepared = std::sync::Arc::new(
-            dft_engine::PreparedSymmetry::new(
-                &cell,
-                &atoms,
-                &full,
-                self.symmetry.tolerance_bohr,
-                tr,
-            )
-            .map_err(|e| fail(e.to_string()))?,
+            dft_engine::PreparedSymmetry::new(&cell, &atoms, &full, self.detection_tolerance(), tr)
+                .map_err(|e| fail(e.to_string()))?,
         );
         *cache = Some(prepared.clone());
         Ok(Some(prepared))
@@ -193,7 +187,7 @@ impl Config {
             "density_operations_count": density_ops.len(),
             "density_operations": density_ops.iter().map(|o| serde_json::json!({"rotation":o.rotation,"translation":o.translation,"atom_permutation":o.atom_permutation,"antiunitary":o.antiunitary})).collect::<Vec<_>>(),
             "mode":"auto", "operations_count":m.operations.iter().filter(|o|!o.antiunitary).count(),
-            "irreducible_k_count":m.points.len(),"full_k_count":m.entries.len(),"tolerance_bohr":self.symmetry.tolerance_bohr,
+            "irreducible_k_count":m.points.len(),"full_k_count":m.entries.len(),"tolerance_bohr":self.symmetry.tolerance_bohr,"detection_tolerance_bohr":self.detection_tolerance(),
             "crystal_operations_count": self.symmetrization.as_ref().map(|r| r.operations_count),
             "input_symmetrization": self.symmetrization.as_ref().map(|r| serde_json::json!({
                 "policy": "ADR 0049: lattice and positions projected onto the group detected at tolerance_bohr; refused above it",
@@ -1142,6 +1136,24 @@ impl Config {
     /// that group (refused above the tolerance). Changes at roundoff level keep
     /// the input bits. Runs once at parse time so every driver, output and
     /// relaxation start sees one consistent, exactly symmetric geometry.
+    /// ADR 0049 (amendment GS1B): tolerance (Bohr) for every group detection
+    /// after the input was projected onto its group at `symmetry.tolerance_bohr`.
+    /// The projected input carries that group exactly and relaxations keep it to
+    /// roundoff, so the tight tolerance re-finds exactly the start group. The
+    /// loose input tolerance applied to a relaxed geometry would add operations
+    /// once the trajectory passes within it of a higher symmetry, and the
+    /// symmetrized stress/forces would then lose the component driving it there.
+    /// Without a projection record (configs built without `parse`) the
+    /// configured tolerance is used unchanged.
+    pub fn detection_tolerance(&self) -> f64 {
+        if self.symmetrization.is_some() {
+            self.symmetry
+                .tolerance_bohr
+                .min(dft_geometry::symmetry::SYMMETRIZATION_VERIFY_BOHR)
+        } else {
+            self.symmetry.tolerance_bohr
+        }
+    }
     pub fn symmetrize_input(&mut self) -> Result<(), ConfigError> {
         if self.symmetry.mode != SymmetryMode::Auto || self.symmetrization.is_some() {
             return Ok(());

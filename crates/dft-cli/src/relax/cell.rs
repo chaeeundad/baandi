@@ -621,7 +621,7 @@ fn emit(ctx: &Context, settings: &Settings, s: &State, out: &Path) -> Result<(),
         }
     }
     block["space_group_operations"] = json!(
-        dft_geometry::symmetry::detect(&ctx.cell, &ctx.atoms(), ctx.config.symmetry.tolerance_bohr)
+        dft_geometry::symmetry::detect(&ctx.cell, &ctx.atoms(), ctx.config.detection_tolerance())
             .map_err(|e| error(4, e))?
             .len()
     );

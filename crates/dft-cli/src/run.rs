@@ -244,7 +244,7 @@ fn reference_symmetry(
                 &config.cell().map_err(|e| error(1, e))?,
                 &atoms,
                 &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                config.symmetry.tolerance_bohr,
+                config.detection_tolerance(),
                 config.basis.time_reversal(),
                 &p,
             )

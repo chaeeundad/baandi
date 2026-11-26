@@ -56,7 +56,9 @@ fn preparation_is_shared_and_invalidated_by_physical_inputs() {
         &first,
         &config.prepared_symmetry().unwrap().unwrap()
     ));
-    config.symmetry.tolerance_bohr *= 2.;
+    // After the parse-time projection, detection runs at min(tolerance, 1e-9)
+    // Bohr (ADR 0049 amendment GS1B): only a tolerance below 1e-9 changes it.
+    config.symmetry.tolerance_bohr = 5e-10;
     let tolerance = config.prepared_symmetry().unwrap().unwrap();
     assert!(!Arc::ptr_eq(&first, &tolerance));
     config.basis.kgrid = Some([2, 2, 2]);

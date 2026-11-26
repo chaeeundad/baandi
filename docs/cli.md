@@ -1269,6 +1269,9 @@ lattice is carried in Bohr. `results.json.symmetry` records `tolerance_bohr`,
 `crystal_operations_count` and `input_symmetrization` (applied changes and the
 largest atom and lattice displacements in Bohr). Use a smaller
 `tolerance_bohr` to keep an intentionally near-symmetric distortion.
+After this projection every detection (including each relaxation geometry) runs
+at `min(tolerance_bohr, 1e-9)` Bohr (`detection_tolerance_bohr` in results), so
+relaxations keep the start group (ADR 0049 amendment GS1B).
 
 `auto` detects species-aware spatial operations, uses the subgroup preserving
 `basis.kgrid`/`kshift`, and reports irreducible eigenvalues, weights and integer

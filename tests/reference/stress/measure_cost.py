@@ -24,7 +24,8 @@ for case in ['si8', 'k444s']:
         with tempfile.TemporaryDirectory(prefix='p22-stress-cost-') as td:
             td = Path(td)
             text = bench['case_input'](upf, case, threads=1)
-            text += '\n[output]\nstress=' + ('true' if enabled else 'false') + '\n'
+            # PULAY-OPTIN (2026-11-26): the assessment is opt-in; this script measures it.
+            text += '\n[output]\nstress=' + ('true' if enabled else 'false') + '\nstress_pulay_assessment=true\n'
             (td / 'input.toml').write_text(text)
             command = [binary, 'run', str(td / 'input.toml'), '--output-dir', str(td / 'out')]
             start = time.monotonic()

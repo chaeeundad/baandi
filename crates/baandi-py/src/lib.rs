@@ -288,7 +288,10 @@ impl ReferenceSession<'_> {
             api::Run::Electronic(_) => Err(runtime_error("expected scalar reference result")),
         }
     }
-    fn derivatives(&mut self, stress: bool) -> PyResult<&api::Observables> {
+    fn derivatives(
+        &mut self,
+        stress: Option<dft_engine::PulayAssessmentMode>,
+    ) -> PyResult<&api::Observables> {
         let input = || StartInput {
             cell: self.input.cell,
             atoms: self.input.atoms,
@@ -309,7 +312,10 @@ impl ReferenceSession<'_> {
         derivatives
             .evaluate_forces(input(), &run.outcome.result)
             .map_err(runtime_error)?;
-        if stress {
+        if let Some(mode) = stress {
+            derivatives
+                .set_pulay_assessment(mode)
+                .map_err(runtime_error)?;
             derivatives
                 .evaluate_stress(input(), &run.outcome.result)
                 .map_err(runtime_error)?;
@@ -453,6 +459,8 @@ impl Session {
                                 forces: true,
                                 stress: true,
                                 deferred: true,
+                                // Selected per call by `stress(pulay_assessment=...)`.
+                                pulay_assessment: dft_engine::PulayAssessmentMode::Off,
                             };
                             let runtime = runtime::Runtime::new(api::stepper(input(), request));
                             let snapshot = runtime.snapshot();
@@ -585,7 +593,7 @@ impl Session {
     fn forces(&self, py: Python<'_>) -> PyResult<Vec<[f64; 3]>> {
         if self.reference {
             return self.reference_call(py, |s| {
-                Ok(s.derivatives(false)?
+                Ok(s.derivatives(None)?
                     .forces
                     .as_ref()
                     .expect("requested forces")
@@ -636,7 +644,17 @@ impl Session {
     /// the same delivery contract as forces, at a threshold of at most
     /// `StandardProfile::STRESS_THRESHOLD_HA` (5e-11 Ha, the stress class; the
     /// CLI default for stress inputs, ADR 0043 ONEPATH-2/4).
-    fn stress(&self, py: Python<'_>) -> PyResult<[[f64; 3]; 3]> {
+    /// `pulay_assessment=True` also runs the isotropic cutoff-derivative Pulay
+    /// assessment (three extra SCFs, warning only; the tensor is identical),
+    /// default False (PULAY-OPTIN, 2026-11-26). A reference session evaluates
+    /// its stress once; a later call with the other setting raises.
+    #[pyo3(signature = (pulay_assessment=false))]
+    fn stress(&self, py: Python<'_>, pulay_assessment: bool) -> PyResult<[[f64; 3]; 3]> {
+        let mode = if pulay_assessment {
+            dft_engine::PulayAssessmentMode::CutoffScan
+        } else {
+            dft_engine::PulayAssessmentMode::Off
+        };
         if let Some(p) = self.force_options.standard
             && p.threshold_ha > dft_engine::StandardProfile::STRESS_THRESHOLD_HA
         {
@@ -647,9 +665,9 @@ impl Session {
             )));
         }
         if self.reference {
-            let (values, pulay) = self.reference_call(py, |s| {
+            let (values, pulay) = self.reference_call(py, move |s| {
                 let r = s
-                    .derivatives(true)?
+                    .derivatives(Some(mode))?
                     .stress
                     .as_ref()
                     .expect("requested stress");
@@ -689,15 +707,19 @@ impl Session {
                     potential: p,
                 })
                 .collect();
-            dft_engine::stress::stress(&dft_engine::forces::ForceState {
-                cell: &cell,
-                atoms: &atoms,
-                potentials: &refs,
-                options: &options,
-                electronic: dft_engine::forces::ElectronicState::Fixed(&outcome.result),
-                density_floor: None,
-                symmetry: &[],
-            })
+            dft_engine::stress::stress_with(
+                &dft_engine::forces::ForceState {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &refs,
+                    options: &options,
+                    electronic: dft_engine::forces::ElectronicState::Fixed(&outcome.result),
+                    density_floor: None,
+                    symmetry: &[],
+                },
+                None,
+                mode,
+            )
             .map(|r| {
                 (
                     r.values,

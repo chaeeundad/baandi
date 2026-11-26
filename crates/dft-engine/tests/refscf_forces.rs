@@ -1594,6 +1594,7 @@ fn fd_band_growth_forces_stress_match_explicit_count() {
             forces: true,
             stress: true,
             deferred: false,
+            ..Default::default()
         };
         let input = StartInput {
             cell: &cell,
@@ -1672,6 +1673,7 @@ fn fd_buffer_bands_match_large_band_tight_run() {
             forces: true,
             stress: true,
             deferred: false,
+            ..Default::default()
         };
         let input = StartInput {
             cell: &cell,

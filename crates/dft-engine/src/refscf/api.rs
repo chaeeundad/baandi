@@ -15,6 +15,10 @@ pub struct Derivatives {
     pub forces: bool,
     pub stress: bool,
     pub deferred: bool,
+    /// Stress only: run the isotropic cutoff-derivative Pulay assessment (three
+    /// extra SCFs). Default off (PULAY-OPTIN, 2026-11-26); the tensor is
+    /// identical either way.
+    pub pulay_assessment: crate::stress::PulayAssessmentMode,
 }
 
 pub struct Request {
@@ -210,11 +214,11 @@ impl Observables {
                 ));
             }
             let state = self.view(input, crate::ElectronicState::Reference(run))?;
-            self.stress = Some(if let Some(symmetry) = &self.symmetry {
-                crate::stress::stress_prepared(&state, symmetry)?
-            } else {
-                crate::stress(&state)?
-            });
+            self.stress = Some(crate::stress::stress_with(
+                &state,
+                self.symmetry.as_ref(),
+                self.requested.pulay_assessment,
+            )?);
             self.stress_done = true;
         }
         Ok(())
@@ -238,6 +242,22 @@ impl Observables {
         Ok(())
     }
 
+    /// Select the Pulay assessment of a deferred stress before it is evaluated.
+    /// Changing it after the stress was evaluated is an error (the cached
+    /// result would not match the request).
+    pub fn set_pulay_assessment(
+        &mut self,
+        mode: crate::stress::PulayAssessmentMode,
+    ) -> Result<(), ScfError> {
+        if self.stress_done && self.requested.pulay_assessment != mode {
+            return Err(ScfError::InvalidInput(
+                "reference API: stress already evaluated with another Pulay assessment mode",
+            ));
+        }
+        self.requested.pulay_assessment = mode;
+        Ok(())
+    }
+
     pub fn evaluate_stress(
         &mut self,
         input: StartInput<'_>,
@@ -250,11 +270,11 @@ impl Observables {
                 ));
             }
             let state = self.state(input, result)?;
-            self.stress = Some(if let Some(symmetry) = &self.symmetry {
-                crate::stress::stress_prepared(&state, symmetry)?
-            } else {
-                crate::stress(&state)?
-            });
+            self.stress = Some(crate::stress::stress_with(
+                &state,
+                self.symmetry.as_ref(),
+                self.requested.pulay_assessment,
+            )?);
             self.stress_done = true;
         }
         Ok(())

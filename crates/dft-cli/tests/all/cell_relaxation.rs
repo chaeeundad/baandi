@@ -107,6 +107,41 @@ fn cell_resume_monotonicity_and_protocols() {
     let xyz = fs::read_to_string(dir.join("full/trajectory.extxyz")).unwrap();
     assert_eq!(xyz.lines().count(), 4 * frames.len());
     assert!(xyz.contains("Properties=species:S:1:pos:R:3:forces:R:3"));
+    // PULAY-OPTIN (2026-11-26): the rebuilt frame's Pulay assessment is opt-in;
+    // the rebuilt stress is bit for bit the same with it on.
+    let rebuilt = &result["relaxation"]["rebuilt_final"]["frame"];
+    assert_eq!(rebuilt["pulay_assessment"]["status"], "not_evaluated");
+    fs::write(
+        dir.join("assessed.toml"),
+        input()
+            + "\n[relax]\nmode='ions_cell'\ncell_dofs='isotropic'\nmax_steps=4\nforce_tol_ha_bohr=1e-8\n[output]\nstress_pulay_assessment=true\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .current_dir(&dir)
+        .args(["relax", "assessed.toml", "--output-dir", "assessed"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let assessed: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("assessed/results.json")).unwrap()).unwrap();
+    let on = &assessed["relaxation"]["rebuilt_final"]["frame"];
+    assert_eq!(
+        on["pulay_assessment"]["method"],
+        "isotropic_cutoff_derivative_5_10_percent"
+    );
+    let bits = |v: &serde_json::Value| -> Vec<u64> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|row| row.as_array().unwrap().iter())
+            .map(|x| x.as_f64().unwrap().to_bits())
+            .collect()
+    };
+    assert_eq!(
+        bits(&rebuilt["stress_ha_bohr3"]),
+        bits(&on["stress_ha_bohr3"])
+    );
 }
 
 #[test]

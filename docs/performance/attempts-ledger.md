@@ -3679,6 +3679,19 @@ Also si128 FFT_KERNEL_BY_LENGTH (now wired): all 10 lane shapes choose MKL (16-4
 calibration); wall 33.63 -> 33.46 s; kernels -0.9 s but slab gather/scatter, middle pack/unpack and multiply +0.5 s
 (same pattern as M2_FFT=mkl in P3e). Evidence: dev08 /data/sig-dft/wo/RESULT.md.
 
+### PULAY-OPTIN (2026-11-26, user decision): stress Pulay assessment OFF by default, opt-in
+
+Trigger: dev08 stress runs where the isotropic cutoff-derivative Pulay assessment (three extra cold SCF runs at
+c, 1.05c, 1.10c) was 51% of the wall on GeTe and 71% on B12 (1861 s of 2626 s); QE does no such scan and the
+assessment never changes the stress tensor (diagnostic only). Change: off by default, opt-in with
+`[output] stress_pulay_assessment = true` (CLI, also for the nominal-cutoff frames of cell relaxation) or
+`Session.stress(pulay_assessment=True)` (Python); engine switch `stress::PulayAssessmentMode` on
+`refscf::api::Derivatives` and `stress::stress_with`. Off: `stress.pulay_assessment =
+{"status":"not_evaluated",...}`, `cutoff_scf_runs = 0`. Stress tensor bit-identical on/off (CLI test
+`all::stress::stress_output_identity_schema_and_paths`, spin/FD in `forces.rs`, facade deferred vs eager in
+`api_identity`). Status: adopted (default off). Lesson: a diagnostic that costs more than the observable belongs
+behind an explicit switch.
+
 ### MPI-DERIV (2026-11-26, Mac correctness; dev08 acceptance pending): k-distributed post-SCF derivatives
 
 Trigger: dev08 MPQE entry 17 (B12, 172 k, MPI8) spent >36 min after a ~9 min SCF+verification in forces/stress.

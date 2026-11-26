@@ -14,6 +14,10 @@ s = result['stress']
 validate(s, schema['properties']['stress'])
 if 'state_contracts' in result:
     validate(result['state_contracts'], schema)
+# PULAY-OPTIN (2026-11-26): the opt-in assessment and the scan count agree.
+evaluated = 'method' in s['pulay_assessment']
+assert s['cutoff_scf_runs'] == (3 if evaluated else 0)
+assert evaluated or s['pulay_assessment']['status'] == 'not_evaluated'
 for a in range(3):
     for b in range(3):
         assert abs(s['values'][a][b] - sum(t[a][b] for t in s['per_term'].values())) < 1e-12
@@ -29,8 +33,9 @@ if s['preconditions']['convergence_profile'] == 'standard':
         ('no threshold', lambda x: x['preconditions'].pop('standard_threshold_ha')),
         ('unconverged', lambda x: x['preconditions'].update(converged=False)),
     ]
-    assert s['pulay_assessment']['scan_profile'] == 'standard_verified'
-    assert all(t is not None for t in s['pulay_assessment']['scan_thresholds_ha'])
+    if 'method' in s['pulay_assessment']:
+        assert s['pulay_assessment']['scan_profile'] == 'standard_verified'
+        assert all(t is not None for t in s['pulay_assessment']['scan_thresholds_ha'])
 else:
     profile_probes = [
         ('standard', lambda x: x['preconditions'].update(convergence_profile='standard')),
@@ -43,6 +48,8 @@ for label, mutate in [
     *profile_probes,
     ('tensor shape', lambda x: x.update(values=[[0, 0]])),
     ('cutoff claim', lambda x: x.update(cutoff_converged=True)),
+    ('scan count', lambda x: x.update(cutoff_scf_runs=1)),
+    ('pulay status', lambda x: x.update(pulay_assessment={'status': 'skipped', 'reason': 'x'})),
 ]:
     invalid = copy.deepcopy(s)
     mutate(invalid)

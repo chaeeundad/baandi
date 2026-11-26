@@ -15,7 +15,8 @@ commands/evidence are in `VALIDATION.md`, `native-evidence.json` and
 native acceptance. No MLIP loop or low-level external coupling is implemented.
 
 ASE stress is tensile-positive in eV/Angstrom^3, Voigt xx,yy,zz,yz,xz,xy.
-The native method returns Ha/Bohr^3 and warns on the separate Pulay assessment.
+The native method returns Ha/Bohr^3; `stress(pulay_assessment=True)` (default False since
+PULAY-OPTIN, 2026-11-26) also runs the separate Pulay assessment and warns on it.
 `test_ase_stress_sign_voigt_and_energy_derivative` uses ASE's own numerical
 stress oracle. Do not claim installed-wheel acceptance from skipped tests.
 

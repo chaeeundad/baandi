@@ -2,6 +2,9 @@
 //! start orbitals bit-identical to the original per-(row, atom, m) quadrature.
 //! The memo lives in `finish_kpoints`, shared by the unpolarized, spin/FD and
 //! fixed-density k starts.
+//! GK1B: rows-only projector tables (`BAANDI_K_NL_TABLE_MEMO`) keep the start
+//! orbitals and the operators' H X bit-identical; the shared collinear spin
+//! start (`BAANDI_K_START_SPIN_SHARE`) keeps a whole spin run bit-identical.
 //! Mac observation (release, not an assertion):
 //! cargo test --release -p dft-engine --test k_start_memo timing -- --ignored --nocapture
 #[allow(dead_code)]
@@ -54,14 +57,24 @@ fn points() -> Vec<KPoint> {
     ]
 }
 
-/// Start orbitals (bits per k block, and the start kind) with the memo switch.
+fn bits(x: &dft_numerics::linalg::ComplexMatrix) -> Vec<u64> {
+    x.as_slice()
+        .iter()
+        .flat_map(|z| [z.re.to_bits(), z.im.to_bits()])
+        .collect()
+}
+
+type StartBits = (Vec<Vec<u64>>, OrbitalStartKind, f64, Vec<Vec<u64>>);
+
+/// Start orbitals (bits per k block), the start kind, the start wall and the
+/// bits of H X of every k operator applied to its start orbitals.
 fn run(
     f: &Fixture,
     points: &[KPoint],
     options: &ScfOptions,
-    memo: &str,
+    switches: &[(&str, &str)],
     ranks: usize,
-) -> Vec<(Vec<Vec<u64>>, OrbitalStartKind, f64)> {
+) -> Vec<StartBits> {
     let potentials = [
         SpeciesPotential {
             label: "A",
@@ -73,9 +86,9 @@ fn run(
         },
     ];
     dft_mpi::simulate(ranks, |comm| {
-        let config = RunConfig::from_pairs(&[("k_start_memo", memo)]).unwrap();
+        let config = RunConfig::from_pairs(switches).unwrap();
         let _scope = config.enter();
-        let state = refstart::start_kpoints(
+        let mut state = refstart::start_kpoints(
             StartInput {
                 cell: &f.cell,
                 atoms: &f.atoms,
@@ -87,19 +100,16 @@ fn run(
         )
         .unwrap();
         assert!(config.consulted(Id::K_START_MEMO));
-        let bits = state
-            .orbitals
-            .0
-            .iter()
-            .map(|x| {
-                x.as_slice()
-                    .iter()
-                    .flat_map(|z| [z.re.to_bits(), z.im.to_bits()])
-                    .collect()
-            })
-            .collect();
+        assert!(config.consulted(Id::K_NL_TABLE_MEMO));
+        let orbitals: Vec<_> = state.orbitals.0.iter().map(bits).collect();
+        let mut hx = Vec::new();
+        for (block, x) in state.blocks.iter_mut().zip(&state.orbitals.0) {
+            let mut y = dft_numerics::linalg::ComplexMatrix::zeros(x.rows(), x.cols()).unwrap();
+            block.operator.apply_block(comm, x, &mut y).unwrap();
+            hx.push(bits(&y));
+        }
         let seconds = state.setup.phases["complex_k_atomic_starts"];
-        (bits, state.report.orbitals, seconds)
+        (orbitals, state.report.orbitals, seconds, hx)
     })
 }
 
@@ -112,8 +122,8 @@ fn gk1_k_start_memo_is_bit_identical() {
         ..Default::default()
     };
     for ranks in [1, 3] {
-        let on = run(&f, &points(), &options, "on", ranks);
-        let off = run(&f, &points(), &options, "off", ranks);
+        let on = run(&f, &points(), &options, &[("k_start_memo", "on")], ranks);
+        let off = run(&f, &points(), &options, &[("k_start_memo", "off")], ranks);
         for (rank, (a, b)) in on.iter().zip(&off).enumerate() {
             // 5 atoms x (s + p) = 20 atomic columns cover the 8 bands.
             assert_eq!(a.1, OrbitalStartKind::Atomic);
@@ -127,6 +137,114 @@ fn gk1_k_start_memo_is_bit_identical() {
                 "ranks {ranks} rank {rank}: start orbital bits differ"
             );
         }
+    }
+}
+
+#[test]
+fn gk1b_rows_only_projector_tables_are_bit_identical() {
+    let f = fixture();
+    let options = ScfOptions {
+        cutoff_hartree: 2.5,
+        bands: Some(8),
+        ..Default::default()
+    };
+    for ranks in [1, 3] {
+        let on = run(&f, &points(), &options, &[("k_nl_table_memo", "on")], ranks);
+        let off = run(
+            &f,
+            &points(),
+            &options,
+            &[("k_nl_table_memo", "off")],
+            ranks,
+        );
+        for (rank, (a, b)) in on.iter().zip(&off).enumerate() {
+            assert_eq!(
+                a.0, b.0,
+                "ranks {ranks} rank {rank}: start orbital bits differ"
+            );
+            assert_eq!(a.3.len(), 3);
+            assert_eq!(a.3, b.3, "ranks {ranks} rank {rank}: H X bits differ");
+        }
+    }
+}
+
+/// A collinear fixed-spin k run (3 maps, LDA PW, 2 species, 3 k) with the shared
+/// spin start equals the per-channel start bit for bit: history energies,
+/// channel densities, eigenvalues and final orbitals.
+#[test]
+fn gk1b_spin_shared_start_is_bit_identical() {
+    use dft_engine::{
+        collinear::SpinSector,
+        refscf::{
+            electronic::{self, Policy},
+            profile::Profile,
+        },
+    };
+    let f = fixture();
+    let potentials = [
+        SpeciesPotential {
+            label: "A",
+            potential: &f.a,
+        },
+        SpeciesPotential {
+            label: "B",
+            potential: &f.b,
+        },
+    ];
+    let options = ScfOptions {
+        cutoff_hartree: 2.5,
+        bands: Some(8),
+        max_iterations: 3,
+        functional: dft_engine::Functional::LdaPw,
+        allow_functional_override: true,
+        gamma_real: dft_engine::GammaReal::Off,
+        verification: dft_engine::Verification::FixedPoint,
+        standard: Some(dft_engine::StandardProfile { threshold_ha: 5e-9 }),
+        ..ScfOptions::strict_reference()
+    };
+    let sector = SpinSector {
+        n_up: 6,
+        n_down: 4,
+        axis_cartesian: [0., 0., 1.],
+        initial_moment_seed: None,
+    };
+    for ranks in [1, 2] {
+        let arm = |share: &str| {
+            dft_mpi::simulate(ranks, |comm| {
+                let config = RunConfig::from_pairs(&[("k_start_spin_share", share)]).unwrap();
+                let _scope = config.enter();
+                let r = electronic::run_with_trace(
+                    StartInput {
+                        cell: &f.cell,
+                        atoms: &f.atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    Profile::default(),
+                    &points(),
+                    Policy::FixedSpin(sector.clone()),
+                    comm,
+                    None,
+                )
+                .unwrap();
+                assert!(config.consulted(Id::K_START_SPIN_SHARE));
+                let mut out: Vec<u64> = r.history.iter().map(|i| i.energy_ha.to_bits()).collect();
+                for d in &r.density {
+                    out.extend(d.iter().map(|v| v.to_bits()));
+                }
+                for channel in &r.blocks {
+                    for b in channel {
+                        out.extend(b.eigenvalues_ha.iter().map(|v| v.to_bits()));
+                        out.extend(bits(&b.orbitals));
+                    }
+                }
+                (r.history.len(), out)
+            })
+        };
+        let on = arm("on");
+        let off = arm("off");
+        assert!(on[0].0 > 0);
+        assert_eq!(on, off, "ranks {ranks}: spin run bits differ");
     }
 }
 
@@ -179,29 +297,43 @@ fn timing() {
             potential: &f.b,
         },
     ];
-    for memo in ["on", "off", "on"] {
-        let config = RunConfig::from_pairs(&[("k_start_memo", memo)]).unwrap();
-        let _scope = config.enter();
-        let clock = std::time::Instant::now();
-        let state = refstart::start_kpoints(
-            StartInput {
-                cell: &f.cell,
-                atoms: &f.atoms,
-                potentials: &potentials,
-                options: &options,
-            },
-            &points,
-            &dft_engine::refscf::metric::Serial,
-        )
-        .unwrap();
-        let wall = clock.elapsed().as_secs_f64();
+    // GK1B arms: "before" = GK1 state (full-sphere projector tables).
+    let arms: [(&str, &[(&str, &str)]); 3] = [
+        ("before", &[("k_nl_table_memo", "off")]),
+        ("after", &[("k_nl_table_memo", "on")]),
+        ("before", &[("k_nl_table_memo", "off")]),
+    ];
+    let ranks: usize = std::env::var("GK1_RANKS").map_or(4, |v| v.parse().unwrap());
+    for (memo, pairs) in arms {
+        let report = dft_mpi::simulate(ranks, |comm| {
+            let config = RunConfig::from_pairs(pairs).unwrap();
+            let _scope = config.enter();
+            let clock = std::time::Instant::now();
+            let state = refstart::start_kpoints(
+                StartInput {
+                    cell: &f.cell,
+                    atoms: &f.atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                &points,
+                comm,
+            )
+            .unwrap();
+            let wall = clock.elapsed().as_secs_f64();
+            (
+                wall,
+                state.blocks[0].basis.vectors().len(),
+                state.grid.dims(),
+                state.setup.phases.clone(),
+            )
+        });
+        let (wall, npw, dims, phases) = &report[0];
         eprintln!(
-            "GK1_TIMING memo={memo} k={nk} npw0={} grid={:?} wall_s={wall:.3}",
-            state.blocks[0].basis.vectors().len(),
-            state.grid.dims()
+            "GK1_TIMING arm={memo} ranks={ranks} k={nk} npw0={npw} grid={dims:?} rank0_wall_s={wall:.3}"
         );
-        for (name, s) in &state.setup.phases {
-            eprintln!("GK1_TIMING memo={memo}   {name} {s:.4}");
+        for (name, s) in phases {
+            eprintln!("GK1_TIMING arm={memo}   {name} {s:.4}");
         }
     }
 }

@@ -456,9 +456,49 @@ struct ProjectorRecipeAtom {
 struct ProjectorRecipe {
     momenta: Vec<GVector>,
     atoms: Vec<ProjectorRecipeAtom>,
+    /// GK1B rows-only recipe: the factors hold only these (sorted) basis rows,
+    /// in this order; `None` means the factors cover the whole basis.
+    local: Option<Vec<usize>>,
 }
 impl ProjectorRecipe {
+    /// Factor slot of basis row `i` (`None`: not held by a rows-only recipe).
+    fn slot(&self, i: usize) -> Option<usize> {
+        match &self.local {
+            None => Some(i),
+            Some(local) => local.binary_search(&i).ok(),
+        }
+    }
+    /// Rows of all atoms' columns, column-major; `None` when a rows-only recipe
+    /// does not hold one of `indices`. Values equal the full-basis recipe's
+    /// bit for bit (same factor, same phase argument, same product).
+    fn try_rows(&self, indices: &[usize]) -> Option<Vec<Complex64>> {
+        let slots = indices
+            .iter()
+            .map(|&i| self.slot(i))
+            .collect::<Option<Vec<_>>>()?;
+        let channels: usize = self.atoms.iter().map(|a| a.factors.len()).sum();
+        let mut out = Vec::with_capacity(indices.len() * channels);
+        for atom in &self.atoms {
+            let phases: Vec<_> = indices
+                .iter()
+                .map(|&i| {
+                    // Bounds and finite phase arguments were checked at construction.
+                    phase(self.momenta[i].cartesian, atom.position)
+                        .expect("validated projector phase")
+                })
+                .collect();
+            for col in atom.factors.iter() {
+                out.extend(slots.iter().zip(&phases).map(|(&s, p)| col[s] * p));
+            }
+        }
+        Some(out)
+    }
     fn rows(&self, indices: &[usize]) -> Vec<Complex64> {
+        if self.local.is_some() {
+            return self
+                .try_rows(indices)
+                .expect("rows-only projector table: only owned rows are available");
+        }
         let channels: usize = self.atoms.iter().map(|a| a.factors.len()).sum();
         let mut out = Vec::with_capacity(indices.len() * channels);
         for atom in &self.atoms {
@@ -1012,7 +1052,11 @@ impl NonlocalOperator {
             return Err(HamiltonianError::Shape);
         }
         Ok(if let Some(recipe) = &self.table.recipe {
-            recipe.rows(indices)
+            if recipe.local.is_some() {
+                recipe.try_rows(indices).ok_or(HamiltonianError::Shape)?
+            } else {
+                recipe.rows(indices)
+            }
         } else {
             let mut out = Vec::with_capacity(indices.len() * self.projector_count());
             for col in self.table.chunks_exact(self.rows) {
@@ -2407,7 +2451,7 @@ impl NonlocalOperator {
         species: &[Species<'_>],
         rule: dft_upf::radial::RadialEvenRule,
     ) -> Result<Self, HamiltonianError> {
-        Self::new_selected(basis, volume_bohr3, species, rule, None)
+        Self::new_selected(basis, volume_bohr3, species, rule, None, false)
     }
     /// Build only selected full-sphere rows; full columns remain available lazily.
     /// `indices` must be sorted and unique. The engine selects the owned Gamma
@@ -2424,7 +2468,30 @@ impl NonlocalOperator {
         {
             return Err(HamiltonianError::Shape);
         }
-        Self::new_selected(basis, volume_bohr3, species, rule, Some(indices))
+        Self::new_selected(basis, volume_bohr3, species, rule, Some(indices), false)
+    }
+    /// GK1B: like [`Self::new_owned_with_rule`], but the radial/angular
+    /// factors are evaluated and kept for the `indices` rows only (per-rank
+    /// work and memory scale with the owned rows, not the k sphere). Owned
+    /// values are bit-identical to `new_owned_with_rule`. Full columns are not
+    /// available: [`AtomProjectors::columns`] panics and
+    /// [`AtomProjectors::projector_rows`] returns `Shape` for a row outside
+    /// `indices`. Errors (non-finite factors, radial failures) are detected on
+    /// owned rows only, so they are rank-local: distributed callers must agree
+    /// on the outcome collectively before entering further collectives.
+    pub fn new_owned_rows_only_with_rule(
+        basis: &PlaneWaveBasis,
+        volume_bohr3: f64,
+        species: &[Species<'_>],
+        rule: dft_upf::radial::RadialEvenRule,
+        indices: &[usize],
+    ) -> Result<Self, HamiltonianError> {
+        if indices.windows(2).any(|p| p[0] >= p[1])
+            || indices.last().is_some_and(|&i| i >= basis.momenta().len())
+        {
+            return Err(HamiltonianError::Shape);
+        }
+        Self::new_selected(basis, volume_bohr3, species, rule, Some(indices), true)
     }
     fn new_selected(
         basis: &PlaneWaveBasis,
@@ -2432,7 +2499,10 @@ impl NonlocalOperator {
         species: &[Species<'_>],
         rule: dft_upf::radial::RadialEvenRule,
         selected: Option<&[usize]>,
+        rows_only: bool,
     ) -> Result<Self, HamiltonianError> {
+        // Factor rows: the owned rows (rows-only) or the whole basis.
+        let factor_rows = if rows_only { selected } else { None };
         if selected.is_none() && rule == dft_upf::radial::RadialEvenRule::Simpson3_8 {
             return Self::new(basis, volume_bohr3, species);
         }
@@ -2489,14 +2559,15 @@ impl NonlocalOperator {
             let nc = channels.len();
             max_channels = max_channels.max(nc);
             let factor_span = profile.map(|p| p.span(IC::InitFactorsCalls, IC::InitFactorsNanos));
-            let mut table = vec![vec![Complex64::default(); basis.momenta().len()]; nc];
             // Exact squared-momentum keys only; no shell rounding or interpolation.
             // Flat preallocated storage avoids allocation on cache misses, including
             // generic k where nearly every momentum can have a different norm.
-            let ng = basis.momenta().len();
+            let ng = factor_rows.map_or(basis.momenta().len(), <[usize]>::len);
+            let mut table = vec![vec![Complex64::default(); ng]; nc];
             let mut radial_cache = std::collections::HashMap::with_capacity(ng);
             let mut radial_values = vec![0.0; ng * np];
-            for (ig, g) in basis.momenta().iter().enumerate() {
+            for ig in 0..ng {
+                let g = &basis.momenta()[factor_rows.map_or(ig, |rows| rows[ig])];
                 let next = radial_cache.len();
                 let slot = match radial_cache.entry(g.norm_squared.to_bits()) {
                     std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
@@ -2564,7 +2635,7 @@ impl NonlocalOperator {
                 {
                     return Err(HamiltonianError::NonFinite);
                 }
-                recipe_bytes += nc * basis.momenta().len() * size_of::<Complex64>();
+                recipe_bytes += nc * ng * size_of::<Complex64>();
                 let factors = Arc::new(table);
                 validation
                     .as_mut()
@@ -2601,6 +2672,7 @@ impl NonlocalOperator {
             let recipe = ProjectorRecipe {
                 momenta: basis.momenta().to_vec(),
                 atoms: recipe_atoms,
+                local: factor_rows.map(<[usize]>::to_vec),
             };
             let span =
                 profile.map(|p| p.span(IC::InitOwnedRowsBuildCalls, IC::InitOwnedRowsBuildNanos));
@@ -3050,6 +3122,67 @@ mod phase_validation_tests {
         ])
         .unwrap()
     }
+    /// GK1B: rows-only factors give the owned table and owned projector rows
+    /// of `new_owned_with_rule` bit for bit, never build the full table, and
+    /// refuse rows they do not hold.
+    #[test]
+    fn rows_only_owned_tables_are_bit_identical() {
+        let pp = pseudo_scaled(&[0, 1, 1, 2, 3], 41, 1.);
+        let pq = pseudo_scaled(&[0, 2], 37, 0.7);
+        let pa = [[0.2, 0.3, 0.4], [1.2, -0.4, 0.7]];
+        let pb = [[3.1, 2.2, -0.9]];
+        let species = [
+            Species {
+                potential: &pp,
+                positions_bohr: &pa,
+            },
+            Species {
+                potential: &pq,
+                positions_bohr: &pb,
+            },
+        ];
+        let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [1., 5., 0.], [0.3, 0.2, 7.]]).unwrap();
+        for k in [[0.; 3], [0.25, 0., 0.], [0.13, -0.21, 0.07]] {
+            let basis = PlaneWaveBasis::at_k(&cell, Hartree(2.), k).unwrap();
+            let n = basis.momenta().len();
+            for rule in [
+                RadialEvenRule::Simpson3_8,
+                RadialEvenRule::SimpsonQuadraticEnd,
+            ] {
+                for ranks in [1, 3] {
+                    for rank in 0..ranks {
+                        let indices: Vec<_> = (rank..n).step_by(ranks).collect();
+                        let v = cell.volume_bohr3();
+                        let a = NonlocalOperator::new_owned_with_rule(
+                            &basis, v, &species, rule, &indices,
+                        )
+                        .unwrap();
+                        let b = NonlocalOperator::new_owned_rows_only_with_rule(
+                            &basis, v, &species, rule, &indices,
+                        )
+                        .unwrap();
+                        assert_eq!(bits(&a.table.owned), bits(&b.table.owned));
+                        assert_eq!(a.projector_count(), b.projector_count());
+                        for (x, y) in a.atoms.iter().zip(&b.atoms) {
+                            assert_eq!(x.coupling, y.coupling);
+                        }
+                        assert_eq!(
+                            bits(&a.projector_rows(&indices).unwrap()),
+                            bits(&b.projector_rows(&indices).unwrap())
+                        );
+                        assert!(b.table.full.get().is_none());
+                        if ranks > 1 {
+                            let other = (rank + 1) % ranks;
+                            assert!(matches!(
+                                b.projector_rows(&[other]),
+                                Err(HamiltonianError::Shape)
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn init_profile_preserves_owned_and_eager_projectors() {
         let pp = pseudo_scaled(&[0, 1, 1, 2, 3], 41, 1.);
@@ -3224,6 +3357,7 @@ mod phase_validation_tests {
                             factors: Arc::new(vec![vec![Complex64::new(0.3, -0.2)]]),
                             position: r,
                         }],
+                        local: None,
                     };
                     let expected = Complex64::new(0.3, -0.2) * phase(g, r).unwrap();
                     assert_eq!(bits(&recipe.rows(&[0])), bits(&[expected]));

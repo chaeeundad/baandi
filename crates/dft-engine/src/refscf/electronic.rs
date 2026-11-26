@@ -744,18 +744,15 @@ pub(super) async fn run_continuation<K: Collective>(
         p.validate(&input, points)?;
         options.grid_override = Some(p.grid(&input)?);
     }
-    let mut states = (0..policy.channels())
-        .map(|_| {
-            refstart::start_electronic(
-                StartInput {
-                    options: &options,
-                    ..input
-                },
-                points,
-                comm,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut states = refstart::start_electronic_channels(
+        StartInput {
+            options: &options,
+            ..input
+        },
+        points,
+        comm,
+        policy.channels(),
+    )?;
     // FD buffer bands: the solved block holds `bands` plus the buffer; the
     // start's columns are kept bit for bit and the buffer is appended.
     let width = map::solve_width(&policy, bands, min_basis(&states[0]));

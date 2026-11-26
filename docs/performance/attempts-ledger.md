@@ -4154,3 +4154,34 @@ Not changed: start MGS with one tree sum per column pair (`refstart.rs` k sectio
 turns modified into classical Gram-Schmidt and changes bits; it is replaced by GK11 (generalized Ritz start).
 The start H application is already one block apply per k. Lesson: per-(row, atom, m) loops over a quantity that
 depends on (channel, |q|) only are the dominant start cost; check the inner-loop invariants of every per-k setup.
+
+## GK1B-NL-TABLES — rows-only k projector tables, shared spin start (2026-11-26; bit-identical, default on, dev08 pending)
+
+Changes: (1) `NonlocalOperator::new_owned_rows_only_with_rule` (`crates/dft-physics/src/hamiltonian.rs`) evaluates
+the projector radial/angular factors (exact |k+G|^2 radial memo kept) for the rank's owned rows only instead of the
+whole k sphere on every rank; owned values come from the same factor, phase argument and product, so they are
+bit-identical; full columns are refused (`projector_rows` returns `Shape` off the owned rows, `columns()` panics).
+Only the k start uses it (the k operator reads only owned rows through `projector_rows`; the Gamma path, forces,
+stress and the oracle keep full tables). Errors became rank-local, so the k start agrees on the outcome with one
+extra one-double reduction per k. Switch `BAANDI_K_NL_TABLE_MEMO` (default on). (2) Collinear spin k starts
+(`refstart::start_electronic_channels`, called from `refscf/electronic.rs`) build bases, grids, projector tables,
+atomic columns, MGS, the start H and Ritz once and give each channel its own operator and a copy of the orbitals;
+`start_inner` still runs per channel. Switch `BAANDI_K_START_SPIN_SHARE` (default on). Table: 67 entries.
+Evidence: unit test `rows_only_owned_tables_are_bit_identical` (3 k, 2 rules, 1/3 ranks, l = 0..3); engine tests
+`gk1b_rows_only_projector_tables_are_bit_identical` (start orbitals and H X of every k operator, 1 and 3 ranks) and
+`gk1b_spin_shared_start_is_bit_identical` (fixed-spin LDA-PW, 2 species, 3 k, 3 maps: history energies, channel
+densities, eigenvalues, final orbitals equal bit for bit at 1 and 2 ranks).
+Mac observation (O, release, simulated ranks on threads, load 3-7; 10 atoms, 40 atomic columns, npw ~5000, 4 k),
+rank-0 seconds before (GK1 state) -> after:
+
+| ranks | k_start_nonlocal_tables | k_start_atomic_columns | k_start_orthonormalize | complex_k_atomic_starts |
+|---|---|---|---|---|
+| 1 | 1.30 / 1.28 -> 1.25 | 0.87 -> 0.87 | small | 2.40 / 2.35 -> 2.33 |
+| 4 | 1.50 / 1.47 -> 0.38 | 0.25 -> 0.26 | 0.10 -> 0.09 | 1.92 / 1.89 -> 0.78 |
+| 8 | 1.58 / 1.69 -> 0.29 | 0.15 -> 0.13 | 0.65 / 0.51 -> 0.26 | 2.42 / 2.38 -> 0.72 |
+
+After the change no k-start stage does per-rank work proportional to the full npw except O(npw) bookkeeping (momenta
+copy, phase-range check, kinetic order sort). The next per-k cost at many ranks is the start MGS (one tree sum per
+column pair, latency bound; GK11). Spin runs: the second channel now costs `start_inner` plus operator construction
+only (previously the whole k start again). Lesson: an owned-row constructor that still evaluates full-sphere factors
+"for lazy full columns" pays the replicated cost every k; give the consumer that only needs owned rows its own path.

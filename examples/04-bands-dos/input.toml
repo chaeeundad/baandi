@@ -1,0 +1,39 @@
+# Validate-only in debug tests; run numerical workflows with a release build.
+[system]
+name = "Si diamond"
+lattice_unit = "angstrom"
+lattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.0, 0.0, 0.0]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.25, 0.25, 0.25]
+
+[pseudopotentials]
+Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"
+
+[basis]
+ecutwfc_ry = 30.0
+kgrid = [2, 2, 2]
+kshift = [0.5, 0.5, 0.5]
+ktime_reversal = true
+
+[xc]
+functional = "lda-pz"
+
+[symmetry]
+mode = "auto"
+
+[bands]
+points = [{label = "Gamma", fractional = [0.0, 0.0, 0.0]}, {label = "X", fractional = [0.5, 0.0, 0.5]}, {label = "L", fractional = [0.5, 0.5, 0.5]}, {label = "Gamma", fractional = [0.0, 0.0, 0.0]}]
+points_per_segment = 10
+nbands = 12
+
+[dos]
+dos_kgrid = [4, 4, 4]
+sigma_ev = 0.1
+spacing_ev = 0.02
+nbands = 12

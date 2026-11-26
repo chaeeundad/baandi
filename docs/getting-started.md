@@ -36,35 +36,44 @@ cargo clippy --workspace --all-targets -- -D warnings
 Long numerical tests are ignored in the fast debug gate; their release commands
 are linked from [architecture](architecture.md).
 
-## Run the Si example
+## Run a workflow example
+
+Start with the [13-workflow index](../examples/README.md), covering Gamma LDA,
+k meshes/symmetry, PBE, bands/DOS, metals, spin, forces/relaxation, variable cell,
+checkpoint/restart, observation, Python, MPI and the strict validation oracle.
+Every tutorial has an input, UPF source, commands and output interpretation.
+All debug example checks are validate-only; laptop runtime estimates are unmeasured.
 
 ```sh
-cargo run --offline -p dft-cli -- validate examples/si_lda.toml
-cargo run --offline -p dft-cli -- grid examples/si_lda.toml
-# k-point grid and expression inputs: examples/si_lda_kgrid.toml, examples/si_lda_expr.toml
-cargo run --offline -p dft-cli -- convert 30 Ry Ha     # unit conversion
-cargo run --offline -p dft-cli -- eval "atan(0.5*pi)"   # expression check
-# Supply your UPF and replace the placeholder path in examples/si_lda.toml first:
-cargo run --offline -p dft-cli -- inspect-upf /absolute/path/to/Si.UPF
-cargo run --offline --release -p dft-cli -- run examples/si_lda.toml --output-dir results
+cargo build --release -p dft-cli
+# Obtain the named external UPF first; this is a helper variable, not a CLI setting.
+export PSEUDO_DIR=/absolute/path/outside/repository/pseudo
+python3 examples/prepare.py 01-si-gamma-lda
+input=target/tmp/examples/01-si-gamma-lda/input.toml
+target/release/dft-cli inspect-upf "$PSEUDO_DIR/Si.pz-vbc.UPF"
+target/release/dft-cli validate "$input"
+target/release/dft-cli grid "$input"
+target/release/dft-cli run "$input" --output-dir results/si-gamma
 ```
 
-[si_lda.toml](../examples/si_lda.toml) is the minimal input. `validate` and `grid`
-check configuration and basis/grid settings; full validation/preflight reads
-the supplied UPF to validate physical inputs.
-No UPF file is distributed: supply a supported pseudopotential yourself and
-check its license. The Si file used for validation has unverified provenance
-and an unknown license; its user-approved use was for internal validation only,
-with no redistribution. See [candidate notes](candidate-si-upf.md) and
-[UPF support](upf-support.md).
+The helper (Python 3.9+) copies the template into `target/tmp` with absolute UPF
+paths. Repeating it overwrites the prepared copy. Download files outside the
+repository; no UPF is distributed. File names and sources are in each example.
+Check licenses and [supported UPF features](upf-support.md); the historical
+Si validation file's provenance/license remain unresolved ([candidate notes](candidate-si-upf.md)).
 
-Relative UPF paths resolve against the input directory. Output defaults to
-`results/` relative to the working directory; `--output-dir` overrides it.
-The CLI writes `results.json` (energies, convergence history and provenance),
-`density.bin` (little-endian f64 density) and `density.json` (metadata/checksum).
-Existing output files are overwritten. Converged execution with successful
-writes returns 0 (verification is on by default); budget exhaustion writes the final state and returns 3.
-See [CLI documentation](cli.md) for controls, units and all exit codes.
+The old [si_lda.toml](../examples/si_lda.toml), expression and k-grid inputs are
+retained at their original paths. Replace their UPF placeholders manually.
+`validate` opens UPFs and checks full preflight; `grid` inspects geometry/grid.
+Relative UPF paths resolve against the TOML directory, output paths against the
+working directory. TOML does not expand `$PSEUDO_DIR`.
+
+An ordinary scalar run writes `results.json`, `density.bin` (little-endian f64)
+and `density.json` (metadata/checksum). Existing ordinary outputs are overwritten;
+use fresh directories for each tutorial. Exit 0 means convergence and successful
+writes, with verification on by default; exit 3 means budget exhaustion.
+Checkpoint v2 restart instead writes an export container and routing companion.
+See [CLI](cli.md) for units and exit codes, and [user guides](user/) for workflow limits.
 
 ## Reproduce the comparisons
 

@@ -1,0 +1,25 @@
+# Validate-only in debug tests; run numerical workflows with a release build.
+[system]
+name = "Al fcc metal"
+lattice_unit = "angstrom"
+lattice_vectors = [[0.0, 2.025, 2.025], [2.025, 0.0, 2.025], [2.025, 2.025, 0.0]]
+
+[[system.atoms]]
+species = "Al"
+fractional = [0.0, 0.0, 0.0]
+
+[pseudopotentials]
+Al = "/absolute/path/to/pseudo/Al.upf"
+
+[basis]
+ecutwfc_ry = 40.0
+kgrid = [2, 2, 2]
+kshift = [0.5, 0.5, 0.5]
+
+[xc]
+functional = "pbe"
+
+[occupations]
+mode = "fermi_dirac"
+smearing_ev = 0.2
+band_cap = 16

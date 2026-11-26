@@ -1,0 +1,31 @@
+# Validate-only in debug tests; run numerical workflows with a release build.
+[system]
+name = "Fe bcc fixed moment"
+lattice_unit = "angstrom"
+lattice_vectors = [[-1.435, 1.435, 1.435], [1.435, -1.435, 1.435], [1.435, 1.435, -1.435]]
+
+[[system.atoms]]
+species = "Fe"
+fractional = [0.0, 0.0, 0.0]
+
+[pseudopotentials]
+Fe = "/absolute/path/to/pseudo/Fe.upf"
+
+[basis]
+ecutwfc_ry = 60.0
+kgrid = [2, 2, 2]
+kshift = [0.5, 0.5, 0.5]
+ktime_reversal = false
+
+[xc]
+functional = "pbe"
+
+[spin]
+mode = "collinear"
+total_moment = 2.0
+initial_moment_seed = 2.0
+
+[occupations]
+mode = "fermi_dirac"
+smearing_ev = 0.2
+band_cap = 24

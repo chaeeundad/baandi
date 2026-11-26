@@ -147,8 +147,8 @@ table! {
     ENERGY_IDENTITY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "nonlocal energy of SCF iterations from the band-sum identity";
     // D1 ladder hand-off scan (work order 2026-11-14); defaults are the adopted ladder.
-    STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold";
+    STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold; read only by the reference spin/FD driver; default off since 2026-11-27 (dev08 gen59: binds only on Au of six metals, one map fewer, dF 3.9e-9 Ha, unchanged against QE), aligned with the scalar k path and QE";
 
 
 

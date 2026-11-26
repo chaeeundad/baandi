@@ -29,7 +29,7 @@ impl StandardProfile {
         (5.0 * tolerance).max(5e-6)
     }
 
-    /// Residual guard (`BAANDI_STANDARD_RESIDUAL_GUARD`, default on): an
+    /// Residual guard (`BAANDI_STANDARD_RESIDUAL_GUARD`, default off since 2026-11-27): an
     /// EMPIRICAL estimator of the band-energy error left by loose eigensolves,
     /// from the per-band residual norms of the latest eigensolve, in Ha:
     ///

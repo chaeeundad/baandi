@@ -88,13 +88,7 @@ fn table_defaults_match_accessors_with_environment_unset() {
 #[test]
 fn legacy_defaults_are_unchanged() {
     let on = |id: Id| switches::resolve(switches::switch(id), None).0 == Value::Choice("on");
-    for id in [
-        Id::M2_DGEMM,
-        Id::MKL_DGEMM,
-        Id::MKL_EVD,
-        Id::STANDARD_RESIDUAL_GUARD,
-        Id::STAGE_TIMERS,
-    ] {
+    for id in [Id::M2_DGEMM, Id::MKL_DGEMM, Id::MKL_EVD, Id::STAGE_TIMERS] {
         assert!(on(id), "{id:?} must default on");
     }
     for id in [
@@ -225,6 +219,11 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DERIV_NL_GEMM), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_RADIAL_TABLES), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_SHELLS), Value::Choice("on"));
+    // Default off since 2026-11-27 (FD/spin only; dev08 gen59 arm D).
+    assert_eq!(
+        switches::resolve(switches::switch(Id::STANDARD_RESIDUAL_GUARD), None).0,
+        Value::Choice("off")
+    );
     assert_eq!(TABLE.len(), 87);
 }
 

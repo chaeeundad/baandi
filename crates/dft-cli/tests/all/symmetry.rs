@@ -76,3 +76,101 @@ fn preparation_is_shared_and_invalidated_by_physical_inputs() {
     config.symmetry.mode = SymmetryMode::Off;
     assert!(config.prepared_symmetry().unwrap().is_none());
 }
+
+#[allow(dead_code)]
+#[path = "../common/mod.rs"]
+mod common;
+
+/// ADR 0049 end to end: an hcp cell with six-decimal fractional coordinates.
+/// The default tolerance finds the full 24-operation group, the input is
+/// projected onto exact sites, and the energy agrees with a symmetry-off run
+/// on exact coordinates within the strict class (1e-10 Ha).
+#[test]
+fn six_decimal_hcp_full_group_matches_symmetry_off() {
+    use std::{fs, process::Command};
+    let dir = std::env::temp_dir().join(format!("gs1-sym-tol-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("syn.xml"),
+        common::gaussian_with(1., 1.5, false, 401).replace("element=\"Xx\"", "element=\"H\""),
+    )
+    .unwrap();
+    let (a, c) = (4.6_f64, 7.4_f64); // Bohr; lattice written at full precision.
+    let h = a * 3f64.sqrt() / 2.;
+    let input = |p: [&str; 2], symmetry: &str| {
+        format!(
+            "[system]\nname='hcp'\nlattice_unit='bohr'\nlattice_vectors=[[{:?},{:?},0.0],[{:?},{:?},0.0],[0.0,0.0,{c:?}]]\n[[system.atoms]]\nspecies='H'\nfractional=[{},0.25]\n[[system.atoms]]\nspecies='H'\nfractional=[{},0.75]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=4.0\nkgrid=[3,3,2]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=200\n[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\n{symmetry}",
+            a / 2.,
+            -h,
+            a / 2.,
+            h,
+            p[0],
+            p[1]
+        )
+    };
+    let six = ["0.333333,0.666667", "0.666667,0.333333"];
+    let exact = [
+        format!("{:?},{:?}", 1. / 3., 2. / 3.),
+        format!("{:?},{:?}", 2. / 3., 1. / 3.),
+    ];
+    let exact = [exact[0].as_str(), exact[1].as_str()];
+    let parsed = Config::parse(&input(six, "[symmetry]\nmode='auto'\n")).unwrap();
+    let record = parsed.symmetrization.as_ref().unwrap();
+    assert_eq!(record.operations_count, 24);
+    assert!(record.positions_changed && !record.lattice_changed);
+    assert!(record.max_atom_displacement_bohr < 1e-5);
+    let json = parsed.symmetry_json().unwrap().unwrap();
+    assert_eq!(json["crystal_operations_count"], 24);
+    assert_eq!(
+        json["tolerance_bohr"],
+        dft_geometry::symmetry::DEFAULT_TOLERANCE_BOHR
+    );
+    // The old 1e-7 Bohr tolerance keeps the six-decimal input at a lower group.
+    let old = Config::parse(&input(
+        six,
+        "[symmetry]\nmode='auto'\ntolerance_bohr=1e-7\n",
+    ))
+    .unwrap();
+    assert!(old.symmetrization.as_ref().unwrap().operations_count < 24);
+    assert!(
+        old.symmetry_map().unwrap().unwrap().points.len()
+            > parsed.symmetry_map().unwrap().unwrap().points.len()
+    );
+    let mut energies = Vec::new();
+    for (name, text) in [
+        ("auto", input(six, "[symmetry]\nmode='auto'\n")),
+        ("off", input(exact, "")),
+    ] {
+        fs::write(dir.join(format!("{name}.toml")), text).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .env("BAANDI_REFERENCE_STRICT", "on")
+            .current_dir(&dir)
+            .args(["run", &format!("{name}.toml"), "--output-dir", name])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(name).join("results.json")).unwrap())
+                .unwrap();
+        if name == "auto" {
+            assert_eq!(result["symmetry"]["crystal_operations_count"], 24);
+            assert_eq!(
+                result["symmetry"]["input_symmetrization"]["positions_changed"],
+                true
+            );
+        }
+        energies.push(result["energies"]["total"]["ha"].as_f64().unwrap());
+    }
+    println!(
+        "hcp six-decimal auto vs exact off: {:.17e} {:.17e} diff {:.3e} Ha",
+        energies[0],
+        energies[1],
+        energies[0] - energies[1]
+    );
+    assert!((energies[0] - energies[1]).abs() <= 1e-10);
+    fs::remove_dir_all(dir).unwrap();
+}

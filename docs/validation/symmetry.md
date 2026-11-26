@@ -12,7 +12,7 @@ No external symmetry library or QE source was used.
 by the inverse lattice row norms. This is not a fixed [-1,1] matrix search:
 non-reduced skew bases can require larger integers. A candidate must have
 determinant +/-1 and preserve the lattice metric. Cartesian atomic tolerance
-is `tolerance_bohr` (default 1e-7 Bohr); each fractional component is bounded by
+is `tolerance_bohr` (default 1e-4 Bohr since ADR 0049, 1e-7 before); each fractional component is bounded by
 `tolerance_bohr * norm(row_i(A^-1))`. Metric product allowance is
 `tol*(norm(a_i)+norm(a_j))+tol^2` Bohr^2. Atom images are enumerated with these
 bounds, rather than component-rounding a Cartesian nearest image in skew cells.
@@ -22,6 +22,15 @@ lexicographic order. Closure includes translations and atom permutations.
 The bounded search rejects more than 2,000,000 integer vector candidates per
 column and tolerances with fractional component bounds >=0.1; it never returns
 a silently incomplete operation list when that search bound is exceeded.
+
+`symmetrize` (ADR 0049) projects the lattice metric (Reynolds average,
+symmetric stretch) and positions (group average, translations snapped to
+p/q <= 24 when that closes exactly) onto the detected group, refuses changes
+above the tolerance, keeps the input bits below 1e-12 Bohr and verifies the
+group at 1e-9 Bohr. Tests: six-decimal hcp (24 operations, exact sites to
+1e-14), exact inputs bit-identical, distortions above tolerance keep the lower
+group, origin offsets; CLI six-decimal hcp auto against exact symmetry off,
+strict path: 7.8e-12 Ha.
 
 `reduce_mesh` takes a duplicate-free uniform full mesh. It selects only
 operations that map every point onto that mesh (fractional tolerance 1e-12).

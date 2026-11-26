@@ -218,6 +218,215 @@ pub fn validate_group(
     Ok(())
 }
 
+/// Default Cartesian atom/lattice matching tolerance, Bohr (ADR 0049).
+/// About 5.3e-5 Angstrom: between VASP's SYMPREC default (1e-5 Angstrom) and a
+/// 1e-5 crystal-coordinate acceptance on a 10 Bohr cell. It accepts structures
+/// whose fractional coordinates are rounded to six decimals in cells up to
+/// roughly 50 Bohr and is still far below any physically meaningful distortion.
+pub const DEFAULT_TOLERANCE_BOHR: f64 = 1e-4;
+/// Changes at or below this Cartesian size (Bohr) are treated as roundoff:
+/// the input bits are kept, so exactly symmetric inputs stay bit-identical.
+pub const SYMMETRIZATION_ROUNDOFF_BOHR: f64 = 1e-12;
+/// Tight tolerance (Bohr) used to verify that a symmetrized structure carries
+/// the detected group exactly (up to floating-point roundoff).
+pub const SYMMETRIZATION_VERIFY_BOHR: f64 = 1e-9;
+/// Largest denominator tried when snapping fractional translations to rationals.
+const SNAP_MAX_DENOMINATOR: i64 = 24;
+
+/// Input geometry projected onto the group detected at a tolerance (ADR 0049).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Symmetrized {
+    /// Lattice vectors as matrix columns [Cartesian][vector], Bohr.
+    pub lattice_columns_bohr: [[f64; 3]; 3],
+    /// Fractional positions in the input order (not wrapped).
+    pub fractional: Vec<[f64; 3]>,
+    /// Number of affine operations (rotation + translation) detected.
+    pub operations_count: usize,
+    /// Largest Cartesian atom displacement, Bohr, measured in the input lattice.
+    pub max_atom_displacement_bohr: f64,
+    /// Largest lattice-vector change |a_i' - a_i|, Bohr.
+    pub max_lattice_change_bohr: f64,
+    /// True when positions were replaced (displacement above roundoff).
+    pub positions_changed: bool,
+    /// True when the lattice was replaced (change above roundoff).
+    pub lattice_changed: bool,
+    /// True when translations were snapped to small-denominator rationals.
+    pub translations_snapped: bool,
+}
+
+fn wrap(v: f64) -> f64 {
+    v - v.round()
+}
+
+/// Snap one fractional component to the nearest p/q (q <= SNAP_MAX_DENOMINATOR,
+/// smallest q first) within `bound`; None if no such rational is close enough.
+fn snap_component(t: f64, bound: f64) -> Option<f64> {
+    (1..=SNAP_MAX_DENOMINATOR).find_map(|q| {
+        let p = (t * q as f64).round();
+        let s = p / q as f64;
+        ((t - s).abs() <= bound).then_some(s)
+    })
+}
+
+/// Group-averaged (Reynolds) projection of atoms and lattice onto the group
+/// detected at `tolerance_bohr`. Fractional translations are first snapped to
+/// small-denominator rationals when every snapped translation stays within the
+/// tolerance and the snapped set closes exactly; otherwise translations are the
+/// least-squares estimate from all atoms (consistent with an origin shift).
+/// The lattice metric is averaged over the rotations and the lattice vectors are
+/// updated by the symmetric stretch A' = A M^-1/2 M'^1/2 (no rigid rotation).
+/// Refuses (error) when any atom or lattice vector would move by more than the
+/// tolerance, or when the result does not carry the group at a tight tolerance.
+pub fn symmetrize(
+    cell: &Cell,
+    atoms: &[Atom],
+    tolerance_bohr: f64,
+) -> Result<Symmetrized, SymmetryError> {
+    let ops = detect(cell, atoms, tolerance_bohr)?;
+    let tol = tolerance_bohr;
+    let n_ops = ops.len() as f64;
+    let x: Vec<Vector3<f64>> = atoms
+        .iter()
+        .map(|a| Vector3::from(a.fractional_position))
+        .collect();
+    // Lattice: Reynolds average of the metric over the rotations.
+    let a = cell.lattice;
+    let metric = a.transpose() * a;
+    let averaged = ops.iter().fold(Matrix3::zeros(), |s, o| {
+        let r = matrix(o.rotation);
+        s + r.transpose() * metric * r
+    }) / n_ops;
+    let averaged = (averaged + averaged.transpose()) * 0.5;
+    let power = |m: Matrix3<f64>, p: f64| -> Option<Matrix3<f64>> {
+        let e = m.symmetric_eigen();
+        if e.eigenvalues.iter().any(|&v| v <= 0.0 || !v.is_finite()) {
+            return None;
+        }
+        let d = Matrix3::from_diagonal(&e.eigenvalues.map(|v| v.powf(p)));
+        Some(e.eigenvectors * d * e.eigenvectors.transpose())
+    };
+    let stretched = power(metric, -0.5)
+        .zip(power(averaged, 0.5))
+        .map(|(mi, ms)| a * mi * ms)
+        .ok_or(SymmetryError("lattice metric is not positive definite"))?;
+    let lattice_change = (0..3)
+        .map(|j| (stretched.column(j) - a.column(j)).norm())
+        .fold(0.0, f64::max);
+    if lattice_change > tol {
+        return Err(SymmetryError(
+            "lattice symmetrization would exceed the tolerance",
+        ));
+    }
+    let lattice_changed = lattice_change > SYMMETRIZATION_ROUNDOFF_BOHR;
+    let new_lattice = if lattice_changed { stretched } else { a };
+
+    // Least-squares translations from all atoms (origin-shift consistent).
+    let estimated: Vec<Vector3<f64>> = ops
+        .iter()
+        .map(|o| {
+            let r = matrix(o.rotation);
+            let t = Vector3::from(o.translation);
+            let mean = o
+                .atom_permutation
+                .iter()
+                .enumerate()
+                .fold(Vector3::zeros(), |s, (j, &i)| {
+                    s + (x[i] - r * x[j] - t).map(wrap)
+                })
+                / x.len() as f64;
+            t + mean
+        })
+        .collect();
+    let bounds: [f64; 3] = std::array::from_fn(|i| tol * cell.inverse.row(i).norm());
+    let snapped: Option<Vec<Vector3<f64>>> = estimated
+        .iter()
+        .map(|t| {
+            let s = Vector3::new(
+                snap_component(t[0], bounds[0])?,
+                snap_component(t[1], bounds[1])?,
+                snap_component(t[2], bounds[2])?,
+            );
+            ((a * (s - t)).norm() <= tol).then_some(s)
+        })
+        .collect();
+    let closes = |taus: &[Vector3<f64>]| {
+        ops.iter().enumerate().all(|(ia, oa)| {
+            ops.iter().enumerate().all(|(ib, ob)| {
+                let r = matrix(oa.rotation) * matrix(ob.rotation);
+                let t = matrix(oa.rotation) * taus[ib] + taus[ia];
+                ops.iter().enumerate().any(|(ic, oc)| {
+                    matrix(oc.rotation) == r
+                        && ob
+                            .atom_permutation
+                            .iter()
+                            .enumerate()
+                            .all(|(i, &j)| oa.atom_permutation[j] == oc.atom_permutation[i])
+                        && (0..3).all(|k| wrap(taus[ic][k] - t[k]).abs() <= 1e-12)
+                })
+            })
+        })
+    };
+    let project = |taus: &[Vector3<f64>]| -> (Vec<Vector3<f64>>, f64) {
+        let mut sums = vec![Vector3::zeros(); x.len()];
+        for (o, t) in ops.iter().zip(taus) {
+            let r = matrix(o.rotation);
+            for (j, &i) in o.atom_permutation.iter().enumerate() {
+                sums[i] += (r * x[j] + t - x[i]).map(wrap);
+            }
+        }
+        let delta: Vec<_> = sums.into_iter().map(|s| s / n_ops).collect();
+        let worst = delta.iter().map(|d| (a * d).norm()).fold(0.0, f64::max);
+        (delta, worst)
+    };
+    let mut candidates = Vec::new();
+    if let Some(s) = snapped.filter(|s| closes(s)) {
+        candidates.push((true, s));
+    }
+    candidates.push((false, estimated));
+    let (translations_snapped, delta, displacement) = candidates
+        .into_iter()
+        .map(|(snap, taus)| {
+            let (d, w) = project(&taus);
+            (snap, d, w)
+        })
+        .find(|(_, _, w)| *w <= tol)
+        .ok_or(SymmetryError(
+            "atom symmetrization would exceed the tolerance",
+        ))?;
+    let positions_changed = displacement > SYMMETRIZATION_ROUNDOFF_BOHR;
+    let fractional: Vec<[f64; 3]> = if positions_changed {
+        x.iter().zip(&delta).map(|(p, d)| (p + d).into()).collect()
+    } else {
+        atoms.iter().map(|a| a.fractional_position).collect()
+    };
+    let result = Symmetrized {
+        lattice_columns_bohr: std::array::from_fn(|i| std::array::from_fn(|j| new_lattice[(i, j)])),
+        fractional,
+        operations_count: ops.len(),
+        max_atom_displacement_bohr: displacement,
+        max_lattice_change_bohr: lattice_change,
+        positions_changed,
+        lattice_changed,
+        translations_snapped: translations_snapped && positions_changed,
+    };
+    if positions_changed || lattice_changed {
+        let new_cell = Cell::from_matrix_columns_bohr(result.lattice_columns_bohr)
+            .map_err(|_| SymmetryError("symmetrized lattice is not a valid cell"))?;
+        let new_atoms: Vec<Atom> = atoms
+            .iter()
+            .zip(&result.fractional)
+            .map(|(a, p)| Atom::new(a.species.clone(), *p))
+            .collect();
+        let exact = detect(&new_cell, &new_atoms, SYMMETRIZATION_VERIFY_BOHR)?;
+        if exact.len() != ops.len() {
+            return Err(SymmetryError(
+                "symmetrized structure does not carry the detected group exactly",
+            ));
+        }
+    }
+    Ok(result)
+}
+
 #[derive(Clone, Debug)]
 pub struct KOrbitEntry {
     pub full_id: usize,

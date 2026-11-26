@@ -1256,8 +1256,19 @@ root algorithm, thresholds, ignored Al command and remaining integration work.
 ```toml
 [symmetry]
 mode = "auto"       # default "off"
-tolerance_bohr = 1e-7
+tolerance_bohr = 1e-4   # default since ADR 0049 (was 1e-7)
 ```
+
+With `auto`, the group is detected at `tolerance_bohr` (Cartesian, Bohr) and
+the input lattice and positions are replaced by their projection onto that
+group before anything else runs (ADR 0049): database structures with rounded
+coordinates (for example six-decimal 1/3, 2/3) get their full group and exact
+sites. The run is refused if any atom or lattice vector would move by more than
+the tolerance; changes at or below 1e-12 Bohr keep the input bits. A changed
+lattice is carried in Bohr. `results.json.symmetry` records `tolerance_bohr`,
+`crystal_operations_count` and `input_symmetrization` (applied changes and the
+largest atom and lattice displacements in Bohr). Use a smaller
+`tolerance_bohr` to keep an intentionally near-symmetric distortion.
 
 `auto` detects species-aware spatial operations, uses the subgroup preserving
 `basis.kgrid`/`kshift`, and reports irreducible eigenvalues, weights and integer

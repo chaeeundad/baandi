@@ -28,6 +28,10 @@ pub enum ConfigError {
 pub struct Config {
     #[serde(skip)]
     symmetry_cache: std::cell::RefCell<Option<std::sync::Arc<dft_engine::PreparedSymmetry>>>,
+    /// ADR 0049: record of the input projection onto the detected group
+    /// (symmetry.mode = auto only); the projected geometry replaced the input.
+    #[serde(skip)]
+    pub symmetrization: Option<dft_geometry::symmetry::Symmetrized>,
     #[serde(default)]
     pub preflight: preflight::structure::Policy,
     #[serde(skip)]
@@ -102,7 +106,7 @@ impl Default for Symmetry {
         Self {
             mode: SymmetryMode::Off,
             density_group: DensityGroup::Mesh,
-            tolerance_bohr: 1e-7,
+            tolerance_bohr: dft_geometry::symmetry::DEFAULT_TOLERANCE_BOHR,
         }
     }
 }
@@ -190,6 +194,14 @@ impl Config {
             "density_operations": density_ops.iter().map(|o| serde_json::json!({"rotation":o.rotation,"translation":o.translation,"atom_permutation":o.atom_permutation,"antiunitary":o.antiunitary})).collect::<Vec<_>>(),
             "mode":"auto", "operations_count":m.operations.iter().filter(|o|!o.antiunitary).count(),
             "irreducible_k_count":m.points.len(),"full_k_count":m.entries.len(),"tolerance_bohr":self.symmetry.tolerance_bohr,
+            "crystal_operations_count": self.symmetrization.as_ref().map(|r| r.operations_count),
+            "input_symmetrization": self.symmetrization.as_ref().map(|r| serde_json::json!({
+                "policy": "ADR 0049: lattice and positions projected onto the group detected at tolerance_bohr; refused above it",
+                "positions_changed": r.positions_changed, "lattice_changed": r.lattice_changed,
+                "translations_snapped": r.translations_snapped,
+                "max_atom_displacement_bohr": r.max_atom_displacement_bohr,
+                "max_lattice_change_bohr": r.max_lattice_change_bohr,
+            })),
             "phase_convention":m.phase_convention,"magnetic_policy":"identity spin only; spin swap and magnetic antiunitary operations disabled without model-invariance proof",
             "points":m.points.iter().enumerate().map(|(i,p)|serde_json::json!({"fractional":p.fractional,"weight":p.weight,"multiplicity":m.entries.iter().filter(|e|e.representative_id==i).count()})).collect::<Vec<_>>(),
             "operations":m.operations.iter().map(|o|serde_json::json!({"rotation":o.rotation,"translation":o.translation,"atom_permutation":o.atom_permutation,"spin_action":"identity","antiunitary":o.antiunitary,"model_invariance_proof":"nc_scalar_periodic_identity_spin_no_external_terms_v1"})).collect::<Vec<_>>(),
@@ -1120,9 +1132,46 @@ pub struct PreparedInput {
 }
 impl Config {
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        let config = Self::parse_unvalidated(text)?;
+        let mut config = Self::parse_unvalidated(text)?;
+        config.symmetrize_input()?;
         config.validate()?;
         Ok(config)
+    }
+    /// ADR 0049: with symmetry.mode = auto, detect the group at the configured
+    /// tolerance and replace the lattice and positions by their projection onto
+    /// that group (refused above the tolerance). Changes at roundoff level keep
+    /// the input bits. Runs once at parse time so every driver, output and
+    /// relaxation start sees one consistent, exactly symmetric geometry.
+    pub fn symmetrize_input(&mut self) -> Result<(), ConfigError> {
+        if self.symmetry.mode != SymmetryMode::Auto || self.symmetrization.is_some() {
+            return Ok(());
+        }
+        let cell = self.cell()?;
+        let atoms: Vec<_> = self
+            .system
+            .atoms
+            .iter()
+            .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
+            .collect();
+        let record =
+            dft_geometry::symmetry::symmetrize(&cell, &atoms, self.symmetry.tolerance_bohr)
+                .map_err(|e| {
+                    ConfigError::Invalid(format!(
+                        "symmetry.operations: {e}; cannot safely reduce; use symmetry.mode='off', a different symmetry.tolerance_bohr or correct the structure"
+                    ))
+                })?;
+        if record.lattice_changed {
+            self.system.lattice_unit = LatticeUnit::Bohr;
+            self.system.lattice_vectors =
+                std::array::from_fn(|v| std::array::from_fn(|c| record.lattice_columns_bohr[c][v]));
+        }
+        if record.positions_changed {
+            for (atom, p) in self.system.atoms.iter_mut().zip(&record.fractional) {
+                atom.fractional = *p;
+            }
+        }
+        self.symmetrization = Some(record);
+        Ok(())
     }
     /// Parse for diagnostic reporting before geometry validation. Never run unchecked.
     pub fn parse_unvalidated(text: &str) -> Result<Self, ConfigError> {

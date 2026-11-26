@@ -10,7 +10,7 @@
 
 ## MF11 crystal symmetry (P19A)
 
-`symmetry` detects species-aware affine groups and reduces uniform meshes with explicit orbit maps. Keep integer search bounds, deterministic ordering, group closure and shifted-mesh subgroup checks. Nonlinear FFT quadrature invariance is distinct from reciprocal-space closure.
+`symmetry` detects species-aware affine groups and reduces uniform meshes with explicit orbit maps. Keep integer search bounds, deterministic ordering, group closure and shifted-mesh subgroup checks. Nonlinear FFT quadrature invariance is distinct from reciprocal-space closure. `symmetrize` (ADR 0049) projects lattice and positions onto the detected group; it must refuse changes above the tolerance and keep input bits for roundoff-level changes.
 
 See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
 observed failures and validation limits. No QE symmetry-on oracle is available.

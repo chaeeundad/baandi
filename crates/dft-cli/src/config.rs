@@ -357,6 +357,15 @@ impl Config {
             _ => Err(ConfigError::Invalid("occupations.mode: unsupported smearing scheme; select fixed or fermi_dirac".into())),
         }
     }
+    /// Reference FD band count: automatic growth (up to `band_cap`) unless
+    /// `scf.nbands` is explicit, which keeps the fixed count (the cap).
+    pub fn fd_band_growth(
+        &self,
+        finite: bool,
+    ) -> Option<dft_engine::refscf::electronic::BandGrowth> {
+        (finite && self.scf.as_ref().and_then(|s| s.nbands).is_none())
+            .then_some(dft_engine::refscf::electronic::BandGrowth::Automatic)
+    }
     pub fn finite_constraint(&self) -> dft_physics::occupations::Constraint {
         use dft_physics::occupations::Constraint;
         self.spin

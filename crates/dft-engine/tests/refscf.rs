@@ -9245,3 +9245,125 @@ fn g4g_trace_is_observational() {
         });
     }
 }
+
+/// Automatic FD band count: a one-electron metal at theta = 0.05 Ha needs the
+/// first G shell (six near-degenerate bands about 0.79 Ha up) fully retained,
+/// so a start at 2 bands grows on the unchanged coverage criterion and
+/// reaches the fixed point of an explicit 12-band run.
+#[test]
+fn fd_band_growth_matches_explicit_count_and_reports_cap() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        model::ScfError,
+        refscf::{
+            api::{Request, solve},
+            electronic::{BandGrowth, Policy},
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = common::potential_with_atomic_start(1., 1., false, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = vec![KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let theta_ha = 0.05;
+    let run = |bands: Option<usize>, cap: usize, growth: Option<BandGrowth>| {
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            bands,
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha,
+            band_cap: cap,
+        });
+        request.band_growth = growth;
+        solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+    };
+    let explicit = run(Some(12), 12, None).unwrap();
+    assert!(explicit.converged && explicit.band_growth.is_none());
+    let grown = run(None, 12, Some(BandGrowth::From(2))).unwrap();
+    assert!(grown.converged);
+    let report = grown.band_growth.as_ref().unwrap();
+    let mu =
+        |r: &dft_engine::refscf::electronic::Run| r.occupations.unwrap().roots[0].unwrap().mu_ha;
+    eprintln!(
+        "growth {report:?}\nF explicit {:.15} grown {:.15} diff {:.3e}\nE diff {:.3e} mu explicit {:.12} grown {:.12} diff {:.3e}\niterations explicit {} grown {}",
+        explicit.thermodynamics.free_energy_ha,
+        grown.thermodynamics.free_energy_ha,
+        grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha,
+        grown.thermodynamics.internal_energy_ha - explicit.thermodynamics.internal_energy_ha,
+        mu(&explicit),
+        mu(&grown),
+        mu(&grown) - mu(&explicit),
+        explicit.history.len(),
+        grown.history.len(),
+    );
+    assert_eq!(report.initial_bands, 2);
+    assert_eq!(report.band_cap, 12);
+    assert!(!report.events.is_empty());
+    for (i, e) in report.events.iter().enumerate() {
+        assert_eq!(e.to, BandGrowth::next(e.from, 12));
+        assert!(e.edge_max_fraction > 1e-8 || e.edge_electrons > 1e-10);
+        if i > 0 {
+            assert_eq!(e.from, report.events[i - 1].to);
+        }
+    }
+    assert_eq!(report.final_bands, report.events.last().unwrap().to);
+    assert_eq!(grown.blocks[0][0].occupations.len(), report.final_bands);
+    let edge = grown.occupations.unwrap();
+    assert!(edge.edge_max_fraction <= 1e-8 && edge.edge_electrons <= 1e-10);
+    // Standard accuracy class (5e-9 Ha) on F and E.
+    assert!(
+        (grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha).abs()
+            <= 5e-9
+    );
+    assert!(
+        (grown.thermodynamics.internal_energy_ha - explicit.thermodynamics.internal_energy_ha)
+            .abs()
+            <= 5e-9
+    );
+    assert!((mu(&grown) - mu(&explicit)).abs() <= 1e-7);
+    // The cap is the ceiling: 2 -> 6, then 6 cannot grow at cap 6.
+    let capped = run(None, 6, Some(BandGrowth::From(2))).err().unwrap();
+    let ScfError::InvalidInput(message) = capped else {
+        panic!("{capped:?}")
+    };
+    assert!(message.starts_with(
+        "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study"
+    ));
+    assert!(message.contains("automatic band count reached 6 bands; occupations.band_cap = 6"));
+    // No growth requested (explicit count): today's message, unchanged.
+    let fixed = run(None, 6, None).err().unwrap();
+    assert!(matches!(
+        fixed,
+        ScfError::InvalidInput(
+            "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study"
+        )
+    ));
+    // Automatic start max(ceil(n) + 4, ceil(1.2 n)) for channel target n,
+    // growth max(b + 4, ceil(1.2 b)) bounded by the limit.
+    assert_eq!(BandGrowth::automatic_initial(0.5), 5);
+    assert_eq!(BandGrowth::automatic_initial(16.), 20);
+    assert_eq!(BandGrowth::automatic_initial(40.), 48);
+    assert_eq!(BandGrowth::next(20, 40), 24);
+    assert_eq!(BandGrowth::next(30, 40), 36);
+    assert_eq!(BandGrowth::next(38, 40), 40);
+}

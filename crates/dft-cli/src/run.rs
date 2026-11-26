@@ -2973,6 +2973,7 @@ fn reference_electronic_run(
     let mut request = dft_engine::refscf::api::Request::new(profile, points.to_vec());
     request.symmetry = symmetry;
     request.policy = Some(policy);
+    request.band_growth = config.fd_band_growth(theta.is_some());
     let delivery = if mode.observe || mode.agent {
         crate::telemetry::drive_reference(input, request, mode, out)?
     } else {
@@ -3127,7 +3128,8 @@ fn reference_electronic_run(
         "parallel":{"model":model,"ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"k_concurrency":1,"g_vectors":"distributed"},
         "timings":{"setup_s":r.setup_s,"engine_total_s":r.total_s},
         "reference_scf":{"start":start_report_json(r.start_report),"schema":"reference-spin-fd-1","iterations":rows,"stalls":stalls,"verification_calls":calls(&r.verification_calls),
-            "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>()},
+            "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>(),
+            "band_count_growth":band_growth_json(r.band_growth.as_ref(), cap, theta.is_some())},
         "limitations":["retained-basis occupation coverage is not an infinite-tail bound","polarized PZ unavailable; free-moment collinear FD with PBE routes to legacy pending G4D"]});
     if let Some(report) = &r.symmetry {
         result["reference_scf"]["symmetry"] = reference_symmetry_json(report);
@@ -3182,6 +3184,28 @@ fn reference_electronic_run(
             r.converged
         ),
     })
+}
+
+/// `reference_scf.band_count_growth`: automatic FD band count (scf.nbands
+/// omitted) or the fixed count (explicit scf.nbands, or fixed occupations).
+fn band_growth_json(
+    report: Option<&dft_engine::refscf::electronic::BandGrowthReport>,
+    cap: usize,
+    finite: bool,
+) -> Value {
+    match report {
+        Some(r) => {
+            json!({"mode":"automatic","initial_bands":r.initial_bands,"final_bands":r.final_bands,
+            "band_cap":r.band_cap,"growth_rule":"max(bands+4, ceil(1.2*bands)), at most band_cap",
+            "events":r.events.iter().map(|e| json!({"iteration":e.iteration,"verification_map":e.verification,
+                "from_bands":e.from,"to_bands":e.to,"edge_max_fraction":e.edge_max_fraction,
+                "edge_electrons":e.edge_electrons})).collect::<Vec<_>>()})
+        }
+        None if finite => {
+            json!({"mode":"fixed","initial_bands":cap,"final_bands":cap,"band_cap":cap,"events":[]})
+        }
+        None => Value::Null,
+    }
 }
 
 /// ONEPATH-3: standard-path records of the collinear and Fermi-Dirac drivers

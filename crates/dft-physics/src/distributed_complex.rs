@@ -176,6 +176,33 @@ impl DistributedComplexHamiltonian {
     pub fn worker_pool(&self) -> Arc<WorkerPool> {
         self.pool.clone()
     }
+    /// Scratch band capacity (columns per apply).
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+    /// Grow the band scratch to at least `capacity` columns. A no-op when the
+    /// scratch is already large enough; the potential, epoch and identity are
+    /// unchanged, so cached H X entries keyed on this operator stay valid.
+    pub fn ensure_capacity(&mut self, capacity: usize) -> Result<(), SolverError> {
+        if capacity <= self.capacity {
+            return Ok(());
+        }
+        let rows = self.local_rows().len();
+        let p = self.projectors.cols();
+        self.gemm = GemmWorkspace::with_pool(
+            rows.max(p),
+            capacity.max(p),
+            self.pool.workers_created().max(1),
+            self.pool.clone(),
+        )?;
+        self.projection = ComplexMatrix::zeros(p, capacity)?;
+        self.coupled = ComplexMatrix::zeros(p, capacity)?;
+        self.back = ComplexMatrix::zeros(rows, capacity)?;
+        self.partial = vec![0.; 2 * p * capacity];
+        self.reduced = vec![0.; 2 * p * capacity];
+        self.capacity = capacity;
+        Ok(())
+    }
     pub fn first_axis(&self) -> usize {
         self.fft.first_axis()
     }

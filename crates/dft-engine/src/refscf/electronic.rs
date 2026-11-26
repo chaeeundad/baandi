@@ -88,6 +88,42 @@ impl Policy {
         }
     }
 }
+/// Automatic Fermi-Dirac band count (reference driver). The policy's
+/// `band_cap` is the ceiling; the FD coverage criterion is unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BandGrowth {
+    /// Start at `max(ceil(n) + 4, ceil(1.2 n))`, n the largest channel
+    /// electron target (N/2 unpolarized; max(N/2, n_up, n_down) at free
+    /// moment; (N+|m|)/2 at fixed moment), bounded by the cap.
+    Automatic,
+    /// Start at an explicit count (tests and studies), bounded by the cap.
+    From(usize),
+}
+impl BandGrowth {
+    /// The initial count of [`BandGrowth::Automatic`] for a channel target.
+    pub fn automatic_initial(channel_electrons: f64) -> usize {
+        let n = channel_electrons.max(0.);
+        (n.ceil() as usize + 4).max((1.2 * n).ceil() as usize)
+    }
+    /// One growth step: `max(bands + 4, ceil(1.2 bands))`, bounded by `limit`.
+    pub fn next(bands: usize, limit: usize) -> usize {
+        (bands + 4)
+            .max((1.2 * bands as f64).ceil() as usize)
+            .min(limit)
+    }
+}
+/// One automatic band growth: the map (ordinary or verification) of
+/// `iteration` failed the coverage criterion at `from` bands and was solved
+/// again from the same input density at `to` bands.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GrowthEvent {
+    pub iteration: usize,
+    pub verification: bool,
+    pub from: usize,
+    pub to: usize,
+    pub edge_max_fraction: f64,
+    pub edge_electrons: f64,
+}
 #[derive(Debug)]
 pub struct BandBlock {
     pub point: KPoint,
@@ -131,8 +167,18 @@ pub struct Run {
     pub verification: Option<VerificationReport>,
     pub verification_calls: Vec<(usize, usize, SolveRecord)>,
     pub kept_hx: Vec<super::kept_hx::Report>,
+    /// Automatic band count: initial count, cap and growth events (`None`
+    /// when the count was fixed by the caller).
+    pub band_growth: Option<BandGrowthReport>,
     pub setup_s: f64,
     pub total_s: f64,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct BandGrowthReport {
+    pub initial_bands: usize,
+    pub final_bands: usize,
+    pub band_cap: usize,
+    pub events: Vec<GrowthEvent>,
 }
 /// Opt-in diagnostic records retained even when the run rejects a history.
 /// Storage is reserved at setup; adapters inspect/serialize only after return.
@@ -483,7 +529,34 @@ pub fn stepper_with<'a, K: Collective>(
     comm: &'a K,
 ) -> Stepper<'a, Run> {
     Stepper::new(move |boundary| async move {
-        run_continuation(input, profile, points, policy, comm, None, None, &boundary).await
+        run_continuation(
+            input, profile, points, policy, None, comm, None, None, &boundary,
+        )
+        .await
+    })
+}
+/// [`stepper_with`] with automatic FD band growth (as `api::Request::band_growth`).
+pub fn stepper_growing<'a, K: Collective>(
+    input: StartInput<'a>,
+    profile: Profile,
+    points: &'a [KPoint],
+    policy: Policy,
+    growth: BandGrowth,
+    comm: &'a K,
+) -> Stepper<'a, Run> {
+    Stepper::new(move |boundary| async move {
+        run_continuation(
+            input,
+            profile,
+            points,
+            policy,
+            Some(growth),
+            comm,
+            None,
+            None,
+            &boundary,
+        )
+        .await
     })
 }
 fn run_inner<K: Collective>(
@@ -497,7 +570,7 @@ fn run_inner<K: Collective>(
 ) -> Result<Run, ScfError> {
     Stepper::new(move |boundary| async move {
         run_continuation(
-            input, profile, points, policy, comm, prepared, trace, &boundary,
+            input, profile, points, policy, None, comm, prepared, trace, &boundary,
         )
         .await
     })
@@ -509,6 +582,7 @@ pub(super) async fn run_continuation<K: Collective>(
     profile: Profile,
     points: &[KPoint],
     policy: Policy,
+    growth: Option<BandGrowth>,
     comm: &K,
     prepared: Option<&super::symmetry::Prepared>,
     mut trace: Option<&mut Trace>,
@@ -551,7 +625,7 @@ pub(super) async fn run_continuation<K: Collective>(
     })?;
     let mut options = opts.clone();
     options.gamma_real = crate::model::GammaReal::Off;
-    let bands = match &policy {
+    let cap = match &policy {
         Policy::FermiDirac { band_cap, .. } | Policy::SpinFermiDirac { band_cap, .. } => *band_cap,
         Policy::FixedSpin(sector) => options.bands.unwrap_or(
             sector
@@ -561,8 +635,33 @@ pub(super) async fn run_continuation<K: Collective>(
                 .ok_or(ScfError::InvalidInput("band overflow"))?,
         ),
     };
+    if growth.is_some() && (policy.finite().is_none() || options.bands.is_some() || trace.is_some())
+    {
+        return Err(ScfError::InvalidInput(
+            "occupations.bands: automatic band growth requires Fermi-Dirac occupations, no explicit band count and no trace",
+        ));
+    }
+    let mut bands = match growth {
+        None => cap,
+        Some(BandGrowth::From(n)) => n.min(cap),
+        Some(BandGrowth::Automatic) => {
+            let channel = match &policy {
+                Policy::SpinFermiDirac {
+                    constraint: Constraint::FixedMoment(m),
+                    ..
+                } => (electrons + m.abs()) / 2.,
+                Policy::SpinFermiDirac { sector, .. } => {
+                    (electrons / 2.).max(sector.n_up.max(sector.n_down) as f64)
+                }
+                _ => electrons / 2.,
+            };
+            BandGrowth::automatic_initial(channel).min(cap)
+        }
+    };
+    let initial_bands = bands;
+    let mut growth_events: Vec<GrowthEvent> = Vec::new();
     if let Some((theta, constraint)) = policy.finite() {
-        crate::model::spin::validate_options(&options, theta, bands)?;
+        crate::model::spin::validate_options(&options, theta, cap)?;
         if !theta.is_finite()
             || theta <= 0.
             || bands == 0
@@ -747,6 +846,53 @@ pub(super) async fn run_continuation<K: Collective>(
                 }
                 super::checkpoint::header(io, &input, profile, comm, "electronic", dims)?;
                 io.same(&format!("{policy:?}"))?;
+                // Automatic band count only: the fixed-count format is unchanged.
+                if growth.is_some() {
+                    io.same(&format!("{growth:?}"))?;
+                    let mut count = bands;
+                    io.value(&mut count)?;
+                    if count > cap || count < bands {
+                        return Err(super::checkpoint::invalid("band growth count"));
+                    }
+                    if count != bands {
+                        // Shape only: the orbital block is read next.
+                        for state in states.iter_mut() {
+                            for (block, x) in state.blocks.iter_mut().zip(&mut state.orbitals.0) {
+                                *x = dft_numerics::linalg::ComplexMatrix::zeros(x.rows(), count)
+                                    .map_err(super::numerical)?;
+                                block
+                                    .operator
+                                    .ensure_capacity((2 * count).min(block.basis.vectors().len()))
+                                    .map_err(super::numerical)?;
+                            }
+                        }
+                        bands = count;
+                    }
+                    let mut events: Vec<_> = growth_events
+                        .iter()
+                        .map(|e| {
+                            (
+                                (e.iteration, e.verification),
+                                (e.from, e.to),
+                                (e.edge_max_fraction, e.edge_electrons),
+                            )
+                        })
+                        .collect();
+                    io.value(&mut events)?;
+                    growth_events = events
+                        .into_iter()
+                        .map(
+                            |((iteration, verification), (from, to), (f, e))| GrowthEvent {
+                                iteration,
+                                verification,
+                                from,
+                                to,
+                                edge_max_fraction: f,
+                                edge_electrons: e,
+                            },
+                        )
+                        .collect();
+                }
                 super::checkpoint::symmetry(io, &mut workspace.symmetry)?;
                 io.same(&plan.g2)?;
                 io.value(&mut completed)?;
@@ -792,22 +938,41 @@ pub(super) async fn run_continuation<K: Collective>(
         let mut calls = Vec::new();
         let mut redo = false;
         let mut reported_columns = 0;
+        let mut verification_grew = false;
         let (step, y, f, dr2) = loop {
             let xc_stage = dft_physics::xc::screening_scope("map", false, Some(electrons));
-            let step = map::evaluate(
-                &mut workspace,
-                &mut states,
-                &mut kept,
-                comm,
-                input.cell,
-                opts.functional,
-                &n,
-                &policy,
-                ethr,
-                iteration == 1 && !redo,
-                diagnostic,
-                trace.is_some(),
-            )?;
+            let mut shortfall = map::Shortfall::default();
+            let step = loop {
+                match map::evaluate(
+                    &mut workspace,
+                    &mut states,
+                    &mut kept,
+                    comm,
+                    input.cell,
+                    opts.functional,
+                    &n,
+                    &policy,
+                    ethr,
+                    iteration == 1 && !redo,
+                    diagnostic,
+                    trace.is_some(),
+                    growth.is_some().then_some(&mut shortfall),
+                ) {
+                    Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
+                        grow(
+                            &mut states,
+                            &mut kept,
+                            comm,
+                            &mut bands,
+                            cap,
+                            (iteration, false),
+                            shortfall,
+                            &mut growth_events,
+                        )?;
+                    }
+                    other => break other?,
+                }
+            };
             collect_calls(&step, &mut calls);
             let y = transform(&mut plan, comm, &step.density, &policy, electrons, volume)?;
             let f: Vec<_> = y.iter().zip(&x).map(|(a, b)| a - b).collect();
@@ -902,20 +1067,43 @@ pub(super) async fn run_continuation<K: Collective>(
             }
             let _xc_stage =
                 dft_physics::xc::screening_scope("verification", false, Some(electrons));
-            let fresh = map::evaluate(
-                &mut workspace,
-                &mut states,
-                &mut kept,
-                comm,
-                input.cell,
-                opts.functional,
-                &step.density,
-                &policy,
-                tolerance,
-                false,
-                diagnostic,
-                trace.is_some(),
-            )?;
+            let before = bands;
+            let mut shortfall = map::Shortfall::default();
+            let fresh = loop {
+                match map::evaluate(
+                    &mut workspace,
+                    &mut states,
+                    &mut kept,
+                    comm,
+                    input.cell,
+                    opts.functional,
+                    &step.density,
+                    &policy,
+                    tolerance,
+                    false,
+                    diagnostic,
+                    trace.is_some(),
+                    growth.is_some().then_some(&mut shortfall),
+                ) {
+                    Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
+                        grow(
+                            &mut states,
+                            &mut kept,
+                            comm,
+                            &mut bands,
+                            cap,
+                            (iteration, true),
+                            shortfall,
+                            &mut growth_events,
+                        )?;
+                    }
+                    other => break other?,
+                }
+            };
+            verification_grew = bands != before;
+            if verification_grew {
+                warm(&mut states, &fresh);
+            }
             for cache in &mut kept {
                 cache.preserve_input(false);
             }
@@ -956,9 +1144,14 @@ pub(super) async fn run_continuation<K: Collective>(
             let mut eigen_residual = 0_f64;
             for (s, (a, b)) in step.blocks.iter().zip(&fresh.blocks).enumerate() {
                 for (k, (a, b)) in a.iter().zip(b).enumerate() {
+                    // A verification-map growth adds empty bands absent
+                    // from the ordinary map: their occupation counts in full.
                     for i in 0..bands {
-                        occ_change +=
-                            points[k].weight * (a.occupations[i] - b.occupations[i]).abs();
+                        let before = a.occupations.get(i).copied().unwrap_or(0.);
+                        occ_change += points[k].weight * (before - b.occupations[i]).abs();
+                        if i >= a.occupations.len() {
+                            continue;
+                        }
                         if policy.finite().is_some() || i < policy.fixed_count(s) {
                             eig_change =
                                 eig_change.max((a.eigenvalues[i] - b.eigenvalues[i]).abs());
@@ -1075,7 +1268,11 @@ pub(super) async fn run_continuation<K: Collective>(
                 x = next;
             }
             n = proposal;
-            warm(&mut states, &step);
+            // After a verification-map growth the states hold the enlarged
+            // verification solution; the smaller ordinary block is not restored.
+            if !verification_grew {
+                warm(&mut states, &step);
+            }
         }
         if let Some(trace) = trace.as_deref_mut() {
             trace.records[ordinary_trace.unwrap()].mixing_fraction = mixing_fraction;
@@ -1191,6 +1388,12 @@ pub(super) async fn run_continuation<K: Collective>(
                     .iter()
                     .map(|k| k.report(comm))
                     .collect::<Result<_, _>>()?,
+                band_growth: growth.map(|_| BandGrowthReport {
+                    initial_bands,
+                    final_bands: bands,
+                    band_cap: cap,
+                    events: growth_events.clone(),
+                }),
                 setup_s,
                 total_s: clock.elapsed().as_secs_f64(),
             });
@@ -1199,6 +1402,72 @@ pub(super) async fn run_continuation<K: Collective>(
         boundary.emit_state(map_report, checkpoint_state!()).await;
     }
     unreachable!("positive budget checked")
+}
+/// One automatic growth step after a coverage rejection: extend every channel
+/// and k block with the start's kinetic-ordered complements and drop the kept
+/// H X entries (their column count changed). Density, Broyden history, ethr
+/// and the iteration counter are untouched: the same map is solved again.
+#[allow(clippy::too_many_arguments)]
+fn grow<K: Collective>(
+    states: &mut [refstart::KStartState],
+    kept: &mut [KeptHx],
+    comm: &K,
+    bands: &mut usize,
+    cap: usize,
+    (iteration, verification): (usize, bool),
+    shortfall: map::Shortfall,
+    events: &mut Vec<GrowthEvent>,
+) -> Result<(), ScfError> {
+    let basis = states[0]
+        .blocks
+        .iter()
+        .map(|b| b.basis.vectors().len())
+        .min()
+        .unwrap_or(0);
+    let next = BandGrowth::next(*bands, cap.min(basis));
+    if next <= *bands {
+        // ScfError carries a static message; this terminal error is built once.
+        let message = format!(
+            "{} (automatic band count reached {} bands; occupations.band_cap = {cap}{})",
+            map::COVERAGE,
+            *bands,
+            if basis < cap {
+                ", smallest k basis reached"
+            } else {
+                ""
+            }
+        );
+        return Err(ScfError::InvalidInput(Box::leak(message.into_boxed_str())));
+    }
+    for state in states.iter_mut() {
+        refstart::extend_k_orbitals(state, next, comm)?;
+    }
+    for cache in kept.iter_mut() {
+        cache.invalidate();
+    }
+    if comm.rank() == 0 {
+        eprintln!(
+            "band growth: iteration {iteration}{}: FD coverage insufficient at {} bands (edge fraction {:.3e}, edge electrons {:.3e}); continuing with {next} bands (cap {cap})",
+            if verification {
+                " (verification map)"
+            } else {
+                ""
+            },
+            *bands,
+            shortfall.edge_max_fraction,
+            shortfall.edge_electrons,
+        );
+    }
+    events.push(GrowthEvent {
+        iteration,
+        verification,
+        from: *bands,
+        to: next,
+        edge_max_fraction: shortfall.edge_max_fraction,
+        edge_electrons: shortfall.edge_electrons,
+    });
+    *bands = next;
+    Ok(())
 }
 fn collect_calls(step: &Map, out: &mut Vec<(usize, usize, SolveRecord)>) {
     for (s, c) in step.blocks.iter().enumerate() {

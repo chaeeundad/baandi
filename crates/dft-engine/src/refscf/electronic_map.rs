@@ -460,6 +460,15 @@ pub(super) fn fields<K: Collective>(
             }),
     })
 }
+/// The FD empty-state coverage rejection (criterion: top-band occupation
+/// fraction above 1e-8 or edge electrons above 1e-10 N at any k).
+pub(super) const COVERAGE: &str = "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study";
+/// Coverage numbers of a rejected FD map, reported by automatic band growth.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Shortfall {
+    pub edge_max_fraction: f64,
+    pub edge_electrons: f64,
+}
 #[allow(clippy::too_many_arguments)]
 pub(super) fn evaluate<K: Collective>(
     workspace: &mut Workspace,
@@ -474,6 +483,7 @@ pub(super) fn evaluate<K: Collective>(
     first: bool,
     diagnostics: bool,
     response_diagnostics: bool,
+    shortfall: Option<&mut Shortfall>,
 ) -> Result<Map, ScfError> {
     let fields = fields(workspace, &mut states[0], comm, cell, functional, input)?;
     let bands = states[0].orbitals.cols();
@@ -609,9 +619,20 @@ pub(super) fn evaluate<K: Collective>(
         if evaluation.edge_max_fraction > 1e-8
             || evaluation.edge_electrons > 1e-10 * electrons.max(1.)
         {
-            return Err(ScfError::InvalidInput(
-                "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study",
-            ));
+            // Automatic band growth keeps this map's solved orbitals as the
+            // warm start of the enlarged block; the criterion is unchanged.
+            if let Some(shortfall) = shortfall {
+                *shortfall = Shortfall {
+                    edge_max_fraction: evaluation.edge_max_fraction,
+                    edge_electrons: evaluation.edge_electrons,
+                };
+                for (state, channel) in states.iter_mut().zip(&blocks) {
+                    for (x, b) in state.orbitals.0.iter_mut().zip(channel) {
+                        x.clone_from(&b.orbitals);
+                    }
+                }
+            }
+            return Err(ScfError::InvalidInput(COVERAGE));
         }
         for (block, f) in blocks
             .iter_mut()

@@ -1104,12 +1104,30 @@ positive. Kelvin uses the exact SI Boltzmann constant at the CLI boundary;
 the engine uses theta=k_B T in Ha. Gaussian, MP and cold schemes reject.
 Odd unpolarized electron counts are permitted only in FD mode.
 
-`band_cap` defaults to 32. The initial policy prepares and solves this entire
-cap, automatically adding empty bands up to it; `scf.nbands` is a lower bound
-and must not exceed the cap. The cap must fit every k basis. Insufficient
-empty-state coverage fails with an instruction to increase the cap. The
-reported top-band diagnostics are not bounds on infinitely many omitted bands;
-repeat with at least four more bands and compare F/density.
+`band_cap` defaults to 32. The cap must fit every k basis. FD band count on
+the reference driver:
+
+- `scf.nbands` omitted (automatic): the run starts at
+  `max(ceil(n) + 4, ceil(1.2 n))` bands, n the largest channel electron target
+  (N/2 unpolarized), at most `band_cap`. When a map fails the empty-state
+  coverage criterion (top-band occupation fraction above 1e-8 or edge electrons
+  above 1e-10 N at any k; unchanged), the count grows to
+  `max(bands + 4, ceil(1.2 bands))`, at most `band_cap`, and the same SCF
+  iteration is solved again without restarting (density mixing history kept).
+  Each growth prints one stderr line (`band growth: ...`) and is recorded in
+  `results.json.reference_scf.band_count_growth` (`mode`, `initial_bands`,
+  `final_bands`, `band_cap`, `growth_rule`, `events[]` with iteration,
+  verification map, from/to and the rejected edge numbers). At the cap the run
+  fails with the coverage message plus the band count reached; raise
+  `band_cap`.
+- `scf.nbands` explicit: the previous behaviour, unchanged. The whole cap is
+  prepared and solved (`scf.nbands` is a lower bound and must not exceed the
+  cap); insufficient coverage fails with an instruction to increase the cap.
+  `band_count_growth.mode` is `fixed`.
+
+The reported top-band diagnostics are not bounds on infinitely many omitted bands;
+repeat with at least four more bands and compare F/density. The strict oracle
+FD path (`finite_run`) keeps the fixed cap.
 
 When to use it for an insulator-like cell: if fixed occupations stall (density residual
 floors around 1e-3, the SCF wanders) and the printed HOMO/LUMO gap is below about

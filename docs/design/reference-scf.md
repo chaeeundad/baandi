@@ -3520,7 +3520,8 @@ Stage 1 solves every retained band at every k before calling the existing
 mandatory in reference Davidson, including numerically zero tails. Density,
 kinetic, nonlocal, band energy and the residual-square guard all use the
 same occupation times normalized k weight exactly once. The explicit FD cap
-is prepared before construction (CLI default 32, identical to legacy).
+is prepared before construction (CLI default 32, identical to legacy) when
+`scf.nbands` is explicit; otherwise the automatic count below applies.
 Positive theta, interior sector capacities, number/moment residuals and the
 legacy top-band coverage limits are enforced without clipping occupations.
 Internal energy E, positive TS and Mermin F=E-TS are separate records.
@@ -3551,6 +3552,65 @@ chemical potentials, entropy and total/absolute magnetization. Verification
 results never replace it. Energy-only verification, failed-map reuse, RMM and
 cutoff ladder currently reject; predictor gates and deferred energy audits
 are explicitly inactive on this entry.
+
+### Automatic FD band count (2026-11-26)
+
+Problem: the coverage limits above (top-band occupation fraction at most 1e-8
+and edge electrons at most 1e-10 N at every k, i.e. the top band about 18.4
+theta above mu) reject a run whose retained count is too small, after minutes
+of work (dev08 QE campaign: Ru, 32 electrons, QE's default 20 bands, top band
+0.58 eV above E_F). Users had to guess the count.
+
+Contract (`api::Request::band_growth`, `electronic::BandGrowth`):
+
+- Engaged by the CLI for reference FD (scalar and collinear) when `scf.nbands`
+  is omitted. An explicit `scf.nbands` keeps the previous behaviour exactly:
+  the fixed count is `occupations.band_cap` and an insufficient count fails.
+  Engine callers that do not set `band_growth` are unchanged.
+- Start: `max(ceil(n) + 4, ceil(1.2 n))`, n the largest channel electron
+  target (N/2 unpolarized; max(N/2, n_up, n_down) at free moment; (N+|m|)/2 at
+  fixed moment), at most the cap. This is the empty-band margin documented for
+  QE's smeared default `nbnd` (input documentation, not source), so a QE
+  comparison starts from the same count; it is a start, not a guarantee.
+- Growth: when a map (ordinary or verification) fails the unchanged coverage
+  criterion, the count becomes `max(b + 4, ceil(1.2 b))`, at most the cap and
+  the smallest k basis, and the same map is solved again from the same input
+  density. Geometric growth bounds the number of re-solves (each costs one
+  map) to O(log(cap/start)); the +4 floor avoids tiny steps on small counts.
+- Extension: the failed map's solved orbitals are kept bit for bit and every
+  channel/k block is extended with the start's deterministic complements
+  (unit plane waves in ascending |k+G|^2, ties by G index), orthogonalised
+  twice against the block (classical Gram-Schmidt, one reduction per pass,
+  dependent candidates skipped). Operator scratch grows to two columns per
+  band (`DistributedComplexHamiltonian::ensure_capacity`).
+- State: the Broyden history acts on the density and is kept; ethr, the
+  iteration counter, the ratchet and the history records are untouched. The
+  kept H X cache is reset (it is keyed on the column count, so the next
+  prepare would miss anyway). A growth inside a verification map counts the
+  added bands' occupations in the occupation change, and the following
+  ordinary map starts from the enlarged verification solution instead of the
+  smaller candidate block. Delivery is the accepted candidate's own block.
+- Cap: when the count cannot grow, the run fails with the existing message
+  plus `(automatic band count reached B bands; occupations.band_cap = C)`.
+- Checkpoint v2: only growth runs add the growth mode, the current count and
+  the events after the policy record; the fixed-count format is unchanged.
+  A restart resizes the blocks before the orbital records are read.
+- Records: one stderr line per growth (rank 0) and
+  `results.json.reference_scf.band_count_growth` with mode, initial/final
+  count, cap, rule and events (iteration, verification map, from/to,
+  edge fraction and edge electrons of the rejected map).
+
+Validation (Mac, debug): `refscf::fd_band_growth_matches_explicit_count_and_reports_cap`
+(one-electron metal, theta 0.05 Ha, start 2 bands grows 2 -> 6 -> 10 in the
+first map; against an explicit 12-band run: F differs by 1.4e-13 Ha, E by
+2.7e-13 Ha, mu by 2.0e-8 Ha, both 5 iterations; cap 6 fails with the extended
+message, no growth keeps the original message);
+`refscf_checkpoint::electronic_fd_band_growth_restart` (three simulated ranks,
+exact restart before and after the growth); CLI
+`reference_gaps::reference_fd_automatic_band_count` (He fixture, 2x2x2 mesh,
+theta 0.02 Ha: 5 -> 9 bands, F within 5.5e-13 Ha and mu within 8.4e-12 Ha of
+the explicit 12-band run). Forces and stress are unavailable on the reference
+FD entry, so no force comparison applies.
 
 ### G4G isolated open-shell stall investigation (2026-11-25; initial investigation)
 

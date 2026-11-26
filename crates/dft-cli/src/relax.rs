@@ -339,6 +339,16 @@ impl Context {
         if atomic {
             opts.start_density = dft_engine::StartDensity::Atomic;
         }
+        if self.selection.reference() {
+            // RELAX-CELL-DEFAULT: on the reference driver this problem is never
+            // solved; it only supplies the FFT grid (frozen-Miller cell
+            // segments) and the atomic superposition (C3 predictor). The strict
+            // oracle constructor rejects the standard profile and verification
+            // (R10BC), which do not affect either quantity, so build it with the
+            // oracle's settings for those two fields.
+            opts.standard = None;
+            opts.verification = dft_engine::Verification::Off;
+        }
         let mut p = if self.config.basis.legacy_gamma() {
             ScfProblem::new(&self.cell, &self.atoms(), &self.refs(), opts)
         } else {

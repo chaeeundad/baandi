@@ -366,24 +366,34 @@ fn facade_delivery_matches_existing_dispatch() {
             stress.pulay.unwrap().correction
         );
         let seed = eager.ionic_seed.unwrap();
-        let mut unsupported = api::Request::new(profile, points.clone());
-        unsupported.policy = Some(refscf::electronic::Policy::FermiDirac {
+        // FD-FORCES (2026-11-26): the facade delivers Fermi-Dirac forces.
+        let mut fd = api::Request::new(profile, points.clone());
+        fd.policy = Some(refscf::electronic::Policy::FermiDirac {
             theta_ha: 0.01,
             band_cap: 12,
         });
-        unsupported.derivatives.forces = true;
-        assert!(matches!(
-            api::solve(input(), unsupported),
-            Err(dft_engine::ScfError::InvalidInput(_))
-        ));
-        let mut unsupported = api::Request::new(profile, points.clone());
-        unsupported.seed = Some(seed.clone());
-        unsupported.symmetry =
+        fd.derivatives.forces = true;
+        let fd = api::solve(input(), fd).unwrap();
+        assert!(matches!(fd.run, api::Run::Electronic(_)));
+        let fd_forces = fd.derivatives.forces.expect("FD forces delivered");
+        assert!(fd_forces.values.iter().flatten().all(|v| v.is_finite()));
+        // A Gamma seed with prepared symmetry stays rejected; complex-k seeds
+        // with symmetry are supported since R7B-CELL-RELAX (symmetric warm
+        // starts of the cell relaxation).
+        let mut symmetric = api::Request::new(profile, points.clone());
+        symmetric.seed = Some(seed.clone());
+        symmetric.symmetry =
             Some(refscf::symmetry::Prepared::new(&cell, &atoms, &points, 1e-5, false).unwrap());
-        assert!(matches!(
-            api::solve(input(), unsupported),
-            Err(dft_engine::ScfError::InvalidInput(_))
-        ));
+        let symmetric = api::solve(input(), symmetric);
+        if gamma {
+            assert!(matches!(
+                symmetric,
+                Err(dft_engine::ScfError::InvalidInput(_))
+            ));
+        } else {
+            let run = symmetric.unwrap().run.into_scalar().unwrap();
+            assert!(run.outcome.converged);
+        }
         let mut request = api::Request::new(profile, points.clone());
         request.seed = Some(seed.clone());
         request.derivatives = api::Derivatives {

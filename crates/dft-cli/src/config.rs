@@ -51,6 +51,9 @@ pub struct Config {
     pub bands: Option<Bands>,
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
+    /// D3-DISPERSION (ADR 0048): Grimme D3 correction evaluated once per
+    /// geometry after the SCF; absent = no code path runs.
+    pub dispersion: Option<Dispersion>,
     /// RUN-CONFIG: switch values by registry name (`m2_grid = "on"`); see
     /// `crate::run_config` (environment > input > default).
     #[serde(default)]
@@ -806,6 +809,25 @@ impl Scf {
         }
     }
 }
+/// `[dispersion]` (ADR 0048). Damping parameters are dimensionless except
+/// `a2` (Bohr); absent parameters come from the library's set for the run's
+/// functional. `library` is used as given (absolute, or relative to the working
+/// directory); without it `BAANDI_DFTD3_LIB`, then the platform default name.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Dispersion {
+    pub method: String,
+    pub s6: Option<f64>,
+    pub s8: Option<f64>,
+    pub s9: Option<f64>,
+    pub a1: Option<f64>,
+    pub a2: Option<f64>,
+    pub rs6: Option<f64>,
+    pub rs8: Option<f64>,
+    pub alpha6: Option<f64>,
+    pub library: Option<PathBuf>,
+}
+
 /// Output paths resolve against the process working directory.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

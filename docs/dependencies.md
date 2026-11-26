@@ -13,6 +13,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | exmex | 0.21.0 | MIT OR Apache-2.0 | dft-units (all features off) |
 | faer | 0.24.4 | MIT | dft-numerics |
 | libm | 0.2.16 | MIT | dft-physics, dft-upf |
+| libloading | 0.8.9 | ISC | dft-dispersion (optional, feature `dftd3` only; ADR 0048) |
 | nalgebra | 0.35.0 | Apache-2.0 | dft-basis, dft-geometry, dft-physics |
 | ndarray | 0.17.2 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics |
 | ndrustfft | 0.6.2 | MIT | dft-numerics (dev-dependency, test oracle) |
@@ -178,6 +179,38 @@ validation record. See ADR 0029 for scope and deferred SDK adoption.
 ### P11G PyO3 (decision by architect, 2026-11-04)
 
 `baandi-py` adds `pyo3` 0.30.1 (crates.io, published 2026-10-14; license MIT OR Apache-2.0; MSRV 1.85, workspace uses 1.99; supports CPython 3.9 and later; about 1.3 million downloads; actively maintained). It is used only in the new `baandi-py` crate, outside the numerical core; nothing in `dft-*` depends on it. Build and wheel packaging use `maturin` 1.16.0 (Python build tool, not a Rust dependency); ASE 3.26.0 is an optional Python dependency, never required by the Rust build. Apple Silicon: host build, test, fmt and clippy gates pass on this Mac (aarch64); `scripts/check.sh baandi-py` run by the architect before the ticket. `unsafe` stays inside PyO3's generated code; any own `unsafe` in the adapter needs documented preconditions and tests (workspace lint `undocumented_unsafe_blocks = deny`). See ADR 0030.
+
+### D3-DISPERSION optional simple-dftd3 adapter (ADR 0048)
+
+The `dftd3` Cargo feature (dft-cli, forwarded to the new `dft-dispersion`
+crate) adds one Rust package, `libloading` 0.8.9 (license **ISC**, a permissive
+MIT-equivalent licence; the ticket assumed MIT/Apache and this is the actual
+metadata declaration). Its own dependencies `cfg-if` 1.0.5 and `windows-link`
+0.2.1 (both MIT OR Apache-2.0) were already in the lockfile. libloading is the
+standard maintained crate for `dlopen`/`LoadLibrary` (crates.io on 2026-11-26:
+latest 0.9.1, crate updated 2026-11-13, 669 million downloads; 0.8.9 is the
+newest 0.8 release and is used to keep the MSRV/API stable); it has no native dependency and
+builds on Apple Silicon (host build, tests and clippy of this ticket). The
+default build does not compile it: Cargo.lock gains the entries, the default
+binary is unchanged. It was fetched by Claude into the shared Cargo registry;
+the offline Codex vendor tree (`../rust-dft-vendor`) does not yet contain it.
+
+Runtime library, not a Cargo dependency: simple-dftd3 1.7.0 (Grimme group,
+<https://github.com/dftd3/simple-dftd3>, LGPL-3.0-or-later), the conda-forge
+binary build `osx-arm64/simple-dftd3-1.7.0-gfortran_h643d65c_0.conda` with its
+runtime libraries mctc-lib 0.7.0, toml-f 0.5.2, jonquil 0.3.2 (Apache-2.0/MIT),
+libgfortran 15.3.0, libgcc 15.3.0 (GPL-3.0 with the GCC runtime library
+exception) and llvm-openmp 23.1.6 (Apache-2.0 WITH LLVM-exception).
+`scripts/fetch_dftd3.py` downloads exactly these files, checks their SHA-256 and
+extracts them outside the repository (default
+`/Volumes/990-2TB/Develop/rust-dft-wt/vendor/dftd3`, manifest with every URL and
+hash, licence files under `licenses/`). Nothing of it is committed, linked or
+redistributed; BAANDI opens it at run time through its own MIT adapter, which is
+the reason the LGPL `dftd3` Rust crate is not used. The same package provides the
+`s-dftd3` program used as the independent oracle. Apple Silicon: the conda-forge
+arm64 build loads and passes the adapter tests on this Mac (install names use
+`@rpath` with `@loader_path/../lib`, so no `DYLD_*` variable is needed). Linux
+(dev08) needs a pinned linux-64 table in the fetch script before use.
 
 ## P10J persistent executor
 

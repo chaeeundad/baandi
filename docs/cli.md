@@ -1360,6 +1360,59 @@ as JSON. ASE `get_stress` uses tensile-positive eV/Angstrom^3 and order
 xx,yy,zz,yz,xz,xy for the existing Gamma/unpolarized adapter. See
 [conventions, equations, protocols and evidence](validation/stress.md).
 
+## Dispersion correction `[dispersion]` (D3-DISPERSION, ADR 0048)
+
+Grimme DFT-D3 is available in builds with the Cargo feature `dftd3`
+(`cargo build --release -p dft-cli --features dftd3`). The default build rejects
+the table at preflight and runs no dispersion code. The term is computed by the
+official simple-dftd3 library, opened at run time (not linked):
+
+```toml
+[dispersion]
+method = "d3bj"      # "d3bj" (rational / Becke-Johnson) or "d3zero" (zero damping)
+# optional parameters; absent = the library's set for the run's functional
+# s6, s8, a1, a2 (a2 in Bohr) for d3bj; s6, s8, rs6, rs8 for d3zero;
+# alpha6 (default 14) and s9 (three-body ATM term, default 1)
+# library = "/abs/path/libs-dftd3.dylib"   # else BAANDI_DFTD3_LIB, else libs-dftd3.dylib/.so
+```
+
+Get the library with `python3 -I scripts/fetch_dftd3.py` (conda-forge
+simple-dftd3 1.7.0 and its runtime libraries, SHA-256 checked, extracted to
+`/Volumes/990-2TB/Develop/rust-dft-wt/vendor/dftd3` by default; the script prints
+the `BAANDI_DFTD3_LIB` value). `library` is used as written (absolute, or
+relative to the working directory, not to the input file).
+
+Parameter rules: with no damping parameter the library set for the functional
+is used (`pbe`); then `s9` may only be 0 (two-body only) or 1 (default, two- plus
+three-body, as QE's `dftd3_threebody = .true.`). LDA has no D3 parameter set, so
+an LDA run must give all core parameters (`s6, s8, a1, a2` or `s6, s8, rs6`).
+Partial sets, parameters of the other damping and unknown keys are rejected.
+Preflight also opens the library and requires version 1.x.
+
+Evaluation: once per geometry after the SCF, on the final structure, periodic
+in all three directions, with the library's default real-space cutoffs. It does
+not change the Kohn-Sham potential, the SCF or its convergence. Output:
+
+- `dispersion` block in results.json: method, damping, parameters (source
+  `library_parameter_set` or `explicit_input`), library name/version/path,
+  `energy_ha`, `forces_ha_bohr` (= -gradient), `virial_ha` (dE/d strain),
+  `stress_ha_bohr3` (tensile positive, virial/volume) and its pressure;
+- `total_energy.ha` (and `ry`, `ev`) includes E_disp; `total_energy.dispersion_ha`
+  and `total_energy.without_dispersion_ha` give the split. `energies.total`
+  includes it, `energies.dispersion` and `energies.total_without_dispersion`
+  are added. Spin/Fermi-Dirac runs add it to `thermodynamics.internal_energy_ha`
+  and `free_energy_ha` (with `thermodynamics.dispersion_ha`);
+- with `[output] forces`/`stress`, `forces.values` and `stress.values` include
+  the term, `per_term.dispersion` holds it and the derivative ledger lists it;
+- `baandi relax` adds it to every frame's energy, forces and stress, so ionic
+  and cell steps follow the corrected surface.
+
+Not supported: the strict-oracle spin/Fermi-Dirac drivers
+(`BAANDI_REFERENCE_STRICT=on` with spin or smearing) reject `[dispersion]`;
+D3M(BJ), D4, many-body and nonlocal van der Waals functionals are not available.
+Sign conventions were established by finite differences
+(`crates/dft-dispersion/tests/finite_differences.rs`).
+
 ## Variable-cell relaxation (P23A)
 
 `baandi relax` accepts `relax.mode="ions"|"cell"|"ions_cell"` (default ions),

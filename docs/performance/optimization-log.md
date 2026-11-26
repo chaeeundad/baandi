@@ -4975,3 +4975,16 @@ on; one extra reduction agrees on construction errors) and one shared start for 
 `dft-physics` hamiltonian and `dft-engine/tests/k_start_memo.rs`). Mac (O, release, npw ~5000, 40 columns, 4 k):
 `k_start_nonlocal_tables` rank 0 1.5 -> 0.38 s at 4 simulated ranks, 1.6 -> 0.29 s at 8; whole k start 1.9 -> 0.78 s
 and 2.4 -> 0.72 s; serial unchanged.
+
+## GK10-BORDER-GRAM — border-only projected S/H in the complex Davidson (2026-11-26)
+
+Profile: dev08 kprof shows diagonalization at 66 of 92 s per B12 SCF and 30 of 45 s for GeTe; the complex reference
+Davidson recomputed S = V^H V and H = V^H HV in full after every append, while the real Gamma path computes only the
+new border. Change: border-only S and H (V^H E, V^H HE; one GEMM and one reduction each; adjoint mirror; new corner
+hermitized), full recompute after a repair, restarts unchanged; switch `BAANDI_CDAV_BORDER_GRAM` (default on).
+Rounding class: SCF energies within 3.6e-15 Ha of the full recompute on the k generality set (cubic, skewed,
+elongated; Gamma-in-list, shifted mesh; strict and standard; P = 1/3/8), FD and spin k runs within 6.6e-14 Ha, same
+maps. Gram flops and reduced bytes per projected matrix (m + k)^2 -> (m + k) k (0.2-0.5 on a B12 shape). Mac (O,
+release, 12 atoms, 22 bands, 2 k, ecut 20 Ha): solve 3.25 -> 2.84 s at P=1, 1.05 -> 0.93 s at P=4 (simulated).
+Not changed: the complex overlap factor is still a full refactor per append (the real path's bordered Cholesky
+is a separate step); repair path. dev08 A/B pending.

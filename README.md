@@ -32,7 +32,7 @@ Move beyond the assumption that one converged SCF calculation is sufficient. BAA
 
 ### 3. Multiscale-ready scientific interfaces
 
-Interoperability is an architectural requirement. BAANDI aims to exchange structures, densities, potentials, energies and electronic-state metadata (and forces and stresses once they exist) with external tools through physically consistent interfaces: QM/MM coupling, explicit and implicit solvents, machine-learned interatomic potentials, multiscale simulations. External methods connect through adapters and drivers outside the numerical core. BAANDI does not aim to replace specialized molecular dynamics, machine learning or continuum engines.
+Interoperability is an architectural requirement. BAANDI aims to exchange structures, densities, potentials, energies and electronic-state metadata including the supported force and stress outputs with external tools through physically consistent interfaces: QM/MM coupling, explicit and implicit solvents, machine-learned interatomic potentials, multiscale simulations. External methods connect through adapters and drivers outside the numerical core. BAANDI does not aim to replace specialized molecular dynamics, machine learning or continuum engines.
 
 ### 4. An observable, controllable, agent-native runtime
 
@@ -46,28 +46,28 @@ The numerical core knows nothing about language models, networks or tool protoco
 | D. Integration | Python/ASE, MLIP adapters, external numerical solvers |
 | E. Agent tools | A thin MCP server with typed tools, quotas and an audit log |
 
-Rules that hold for every layer: the stepwise path must give bit-identical results to the conventional path; a change to a running calculation is validated, applied only between SCF iterations, rejected without side effects if unsafe, and recorded; convergence is declared only by the existing fixed-point certificate, never by the control layer; diagnostics separate measured evidence from hypothesis. The first end-to-end demonstration is a **self-healing SCF**: a failing calculation is diagnosed, repaired through a validated policy change, continued and verified, with the intervention recorded. Design and plan: [docs/research/agent-native-directive-review.md](docs/research/agent-native-directive-review.md) and the P11 tickets; none of layers B to E exists yet.
+Rules: stepwise and batch execution preserve the same numerical trajectory. Controls apply at explicit safe map boundaries and are audited. The engine alone decides convergence; independent reference verification is on by default and can be disabled for supported outputs. Typed state, reference runtime, checkpoint v2, Python/ASE and host-embedded MCP exist. The historical self-healing demo demonstrates legacy budget recovery; the reference runtime rejects budget extension. MLIP/external solver integrations remain designs.
 
 ## Technical Direction
 
 The current implementation covers:
 
 - Plane-wave basis sets and reciprocal-space operations
-- Periodic boundary conditions and Monkhorst–Pack k-point sampling (time-reversal symmetry only)
+- Periodic boundary conditions and Monkhorst–Pack k-point sampling, time reversal and opt-in compatible spatial symmetry reduction
 - Norm-conserving pseudopotentials (UPF v2 subset)
 - Local and nonlocal Hamiltonian operators
 - Hartree and exchange-correlation potentials (LDA, and PBE through a library)
-- Block-Davidson Kohn–Sham eigensolver, Pulay density mixing, a fixed-point convergence certificate and an energy audit
+- Reference Davidson eigensolvers, Broyden/plain density mixing, default-on fixed-point verification and an energy audit; a feature-gated strict oracle for validation
 - Deterministic multithreading (results identical for every thread count)
 - Validation against Quantum ESPRESSO (see the results below)
 
-In design or development: richer SCF algorithms and an optional Intel MKL backend selected at compile time, band-structure/DOS and volumetric outputs in standard formats, electronic-state exploration, forces and stresses, external-field coupling, spin polarization, GPU backends, and the agent-native runtime above.
+Implemented with documented limits: optional Intel MKL, bands/DOS and standard volumetric outputs, spin/FD, forces/stress and reference runtime. Research/design directions include richer algorithms, electronic-state exploration, external coupling and GPU backends.
 
-These are development directions, not claims of currently available functionality; the status table below is the authoritative list.
+Current supported workflows and limits are indexed in docs/INDEX.md and ADR 0047; dated evidence retains the implementation that produced it.
 
 ## Development Status
 
-**BAANDI is in an early experimental stage.** A verified silicon-class workflow exists (insulators, fixed occupations, LDA and PBE, Gamma and k-point meshes), but it is not a production DFT code. It should not be used for scientific conclusions without independent validation. Features such as metals/smearing, forces, stress, spin and structure relaxation are not available yet.
+BAANDI remains experimental and needs independent validation for scientific conclusions. In addition to the silicon insulating workflow, it implements limited-validation collinear spin, Fermi–Dirac occupations, forces/stress and unpolarized fixed-occupation relaxation. Free-moment PBE remains unqualified and uses the strict-oracle fallback.
 
 Build instructions, example inputs, how to run the CLI and how the Quantum ESPRESSO comparisons are reproduced are in [docs/getting-started.md](docs/getting-started.md); the full documentation map is [docs/INDEX.md](docs/INDEX.md).
 
@@ -75,51 +75,52 @@ Build instructions, example inputs, how to run the CLI and how the Quantum ESPRE
 
 ## What BAANDI can do today
 
-Status as of 2026-11-16, written for people who run calculations. Source: `docs/feature-status.json` (this section is generated by `scripts/make_readme_figures.py`).
+Status as of 2026-11-26, written for people who run calculations. Source: `docs/feature-status.json` (this section is generated by `scripts/make_readme_figures.py`).
 
 **You can use it today for:** Total energy, eigenvalues and electron density of insulating periodic systems with LDA or PBE, on Gamma or a k mesh. Reproducible runs: the result files carry hashes, options and the energy audit.
 
 **Not available yet:** Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below. Spin-polarized or finite-temperature relaxation in the CLI, DFT+U forces, molecular dynamics, phonons and hybrid functionals.
 
-**Speed:** Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md.
+**Speed:** Current timing claims use the dated same-model tables and matched-condition protocol in docs/performance/comparison-rules.md and docs/performance/qe-vs-baandi-current.md. The 2026-11-05 relay describes earlier implementations and is not current reference-driver performance. Real-Gamma and MPI paths are implemented. No new speed measurement is supplied by this documentation update.
 
 ### Works today
 
 | Area | Feature | Notes |
 |---|---|---|
-| Physics | Kohn-Sham DFT with plane waves | Periodic cells, norm-conserving pseudopotentials (UPF v2 subset), spin-unpolarized. |
+| Physics | Kohn-Sham DFT with plane waves | Periodic NC plane-wave Kohn–Sham DFT; unpolarized and supported collinear sectors, with documented occupation/XC limits. |
 | Physics | LDA (Perdew-Zunger) and PBE (GGA) | PBE comes from the xcx library; tested against QE on the same pseudopotential. |
 | Physics | Insulators with fixed occupations | Fixed occupations require a sampled band gap. Use the separate Fermi-Dirac option for partial occupations. |
 | k points | Gamma, Monkhorst-Pack grids (shifted or not), explicit k lists | Time reversal and opt-in crystal symmetry reduction; only model-, mesh- and FFT-grid-preserving operations. [Evidence](tests/reference/symmetry/evidence.json). |
-| SCF | Pulay and linear density mixing, block Davidson eigensolver | Default: one standard SCF path (threshold 5e-9 Ha) with a fixed-point verification after convergence (ADR 0043). The strict path with its certificate and energy audit is a reference tool (BAANDI_REFERENCE_STRICT=on). Verified standard results are not strict-certified. |
+| SCF | Broyden/plain density mixing and reference Davidson | Broyden/plain density mixing and reference Davidson; beta 0.7/history 8, threshold 5e-9 Ha and verification on by default. StrictOracle is an explicit validation route and the temporary G4D fallback. Verified standard is not strict-certified. |
 | Input | One TOML file; units (Ha, Ry, eV, Angstrom, Bohr, ...) and expressions such as 1/4 or 5.43/2 Angstrom | Wrong inputs are rejected with the key path of the problem. |
 | Output | results.json (energies, eigenvalues, convergence history, provenance) and the electron density (binary + metadata) | Every run records input and pseudopotential hashes. |
-| Speed | Threads over k points and over bands, bit-identical results for any thread count | `[scf] threads = N`; default is 1. |
+| Speed | Thread budget and determinism | Thread budget via [scf] threads = N (default 1); same-build/backend determinism is checked separately from MPI rank-count accuracy. Reference k/spin/FD work is distributed under MPI. |
 | Validation | Agrees with Quantum ESPRESSO 7.6 on silicon (energies, eigenvalues, k grids, PBE) | See the validation results below. One cell and one pseudopotential so far. |
 | Output | Band structures and density of states (CSV, SVG figure, QE-/VASP-style files) | `bands` and `dos` subcommands: CSV, SVG, QE- and VASP-style files. Fixed-density non-self-consistent calculation; checked by the repository tests. |
 | Output | Electron density, ELF and potentials as cube, XSF, CHGCAR and VTK files | Cube, XSF, CHGCAR and VTK writers; opens in VESTA, VMD, ParaView and similar viewers. Checked against format specifications in tests. |
-| Robustness | Convergence fix for larger cells (8-atom silicon cell stalled at the default settings) | Buffer bands: the highest requested bands are loosely converged; strict bands keep the full tolerance. The 8-atom silicon cell now converges. |
+| Robustness | Reference convergence and historical buffer-band recovery | Reference convergence uses its Davidson Ritz-change schedule, Broyden mixing and independent verification. Historical buffer-band recovery is oracle evidence; it is not a production tuning recipe. |
 | Usability | Input preflight check: element versus pseudopotential, SCF settings, plain-language summary of what will be computed | `validate` checks element versus pseudopotential and SCF settings and prints a plain-language summary; no SCF is run. |
+| Speed | Optional Intel MKL backend for FFT and matrix products, chosen at compile time | Optional Intel MKL FFT/matrix backend is implemented behind a compile-time feature; the default build is pure Rust. See dated same-model dev08 tables for end-to-end measurements and their limits. |
+| Speed | Opt-in reference RMM, reference ladder and plain/TF preconditioning | Reference RMM and reference ladder remain isolated opt-in algorithms; reference preconditioning is plain or TF. Adopted reference rollback branches and rejected experiments were retired under D3; retained choices are listed in the current switch manifest. |
+| Runtime | Reference runtime, checkpoint v2, Python/ASE and host-embedded MCP | Reference stepper/runtime, observed and supervised CLI, checkpoint v2, Python stepping and host-embedded MCP are implemented with documented limits. Legacy budget-recovery evidence remains historical; reference budget-extension recovery is unsupported. Numerical core has no LLM/network dependency. |
 | Input | Offline pseudopotential registry with license and SHA-256 checks | `pseudo` subcommands; pseudopotential files are never shipped in the repository. |
-| Physics | Fermi-Dirac occupations and chemical potential | Unpolarized and collinear finite-temperature SCF; analytic synthetic oracles and an Al smoke run, no QE metal comparison. Check empty-band convergence; finite-T restart unavailable. [Evidence](tests/reference/occupations/summary.json). |
+| Physics | Fermi-Dirac occupations and chemical potential | Fermi–Dirac occupations and chemical potential for supported unpolarized/collinear models, with limited validation and empty-band checks. Reference fixed-cutoff electronic steppers support exact checkpoint v2; warm imports and legacy v1 FD restart remain unavailable. Free-moment PBE uses the G4D oracle fallback. Analytic synthetic oracles and an Al smoke run; no QE metal comparison. [Evidence](tests/reference/occupations/summary.json). |
 | Physics | Collinear spin with fixed up/down electron counts | LDA-PW and PBE; synthetic analytic and zero-moment oracles. No validated magnetic material ground state; noncollinear and spin-orbit remain unavailable. [Evidence](crates/dft-engine/tests/collinear-evidence.json). |
 | Physics | Nonlinear core correction and PseudoDojo NC file support | Independent header checks and synthetic NLCC oracles; Si/MgO bulk smoke, comparison with QE pending. Datasets remain unqualified; ultrasoft and PAW unavailable. [Evidence](tests/reference/datasets/p13c-status.json). |
 | Physics | Atomic forces | NC LDA/PBE, NLCC, fixed spin and Fermi-Dirac, from a verified standard state (default) or a strict certified one; energy finite differences and independent scalar checks. DFT+U forces unsupported; comparison with QE pending. [Evidence](tests/reference/forces/manifest.json). |
 | Physics | Space-group symmetry (k-point reduction, density symmetrization) | Opt-in k-point reduction and density symmetrization; full/reduced, spin and finite-temperature checks. Magnetic spin swaps unsupported; comparison with QE pending. [Evidence](tests/reference/symmetry/evidence.json). |
-| SCF | Standard convergence profile with fixed-point verification | Default for every command since 2026-11-16 (ADR 0043); strict is a reference tool only. The stored P17A evidence measured the unverified profile: less solver work in successful cases, skew/slab/mesh failures recorded. [Evidence](tests/reference/perf/p17a/final-report.json). |
+| Speed | MPI distributed reference path | MPI is implemented behind a build feature; its distributed reference path is validated under documented gates. GPU remains a design topic with no implementation. |
+| SCF | Standard convergence profile with fixed-point verification | Reference driver is the single production standard path with independent verification (ADR 0047). StrictOracle remains for explicit validation and the G4D exception. P17A numbers remain historical unverified legacy-profile evidence. |
 | Physics | Stress and pressure | NC frozen-basis strain derivatives from a verified standard state (default; stress inputs default to 5e-11 Ha, provisional) or a strict one; ASE strain check and separate Pulay estimate; real Si/MgO material stresses inconclusive; comparison with QE pending. [Evidence](tests/reference/stress/validation.json). |
-| Physics | Fixed-cell ionic relaxation | BFGS/FIRE, Cartesian constraints, warm starts and byte-identical restart. CLI spin-polarized and finite-temperature relaxation unsupported; Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json). |
-| Physics | Cell relaxation | Works for the stated synthetic cases and isotropic PseudoDojo Si/MgO shifted-mesh runs, with limits: rebuild plus fresh-basis polish verifies start agreement and final pressure. Full-tensor symmetry preservation on shifted meshes and cutoff convergence are not established; comparison with QE pending. [Evidence](tests/reference/relaxation/cell/validation.json). |
+| Physics | Fixed-cell ionic relaxation | BFGS/FIRE and Cartesian constraints with reference SCF and live warm seeds. Optimizer resume restores optimizer state but currently lacks the reference orbital seed and records a fresh atomic-start fallback; historical byte-identical resume evidence belongs to the legacy path. CLI spin/FD relaxation remains unavailable. Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json). |
+| Physics | Cell relaxation | Variable-cell relaxation uses the reference driver with frozen Miller/FFT support and a final nominal-cutoff rebuild. Historical synthetic/isotropic Si/MgO rebuild-plus-polish evidence retains its original driver; gen19 reports reference/legacy lattice difference 6.3e-8 Bohr and pressure difference 2.3e-9 Ha/Bohr^3. Full-tensor shifted-mesh symmetry and cutoff convergence remain unestablished. Comparison with QE pending. [Historical evidence](tests/reference/relaxation/cell/validation.json); [gen19 relay and limits](docs/decisions/0047-reference-driver-single-path.md#evidence-gen14gen28). |
 
 ### Being built now
 
 | Area | Feature | Notes |
 |---|---|---|
-| Speed | Optional Intel MKL backend for FFT and matrix products, chosen at compile time | Merged behind a compile-time feature; the default build stays pure Rust. Kernel-level measurements on the test server look promising; end-to-end numbers follow. |
-| Speed | RMM-DIIS eigensolver for large band counts and Kerker-preconditioned mixing for hard cases (merged as switchable modules); cheaper FFT call structure (in progress) | Defaults are unchanged; a default changes only with evidence on several systems. |
 | Usability | Structure and input importers, Materials Project lookup, pseudopotential download with license and hash checks, a guided or natural-language style CLI | In design now. |
 | Infrastructure | General benchmark and robustness suite (not silicon-only) | Used to judge speed and defaults on many cell shapes, band counts and pseudopotentials. |
-| Runtime | Observable, controllable calculations for people and AI agents: step-by-step SCF, live events, safe-point policy changes, checkpoint/restart, self-healing SCF demo, MCP server, Python/ASE | Design in progress (docs/research/agent-native-directive-review.md); no runtime code yet. The numerical core stays free of LLM and network dependencies. |
 
 ### Planned, not available yet
 
@@ -129,7 +130,7 @@ Status as of 2026-11-16, written for people who run calculations. Source: `docs/
 | Physics | RPA and cRPA correlation (research stage) | Design only; no implementation yet. |
 | Method | Electronic-state landscape exploration: several self-consistent solutions, state comparison, branch tracking | Design in docs/roadmap/esle.md; starts after the baseline is complete. |
 | Method | Coupling to outside environments (embedding, solvent, QM/MM, applied electric fields) through typed interfaces | Design in docs/architecture/scientific-coupling.md. |
-| Speed | GPU backends and MPI | Design study in progress; the CPU path stays the reference. |
+| Speed | GPU backends | GPU remains a design topic with no implementation. |
 | Physics | Molecular dynamics and phonons | Planned; not available yet. |
 
 <!-- status:end -->
@@ -138,7 +139,7 @@ Status as of 2026-11-16, written for people who run calculations. Source: `docs/
 
 ## Validation results
 
-Generated by `scripts/make_readme_figures.py` from stored evidence in `tests/reference` and the linked collinear report (do not edit by hand). Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). The QE comparison below covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.
+Generated by `scripts/make_readme_figures.py` from stored evidence in `tests/reference` and the linked collinear report (do not edit by hand). Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). The stored QE table and cutoff scan were produced by the historical legacy driver, not the current reference driver. The QE comparison below covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.
 
 ![Total energy versus cutoff](docs/img/cutoff-scan.svg)
 
@@ -165,7 +166,7 @@ Rust and independent Python header readers agree for 5 files (O, Ni, Al, Mg, Si)
 
 Synthetic Gaussian core transforms match the analytic formula to 8.33e-16 relative error; localized XC potentials match finite differences to 7.25e-12 Ha. The later density-floor derivative check has maximum error 2.23e-10 Ha Bohr^3. [`tests/reference/datasets/p13c-status.json`](tests/reference/datasets/p13c-status.json); [`tests/reference/materials/verification.json`](tests/reference/materials/verification.json).
 
-Limits: translating the synthetic PBE cell changes the energy by 3.08e-06 Ha on the coarse grid (fails the 1e-07 Ha cap), falling to 5.17e-09 Ha with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence remains unavailable; validated NC force/stress derivatives are reported below.
+Limits: translating the synthetic PBE cell changes the energy by 3.08e-06 Ha on the coarse grid (fails the 1e-07 Ha cap), falling to 5.17e-09 Ha with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence is unavailable in the historical legacy v1 scope; this is not a blanket restriction on reference v2. Validated NC force/stress derivatives are reported below.
 
 ### Real-material bulk runs: Si and MgO
 
@@ -190,7 +191,7 @@ A synthetic skew cell exposes a false success after 6 iterations: occupied-state
 
 ### Standard convergence profile: work versus strict
 
-Standard threshold: 5e-09 Ha. Since 2026-11-16 the standard path with a fixed-point verification after convergence is the default (ADR 0043); the rows below are the P17A measurement of the unverified standard profile. **Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. [`tests/reference/perf/p17a/final-report.json`](tests/reference/perf/p17a/final-report.json).
+Standard threshold: 5e-09 Ha. Since 2026-11-16 the standard path with a fixed-point verification after convergence is the default (ADR 0043); the rows below are the P17A historical legacy-driver measurement of the unverified standard profile. **Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. [`tests/reference/perf/p17a/final-report.json`](tests/reference/perf/p17a/final-report.json).
 
 | Case | Status strict / standard | SCF iterations strict / standard | Davidson steps strict / standard | E standard - E strict (Ha) |
 |---|---|---:|---:|---:|
@@ -212,7 +213,7 @@ Reference: independent analytic occupation/entropy formulas, finite differences 
 
 Synthetic SCF: E = -0.461893304214 Ha, F = -0.475756247825 Ha, S/kB = 1.386294361120, in 11 iterations. The entropy derivative error falls from 5.67e-06 to 3.46e-07 (dimensionless) as the temperature-energy step decreases from 0.004 to 0.001 Ha. Empty-band refinement changes F by at most 1.55e-14 Ha. At kB T = 0.001 Ha, energy differs from fixed occupations by 4.44e-16 Ha.
 
-External-file Al smoke: kB T = 0.01 Ha, cutoff 20 Ha, 20 bands, mesh 2x2x2, E = -2.308957374807 Ha in 8 iterations. This is not validated metallic material accuracy. Empty-band convergence must be checked for each calculation; finite-temperature checkpoint persistence is unavailable.
+External-file Al smoke: kB T = 0.01 Ha, cutoff 20 Ha, 20 bands, mesh 2x2x2, E = -2.308957374807 Ha in 8 iterations. This is not validated metallic material accuracy. Empty-band convergence must be checked for each calculation; finite-temperature checkpoint persistence is unavailable in the historical legacy v1 scope; reference v2 electronic continuation evidence is reported separately below.
 
 ### Crystal symmetry: fewer k points for the same calculation
 
@@ -258,7 +259,7 @@ Mac cost observations (one sample per case, no performance acceptance): [`tests/
 
 BFGS/FIRE are available with Cartesian constraints. Against an independent scalar energy scan, compressed/stretched synthetic starts reach the periodic minimum within 6.04e-10 Bohr. This is a periodic model, not an isolated molecule or a global-minimum proof. Warm versus fresh SCF energy differs by at most 5.55e-16 Ha. ASE BFGS versus CLI BFGS differs by 3.62e-07 Bohr and 7.77e-16 Ha; ASE is an independent optimizer using BAANDI forces, not another DFT code. [`tests/reference/relaxation/manifest.json`](tests/reference/relaxation/manifest.json).
 
-Gamma-only Si returns to the ideal diamond bond: final atom fractional coordinates (0.249999999984, 0.249999999987, 0.249999999983), after 5 steps, maximum free force 5.57e-11 Ha/Bohr. Restart after an accepted boundary yields byte-identical complete output files in the 4-step fixture. [`tests/reference/relaxation/logs/cli-all.log`](tests/reference/relaxation/logs/cli-all.log); [`tests/reference/relaxation/manifest.json`](tests/reference/relaxation/manifest.json).
+Gamma-only Si returns to the ideal diamond bond: final atom fractional coordinates (0.249999999984, 0.249999999987, 0.249999999983), after 5 steps, maximum free force 5.57e-11 Ha/Bohr. Historical legacy-driver restart after an accepted boundary yields byte-identical complete output files in the 4-step fixture. [`tests/reference/relaxation/logs/cli-all.log`](tests/reference/relaxation/logs/cli-all.log); [`tests/reference/relaxation/manifest.json`](tests/reference/relaxation/manifest.json).
 
 MgO caveat: the Gamma-only model relaxes away from ideal rocksalt. A fresh-SCF scalar energy scan finds negative curvature -0.08178 Ha/Bohr^2 at the ideal position; this is not bulk structural qualification. [`tests/reference/relaxation/mgo-curvature.json`](tests/reference/relaxation/mgo-curvature.json). CLI spin-polarized or finite-temperature relaxation is unsupported; unpolarized fixed occupations only (stored runs strict; default runs verify every step on the standard path, ADR 0043). [Relaxation scope](docs/validation/relaxation.md); comparison with QE pending.
 
@@ -300,6 +301,8 @@ Mac cost observations, one on/off pair per case. Analytic time includes force-ba
 | k444s | 2.460 | 1.982 | 44.61% | 8.533 | 3 |
 
 ### Cell relaxation
+
+Driver provenance: the stored synthetic and isotropic Si/MgO rebuild-plus-polish results below use the historical legacy driver; they are not new reference-driver measurements.
 
 Synthetic checks compare the relaxed lattice constant with an independent fine scan of energy versus lattice constant and a parabola fit (enthalpy at applied pressure). Maximum relative difference: 9.24e-07. Tetragonal return to cubic: relative axis difference 1.46e-07. The combined force/stress gradient is checked against an SCF enthalpy directional finite difference (conjugacy): relative error 5.85e-10. Restart: same-build output files byte identical; cell optimizer continuation, not electronic exact continuation. [`tests/reference/relaxation/cell/validation.json`](tests/reference/relaxation/cell/validation.json).
 
@@ -354,13 +357,13 @@ Different start cells select different frozen plane-wave sets and FFT grids. Und
 
 Largest final rebuilt pressure magnitude after polish: 9.212e-11 Ha/Bohr^3 (unchanged tolerance 1e-07 Ha/Bohr^3). This verifies isotropic relaxation on the stated shifted meshes, not full-tensor relaxation with full symmetry preservation on shifted meshes. Cutoff convergence is not claimed. There is no comparison with experiment or other codes; comparison with QE pending. See [usage](docs/user/cell-relaxation.md) and [validation scope](docs/validation/cell-relaxation.md).
 
-### Checkpoint/restart equivalence (synthetic fixtures)
+### Legacy v1 checkpoint/restart equivalence (synthetic fixtures)
 
-Reference: the uninterrupted BAANDI engine in the same build. 162 memory restart comparisons and 18 binary-file restart comparisons preserve energy, density, orbitals, scientific iteration history and certificates bit for bit (wall timings excluded). The fixtures cover cubic Gamma, four k points, and a skew two-species cell; Linear/Pulay/KerkerPulay; requested threads [1, 4]. Different-mixer warm starts have maximum energy difference 8.22e-15 Ha (acceptance: 1e-10 Ha). Paused runtime/audit restoration and cross-process CLI restart also pass. These are self-equivalence checks, not QE comparisons or a cross-build restart promise. See [format, commands and limits](docs/checkpoint-format.md) and [stored evidence](tests/reference/checkpoint/results.json).
+Driver: historical legacy/oracle path, checkpoint v1. Reference: the uninterrupted BAANDI engine in the same build. 162 memory restart comparisons and 18 binary-file restart comparisons preserve energy, density, orbitals, scientific iteration history and certificates bit for bit (wall timings excluded). The fixtures cover cubic Gamma, four k points, and a skew two-species cell; Linear/Pulay/KerkerPulay; requested threads [1, 4]. Different-mixer warm starts have maximum energy difference 8.22e-15 Ha (acceptance: 1e-10 Ha). Paused runtime/audit restoration and cross-process CLI restart also pass. Those are legacy v1 results, not evidence of v2 runtime-audit restoration. These are self-equivalence checks, not QE comparisons or a cross-build restart promise. See [format, commands and limits](docs/checkpoint-format.md) and [stored evidence](tests/reference/checkpoint/results.json).
 
-### Self-healing SCF: offline budget recovery
+### Legacy self-healing SCF: offline budget recovery
 
-Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run with a 1000-iteration budget in the same build (not QE). All four runs were repeated twice; normalized numerical results and every final density/orbital array bit match on replay. Rules and recorded-agent recovery also match the reference bit for bit. No network or LLM is needed.
+Driver: historical legacy/oracle runtime (P11). Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run with a 1000-iteration budget in the same build (not QE). All four runs were repeated twice; normalized numerical results and every final density/orbital array bit match on replay. Rules and recorded-agent recovery also match the reference bit for bit. No network or LLM is needed.
 
 | Arm | Converged | Iterations | Certified energy (Ha) | Error vs reference (Ha) | Applied / rejected |
 |---|---|---|---|---|---|
@@ -369,7 +372,34 @@ Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run with
 | rules | True | 30 | -4.684561184277879 | 0.0e+00 | 1 / 0 |
 | agent | True | 30 | -4.684561184277879 | 0.0e+00 | 1 / 1 |
 
-Acceptance is 1e-10 Ha; the invalid beta=1.1 request is rejected without changing state. This proves initial budget repair and deterministic control, not numerical instability healing, speedup, general recovery defaults or a global ground state. [Reproduce and inspect provenance](docs/demos/self-healing-scf.md#executed-p11e-demo) with `scripts/demo_self_healing.sh`.
+Acceptance is 1e-10 Ha; the invalid beta=1.1 request is rejected without changing state. This proves initial budget repair and deterministic control, not numerical instability healing, speedup, general recovery defaults or a global ground state. It does not establish reference budget recovery; the reference runtime rejects budget extension. [Reproduce and inspect provenance](docs/demos/self-healing-scf.md#executed-p11e-demo) with `scripts/demo_self_healing.sh`.
+
+### Reference checkpoint v2: separate continuation evidence
+
+Stored R8B report status: **BLOCKED** (2026-11-25T07:24:14.618837+00:00); source state: uncommitted implementation; v2 explain wrapper ownership extension pending. Reference: Independent uninterrupted BAANDI trajectory with the same fixture, build, switches and rank count. No QE claim; no cross-rank bit-identity claim. [`tests/reference/checkpoint/reference-v2-results.json`](tests/reference/checkpoint/reference-v2-results.json).
+
+| Continuation check | Bit-identical comparisons / stored comparisons | Converged matrix cases | Additional cases |
+|---|---:|---:|---:|
+| Memory | 32 / 32 | 27 | 5 |
+| Binary file | 32 / 32 | 27 | 5 |
+
+Synthetic Gamma, shifted k mesh and skew two-species fixtures; ranks [1, 3, 8], threads 1; deterministic collective simulator; no physical MPI run. Electronic supplement: 4 passing FermiDirac, FixedSpin cases at 3 simulated ranks, budget 2 maps. Two-map exhaustion only. The longer inherited one-electron FD fixture rejects negative mixed XC density before any checkpoint; no tolerance/default changes. Cross-process restart identity: True; explain check passed: False. The stored workspace gate has 1 failure: checkpoint_v2 cross-process explain invokes the legacy decoder in inspect.rs after successful v2 evidence decoding.
+
+Reference `restart` writes a ResultExport container and routing companion, not normal result files or another exact continuation. v2 does not restore runtime audit state; checkpoint after policy mutation is unsupported. Warm v2 imports, coarse-ladder/external-seeded continuation and terminal exact capture remain unavailable. These checks do not establish physical MPI transport, cross-rank bit identity or cross-build compatibility. See [format and current limits](docs/checkpoint-format.md).
+
+### Reference runtime: observation and control evidence
+
+Reference: same-build plain reference driver; synthetic fixtures, no QE reference. Rank scope: engine tests use simulated ranks 1/3; CLI subprocess tests use one rank. 16 / 16 observation records preserve identity, including pause/resume and verification off/on; counts include per-rank records. The report also records 8 policy replay records and 4 cancellation records. [`tests/reference/runtime/generated/reference-results.json`](tests/reference/runtime/generated/reference-results.json).
+
+Stored baseline comparisons (reference driver, not QE):
+
+| Case | Iterations | Energy difference (Ha) | Density |
+|---|---:|---:|---|
+| gamma | 7 | 0.00e+00 | identical |
+| k222s | 7 | 0.00e+00 | identical |
+| k222 | 7 | 0.00e+00 | identical |
+
+Baseline: `docs/performance/baseline-reference.json`, 3 repeats, 1 thread. The complex-policy records retain matching numerical rejections as well as converged identity results. CLI agent endpoint status: unavailable (Operation not permitted (os error 1)); socket-pair tests are separate. Reference budget-extension recovery is unsupported; the stored self-healing records reject the legacy budget policy and make no recovery claim. No native MPI timing or numerical-instability healing is established. This runtime evidence does not establish v2 runtime-audit restoration. See [runtime contract](docs/design/reference-scf.md#runtime-control).
 
 Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.
 

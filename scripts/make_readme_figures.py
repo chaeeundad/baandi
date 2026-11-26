@@ -346,7 +346,7 @@ def structural_results():
               f"Gamma-only Si returns to the ideal diamond bond: final atom fractional coordinates "
               f"({', '.join(f'{x:.12f}' for x in position)}), after {si['step']} steps, "
               f"maximum free force {si['max_force_ha_bohr']:.2e} Ha/Bohr. "
-              f"Restart after an accepted boundary yields byte-identical complete output files in the "
+              f"Historical legacy-driver restart after an accepted boundary yields byte-identical complete output files in the "
               f"{restart[1]}-step fixture. " + evidence_link(lp) + "; " + evidence_link(rp) + ".", ""]
     curvature_path = "tests/reference/relaxation/mgo-curvature.json"
     curv = load(os.path.join(ROOT, curvature_path))["curvatures"]
@@ -405,6 +405,8 @@ def cell_results():
     rebuilt_path = base + evidence["rebuild_protocol"]["record"]
     frozen, rebuilt = load(os.path.join(ROOT, frozen_path)), load(os.path.join(ROOT, rebuilt_path))
     lines = ["", "### Cell relaxation", "",
+             "Driver provenance: the stored synthetic and isotropic Si/MgO rebuild-plus-polish results below "
+             "use the historical legacy driver; they are not new reference-driver measurements.", "",
              "Synthetic checks compare the relaxed lattice constant with an independent fine scan of energy "
              "versus lattice constant and a parabola fit (enthalpy at applied pressure). Maximum relative difference: "
              f"{max(r['relative_error'] for r in evidence['synthetic_scans']):.2e}. "
@@ -517,7 +519,8 @@ def extended_results():
     lines += [f"Limits: translating the synthetic PBE cell changes the energy by {pbe[0]['delta_ha']:.2e} Ha on the coarse grid "
               f"(fails the {nlcc['caps_frozen_before_measurement']['translation_energy_ha']:.0e} Ha cap), falling to {pbe[-1]['delta_ha']:.2e} Ha "
               "with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified "
-              "for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence remains unavailable; validated NC force/stress derivatives are reported below.", "",
+              "for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence is unavailable in the historical legacy v1 scope; "
+              "this is not a blanket restriction on reference v2. Validated NC force/stress derivatives are reported below.", "",
               "### Real-material bulk runs: Si and MgO", "",
               "PBE calculations with external PseudoDojo files, positive uniform starting density. "
               "These are successful calculation checks, not an independent accuracy reference; comparison with QE pending for Si and MgO. "
@@ -552,7 +555,7 @@ def extended_results():
     freeze = load(os.path.join(REF, "perf/p17a/default-freeze.json"))
     lines += [f"Standard threshold: {freeze['standard_threshold_ha']:.0e} Ha. Since 2026-11-16 the standard path with a "
               "fixed-point verification after convergence is the default (ADR 0043); the rows below are the P17A "
-              "measurement of the unverified standard profile. **Standard results are not certified.** "
+              "historical legacy-driver measurement of the unverified standard profile. **Standard results are not certified.** "
               "The table compares BAANDI with its own strict run, not QE. "
               "Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. "
               + evidence_link("tests/reference/perf/p17a/final-report.json") + ".", "",
@@ -588,7 +591,67 @@ def extended_results():
               f"{al['bands']} bands, mesh {'x'.join(map(str, al['mesh']))}, "
               f"E = {al['energy_ha']:.12f} Ha in {al['iterations']} iterations. "
               "This is not validated metallic material accuracy. Empty-band convergence must be checked for each calculation; "
-              "finite-temperature checkpoint persistence is unavailable.", ""]
+              "finite-temperature checkpoint persistence is unavailable in the historical legacy v1 scope; "
+              "reference v2 electronic continuation evidence is reported separately below.", ""]
+    return lines
+
+
+def reference_runtime_results():
+    """Keep reference continuation/control evidence separate from legacy results."""
+    cp_path = "tests/reference/checkpoint/reference-v2-results.json"
+    cp = load(os.path.join(ROOT, cp_path))
+    protocol = cp["protocol"]
+    electronic = cp["electronic_supplement"]
+    lines = ["### Reference checkpoint v2: separate continuation evidence", "",
+             f"Stored R8B report status: **{cp['status']}** ({cp['recorded_utc']}); "
+             f"source state: {cp['source_state']}. Reference: {cp['reference']} "
+             + evidence_link(cp_path) + ".", "",
+             "| Continuation check | Bit-identical comparisons / stored comparisons | Converged matrix cases | Additional cases |",
+             "|---|---:|---:|---:|"]
+    for label, kind in (("Memory", "memory"), ("Binary file", "file")):
+        rows = cp[kind + "_results"]
+        lines.append(f"| {label} | {sum(r['identity'] for r in rows)} / {len(rows)} | "
+                     f"{protocol['converged_' + kind + '_cases']} | {protocol['additional_' + kind + '_cases']} |")
+    lines += ["", f"Synthetic Gamma, shifted k mesh and skew two-species fixtures; "
+              f"ranks {cp['environment']['ranks']}, threads {cp['environment']['threads']}; "
+              f"{cp['environment']['rank_backend']}. Electronic supplement: "
+              f"{electronic['cases_passed']} passing {', '.join(electronic['policies'])} cases at "
+              f"{electronic['ranks']} simulated ranks, budget {electronic['budget']} maps. "
+              + electronic['scope'] + " "
+              f"Cross-process restart identity: {cp['cross_process']['restart_identity']}; "
+              f"explain check passed: {cp['cross_process']['explain_passed']}. "
+              f"The stored workspace gate has {cp['gates']['workspace_tests']['failed']} failure: "
+              + cp['gates']['workspace_tests']['failure'] + ".", "",
+              "Reference `restart` writes a ResultExport container and routing companion, not normal result files "
+              "or another exact continuation. v2 does not restore runtime audit state; checkpoint after policy mutation "
+              "is unsupported. Warm v2 imports, coarse-ladder/external-seeded continuation and terminal exact capture "
+              "remain unavailable. These checks do not establish physical MPI transport, cross-rank bit identity "
+              "or cross-build compatibility. See [format and current limits](docs/checkpoint-format.md).", ""]
+    runtime_path = "tests/reference/runtime/generated/reference-results.json"
+    runtime = load(os.path.join(ROOT, runtime_path))
+    observations = runtime['observation_runs']
+    baseline = runtime['benchmark_identity']
+    lines += ["### Reference runtime: observation and control evidence", "",
+              f"Reference: {runtime['reference']}. Rank scope: {runtime['rank_scope']}. "
+              f"{sum(r['identity'] for r in observations)} / {len(observations)} observation records "
+              "preserve identity, including pause/resume and verification off/on; counts include per-rank records. "
+              f"The report also records {len(runtime['policy_replays'])} policy replay records and "
+              f"{len(runtime['cancellation'])} cancellation records. "
+              + evidence_link(runtime_path) + ".", "",
+              "Stored baseline comparisons (reference driver, not QE):", "",
+              "| Case | Iterations | Energy difference (Ha) | Density |",
+              "|---|---:|---:|---|"]
+    for row in baseline['cases']:
+        lines.append(f"| {row['case']} | {row['iterations']} | {row['energy_delta_ha']:.2e} | {row['density']} |")
+    lines += ["", f"Baseline: `{baseline['baseline']}`, {baseline['repeats']} repeats, "
+              f"{baseline['threads']} thread. The complex-policy records retain matching numerical rejections "
+              "as well as converged identity results. "
+              f"CLI agent endpoint status: {runtime['agent_endpoint']['status']} "
+              f"({runtime['agent_endpoint']['reason']}); socket-pair tests are separate. "
+              "Reference budget-extension recovery is unsupported; the stored self-healing records reject the "
+              "legacy budget policy and make no recovery claim. No native MPI timing or numerical-instability "
+              "healing is established. This runtime evidence does not establish v2 runtime-audit restoration. "
+              "See [runtime contract](docs/design/reference-scf.md#runtime-control).", ""]
     return lines
 
 
@@ -599,6 +662,7 @@ def block(rows, kruns, gamma, perf=None):
     lines = [BEGIN, "", "## Validation results", "",
              "Generated by `scripts/make_readme_figures.py` from stored evidence in `tests/reference` and the linked collinear report (do not edit by hand). "
              "Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). "
+             "The stored QE table and cutoff scan were produced by the historical legacy driver, not the current reference driver. "
              "The QE comparison below covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.", "",
              "![Total energy versus cutoff](docs/img/cutoff-scan.svg)", "",
              "| Check (Si, 30 Ry, same pseudopotential for both codes) | k points | QE iterations | energy difference (Ha/atom) | largest eigenvalue difference (Ha) | tolerance (energy / eigenvalue) | status |",
@@ -646,8 +710,8 @@ def block(rows, kruns, gamma, perf=None):
     lines += extended_results()
     lines += structural_results()
     checkpoint = load(os.path.join(REF, "checkpoint", "results.json"))
-    lines += ["### Checkpoint/restart equivalence (synthetic fixtures)", "",
-              f"Reference: the uninterrupted BAANDI engine in the same build. "
+    lines += ["### Legacy v1 checkpoint/restart equivalence (synthetic fixtures)", "",
+              f"Driver: historical legacy/oracle path, checkpoint v1. Reference: the uninterrupted BAANDI engine in the same build. "
               f"{checkpoint['memory_exact_comparisons']} memory restart comparisons and "
               f"{checkpoint['file_exact_comparisons']} binary-file restart comparisons preserve energy, density, orbitals, "
               "scientific iteration history and certificates bit for bit (wall timings excluded). "
@@ -657,6 +721,7 @@ def block(rows, kruns, gamma, perf=None):
               f"{checkpoint['warm_max_energy_difference_ha']:.2e} Ha (acceptance: "
               f"{checkpoint['warm_tolerance_ha']:.0e} Ha). "
               "Paused runtime/audit restoration and cross-process CLI restart also pass. "
+              "Those are legacy v1 results, not evidence of v2 runtime-audit restoration. "
               "These are self-equivalence checks, not QE comparisons or a cross-build restart promise. "
               "See [format, commands and limits](docs/checkpoint-format.md) and "
               "[stored evidence](tests/reference/checkpoint/results.json).", ""]
@@ -667,8 +732,8 @@ def block(rows, kruns, gamma, perf=None):
         assert r["converged"] == (r["arm"] != "baseline")
         if r["converged"]:
             assert r["energy_error_hartree"] <= healing["energy_tolerance_hartree"]
-    lines += ["### Self-healing SCF: offline budget recovery", "",
-              "Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run "
+    lines += ["### Legacy self-healing SCF: offline budget recovery", "",
+              "Driver: historical legacy/oracle runtime (P11). Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run "
               "with a 1000-iteration budget in the same build (not QE). "
               "All four runs were repeated twice; normalized numerical results and every final "
               "density/orbital array bit match on replay. Rules and recorded-agent recovery also "
@@ -682,8 +747,10 @@ def block(rows, kruns, gamma, perf=None):
     lines += ["", "Acceptance is 1e-10 Ha; the invalid beta=1.1 request is rejected without changing "
               "state. This proves initial budget repair and deterministic control, not numerical "
               "instability healing, speedup, general recovery defaults or a global ground state. "
+              "It does not establish reference budget recovery; the reference runtime rejects budget extension. "
               "[Reproduce and inspect provenance](docs/demos/self-healing-scf.md#executed-p11e-demo) "
               "with `scripts/demo_self_healing.sh`.", ""]
+    lines += reference_runtime_results()
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
               "fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.", "", END]

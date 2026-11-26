@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-16",
+ "updated": "2026-11-26",
  "legend": {
   "done": "Works today",
   "progress": "Being built now",
@@ -10,7 +10,7 @@
    "status": "done",
    "area": "Physics",
    "feature": "Kohn-Sham DFT with plane waves",
-   "note": "Periodic cells, norm-conserving pseudopotentials (UPF v2 subset), spin-unpolarized."
+   "note": "Periodic NC plane-wave Kohn–Sham DFT; unpolarized and supported collinear sectors, with documented occupation/XC limits."
   },
   {
    "status": "done",
@@ -33,8 +33,8 @@
   {
    "status": "done",
    "area": "SCF",
-   "feature": "Pulay and linear density mixing, block Davidson eigensolver",
-   "note": "Default: one standard SCF path (threshold 5e-9 Ha) with a fixed-point verification after convergence (ADR 0043). The strict path with its certificate and energy audit is a reference tool (BAANDI_REFERENCE_STRICT=on). Verified standard results are not strict-certified."
+   "feature": "Broyden/plain density mixing and reference Davidson",
+   "note": "Broyden/plain density mixing and reference Davidson; beta 0.7/history 8, threshold 5e-9 Ha and verification on by default. StrictOracle is an explicit validation route and the temporary G4D fallback. Verified standard is not strict-certified."
   },
   {
    "status": "done",
@@ -51,8 +51,8 @@
   {
    "status": "done",
    "area": "Speed",
-   "feature": "Threads over k points and over bands, bit-identical results for any thread count",
-   "note": "`[scf] threads = N`; default is 1."
+   "feature": "Thread budget and determinism",
+   "note": "Thread budget via [scf] threads = N (default 1); same-build/backend determinism is checked separately from MPI rank-count accuracy. Reference k/spin/FD work is distributed under MPI."
   },
   {
    "status": "done",
@@ -75,8 +75,8 @@
   {
    "status": "done",
    "area": "Robustness",
-   "feature": "Convergence fix for larger cells (8-atom silicon cell stalled at the default settings)",
-   "note": "Buffer bands: the highest requested bands are loosely converged; strict bands keep the full tolerance. The 8-atom silicon cell now converges."
+   "feature": "Reference convergence and historical buffer-band recovery",
+   "note": "Reference convergence uses its Davidson Ritz-change schedule, Broyden mixing and independent verification. Historical buffer-band recovery is oracle evidence; it is not a production tuning recipe."
   },
   {
    "status": "done",
@@ -85,16 +85,16 @@
    "note": "`validate` checks element versus pseudopotential and SCF settings and prints a plain-language summary; no SCF is run."
   },
   {
-   "status": "progress",
+   "status": "done",
    "area": "Speed",
    "feature": "Optional Intel MKL backend for FFT and matrix products, chosen at compile time",
-   "note": "Merged behind a compile-time feature; the default build stays pure Rust. Kernel-level measurements on the test server look promising; end-to-end numbers follow."
+   "note": "Optional Intel MKL FFT/matrix backend is implemented behind a compile-time feature; the default build is pure Rust. See dated same-model dev08 tables for end-to-end measurements and their limits."
   },
   {
-   "status": "progress",
+   "status": "done",
    "area": "Speed",
-   "feature": "RMM-DIIS eigensolver for large band counts and Kerker-preconditioned mixing for hard cases (merged as switchable modules); cheaper FFT call structure (in progress)",
-   "note": "Defaults are unchanged; a default changes only with evidence on several systems."
+   "feature": "Opt-in reference RMM, reference ladder and plain/TF preconditioning",
+   "note": "Reference RMM and reference ladder remain isolated opt-in algorithms; reference preconditioning is plain or TF. Adopted reference rollback branches and rejected experiments were retired under D3; retained choices are listed in the current switch manifest."
   },
   {
    "status": "progress",
@@ -109,10 +109,10 @@
    "note": "Used to judge speed and defaults on many cell shapes, band counts and pseudopotentials."
   },
   {
-   "status": "progress",
+   "status": "done",
    "area": "Runtime",
-   "feature": "Observable, controllable calculations for people and AI agents: step-by-step SCF, live events, safe-point policy changes, checkpoint/restart, self-healing SCF demo, MCP server, Python/ASE",
-   "note": "Design in progress (docs/research/agent-native-directive-review.md); no runtime code yet. The numerical core stays free of LLM and network dependencies."
+   "feature": "Reference runtime, checkpoint v2, Python/ASE and host-embedded MCP",
+   "note": "Reference stepper/runtime, observed and supervised CLI, checkpoint v2, Python stepping and host-embedded MCP are implemented with documented limits. Legacy budget-recovery evidence remains historical; reference budget-extension recovery is unsupported. Numerical core has no LLM/network dependency."
   },
   {
    "status": "done",
@@ -124,7 +124,7 @@
    "status": "done",
    "area": "Physics",
    "feature": "Fermi-Dirac occupations and chemical potential",
-   "note": "Unpolarized and collinear finite-temperature SCF; analytic synthetic oracles and an Al smoke run, no QE metal comparison. Check empty-band convergence; finite-T restart unavailable. [Evidence](tests/reference/occupations/summary.json)."
+   "note": "Fermi–Dirac occupations and chemical potential for supported unpolarized/collinear models, with limited validation and empty-band checks. Reference fixed-cutoff electronic steppers support exact checkpoint v2; warm imports and legacy v1 FD restart remain unavailable. Free-moment PBE uses the G4D oracle fallback. Analytic synthetic oracles and an Al smoke run; no QE metal comparison. [Evidence](tests/reference/occupations/summary.json)."
   },
   {
    "status": "done",
@@ -175,16 +175,22 @@
    "note": "Design in docs/architecture/scientific-coupling.md."
   },
   {
+   "status": "done",
+   "area": "Speed",
+   "feature": "MPI distributed reference path",
+   "note": "MPI is implemented behind a build feature; its distributed reference path is validated under documented gates. GPU remains a design topic with no implementation."
+  },
+  {
    "status": "planned",
    "area": "Speed",
-   "feature": "GPU backends and MPI",
-   "note": "Design study in progress; the CPU path stays the reference."
+   "feature": "GPU backends",
+   "note": "GPU remains a design topic with no implementation."
   },
   {
    "status": "done",
    "area": "SCF",
    "feature": "Standard convergence profile with fixed-point verification",
-   "note": "Default for every command since 2026-11-16 (ADR 0043); strict is a reference tool only. The stored P17A evidence measured the unverified profile: less solver work in successful cases, skew/slab/mesh failures recorded. [Evidence](tests/reference/perf/p17a/final-report.json)."
+   "note": "Reference driver is the single production standard path with independent verification (ADR 0047). StrictOracle remains for explicit validation and the G4D exception. P17A numbers remain historical unverified legacy-profile evidence."
   },
   {
    "status": "done",
@@ -196,13 +202,13 @@
    "status": "done",
    "area": "Physics",
    "feature": "Fixed-cell ionic relaxation",
-   "note": "BFGS/FIRE, Cartesian constraints, warm starts and byte-identical restart. CLI spin-polarized and finite-temperature relaxation unsupported; Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json)."
+   "note": "BFGS/FIRE and Cartesian constraints with reference SCF and live warm seeds. Optimizer resume restores optimizer state but currently lacks the reference orbital seed and records a fresh atomic-start fallback; historical byte-identical resume evidence belongs to the legacy path. CLI spin/FD relaxation remains unavailable. Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json)."
   },
   {
    "status": "done",
    "area": "Physics",
    "feature": "Cell relaxation",
-   "note": "Works for the stated synthetic cases and isotropic PseudoDojo Si/MgO shifted-mesh runs, with limits: rebuild plus fresh-basis polish verifies start agreement and final pressure. Full-tensor symmetry preservation on shifted meshes and cutoff convergence are not established; comparison with QE pending. [Evidence](tests/reference/relaxation/cell/validation.json)."
+   "note": "Variable-cell relaxation uses the reference driver with frozen Miller/FFT support and a final nominal-cutoff rebuild. Historical synthetic/isotropic Si/MgO rebuild-plus-polish evidence retains its original driver; gen19 reports reference/legacy lattice difference 6.3e-8 Bohr and pressure difference 2.3e-9 Ha/Bohr^3. Full-tensor shifted-mesh symmetry and cutoff convergence remain unestablished. Comparison with QE pending. [Historical evidence](tests/reference/relaxation/cell/validation.json); [gen19 relay and limits](docs/decisions/0047-reference-driver-single-path.md#evidence-gen14gen28)."
   },
   {
    "status": "planned",
@@ -219,5 +225,5 @@
   "Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below.",
   "Spin-polarized or finite-temperature relaxation in the CLI, DFT+U forces, molecular dynamics, phonons and hybrid functionals."
  ],
- "speed": "Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md."
+ "speed": "Current timing claims use the dated same-model tables and matched-condition protocol in docs/performance/comparison-rules.md and docs/performance/qe-vs-baandi-current.md. The 2026-11-05 relay describes earlier implementations and is not current reference-driver performance. Real-Gamma and MPI paths are implemented. No new speed measurement is supplied by this documentation update."
 }

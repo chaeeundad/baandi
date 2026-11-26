@@ -16,6 +16,21 @@ pub fn local_or_core(
     field: &[Complex64],
     core: bool,
 ) -> Result<Vec<[f64; 3]>, HamiltonianError> {
+    local_or_core_cached(basis, volume, species, field, core, None)
+}
+/// GD1: [`local_or_core`] reading the per-shell radial values from `shells`
+/// when present (values computed with the identical expression elsewhere,
+/// for example split over ranks); a missing value is computed here. Same
+/// accumulation, so the result is bit-identical to [`local_or_core`].
+pub fn local_or_core_cached(
+    basis: &PlaneWaveBasis,
+    volume: f64,
+    species: &[Species<'_>],
+    field: &[Complex64],
+    core: bool,
+    cached: Option<&crate::radial_shells::RadialShellValues>,
+) -> Result<Vec<[f64; 3]>, HamiltonianError> {
+    use crate::radial_shells::ShellKind;
     if field.len() != basis.vectors().len() {
         return Err(HamiltonianError::Shape);
     }
@@ -48,14 +63,21 @@ pub fn local_or_core(
                     if let Some(v) = shells.get(&q.to_bits()) {
                         return Ok(*v);
                     }
-                    let v = if core {
+                    let kind = if core {
+                        ShellKind::CoreValue
+                    } else {
+                        ShellKind::LocalValue
+                    };
+                    let v = if let Some(v) = cached.and_then(|c| c.get(s.potential, kind, q)) {
+                        if core { v / volume } else { v }
+                    } else if core {
                         s.potential.core_density().map_or(Ok(0.0), |n| {
                             dft_upf::radial::spherical_density_transform(s.potential.mesh(), n, q)
                                 .map(|v| v / volume)
-                        })
+                        })?
                     } else {
-                        local.at_g(q)
-                    }?;
+                        local.at_g(q)?
+                    };
                     shells.insert(q.to_bits(), v);
                     Ok(v)
                 })

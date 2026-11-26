@@ -1,5 +1,59 @@
 # Optimization log (newest first)
 
+## GD1-DERIV-SPEED — post-SCF forces and frozen-Miller stress at QE-like cost (2026-11-27; Mac evidence, dev08 pending)
+
+Trigger (relayed, dev08 MPI8 gen57, FD metals, BAANDI vs QE, seconds): forces 4-9 s vs <=0.11 s and stress 18.7-33.4 s
+vs 0.15-0.63 s (Ru 244 k: 6.50 / 23.93; Au 366 k: 4.08 / 18.68; Hf 156 k: 9.33 / 33.36; Sr 75 k: 9.08 / 31.88); Hg (76 k,
+npw 6.6k, 48 bands) 18.2 / 77.6 vs 0.35 / 1.33; TiGa 6.2 / 24.8 vs 0.10 / 0.37; Ta6Zn7 (34 k, npw 17.4k, 131 bands)
+133.5 / 718.5 vs 2.1 / 7.3. Stress 40-56 % of the wall, forces 8-21 %.
+Diagnosis (Mac, per-stage clocks added by this ticket, Ru hcp PseudoDojo PBE 80 Ry, 6x6x4 -> 39 k, FD 0.2 eV, serial):
+forces 0.99 of 1.12 s and stress 3.07 + 1.10 of 4.37 s were the per-k nonlocal part. Causes: (a) a NonlocalOperator
+build per k (one radial quadrature per distinct |k+G| and projector, ~1500-point mesh; at generic k every |k+G| is
+distinct), (b) the stress repeated it, plus a second quadrature per |k+G| for d beta/dq, (c) per-G scalar loops costing
+bands x channels x 9 x npw per atom (the bands x npw x projectors scaling in the dev08 data), (d) frozen_stress re-ran the
+complete force pass only as its precondition check, (e) local/core |G|-shell quadratures (with erf per mesh point per
+shell) replicated on every rank, the core density rebuilt per atom.
+Changes (four switches, table 81 -> 85):
+- `STRESS_FORCE_PASS` (default off; bit-identical): `forces::validate` holds the shared preconditions; stress calls it
+  instead of `forces()`. `precondition_force_band_passes` is 0 when off.
+- `DERIV_NL_GEMM` (default on; rounding class): `dft_physics::stress::nonlocal_k_derivatives`. Per atom O = beta^H psi,
+  W = f (D O), the band-summed field Y_c(G) = sum_n conj(psi_n(G)) W_cn (second GEMM), then F_a = -2 Im sum_G q_a sum_c
+  beta_c Y_c and sigma_ab = (2/V) Re[-sum_G q_a sum_c D^b_c Y_c - delta_ab/2 sum conj(O) W], D^b = d beta/dq_b from
+  the radial slope and the solid-harmonic gradient. 2 ng nc nb multiply-adds per atom instead of ~4 (forces) and ~10
+  (stress) in scalar loops; no NonlocalOperator build.
+- `DERIV_RADIAL_TABLES` (default on with >= 2 k blocks; rounding class): projector transforms and their q derivatives
+  from GK14-style tables (h 0.005, 8 points, range 1.1 sqrt(2 Ecut) + 0.05, quadrature fallback outside); node values
+  are the quadrature (`projector_transform_slope` is the former stress expression), split over ranks, one allgatherv.
+- `DERIV_SHELLS` (default on; bit-identical): `dft_physics::radial_shells` evaluates the local/core shell values once
+  per pass with hoisted integrands (erf once per mesh point), split over ranks, one allgatherv; used by local/core
+  forces and stress and the core density (now once per potential, not per atom).
+Accuracy: legacy arm (all four switches at the former behaviour) bit-identical to the pre-change binary (Ru forces,
+stress, energies). New vs legacy, Ru: max|dF| 9.5e-18 Ha/Bohr (forces ~3e-9 by symmetry), max|dS| 1.1e-16 Ha/Bohr^3
+(|S| 2.6e-4). Kernel vs former loops (synthetic l = 0..3, off-diagonal D, skewed cell, Gamma and generic k, zero and
+fractional occupations; quadrature and tables): relative <= 7e-16 (forces), <= 5e-16 (stress). Real Ta+Zn PseudoDojo
+k block: max|dF| 1.6e-15 (|F| 0.42), max|dS| 1.3e-18 (|S| 2.6e-4). Independent finite differences of E_nl
+(tabulated kernel): strain FD error 3.7e-8 Ha/Bohr^3 at h 5e-4 with second-order decay, forces 4.0e-8 Ha/Bohr at h 1e-4.
+Real Si2 FD matrices (`silicon_displaced_and_skew`, `silicon_frozen_strain_gamma_and_k222`) print identical errors
+in both arms (force 2.03e-8, stress 5.6e-11, R7A up to 4.0e-10). Rank independence: `distributed_derivatives_match_
+replicated_and_rank_count` (2/3/7 simulated ranks, 5 k, tables and shells active) bit-identical.
+Timing (O, Mac, one run per arm, same binary): Ru forces 1.124 -> 0.139 s (nonlocal 0.994 -> 0.061, tables 0.016,
+shells 0.049), stress 4.367 -> 0.251 s (validate 1.099 -> 0, kinetic+nonlocal 3.067 -> 0.073, tables 0.041, shells 0.114).
+Per k block (real Ta+Zn, 2 atoms, test `derivative_kernels::gd1_real_upf_kernel_timing`): npw 6913, 48 bands: forces
+0.288 -> 0.013 s, stress 1.221 -> 0.019 s; npw 3764, 24 bands: 0.141 -> 0.0043, 0.576 -> 0.0081. Table build serial
+0.12-0.15 s (split over ranks). E (dev08 MPI8): Ru forces ~0.1-0.2 s, stress ~0.2-0.3 s; Ta6Zn7 nonlocal stress
+~36 GFLOP per rank (~1.5-2 s) against 718.5 s.
+Remaining per-pass costs (not changed): the PBE XC re-evaluation and GGA stress metric on the full grid (replicated,
+~0.02-0.06 s here), the per-k basis rebuild, the kinetic stress copy of the orbitals.
+Lesson: post-SCF derivatives inherited per-k operator builds and per-G scalar loops from the first correct version;
+the band sum belongs in GEMMs and the strain/position derivative should contract a band-summed field, not each band.
+
+Base `43ae80bd` (main); branch uncommitted. Not derived from a QE note (the band-summed contraction and tables are our
+own design; GK14 tables reused). Commands: `baandi run ru.toml` (input in the ticket report; Ru.upf sha256
+25cc2bcb...cfccef) with `BAANDI_STRESS_FORCE_PASS=on BAANDI_DERIV_NL_GEMM=off BAANDI_DERIV_RADIAL_TABLES=off
+BAANDI_DERIV_SHELLS=off` for the legacy arm; `cargo test --release -p dft-physics --test all derivative_kernels --
+--include-ignored --nocapture` with DFT_NC_DIR; `cargo test --release -p dft-engine --test refscf_forces` (17 passed)
+and with DFT_SI_UPF `-- --ignored silicon`. JSON: `forces.stage_seconds`, `stress.stage_seconds` (per rank).
+
 ## B-LEAN-DAVIDSON — lean Davidson of the real Gamma path (2026-11-15, opt-in)
 
 Work order `docs/performance/requests/work-order-beat-qe-2026-11-14.md` phase B

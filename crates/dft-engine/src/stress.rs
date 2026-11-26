@@ -61,7 +61,12 @@ pub struct StressResult {
     pub pulay: Option<PulayAssessment>,
     pub elapsed: std::time::Duration,
     pub band_passes: usize,
+    /// Band passes of the precondition force pass: 0 unless
+    /// `STRESS_FORCE_PASS=on` (GD1; the stress itself never used them).
     pub precondition_force_band_passes: usize,
+    /// GD1: wall seconds per stage of the frozen-Miller stress, in execution
+    /// order (observation only; per rank).
+    pub timings: Vec<(&'static str, f64)>,
 }
 /// Complete analytic derivative at fixed Miller set. Explicitly does not claim
 /// cutoff convergence; `stress` additionally estimates the cutoff correction.
@@ -95,7 +100,28 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     // Shared force path enforces the independent setup identity, active ledger,
     // strict tolerances and fresh certificate (or passed verification) before
     // accepting the state.
-    let validated = crate::forces::forces(state)?;
+    // GD1: the preconditions alone unless STRESS_FORCE_PASS asks for the
+    // former complete force pass (its forces were never used here).
+    let validated = if dft_numerics::switches::on(dft_numerics::switches::Id::STRESS_FORCE_PASS) {
+        let f = crate::forces::forces(state)?;
+        (
+            crate::forces::Validated {
+                verification: f.verification,
+                ledger: f.ledger,
+                quantity: f.quantity,
+            },
+            f.band_passes,
+        )
+    } else {
+        (crate::forces::validate(state)?, 0)
+    };
+    let (validated, precondition_band_passes) = validated;
+    let mut timings = vec![("validate", start.elapsed().as_secs_f64())];
+    let mut clock = std::time::Instant::now();
+    let mut lap = |name: &'static str, timings: &mut Vec<(&'static str, f64)>| {
+        timings.push((name, clock.elapsed().as_secs_f64()));
+        clock = std::time::Instant::now();
+    };
     let densities: Vec<&Array3<f64>> = state.electronic.densities()?;
     let blocks = state.electronic.blocks();
     let volume = state.cell.volume_bohr3();
@@ -138,9 +164,28 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     let mut fft = FftPlan3d::new(dims)?;
     let mut reciprocal = Array3::zeros(dims);
     fft.to_reciprocal(&density.mapv(|v| Complex64::new(v, 0.)), &mut reciprocal)?;
-    let local = terms::local_or_core(&db, volume, &species, &dg.gather(&reciprocal)?, false)?;
+    lap("setup", &mut timings);
+    let shells = crate::forces::shell_values(&species, &db, volume, true)?;
+    lap("shells", &mut timings);
+    let local = terms::local_or_core_cached(
+        &db,
+        volume,
+        &species,
+        &dg.gather(&reciprocal)?,
+        false,
+        shells.as_ref(),
+    )?;
+    lap("local", &mut timings);
     let hartree = terms::hartree(&density, state.cell, &mut fft)?;
-    let core_density = dft_physics::density::core_density(&db, &dg, volume, &species, &mut fft)?;
+    lap("hartree", &mut timings);
+    let core_density = dft_physics::density::core_density_cached(
+        &db,
+        &dg,
+        volume,
+        &species,
+        &mut fft,
+        shells.as_ref(),
+    )?;
     let (energy, integral, core_potential, mut xc) = if densities.len() == 1 {
         let mut scratch = Array3::zeros(dims);
         let result = state.options.evaluate_xc(
@@ -202,18 +247,35 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     for (a, row) in xc.iter_mut().enumerate() {
         row[a] += (energy - integral) / volume;
     }
+    lap("xc", &mut timings);
     let core = if core_density.is_some() {
         fft.to_reciprocal(
             &core_potential.mapv(|v| Complex64::new(v, 0.)),
             &mut reciprocal,
         )?;
-        terms::local_or_core(&db, volume, &species, &dg.gather(&reciprocal)?, true)?
+        terms::local_or_core_cached(
+            &db,
+            volume,
+            &species,
+            &dg.gather(&reciprocal)?,
+            true,
+            shells.as_ref(),
+        )?
     } else {
         [[0.; 3]; 3]
     };
+    lap("core", &mut timings);
     let mut kinetic = [[0.; 3]; 3];
     let mut nonlocal = [[0.; 3]; 3];
     let mut band_passes = 0;
+    let gemm_kernel = dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_NL_GEMM);
+    let tables = if gemm_kernel {
+        crate::forces::projector_tables(state, &species, blocks.len(), true)?
+    } else {
+        Vec::new()
+    };
+    let per_atom = crate::forces::tables_per_atom(&species, &tables);
+    lap("nonlocal_tables", &mut timings);
     // MPI-DERIV: per-k kinetic and nonlocal tensors distributed over ranks
     // (one gather), accumulated in k order as before; symmetrization follows.
     crate::forces::accumulate_blocks(
@@ -226,7 +288,14 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
                 .map(|b| orbitals.column(b).to_vec())
                 .collect();
             let k = dft_physics::kinetic::stress(&basis, &c, &f, volume)?;
-            let n = terms::nonlocal(&basis, volume, &species, orbitals, &f)?;
+            let n = if gemm_kernel {
+                dft_physics::stress::nonlocal_k_derivatives(
+                    &basis, volume, &species, &per_atom, orbitals, &f, true,
+                )?
+                .1
+            } else {
+                terms::nonlocal(&basis, volume, &species, orbitals, &f)?
+            };
             for (slot, value) in out
                 .iter_mut()
                 .zip(k.iter().flatten().chain(n.iter().flatten()))
@@ -245,6 +314,7 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         },
     )?;
     band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
+    lap("kinetic_nonlocal", &mut timings);
     let ions: Vec<_> = state
         .atoms
         .iter()
@@ -255,6 +325,7 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         })
         .collect();
     let ewald = dft_physics::ewald::stress(state.cell, &ions, Default::default())?;
+    lap("ewald", &mut timings);
     let mut parts = vec![
         ("kinetic", kinetic),
         ("local", local),
@@ -318,7 +389,8 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         pulay: None,
         elapsed: start.elapsed(),
         band_passes,
-        precondition_force_band_passes: validated.band_passes,
+        precondition_force_band_passes: precondition_band_passes,
+        timings,
     })
 }
 fn add(a: &mut Tensor, b: &Tensor) {

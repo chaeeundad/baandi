@@ -374,6 +374,14 @@ table! {
         "GK17 (plan GK15): the fixed-occupation reference k map keeps the real-space planes psi_b(r) that its density pass computes for the leading bands of each k (bounded by K_KEPT_SLAB_MB per rank), and the next map's kept-HX update reuses them, so (V_new - V_old) psi_b needs only the forward transform; bit-identical; costs the slab memory; off = inverse and forward transform per band";
     K_KEPT_SLAB_MB: Kind::Number { default: Some(1024.), valid: |v| (0. ..=1048576.).contains(&v) && v.fract() == 0. }, "1024", "integer MiB 0..1048576",
         "GK17: per-rank budget of K_KEPT_SLABS in MiB, split evenly over the rank's k points in k order (bands per k = min(bands, budget / (k count x plane bytes))); 0 keeps no slab";
+    STRESS_FORCE_PASS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "GD1: on = the frozen-Miller stress re-runs the complete force pass as its precondition check (former behaviour); off = it runs only the shared precondition checks (identity, certificate/verification, tolerances, ledger) without computing forces; stress bit-identical; precondition_force_band_passes reports 0 when off";
+    DERIV_NL_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GD1: nonlocal forces and nonlocal stress per k from one projector/gradient GEMM per atom (A = [beta | d beta/dq], B = [psi | q psi]) instead of the NonlocalOperator build plus per-G scalar loops; rounding class (reduction order); off restores the former per-k operator and scalar loops";
+    DERIV_RADIAL_TABLES: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GD1: with two or more k blocks the derivative pass reads the projector transforms and their q derivatives from uniform radial tables (step 0.005 Bohr^-1, 8-point Lagrange, nodes split over ranks, node values equal to the quadrature) instead of one quadrature per distinct |k+G|; rounding class; off restores the quadrature";
+    DERIV_SHELLS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GD1: the local and core |G|-shell transforms of the derivative pass (local/core forces and stress, the rebuilt core density) are evaluated once per pass with the G-independent integrand (including erf) hoisted, split over the ranks in contiguous blocks and shared by one allgatherv, instead of per shell on every rank (and per atom for the core density); bit-identical; off restores the per-shell evaluation";
 }
 
 struct Resolved {

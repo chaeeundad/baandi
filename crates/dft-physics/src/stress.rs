@@ -70,6 +70,20 @@ pub fn local_or_core(
     field: &[Complex64],
     core: bool,
 ) -> Result<Tensor, HamiltonianError> {
+    local_or_core_cached(basis, volume, species, field, core, None)
+}
+/// GD1: [`local_or_core`] reading the per-shell radial values and slopes from
+/// `shells` when present (identical expressions computed elsewhere); a
+/// missing pair is computed here. Bit-identical to [`local_or_core`].
+pub fn local_or_core_cached(
+    basis: &PlaneWaveBasis,
+    volume: f64,
+    species: &[Species<'_>],
+    field: &[Complex64],
+    core: bool,
+    shells: Option<&crate::radial_shells::RadialShellValues>,
+) -> Result<Tensor, HamiltonianError> {
+    use crate::radial_shells::ShellKind;
     if field.len() != basis.vectors().len() {
         return Err(HamiltonianError::Shape);
     }
@@ -91,8 +105,31 @@ pub fn local_or_core(
         for (g, f) in basis.vectors().iter().zip(field) {
             let q = g.norm_squared.sqrt();
             let key = (potential_id, q.to_bits());
+            let shared = if q == 0. {
+                None
+            } else if core {
+                shells.and_then(|c| {
+                    Some((
+                        c.get(pp, ShellKind::CoreValue, q)? / volume,
+                        c.get(pp, ShellKind::CoreSlope, q)?,
+                    ))
+                })
+            } else {
+                shells.and_then(|c| {
+                    Some((
+                        c.get(pp, ShellKind::LocalValue, q)?,
+                        c.get(pp, ShellKind::LocalSlope, q)?,
+                    ))
+                })
+            };
             let (v, prime) = if let Some(hit) = cache.get(&key) {
                 *hit
+            } else if let Some(pair) = shared {
+                if core && pp.core_density().is_none() {
+                    continue;
+                }
+                cache.insert(key, pair);
+                pair
             } else if core {
                 let Some(n) = pp.core_density() else { continue };
                 let v = dft_upf::radial::spherical_density_transform(mesh, n, q)? / volume;
@@ -222,6 +259,330 @@ fn harmonic(l: usize, m: isize, q: [f64; 3]) -> (f64, [f64; 3]) {
         std::array::from_fn(|i| scale * (part(p.d[i]) - l as f64 * part(p.v) * q[i] / r2)),
     )
 }
+/// d/dq of `Pseudopotential::projector_transform(index, q)`:
+/// `4 pi int r^2 u(r) j_l'(q r) dr` over the projector samples (u = r beta),
+/// the same index-coordinate quadrature. Exactly the expression of the
+/// frozen-Miller nonlocal stress (`nonlocal`), so a table built from it
+/// reproduces that quadrature at its nodes bit for bit.
+pub fn projector_transform_slope(
+    pp: &dft_upf::Pseudopotential,
+    index: usize,
+    q: f64,
+) -> Result<f64, HamiltonianError> {
+    let p = pp
+        .projectors()
+        .get(index)
+        .ok_or(RadialError::Argument("projector index"))?;
+    let l = p.l();
+    Ok(4.
+        * PI
+        * integrate_prefix(
+            pp.mesh(),
+            p.radial_times_r()
+                .iter()
+                .zip(pp.mesh().r())
+                .map(|(&u, &r)| Ok(r * r * u * bessel_prime(l, q * r)?))
+                .collect::<Result<Vec<_>, RadialError>>()?,
+        )?)
+}
+
+/// GD1: uniform radial tables of one species' projector transforms
+/// (`value[i]`, `Pseudopotential::projector_transform`) and their q
+/// derivatives (`slope[i]`, [`projector_transform_slope`]), one per projector
+/// `i`. An entry outside a table's range falls back to the quadrature.
+#[derive(Debug, Clone)]
+pub struct ProjectorRadialTables {
+    pub value: Vec<dft_upf::radial::RadialTransformTable>,
+    pub slope: Vec<dft_upf::radial::RadialTransformTable>,
+}
+
+/// GD1: nonlocal ionic forces (`with_stress == false`) or the frozen-Miller
+/// nonlocal strain derivative (`with_stress == true`) of one k block.
+///
+/// Same physics as [`crate::forces::nonlocal`] and [`nonlocal`], reorganised
+/// so that the band sum is done by two GEMMs per atom over the occupied bands:
+/// `O = beta^H psi` (nc x nb), `W_cn = f_n sum_d D_cd O_dn`, and the
+/// band-summed weight field `Y_c(G) = sum_n conj(psi_n(G)) W_cn` (one GEMM
+/// `psi W^H`, conjugated). Then, with `beta_c(G) = b_c(G) e^{-i q.tau}` and
+/// its momentum gradient `D^b_c(G) = d beta_c / d q_b`,
+/// `F_a = -2 Im sum_G q_a sum_c beta_c Y_c` and
+/// `sigma_ab = (2/V) Re[-sum_G q_a sum_c D^b_c Y_c - delta_ab/2 sum_cn conj(O_cn) W_cn]`.
+/// The work is 2 ng nc nb multiply-adds per atom plus O(ng nc) for the field
+/// sums, instead of (4 or 10) ng nc nb. Only the reduction order differs from
+/// the per-G scalar loops (rounding class). `tables[s]` (when given) supplies
+/// the radial values and slopes of `species[s]`; otherwise, and for |q|
+/// outside a table, the quadrature. Occupations include the k weight and the
+/// spin capacity. Returns the forces in species/position order and the stress
+/// tensor; the quantity not requested is zero.
+pub fn nonlocal_k_derivatives(
+    basis: &PlaneWaveBasis,
+    volume: f64,
+    species: &[Species<'_>],
+    tables: &[Option<&ProjectorRadialTables>],
+    orbitals: &ComplexMatrix,
+    occupations: &[f64],
+    with_stress: bool,
+) -> Result<(Vec<[f64; 3]>, Tensor), HamiltonianError> {
+    use dft_numerics::linalg::{MatrixOp, complex_gemm_slices_into, gemm};
+    let ng = basis.momenta().len();
+    if orbitals.rows() != ng || orbitals.cols() != occupations.len() {
+        return Err(HamiltonianError::Shape);
+    }
+    if !volume.is_finite() || volume <= 0. {
+        return Err(HamiltonianError::Volume);
+    }
+    if occupations.iter().any(|f| !f.is_finite() || *f < 0.) {
+        return Err(HamiltonianError::NonFinite);
+    }
+    let atoms_total: usize = species.iter().map(|s| s.positions_bohr.len()).sum();
+    let mut forces = vec![[0.; 3]; atoms_total];
+    let mut out = [[0.; 3]; 3];
+    let occupied: Vec<usize> = (0..occupations.len())
+        .filter(|&b| occupations[b] != 0.)
+        .collect();
+    let nb = occupied.len();
+    if nb == 0 || ng == 0 {
+        return Ok((forces, out));
+    }
+    let gemm_error = |_| HamiltonianError::NonFinite;
+    // Occupied bands, column-major (ng x nb).
+    let mut psi = ComplexMatrix::zeros(ng, nb).map_err(gemm_error)?;
+    for (j, &band) in occupied.iter().enumerate() {
+        psi.column_mut(j).copy_from_slice(orbitals.column(band));
+    }
+    psi.validate_finite().map_err(gemm_error)?;
+    let volume_root = volume.sqrt();
+    // Per-potential factors without the structure phase: columns beta_c (nc)
+    // and, with stress, D^x_c, D^y_c, D^z_c (3 nc).
+    let mut factors: Vec<(usize, Vec<Complex64>)> = Vec::new();
+    let mut harmonics = vec![0.; 16];
+    let mut gradients = [(0., [0.; 3]); 16];
+    let mut atom_index = 0;
+    let mut left = Vec::new();
+    let mut overlaps = Vec::new();
+    for (si, s) in species.iter().enumerate() {
+        let pp = s.potential;
+        let np = pp.projectors().len();
+        let channels: Vec<_> = pp
+            .projectors()
+            .iter()
+            .enumerate()
+            .flat_map(|(i, p)| (-(p.l() as isize)..=p.l() as isize).map(move |m| (i, p.l(), m)))
+            .collect();
+        let nc = channels.len();
+        if nc == 0 {
+            atom_index += s.positions_bohr.len();
+            continue;
+        }
+        for i in 0..np {
+            for j in 0..np {
+                if pp.projectors()[i].l() != pp.projectors()[j].l()
+                    && pp.dij_hartree()[i * np + j] != 0.
+                {
+                    return Err(HamiltonianError::AngularCoupling);
+                }
+            }
+        }
+        let ncol = if with_stress { 4 * nc } else { nc };
+        let lmax = channels.iter().map(|c| c.1).max().unwrap_or(0);
+        if lmax > 3 {
+            return Err(RadialError::Argument("projector l > 3").into());
+        }
+        let keys: Vec<usize> = channels
+            .iter()
+            .map(|&(_, l, m)| (l * l + l).wrapping_add_signed(m))
+            .collect();
+        let potential_id = pp as *const _ as *const () as usize;
+        if !factors.iter().any(|f| f.0 == potential_id) {
+            let table = tables
+                .get(si)
+                .copied()
+                .flatten()
+                .filter(|t| t.value.len() == np && (!with_stress || t.slope.len() == np));
+            let prefactor: Vec<Complex64> = channels
+                .iter()
+                .map(|&(_, l, _)| Complex64::new(0., -1.).powu(l as u32) / volume_root)
+                .collect();
+            let mut distinct: Vec<(usize, usize, isize)> = Vec::new();
+            for (&key, &(_, l, m)) in keys.iter().zip(&channels) {
+                if !distinct.iter().any(|d| d.0 == key) {
+                    distinct.push((key, l, m));
+                }
+            }
+            let mut f = vec![Complex64::default(); ng * ncol];
+            let mut radial = vec![0.; np];
+            let mut slope = vec![0.; np];
+            type Pair = (Vec<f64>, Vec<f64>);
+            let mut fallback: std::collections::HashMap<u64, Pair> =
+                std::collections::HashMap::new();
+            for (ig, g) in basis.momenta().iter().enumerate() {
+                let q = g.norm_squared.sqrt();
+                let strained = with_stress && q > 0.;
+                let mut missing = table.is_none();
+                if let Some(t) = table {
+                    for i in 0..np {
+                        let value = t.value[i].eval(q);
+                        let prime = if strained {
+                            t.slope[i].eval(q)
+                        } else {
+                            Some(0.)
+                        };
+                        match (value, prime) {
+                            (Some(v), Some(p)) => {
+                                radial[i] = v;
+                                slope[i] = p;
+                            }
+                            _ => missing = true,
+                        }
+                    }
+                }
+                if missing {
+                    let entry = match fallback.entry(q.to_bits()) {
+                        std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            let mut v = vec![0.; np];
+                            let mut p = vec![0.; np];
+                            for i in 0..np {
+                                v[i] = pp.projector_transform(i, q)?;
+                                if strained {
+                                    p[i] = projector_transform_slope(pp, i, q)?;
+                                }
+                            }
+                            e.insert((v, p))
+                        }
+                    };
+                    radial.copy_from_slice(&entry.0);
+                    slope.copy_from_slice(&entry.1);
+                }
+                // Direction at zero is arbitrary: all l>0 radial transforms vanish.
+                let direction = if g.norm_squared == 0. {
+                    [0., 0., 1.]
+                } else {
+                    g.cartesian
+                };
+                dft_upf::radial::real_spherical_harmonics_upto(lmax, direction, &mut harmonics)?;
+                if strained {
+                    for &(key, l, m) in &distinct {
+                        gradients[key] = harmonic(l, m, g.cartesian);
+                    }
+                }
+                for (c, &(i, _, _)) in channels.iter().enumerate() {
+                    f[c * ng + ig] = prefactor[c] * harmonics[keys[c]] * radial[i];
+                    if strained {
+                        let (y, dy) = gradients[keys[c]];
+                        for (b, d) in dy.iter().enumerate() {
+                            f[(nc + b * nc + c) * ng + ig] =
+                                prefactor[c] * (slope[i] * y * g.cartesian[b] / q + radial[i] * d);
+                        }
+                    }
+                }
+            }
+            factors.push((potential_id, f));
+        }
+        let f = &factors
+            .iter()
+            .find(|f| f.0 == potential_id)
+            .expect("cached factors")
+            .1;
+        let mut coupling = vec![0.; nc * nc];
+        for (a, &(i, l, m)) in channels.iter().enumerate() {
+            for (b, &(j, ll, mm)) in channels.iter().enumerate() {
+                if l == ll && m == mm {
+                    coupling[a * nc + b] = pp.dij_hartree()[i * np + j];
+                }
+            }
+        }
+        left.resize(ng * nc, Complex64::default());
+        overlaps.resize(nc * nb, Complex64::default());
+        let mut weights = ComplexMatrix::zeros(nc, nb).map_err(gemm_error)?;
+        for position in s.positions_bohr {
+            let phases = basis
+                .momenta()
+                .iter()
+                .map(|g| structure_factor(g.cartesian, std::slice::from_ref(position)))
+                .collect::<Result<Vec<_>, _>>()?;
+            for c in 0..nc {
+                for ((z, factor), phase) in left[c * ng..(c + 1) * ng]
+                    .iter_mut()
+                    .zip(&f[c * ng..(c + 1) * ng])
+                    .zip(&phases)
+                {
+                    *z = factor * phase;
+                }
+            }
+            // O_cn = <beta_c|psi_n> at (c + n nc).
+            complex_gemm_slices_into(&left, ng, nc, true, psi.as_slice(), nb, &mut overlaps)
+                .map_err(gemm_error)?;
+            // W_cn = f_n sum_d D_cd O_dn; E = sum_cn conj(O_cn) W_cn.
+            let mut energy = Complex64::default();
+            for (j, &band) in occupied.iter().enumerate() {
+                let occupation = occupations[band];
+                for p in 0..nc {
+                    let w: Complex64 = (0..nc)
+                        .map(|q| coupling[p * nc + q] * overlaps[q + j * nc])
+                        .sum::<Complex64>()
+                        * occupation;
+                    weights[(p, j)] = w;
+                    energy += overlaps[p + j * nc].conj() * w;
+                }
+            }
+            // conj(Y_c(G)) = sum_n psi_n(G) conj(W_cn), (ng x nc).
+            let field =
+                gemm(&psi, MatrixOp::Identity, &weights, MatrixOp::Adjoint).map_err(gemm_error)?;
+            let force = &mut forces[atom_index];
+            atom_index += 1;
+            if with_stress {
+                let mut sum = [[Complex64::default(); 3]; 3];
+                for (ig, g) in basis.momenta().iter().enumerate() {
+                    let mut s_b = [Complex64::default(); 3];
+                    for c in 0..nc {
+                        let y = field[(ig, c)].conj();
+                        for (b, s) in s_b.iter_mut().enumerate() {
+                            *s += f[(nc + b * nc + c) * ng + ig] * y;
+                        }
+                    }
+                    for (a, row) in sum.iter_mut().enumerate() {
+                        for (b, v) in row.iter_mut().enumerate() {
+                            *v += g.cartesian[a] * phases[ig] * s_b[b];
+                        }
+                    }
+                }
+                for (a, row) in out.iter_mut().enumerate() {
+                    for (b, v) in row.iter_mut().enumerate() {
+                        let mut z = -sum[a][b];
+                        if a == b {
+                            z -= 0.5 * energy;
+                        }
+                        *v += 2. * z.re / volume;
+                    }
+                }
+            } else {
+                let mut sum = [Complex64::default(); 3];
+                for (ig, g) in basis.momenta().iter().enumerate() {
+                    let s: Complex64 = (0..nc)
+                        .map(|c| left[c * ng + ig] * field[(ig, c)].conj())
+                        .sum();
+                    for (axis, v) in sum.iter_mut().enumerate() {
+                        *v += g.cartesian[axis] * s;
+                    }
+                }
+                for (axis, component) in force.iter_mut().enumerate() {
+                    *component -= 2. * sum[axis].im;
+                }
+            }
+        }
+    }
+    if forces
+        .iter()
+        .flatten()
+        .chain(out.iter().flatten())
+        .any(|v| !v.is_finite())
+    {
+        return Err(HamiltonianError::NonFinite);
+    }
+    Ok((forces, out))
+}
+
 /// Full KB strain derivative, all radial channels and Hermitian D couplings.
 pub fn nonlocal(
     basis: &PlaneWaveBasis,

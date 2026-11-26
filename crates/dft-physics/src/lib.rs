@@ -9,6 +9,7 @@ pub mod gga;
 pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
+pub mod radial_shells;
 pub mod real_gamma;
 pub use real_gamma::{RealGammaError, RealHamiltonian, RealNonlocal};
 pub mod spin;

@@ -373,3 +373,6 @@ fn core_and_xc_metric() {
         });
     }
 }
+
+#[path = "derivative_kernels.rs"]
+mod derivative_kernels;

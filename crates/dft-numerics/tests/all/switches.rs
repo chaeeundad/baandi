@@ -205,7 +205,9 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CDAV_REUSE), Value::Choice("on"));
     assert_eq!(value(Id::K_NL_TABLE_MEMO), Value::Choice("on"));
     assert_eq!(value(Id::K_START_SPIN_SHARE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 67);
+    assert_eq!(value(Id::RADIAL_TABLE_START), Value::Choice("on"));
+    assert_eq!(value(Id::RADIAL_TABLE_NL), Value::Choice("on"));
+    assert_eq!(TABLE.len(), 69);
 }
 
 #[test]

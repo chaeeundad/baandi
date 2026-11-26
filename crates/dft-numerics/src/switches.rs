@@ -346,6 +346,10 @@ table! {
         "GK1B: k start builds projector radial/angular factors for the rank's owned rows only (rows-only table, outcome agreed by one collective); bit-identical; off restores the full k-sphere factor table on every rank";
     K_START_SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GK1B: collinear spin k start builds bases, grids, projector tables, atomic columns and the start Ritz once and gives every channel its own operator and a copy of the orbitals; bit-identical; off builds the whole start per channel";
+    RADIAL_TABLE_START: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK14: k atomic start orbitals read their radial transforms from one uniform table per run and species channel (step 0.005 Bohr^-1, 8-point Lagrange) instead of a quadrature per |k+G|; start only (not bit-identical to the quadrature, delivered results inside the strict class); off restores the GK1 quadrature memo";
+    RADIAL_TABLE_NL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK14: k-point projector factors read their radial transforms from one uniform table per run and species projector (step 0.005 Bohr^-1, 8-point Lagrange, measured relative error <= 7.4e-15) instead of a quadrature per |k+G|; changes the k Hamiltonian at roundoff level (delivered energies inside the strict 1e-10 Ha class); Gamma-only path unchanged; off restores the quadrature";
 }
 
 struct Resolved {

@@ -534,6 +534,187 @@ pub fn spherical_density_transform_with_rule(
     )
 }
 
+/// Largest Lagrange stencil a [`RadialTransformTable`] accepts.
+pub const RADIAL_TABLE_MAX_POINTS: usize = 10;
+/// GK14 run-table node spacing (Bohr^-1) and Lagrange stencil. Chosen from the
+/// measured scan (`tests/all/radial_table.rs`, PseudoDojo Ge, Te, Si, O, Mg,
+/// Fe, Ir, I, B and Si.pz-vbc, q <= 11 Bohr^-1): worst transform error
+/// relative to the channel peak 7.4e-15 (8 points, 0.005), against 1.3e-8
+/// for 4 points at the same spacing and 2.1e-7 for 4 points at 0.01.
+pub const RADIAL_TABLE_STEP: f64 = 0.005;
+pub const RADIAL_TABLE_POINTS: usize = 8;
+
+/// GK14: one radial transform `4 pi int r f(r) j_l(q r) rab dr` (exactly the
+/// quadrature of [`projector_transform_with_rule`]) tabulated on the uniform
+/// nodes `q_i = i * step` and evaluated by `points`-point Lagrange
+/// interpolation in the node index. Nodes left of zero use the parity
+/// `T(-q) = (-1)^l T(q)` of `j_l`, so the stencil stays centred near q = 0;
+/// the table extends `points / 2 + 1` nodes past `q_max`.
+///
+/// The table approximates the quadrature (it is not bit-identical); its error
+/// is measured, not assumed (`tests/all/radial_table.rs`). [`Self::eval`]
+/// does no allocation and no quadrature; it returns `None` outside
+/// `[0, q_max]` so the caller can fall back to the direct quadrature.
+#[derive(Debug, Clone)]
+pub struct RadialTransformTable {
+    inv_step: f64,
+    q_max: f64,
+    points: usize,
+    parity: f64,
+    /// 1 / prod_{k != j} (j - k) for the stencil nodes 0..points.
+    inv_denominator: [f64; RADIAL_TABLE_MAX_POINTS],
+    values: Vec<f64>,
+}
+impl RadialTransformTable {
+    /// Tabulate `projector_transform_with_rule(mesh, l, radial_times_r, q, rule)`
+    /// for `0 <= q <= q_max`. `step` must be positive and finite and `points`
+    /// even, in `2..=RADIAL_TABLE_MAX_POINTS`. Errors are those of the
+    /// quadrature at any node.
+    pub fn new(
+        mesh: &RadialMesh,
+        l: usize,
+        radial_times_r: &[f64],
+        rule: RadialEvenRule,
+        q_max: f64,
+        step: f64,
+        points: usize,
+    ) -> Result<Self, RadialError> {
+        let nodes = Self::nodes(q_max, step, points)?;
+        let values = (0..nodes)
+            .map(|i| projector_transform_with_rule(mesh, l, radial_times_r, i as f64 * step, rule))
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::from_nodes(l, q_max, step, points, values)
+    }
+    /// Node count of a table for `(q_max, step, points)`; node `i` sits at
+    /// `q = i as f64 * step`. Same argument checks as [`Self::new`].
+    pub fn nodes(q_max: f64, step: f64, points: usize) -> Result<usize, RadialError> {
+        if !(step.is_finite() && step > 0.0)
+            || !(q_max.is_finite() && q_max >= 0.0)
+            || !(2..=RADIAL_TABLE_MAX_POINTS).contains(&points)
+            || !points.is_multiple_of(2)
+        {
+            return Err(RadialError::Argument("radial table step, q_max or points"));
+        }
+        let last = (q_max / step).ceil();
+        if last >= 1e8 {
+            return Err(RadialError::Argument("radial table too long"));
+        }
+        Ok(last as usize + points / 2 + 2)
+    }
+    /// A table from node values computed by the caller (for example split
+    /// over ranks): `values[i]` must be the transform of angular momentum `l`
+    /// at `q = i as f64 * step`, `values.len() == Self::nodes(q_max, step, points)`.
+    pub fn from_nodes(
+        l: usize,
+        q_max: f64,
+        step: f64,
+        points: usize,
+        values: Vec<f64>,
+    ) -> Result<Self, RadialError> {
+        if values.len() != Self::nodes(q_max, step, points)?
+            || values.iter().any(|v| !v.is_finite())
+        {
+            return Err(RadialError::Argument("radial table node values"));
+        }
+        let mut inv_denominator = [0.0; RADIAL_TABLE_MAX_POINTS];
+        for (j, d) in inv_denominator.iter_mut().enumerate().take(points) {
+            let mut p = 1.0;
+            for k in 0..points {
+                if k != j {
+                    p *= j as f64 - k as f64;
+                }
+            }
+            *d = 1.0 / p;
+        }
+        Ok(Self {
+            inv_step: 1.0 / step,
+            q_max,
+            points,
+            parity: if l.is_multiple_of(2) { 1.0 } else { -1.0 },
+            inv_denominator,
+            values,
+        })
+    }
+    /// Largest q served by [`Self::eval`].
+    pub fn q_max(&self) -> f64 {
+        self.q_max
+    }
+    /// Node count (diagnostics).
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+    /// Interpolated transform at `q`; `None` for q outside `[0, q_max]` or
+    /// non-finite q. Allocation-free.
+    #[inline]
+    pub fn eval(&self, q: f64) -> Option<f64> {
+        if !(0.0..=self.q_max).contains(&q) {
+            return None;
+        }
+        let p = self.points;
+        let x = q * self.inv_step;
+        // Stencil i0 .. i0 + p - 1 with x in [i0 + p/2 - 1, i0 + p/2).
+        let i0 = x.floor() as isize - (p / 2) as isize + 1;
+        let t = x - i0 as f64;
+        // Prefix and suffix products of (t - k).
+        let mut left = [1.0; RADIAL_TABLE_MAX_POINTS];
+        let mut right = [1.0; RADIAL_TABLE_MAX_POINTS];
+        for k in 1..p {
+            left[k] = left[k - 1] * (t - (k - 1) as f64);
+        }
+        for k in (0..p - 1).rev() {
+            right[k] = right[k + 1] * (t - (k + 1) as f64);
+        }
+        let mut sum = 0.0;
+        for j in 0..p {
+            let i = i0 + j as isize;
+            let f = if i < 0 {
+                self.parity * self.values[i.unsigned_abs()]
+            } else {
+                self.values[i as usize]
+            };
+            sum += left[j] * right[j] * self.inv_denominator[j] * f;
+        }
+        Some(sum)
+    }
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+    #[test]
+    fn table_reproduces_nodes_interpolates_and_rejects_bad_input() {
+        let n = 801;
+        let h = 0.01;
+        let mesh = RadialMesh::new((0..n).map(|i| i as f64 * h).collect(), vec![h; n]).unwrap();
+        let f: Vec<_> = mesh.r().iter().map(|r| r * r * (-r * r).exp()).collect();
+        let rule = RadialEvenRule::SimpsonQuadraticEnd;
+        for l in 0..=3 {
+            let t = RadialTransformTable::new(&mesh, l, &f, rule, 5.0, 0.01, 8).unwrap();
+            for i in [0, 1, 7, 250, 500] {
+                let q = i as f64 * 0.01;
+                let exact = projector_transform_with_rule(&mesh, l, &f, q, rule).unwrap();
+                assert!((t.eval(q).unwrap() - exact).abs() <= 1e-15 * exact.abs().max(1.0));
+            }
+            let mut worst = 0.0_f64;
+            for i in 0..997 {
+                let q = i as f64 * 0.005017;
+                let exact = projector_transform_with_rule(&mesh, l, &f, q, rule).unwrap();
+                worst = worst.max((t.eval(q).unwrap() - exact).abs());
+            }
+            assert!(worst < 1e-12, "l={l} worst={worst:e}");
+            assert!(t.eval(5.0 + 1e-9).is_none());
+            assert!(t.eval(-1e-9).is_none());
+            assert!(t.eval(f64::NAN).is_none());
+        }
+        assert!(RadialTransformTable::new(&mesh, 0, &f, rule, 1.0, 0.0, 8).is_err());
+        assert!(RadialTransformTable::new(&mesh, 0, &f, rule, 1.0, 0.01, 5).is_err());
+        assert!(RadialTransformTable::new(&mesh, 0, &f, rule, f64::NAN, 0.01, 8).is_err());
+    }
+}
+
 #[cfg(test)]
 mod core_tests {
     use super::*;

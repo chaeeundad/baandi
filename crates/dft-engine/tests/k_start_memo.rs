@@ -86,7 +86,10 @@ fn run(
         },
     ];
     dft_mpi::simulate(ranks, |comm| {
-        let config = RunConfig::from_pairs(switches).unwrap();
+        // GK14 radial tables off: these tests compare against the quadrature bits.
+        let mut pairs = vec![("radial_table_start", "off"), ("radial_table_nl", "off")];
+        pairs.extend_from_slice(switches);
+        let config = RunConfig::from_pairs(&pairs).unwrap();
         let _scope = config.enter();
         let mut state = refstart::start_kpoints(
             StartInput {

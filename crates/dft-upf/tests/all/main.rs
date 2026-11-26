@@ -13,4 +13,5 @@ mod atomic_wavefunctions;
 mod beta_tail;
 mod parser;
 mod radial;
+mod radial_table;
 mod real_nc;

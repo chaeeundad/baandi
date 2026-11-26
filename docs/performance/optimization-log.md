@@ -4975,3 +4975,17 @@ on; one extra reduction agrees on construction errors) and one shared start for 
 `dft-physics` hamiltonian and `dft-engine/tests/k_start_memo.rs`). Mac (O, release, npw ~5000, 40 columns, 4 k):
 `k_start_nonlocal_tables` rank 0 1.5 -> 0.38 s at 4 simulated ranks, 1.6 -> 0.29 s at 8; whole k start 1.9 -> 0.78 s
 and 2.4 -> 0.72 s; serial unchanged.
+
+## GK14-RADIAL-TABLES — radial transform tables for the k start and k projectors (2026-11-26)
+
+Profile (relayed dev08 MPI8, GeTe 260 k, after GK1 + GK1B): `k_start_atomic_columns` 57 s and
+`k_start_nonlocal_tables` 18 s of an 80 s setup (SCF 43 s; QE whole run 34 s); both are one radial quadrature per
+distinct |k+G| per channel. Change: one uniform table per species channel per k start (h = 0.005 Bohr^-1, 8-point
+Lagrange, parity extension at q < 0; `dft_upf::radial::RadialTransformTable`), nodes split over ranks and summed,
+read by `NonlocalOperator::new_owned_rows_only_tabulated` and `atomic_k_columns_memo`; switches
+`BAANDI_RADIAL_TABLE_NL` / `BAANDI_RADIAL_TABLE_START` (default on). Not bit-identical: measured table error
+<= 7.4e-15 of the channel peak on ten real UPFs; delivered energies within 2.7e-15 Ha (synthetic k set, spin, FD
+5.2e-14) and bit-equal on real Ge/Te (QE-like 4-point/0.01 table: 3.2e-9 Ha, outside strict). Map counts identical.
+Mac (O, release, serial, real Ge/Te, npw ~6190, 8 k): NL stage 1.47 -> 0.046 s, atomic columns 4.58 -> 0.025 s,
+table build 0.185 s, whole k start 6.7 -> 0.88 s. Derived in part from note `qe-pseudo-treatment-differences.md`
+X6 / `qe-stage-by-stage.md` (QE tabulates radial transforms); stencil order and spacing chosen from our own scan.

@@ -119,6 +119,13 @@ fn reference_verify_off_labels_and_stop_to_verified_k_fd_spin_outputs() {
         ),
         ("spin", "[spin]\nmode='collinear'\nn_up=1\nn_down=1\n"),
     ] {
+        // FD-FORCES: scf.nbands now sets the FD band count; this fixture keeps
+        // its historical FD count, the cap (12).
+        let base = if name == "fd" {
+            base.replace("nbands=3\n", "")
+        } else {
+            base.clone()
+        };
         let text = base
             .replace(
                 "functional='lda-pz'",
@@ -311,8 +318,8 @@ fn reference_fd_automatic_band_count() {
     assert_eq!(growth["final_bands"], events.last().unwrap()["to_bands"]);
     assert_eq!(doc_auto["occupations"]["shape"][2], growth["final_bands"]);
     assert_eq!(doc_auto["convergence"]["converged"], true);
-    // Explicit scf.nbands: fixed count = band_cap (unchanged behaviour).
-    let (output, doc) = invoke("explicit", &base.replace("[scf]\n", "[scf]\nnbands=3\n"));
+    // Explicit scf.nbands: fixed count = scf.nbands, no growth.
+    let (output, doc) = invoke("explicit", &base.replace("[scf]\n", "[scf]\nnbands=12\n"));
     assert!(output.status.success());
     let doc_explicit = doc.unwrap();
     let fixed = &doc_explicit["reference_scf"]["band_count_growth"];
@@ -341,6 +348,19 @@ fn reference_fd_automatic_band_count() {
     assert!(
         stderr.contains("insufficient empty-state coverage at explicit cap")
             && stderr.contains("automatic band count reached 6 bands; occupations.band_cap = 6"),
+        "{stderr}"
+    );
+    // Explicit scf.nbands below the needed count: the existing failure,
+    // without growth (the automatic run needed more than 5 bands).
+    let (output, _) = invoke(
+        "explicit-short",
+        &base.replace("[scf]\n", "[scf]\nnbands=5\n"),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study\")")
+            && !stderr.contains("band growth:"),
         "{stderr}"
     );
     fs::remove_dir_all(root).unwrap();

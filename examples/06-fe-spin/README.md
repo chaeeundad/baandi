@@ -8,8 +8,8 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 06-fe-spin
 input=target/tmp/examples/06-fe-spin/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/06-fe-spin
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/06-fe-spin
 ```
 
 FD avoids imposing an insulating gap on metallic Fe. The total moment is constrained to 2 mu_B per primitive cell, not a predicted ground-state moment. Inspect spin/k/band axes, channel counts, moment, free energy and verification in `results.json`, and `density-up.cube`, `density-down.cube`, `density-total.cube`, `magnetization.cube`. Magnetic time reversal is disabled. **G4D:** removing the moment constraint creates free-moment PBE, which is unqualified and routes to the strict oracle; that fallback does not guarantee convergence. See [spin guide](../../docs/user/collinear-spin.md).

@@ -219,7 +219,8 @@ fn cli_results_match_pre_facade_binary() {
         (
             "fd",
             "run",
-            electronic.clone()
+            // FD-FORCES: scf.nbands sets the FD band count; keep the cap (12).
+            electronic.replace("nbands=3\n", "")
                 + "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=12\n",
         ),
         (

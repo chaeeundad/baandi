@@ -330,6 +330,12 @@ table! {
 
     XC_SCREEN_NEGATIVE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "G4E: screen XC-only small/signed vacuum densities with a screened-charge budget; accepted ADR 0046";
+    REFSCF_REAL_START: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4G research: Hermitian Gamma kinetic complements and real starting Ritz matrix; rejected (centred fixture stops converging), default off";
+    REFSCF_CANONICAL_CLUSTER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4G research: canonical coordinates within roundoff-degenerate Ritz clusters; default off";
+    REFSCF_SPIN_PULAY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G4G research: per-channel real-space Pulay replaces the Broyden proposal (serial fixed-sector only); default off pending dev08 O run";
 }
 
 struct Resolved {

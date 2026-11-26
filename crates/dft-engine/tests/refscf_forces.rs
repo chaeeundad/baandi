@@ -172,6 +172,24 @@ fn check_energy_derivatives(
     force: &[[f64; 3]],
     stress: &[[f64; 3]; 3],
 ) {
+    let profile = Profile::from_standard_ha(input.options.standard.unwrap().threshold_ha).unwrap();
+    check_derivatives(input, points, force, stress, |input| {
+        let r = k_driver::run(input, profile, points).unwrap();
+        assert!(r.outcome.converged);
+        r.outcome.result.total_hartree()
+    });
+}
+/// Central differences of the variational energy returned by `energy` (E for
+/// fixed occupations, the Mermin free energy F = E - TS for Fermi-Dirac):
+/// atom 1 displaced along x by +-0.002 Bohr, and an xx strain of +-1e-4 that
+/// keeps the frozen Miller sets. Tolerance 1e-6 Ha/Bohr and Ha/Bohr^3.
+fn check_derivatives(
+    input: StartInput<'_>,
+    points: &[KPoint],
+    force: &[[f64; 3]],
+    stress: &[[f64; 3]; 3],
+    energy: impl Fn(StartInput<'_>) -> f64,
+) {
     // Keep the quadrature fixed for both displacement and frozen-Miller strain.
     let db = dft_basis::PlaneWaveBasis::new(
         input.cell,
@@ -199,7 +217,6 @@ fn check_energy_derivatives(
     };
     let cell = input.cell;
     let atoms = input.atoms;
-    let profile = Profile::from_standard_ha(input.options.standard.unwrap().threshold_ha).unwrap();
     let h = 0.002;
     let mut energies = Vec::new();
     for sign in [-1., 1.] {
@@ -208,17 +225,10 @@ fn check_energy_derivatives(
         for (v, dx) in displaced[1].fractional_position.iter_mut().zip(shift) {
             *v += dx;
         }
-        let r = k_driver::run(
-            StartInput {
-                atoms: &displaced,
-                ..input
-            },
-            profile,
-            points,
-        )
-        .unwrap();
-        assert!(r.outcome.converged);
-        energies.push(r.outcome.result.total_hartree());
+        energies.push(energy(StartInput {
+            atoms: &displaced,
+            ..input
+        }));
     }
     let fd = -(energies[1] - energies[0]) / (2. * h);
     println!(
@@ -268,17 +278,10 @@ fn check_energy_derivatives(
                 "strain crossed a cutoff shell"
             );
         }
-        let r = k_driver::run(
-            StartInput {
-                cell: &strained,
-                ..input
-            },
-            profile,
-            points,
-        )
-        .unwrap();
-        assert!(r.outcome.converged);
-        energies.push(r.outcome.result.total_hartree());
+        energies.push(energy(StartInput {
+            cell: &strained,
+            ..input
+        }));
     }
     let fd = (energies[1] - energies[0]) / (2. * h * cell.volume_bohr3());
     println!(
@@ -850,6 +853,319 @@ fn unstrained_delivery_fingerprints() {
         );
     }
 }
+
+/// FD-FORCES: reference spin/Fermi-Dirac delivery. The analytic forces and
+/// frozen-Miller stress of the delivered state are checked against central
+/// differences of its own variational energy (F = E - TS for Fermi-Dirac, E
+/// for a fixed spin sector) and against the strict legacy oracle state
+/// (`finite_temperature` / `collinear` problems with the same model).
+mod electronic_derivatives {
+    use super::*;
+    use dft_engine::{
+        Functional,
+        collinear::{CollinearProblem, SpinSector},
+        finite_temperature::FiniteTProblem,
+        refscf::electronic::{self, Policy},
+    };
+    use dft_physics::occupations::Constraint;
+
+    struct Case {
+        policy: Policy,
+        functional: Functional,
+        pp_functional: &'static str,
+        bands: usize,
+        points: Vec<KPoint>,
+    }
+
+    fn sector(n_up: usize, n_down: usize) -> SpinSector {
+        SpinSector {
+            n_up,
+            n_down,
+            axis_cartesian: [0., 0., 1.],
+            initial_moment_seed: Some(0.3),
+        }
+    }
+
+    fn gamma() -> Vec<KPoint> {
+        vec![KPoint {
+            fractional: [0.; 3],
+            weight: 1.,
+        }]
+    }
+
+    fn run_case(case: Case) {
+        let screening = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+        let _screen_scope = screening.enter();
+        let pp = common::potential_with_atomic_start(1., 1.5, true, 161, case.pp_functional);
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+        let atoms = [
+            Atom::new("Xx", [0.1, 0.2, 0.3]),
+            Atom::new("Xx", [0.37, 0.43, 0.49]),
+        ];
+        let mut opts = options();
+        opts.functional = case.functional;
+        opts.gamma_real = GammaReal::Off;
+        opts.bands = Some(case.bands);
+        let profile = Profile::from_standard_ha(5e-13).unwrap();
+        opts.standard = Some(dft_engine::StandardProfile {
+            threshold_ha: profile.threshold_ry / 2.,
+        });
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        let points = case.points.as_slice();
+        let mut run = electronic::run(input(), profile, points, case.policy.clone()).unwrap();
+        assert!(run.converged && run.verification.as_ref().unwrap().passed());
+        let entropy = run.thermodynamics.entropy_term_ha;
+        let fractional = run
+            .blocks
+            .iter()
+            .flatten()
+            .flat_map(|b| b.occupations.iter())
+            .filter(|f| **f > 1e-6 && (**f - 1.).abs() > 1e-6 && (**f - 2.).abs() > 1e-6)
+            .count();
+        println!(
+            "case {:?}: F={:.12} Ha TS={entropy:e} Ha fractional occupations={fractional}",
+            case.policy, run.thermodynamics.free_energy_ha
+        );
+        let (force, stress) = {
+            let view = delivered::electronic_state(input(), &mut run, &[]).unwrap();
+            let f = dft_engine::forces(&view).unwrap();
+            let s = dft_engine::stress::frozen_stress(&view).unwrap();
+            assert_eq!(f.verification, "verified");
+            assert_eq!(f.quantity, if case.policy.is_finite() { "F" } else { "E" });
+            let fast = {
+                let config = RunConfig::from_pairs(&[
+                    ("xc_screen_negative", "off"),
+                    ("force_band_first", "on"),
+                ])
+                .unwrap();
+                let _scope = config.enter();
+                dft_engine::forces(&view).unwrap()
+            };
+            assert!(delta(f.values.iter().flatten(), fast.values.iter().flatten()) < 1e-12);
+            (f.values, s.values)
+        };
+        // A changed model is rejected instead of silently used.
+        let mut moved = atoms.clone();
+        moved[0].fractional_position[0] += 0.01;
+        assert!(
+            delivered::electronic_state(
+                StartInput {
+                    atoms: &moved,
+                    ..input()
+                },
+                &mut run,
+                &[]
+            )
+            .is_err()
+        );
+        let policy = case.policy.clone();
+        check_derivatives(input(), points, &force, &stress, |input| {
+            let r = electronic::run(input, profile, points, policy.clone()).unwrap();
+            assert!(r.converged && r.verification.as_ref().unwrap().passed());
+            r.thermodynamics.free_energy_ha
+        });
+        // Strict legacy oracle: same model, strict certificate.
+        let mut strict = opts.clone();
+        strict.standard = None;
+        strict.verification = Verification::Off;
+        strict.density_tolerance = 1e-9;
+        strict.energy_tolerance = 1e-12;
+        strict.eigen_tolerance = 1e-11;
+        let oracle = |electronic| {
+            let state = ForceState {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &species,
+                options: &strict,
+                electronic,
+                density_floor: None,
+                symmetry: &[],
+            };
+            (
+                dft_engine::forces(&state).unwrap().values,
+                dft_engine::stress::frozen_stress(&state).unwrap().values,
+            )
+        };
+        let (free, (old_f, old_s)) = match &case.policy {
+            Policy::FermiDirac { theta_ha, band_cap } => {
+                let r = FiniteTProblem::new(
+                    &cell,
+                    &atoms,
+                    &species,
+                    strict.clone(),
+                    points,
+                    *theta_ha,
+                    *band_cap,
+                )
+                .unwrap()
+                .run()
+                .unwrap();
+                assert!(r.converged);
+                (
+                    r.thermodynamics.free_energy_ha,
+                    oracle(ElectronicState::FiniteTemperature(&r)),
+                )
+            }
+            Policy::FixedSpin(sector) => {
+                let r = CollinearProblem::new(
+                    &cell,
+                    &atoms,
+                    &species,
+                    strict.clone(),
+                    points,
+                    sector.clone(),
+                )
+                .unwrap()
+                .run()
+                .unwrap();
+                assert!(r.converged);
+                (
+                    r.energy.total_hartree(),
+                    oracle(ElectronicState::Collinear(&r)),
+                )
+            }
+            Policy::SpinFermiDirac {
+                sector,
+                theta_ha,
+                constraint,
+                band_cap,
+            } => {
+                let r = CollinearProblem::new_fermi_dirac(
+                    &cell,
+                    &atoms,
+                    &species,
+                    strict.clone(),
+                    points,
+                    sector.clone(),
+                    *theta_ha,
+                    *constraint,
+                    *band_cap,
+                )
+                .unwrap()
+                .run()
+                .unwrap();
+                assert!(r.converged);
+                (
+                    r.thermodynamics.unwrap().free_energy_ha,
+                    oracle(ElectronicState::Collinear(&r)),
+                )
+            }
+        };
+        let df = delta(force.iter().flatten(), old_f.iter().flatten());
+        let ds = delta(stress.iter().flatten(), old_s.iter().flatten());
+        let de = (run.thermodynamics.free_energy_ha - free).abs();
+        println!(
+            "reference vs strict oracle: dF={de:e} Ha dForce={df:e} Ha/Bohr dStress={ds:e} Ha/Bohr^3"
+        );
+        assert!(de < 5e-9 && df < 1e-6 && ds < 1e-6);
+    }
+
+    #[test]
+    fn fermi_dirac_forces_stress_match_free_energy_differences() {
+        run_case(Case {
+            // TS = 9.9e-4 Ha with 7 fractional occupations (16 retained bands
+            // cover the Fermi tail of this small basis; 0.05 Ha does not).
+            policy: Policy::FermiDirac {
+                theta_ha: 0.03,
+                band_cap: 16,
+            },
+            functional: Functional::LdaPz,
+            pp_functional: "SLA PZ",
+            bands: 16,
+            points: gamma(),
+        });
+    }
+
+    #[test]
+    fn collinear_fixed_sector_forces_stress_match_energy_differences() {
+        run_case(Case {
+            policy: Policy::FixedSpin(sector(2, 0)),
+            functional: Functional::LdaPw,
+            pp_functional: "SLA PW",
+            bands: 4,
+            points: gamma(),
+        });
+    }
+
+    #[test]
+    fn collinear_fermi_dirac_forces_stress_match_free_energy_differences() {
+        run_case(Case {
+            policy: Policy::SpinFermiDirac {
+                sector: sector(1, 1),
+                theta_ha: 0.02,
+                constraint: Constraint::FixedMoment(0.5),
+                band_cap: 16,
+            },
+            functional: Functional::LdaPw,
+            pp_functional: "SLA PW",
+            bands: 16,
+            points: gamma(),
+        });
+    }
+
+    #[test]
+    fn nonconverged_or_unverified_delivery_is_rejected() {
+        let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+        let atoms = [
+            Atom::new("Xx", [0.1, 0.2, 0.3]),
+            Atom::new("Xx", [0.37, 0.43, 0.49]),
+        ];
+        let mut opts = options();
+        opts.gamma_real = GammaReal::Off;
+        opts.bands = Some(16);
+        opts.standard = Some(dft_engine::StandardProfile { threshold_ha: 5e-9 });
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        let policy = Policy::FermiDirac {
+            theta_ha: 0.02,
+            band_cap: 16,
+        };
+        let profile = Profile::from_standard_ha(5e-9).unwrap();
+        let mut run = electronic::run(input(), profile, &gamma(), policy.clone()).unwrap();
+        run.converged = false;
+        assert!(delivered::electronic_state(input(), &mut run, &[]).is_err());
+        run.converged = true;
+        run.verification
+            .as_mut()
+            .unwrap()
+            .attempts
+            .last_mut()
+            .unwrap()
+            .passed = false;
+        assert!(delivered::electronic_state(input(), &mut run, &[]).is_err());
+        // Explicit verify=off delivers forces labelled unverified.
+        let mut off = opts.clone();
+        off.verification = Verification::Off;
+        let off_input = || StartInput {
+            options: &off,
+            ..input()
+        };
+        let mut run = electronic::run(off_input(), profile, &gamma(), policy).unwrap();
+        let view = delivered::electronic_state(off_input(), &mut run, &[]).unwrap();
+        assert_eq!(
+            dft_engine::forces(&view).unwrap().verification,
+            "unverified"
+        );
+    }
+}
 mod frozen_strain {
     use super::*;
     use dft_basis::{FftGridSpec, PlaneWaveBasis};
@@ -1231,4 +1547,84 @@ mod frozen_strain {
             compare_strained(&cell, &atoms, &pp, opts.clone(), gamma, true, &mesh(gamma));
         }
     }
+}
+
+/// Automatic FD band growth keeps the derivative contract: forces and stress
+/// of the delivered (grown) state match an explicit fixed-count run of the
+/// same model within the standard accuracy class.
+#[test]
+fn fd_band_growth_forces_stress_match_explicit_count() {
+    use dft_engine::refscf::{
+        api::{Derivatives, Request, solve},
+        electronic::{BandGrowth, Policy},
+    };
+    let screening = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
+    let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.1, 0.2, 0.3]),
+        Atom::new("Xx", [0.37, 0.43, 0.49]),
+    ];
+    let points = vec![KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let profile = Profile::from_standard_ha(5e-13).unwrap();
+    let (theta_ha, cap) = (0.02, 16);
+    let run = |bands: Option<usize>, growth: Option<BandGrowth>| {
+        let mut opts = options();
+        opts.cutoff_hartree = 3.;
+        opts.gamma_real = GammaReal::Off;
+        opts.bands = bands;
+        opts.standard = Some(dft_engine::StandardProfile {
+            threshold_ha: profile.threshold_ry / 2.,
+        });
+        let mut request = Request::new(profile, points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha,
+            band_cap: bands.unwrap_or(cap),
+        });
+        request.band_growth = growth;
+        request.derivatives = Derivatives {
+            forces: true,
+            stress: true,
+            deferred: false,
+        };
+        let input = StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        let d = solve(input, request).unwrap();
+        let forces = d.derivatives.forces.unwrap().values;
+        let stress = d.derivatives.stress.unwrap().values;
+        let r = d.run.into_electronic().unwrap();
+        assert!(r.converged && r.verification.as_ref().unwrap().passed());
+        (r, forces, stress)
+    };
+    let (explicit, f0, s0) = run(Some(cap), None);
+    let (grown, f1, s1) = run(None, Some(BandGrowth::Automatic));
+    let report = grown.band_growth.clone().unwrap();
+    let force_error = delta(f0.iter().flatten(), f1.iter().flatten());
+    let stress_error = delta(s0.iter().flatten(), s1.iter().flatten());
+    let free_error =
+        (grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha).abs();
+    println!(
+        "FD growth {} -> {} bands ({} events): |dF|={free_error:e} Ha max|dforce|={force_error:e} Ha/Bohr max|dstress|={stress_error:e} Ha/Bohr^3; max|force|={:e}",
+        report.initial_bands,
+        report.final_bands,
+        report.events.len(),
+        f0.iter().flatten().fold(0_f64, |m, v| m.max(v.abs())),
+    );
+    assert_eq!(report.initial_bands, 5);
+    assert!(!report.events.is_empty() && report.final_bands < cap);
+    assert!(free_error <= 5e-9);
+    assert!(force_error <= 1e-6);
+    assert!(stress_error <= 1e-8);
 }

@@ -8,7 +8,7 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 11-python
 input=target/tmp/examples/11-python/input.toml
-target/release/dft-cli validate "$input"
+target/release/baandi validate "$input"
 python3 -m venv target/tmp/examples/python-env
 . target/tmp/examples/python-env/bin/activate
 python -m pip install ./python/baandi tomli

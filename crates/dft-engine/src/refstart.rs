@@ -1904,14 +1904,47 @@ fn finish_kpoints<K: Collective>(
                 .total_cmp(&basis.momenta()[b].norm_squared)
                 .then(a.cmp(&b))
         });
+        let real_start = point.fractional == [0.; 3]
+            && dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_REAL_START);
+        let half = real_start
+            .then(|| HalfSphere::new(&basis, &grid))
+            .transpose()
+            .map_err(err)?;
         let target = columns.len().max(bands).min(basis.vectors().len());
         let mut q = Matrix::zeros(rows.len(), 0).map_err(err)?;
         q.reserve_columns(target).map_err(err)?;
-        for mut col in columns.into_iter().chain(order.into_iter().map(|g| {
-            rows.iter()
-                .map(|&r| C::new(f64::from(r == g), 0.))
-                .collect()
-        })) {
+        let rows_ref = &rows;
+        let complements = order.into_iter().flat_map(|g| {
+            let mirror = half.as_ref().map(|h| h.mirror()[g] as usize);
+            let count = match mirror {
+                Some(m) if g > m => 0,
+                Some(m) if g != m => 2,
+                _ => 1,
+            };
+            (0..count).map(move |imaginary| {
+                rows_ref
+                    .iter()
+                    .map(|&r| {
+                        let Some(m) = mirror.filter(|&m| m != g) else {
+                            return C::new(f64::from(r == g), 0.);
+                        };
+                        let v = if imaginary == 0 {
+                            C::new(std::f64::consts::FRAC_1_SQRT_2, 0.)
+                        } else {
+                            C::new(0., std::f64::consts::FRAC_1_SQRT_2)
+                        };
+                        if r == g {
+                            v
+                        } else if r == m {
+                            v.conj()
+                        } else {
+                            C::default()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+        });
+        for mut col in columns.into_iter().chain(complements) {
             for _ in 0..2 {
                 for j in 0..q.cols() {
                     let z: C = q
@@ -1971,7 +2004,20 @@ fn finish_kpoints<K: Collective>(
                 h[(j, i)] = z.conj();
             }
         }
-        let (_, mut c) = hermitian_eigh(&h).map_err(err)?;
+        if real_start {
+            for z in h.as_mut_slice() {
+                if z.im.abs() > 1e-12 {
+                    return Err(err("Gamma start Hamiltonian is not real"));
+                }
+                z.im = 0.;
+            }
+        }
+        let (values, mut c) = hermitian_eigh(&h).map_err(err)?;
+        if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_CANONICAL_CLUSTER) {
+            let mut scratch =
+                vec![C::default(); c.rows() * c.cols() + c.cols() * c.cols() + c.cols()];
+            dft_solvers::ref_davidson_complex::canonicalize_clusters(&values, &mut c, &mut scratch);
+        }
         c.resize_columns(bands).map_err(err)?;
         let mut x = Matrix::zeros(rows.len(), bands).map_err(err)?;
         gemm.multiply_into(&q, MatrixOp::Identity, &c, MatrixOp::Identity, &mut x)

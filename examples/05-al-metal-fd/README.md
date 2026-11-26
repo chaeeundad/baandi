@@ -8,8 +8,8 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 05-al-metal-fd
 input=target/tmp/examples/05-al-metal-fd/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/05-al-metal-fd
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/05-al-metal-fd
 ```
 
 One Al atom has three valence electrons with the specified file, so use FD rather than fixed insulating occupations. Inspect internal energy E, entropy contribution TS, free energy F=E−TS, chemical potential, occupations and top-band coverage in `results.json`. Repeat with a denser mesh, smaller width and at least four more bands before drawing physical conclusions. This is limited-validation metallic functionality, not an accuracy-qualified Al reference.

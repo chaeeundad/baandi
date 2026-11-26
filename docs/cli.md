@@ -1,5 +1,7 @@
 # Command-line SCF
 
+> The command is `baandi` (`target/release/baandi`). The Cargo package is still `dft-cli` (`cargo build -p dft-cli`), and a `dft-cli` binary of the same program remains as a deprecated alias for existing scripts; it will be removed in a later release. Result files keep `"tool": {"name": "dft-cli"}` for schema stability.
+
 ```sh
 cargo run --offline -p dft-cli -- run input.toml [--output-dir DIR]
 ```
@@ -74,10 +76,10 @@ prefer the executed start record when explaining what ran.
 ## Checkpoint/restart v2
 
 ```sh
-dft-cli checkpoint input.toml boundary.cp --iteration 3 --kind exact
-dft-cli restart input.toml boundary.cp result.cp
+baandi checkpoint input.toml boundary.cp --iteration 3 --kind exact
+baandi restart input.toml boundary.cp result.cp
 dft-cli status result.cp
-dft-cli checkpoint input.toml evaluated.cp --kind result
+baandi checkpoint input.toml evaluated.cp --kind result
 ```
 
 These default to the reference stepper and v2. `restart` writes a ResultExport
@@ -536,7 +538,7 @@ dft-cli pseudo path
 dft-cli pseudo suggest SiO2
 dft-cli pseudo suggest Si O
 dft-cli pseudo fetch ID [--yes] [--offline]
-dft-cli inspect-upf /outside/file.upf --json
+baandi inspect-upf /outside/file.upf --json
 ```
 
 `pseudo --registry /outside/registry.json COMMAND` selects an explicitly trusted
@@ -583,8 +585,8 @@ periodic endpoints and the independent Python validator, and
 ## Fixed-density bands and DOS (P8A)
 
 ```sh
-dft-cli bands input.toml [--output-dir DIR]
-dft-cli dos input.toml [--output-dir DIR]
+baandi bands input.toml [--output-dir DIR]
+baandi dos input.toml [--output-dir DIR]
 python3 -I scripts/plot_bands_dos.py DIR/bands.csv DIR/dos.csv -o DIR/figure.svg
 ```
 
@@ -628,7 +630,7 @@ checks occur before computing. Exit codes are 1 input, 2 UPF, 3 SCF exhaustion,
 multi-file transaction; check exit status before using files.
 ## Full input preflight (P8G)
 
-`dft-cli validate input.toml [--json]` now opens and validates the referenced
+`baandi validate input.toml [--json]` now opens and validates the referenced
 UPF files, resolved relative to the input file. This supersedes earlier descriptions
 of `validate` as a geometry-only check. `grid` remains a geometry/grid inspection.
 `run` invokes the identical preflight before constructing an SCF problem or writing
@@ -730,7 +732,7 @@ work without weakening the final acceptance tests.
 
 ## Optional agent preflight findings (P11K, partial implementation)
 
-`dft-cli validate INPUT --json` adds `findings_schema_version: 1`, typed `findings`
+`baandi validate INPUT --json` adds `findings_schema_version: 1`, typed `findings`
 and a read-only `structure` summary to successful reports. Codes currently cover
 cutoff suggestions and explicit element/functional overrides; each carries a
 severity, TOML key path, typed evidence and fix hint. Structure vectors are rows
@@ -786,7 +788,7 @@ share sector/parity/capacity, axis, unsupported-functional and symmetry checks.
 
 ### P13C NC datasets and NLCC
 
-`dft-cli inspect-upf FILE --json [--manifest docs/data/nc-datasets.json]`
+`baandi inspect-upf FILE --json [--manifest docs/data/nc-datasets.json]`
 reports SHA-256, ordered one-based projector channels, wavefunction/mesh counts,
 original XC and relativistic labels, NLCC, and cutoff hints in Ry (absent hints
 are null). The optional manifest is matched by hash, never filename; missing or
@@ -834,7 +836,7 @@ Reproduction (all real files remain external):
 
 ```sh
 export DFT_NC_DIR=/absolute/external/pseudodojo/ex
-python3 -I scripts/check_upf_headers.py --binary target/debug/dft-cli \
+python3 -I scripts/check_upf_headers.py --binary target/debug/baandi \
   --output tests/reference/datasets/pseudodojo-headers.json
 cargo test --release -p dft-cli --test all inspect_upf::real_nc_headers -- --ignored --nocapture
 cargo test --release -p dft-engine --test all nlcc:: -- --include-ignored --nocapture
@@ -993,7 +995,7 @@ and `verification_residual_bound_ha` (ONEPATH-1). The forces are computed with
 the same formulas as on the strict path, from the converged step's own state.
 `output.forces` with `verify = "off"` is an input error.
 
-Fixed-cell relaxation (`dft-cli relax`, `relax.mode = "ions"`, the default) runs
+Fixed-cell relaxation (`baandi relax`, `relax.mode = "ions"`, the default) runs
 every ionic step on the standard path with the verification (ONEPATH-1, user
 decision 2026-11-16): a failed verification continues that step's SCF, warm
 starts and `start_extrapolation` are unchanged, and the relaxation
@@ -1104,9 +1106,16 @@ positive. Kelvin uses the exact SI Boltzmann constant at the CLI boundary;
 the engine uses theta=k_B T in Ha. Gaussian, MP and cold schemes reject.
 Odd unpolarized electron counts are permitted only in FD mode.
 
-`band_cap` defaults to 32. The cap must fit every k basis. FD band count on
-the reference driver:
+`band_cap` defaults to 32. The band count must fit every k basis. FD band
+count on the reference driver (per spin channel and k point):
 
+- `scf.nbands` explicit: the fixed count is `scf.nbands` (FD-FORCES,
+  2026-11-26; before that `scf.nbands` was ignored in FD mode and the cap was
+  always the band count). An `scf.nbands` above an explicit `band_cap` is
+  rejected at preflight (`scf.nbands = N exceeds occupations.band_cap = C`).
+  Every one of these bands is prepared and solved; insufficient empty-state
+  coverage fails with an instruction to increase the count.
+  `band_count_growth.mode` is `fixed`.
 - `scf.nbands` omitted (automatic): the run starts at
   `max(ceil(n) + 4, ceil(1.2 n))` bands, n the largest channel electron target
   (N/2 unpolarized), at most `band_cap`. When a map fails the empty-state
@@ -1119,15 +1128,12 @@ the reference driver:
   `final_bands`, `band_cap`, `growth_rule`, `events[]` with iteration,
   verification map, from/to and the rejected edge numbers). At the cap the run
   fails with the coverage message plus the band count reached; raise
-  `band_cap`.
-- `scf.nbands` explicit: the previous behaviour, unchanged. The whole cap is
-  prepared and solved (`scf.nbands` is a lower bound and must not exceed the
-  cap); insufficient coverage fails with an instruction to increase the cap.
-  `band_count_growth.mode` is `fixed`.
+  `band_cap`. Forces and stress are evaluated on the delivered (grown) state.
 
 The reported top-band diagnostics are not bounds on infinitely many omitted bands;
 repeat with at least four more bands and compare F/density. The strict oracle
-FD path (`finite_run`) keeps the fixed cap.
+FD path (`finite_run`) has no automatic growth: it solves the fixed count
+(`scf.nbands`, otherwise `band_cap`).
 
 When to use it for an insulator-like cell: if fixed occupations stall (density residual
 floors around 1e-3, the SCF wanders) and the printed HOMO/LUMO gap is below about
@@ -1207,9 +1213,25 @@ or the strict certificate (`BAANDI_REFERENCE_STRICT=on`) is required;
 `values`, `per_term` (ewald/local/nonlocal/core), `net_force`,
 `maximum_absolute_component`, `elapsed_seconds`, `band_passes` and
 `unavailable_terms` and a named `derivative_ledger`. Missing derivatives never become zero or a partial total.
-The fixed unpolarized path prints the table; spin and FD also write `forces.txt`.
+The fixed unpolarized path prints the table; the strict-oracle spin and FD
+serializers also write `forces.txt`.
 With symmetry auto the same SCF spatial subgroup averages each term.
 For FD these are derivatives of free energy at fixed temperature and charge.
+
+FD-FORCES (2026-11-26): the default reference driver computes forces and stress
+for Fermi-Dirac (scalar and collinear) and collinear fixed-sector runs too.
+Before this change the reference spin/FD result (`output_profile =
+"reference_spin_fd_v1"`) silently omitted both blocks. `forces.quantity` and
+`stress.quantity` are `F` for FD (Mermin free energy F = E - TS; the
+occupation derivatives add no term because F is variational) and `E` for a
+fixed spin sector. The nonlocal and kinetic terms sum f_nk w_k over both spin
+channels. As for fixed occupations, the passed reference verification is the
+certificate (`verification = "verified"`, standard `preconditions`); with
+`scf.verify = "off"` the blocks say `unverified`. A non-converged run writes
+`{"status":"unavailable","reason":"scf_not_converged"}` for each requested
+block. Both console tables are printed. The stress block includes the Pulay
+assessment from three reference spin/FD cutoff-scan SCFs with the same
+occupation policy.
 State-contract extension version 2 includes the available-force branch and requires
 strict/converged/certificate-passed preconditions. Version 1 unavailable documents
 remain valid, and unavailable forces never carry numerical arrays. The outer
@@ -1217,7 +1239,7 @@ results schema version is unchanged. See [validation](validation/forces.md).
 
 ## Fixed-cell relaxation (P21A)
 
-`dft-cli relax input.toml --output-dir DIR [--resume]` accepts the optional
+`baandi relax input.toml --output-dir DIR [--resume]` accepts the optional
 `[relax]` table, forces from a verified standard SCF on every ionic step (the
 strict certificate with `BAANDI_REFERENCE_STRICT=on`; see the single SCF path
 section), capped BFGS/FIRE steps and Cartesian constraints. Exit 0 is converged, 3 is ionic step exhaustion, 4 is failure after
@@ -1255,7 +1277,7 @@ xx,yy,zz,yz,xz,xy for the existing Gamma/unpolarized adapter. See
 
 ## Variable-cell relaxation (P23A)
 
-`dft-cli relax` accepts `relax.mode="ions"|"cell"|"ions_cell"` (default ions),
+`baandi relax` accepts `relax.mode="ions"|"cell"|"ions_cell"` (default ions),
 `cell_dofs="full"|"isotropic"|"xyz_diagonal"`, Cartesian `fixed_axes`, external
 `pressure_ha_bohr3`, `stress_tol_ha_bohr3`, `rebuild_every`, and
 `pulay_warning_ha_bohr3`. Cell modes minimize E+PV on frozen Miller segments,

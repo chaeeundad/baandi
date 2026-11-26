@@ -76,7 +76,7 @@ Build instructions, example inputs, how to run the CLI and how the Quantum ESPRE
 Build with the pinned Rust toolchain (see [prerequisites](docs/getting-started.md)):
 
 ```sh
-cargo build --release -p dft-cli
+cargo build --release -p dft-cli   # builds target/release/baandi
 # Optional, with a configured MPI toolchain:
 # cargo build --release -p dft-cli --features mpi
 # Optional, with Intel MKL on supported Linux x86_64 hosts:
@@ -85,8 +85,8 @@ export PSEUDO_DIR=/absolute/path/outside/repository/pseudo
 # First obtain Si.pz-vbc.UPF as described in example 01.
 python3 examples/prepare.py 01-si-gamma-lda
 input=target/tmp/examples/01-si-gamma-lda/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/si
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/si
 ```
 
 The smallest run writes `results.json` (energy, eigenvalues, convergence and

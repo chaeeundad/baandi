@@ -8,8 +8,8 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 01-si-gamma-lda
 input=target/tmp/examples/01-si-gamma-lda/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/01-si-gamma-lda
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/01-si-gamma-lda
 ```
 
 Look at `results.json`: `total_energy` (Ha/Ry/eV), eigenvalues, convergence, `scf.driver = "reference"` and verification. `density.bin` and `density.json` contain total density and its grid/checksum. Gamma and 30 Ry are teaching settings; converge the cutoff and k mesh before using energies scientifically.

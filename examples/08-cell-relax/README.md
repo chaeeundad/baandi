@@ -8,8 +8,8 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 08-cell-relax
 input=target/tmp/examples/08-cell-relax/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli relax "$input" --output-dir results/08-cell-relax
+target/release/baandi validate "$input"
+target/release/baandi relax "$input" --output-dir results/08-cell-relax
 ```
 
 This slightly expanded Si primitive cell relaxes isotropically at zero external pressure with fractional ions fixed. Use `mode = "ions_cell"` to also move ions. Inspect per-frame cell/stress/enthalpy, `final.cif`, `trajectory.extxyz` and `results.json`. Frozen Miller segments rebuild every five moves and at the end: inspect rebuilt pressure and Pulay warnings; a frozen-basis minimum is not a cutoff-converged equilibrium. Verification remains on; default stress threshold is 5e-11 Ha. See [cell guide](../../docs/user/cell-relaxation.md).

@@ -2687,12 +2687,11 @@ impl ReferenceContext {
             .sum::<Result<f64, _>>()?;
         let theta = self.config.finite_temperature()?;
         let sector = self.config.spin_sector(electrons)?;
-        let band_cap = self
-            .config
-            .occupations
-            .as_ref()
-            .and_then(|o| o.band_cap)
-            .unwrap_or(32);
+        let band_cap = if theta.is_some() {
+            self.config.fd_band_count()?
+        } else {
+            0
+        };
         request.policy = match (sector, theta) {
             (None, None) => None,
             (None, Some(theta_ha)) => Some(Policy::FermiDirac { theta_ha, band_cap }),

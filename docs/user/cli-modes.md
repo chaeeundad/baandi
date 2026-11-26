@@ -25,7 +25,7 @@ baandi run input.toml --output-dir results
 No observation or control is enabled. Production uses `refscf::api::solve`,
 which completes the same reference stepper used by observed and controlled runs.
 Execution mode does not select physics or change tolerances. The original
-`dft-cli run` spelling continues to work.
+`baandi run` spelling continues to work.
 
 Routing is Reference or StrictOracle, with strict precedence and the free-moment
 PBE G4D exception; see [ADR 0047](../decisions/0047-reference-driver-single-path.md).

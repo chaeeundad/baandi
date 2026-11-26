@@ -197,7 +197,10 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::COLLECTIVE_TRACE), Value::Choice("off"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 59);
+    assert_eq!(value(Id::REFSCF_REAL_START), Value::Choice("off"));
+    assert_eq!(value(Id::REFSCF_CANONICAL_CLUSTER), Value::Choice("off"));
+    assert_eq!(value(Id::REFSCF_SPIN_PULAY), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 62);
 }
 
 #[test]

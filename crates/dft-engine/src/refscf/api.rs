@@ -120,10 +120,35 @@ impl Observables {
         Ok(())
     }
 
+    /// Spin/FD counterpart of `prepare`: validate the delivered reference
+    /// electronic state (model identity, convergence, verification) once.
+    pub fn prepare_electronic(
+        &mut self,
+        input: StartInput<'_>,
+        run: &mut electronic::Run,
+    ) -> Result<(), ScfError> {
+        if !self.prepared && (self.requested.forces || self.requested.stress) {
+            let operations = self.symmetry.as_ref().map_or(&[][..], |s| {
+                s.operations(input.options.crystal_density_group)
+            });
+            delivered::prepare_electronic(&input, run, operations)?;
+            self.prepared = true;
+        }
+        Ok(())
+    }
+
     fn state<'a>(
         &'a self,
         input: StartInput<'a>,
         result: &'a ScfResult,
+    ) -> Result<crate::ForceState<'a>, ScfError> {
+        self.view(input, crate::ElectronicState::Fixed(result))
+    }
+
+    fn view<'a>(
+        &'a self,
+        input: StartInput<'a>,
+        electronic: crate::ElectronicState<'a>,
     ) -> Result<crate::ForceState<'a>, ScfError> {
         if !self.prepared {
             return Err(ScfError::InvalidInput(
@@ -135,7 +160,7 @@ impl Observables {
             atoms: input.atoms,
             potentials: input.potentials,
             options: input.options,
-            electronic: crate::ElectronicState::Fixed(result),
+            electronic,
             density_floor: None,
             symmetry: self
                 .symmetry
@@ -152,6 +177,45 @@ impl Observables {
         if self.requested.forces && !self.forces_done {
             self.forces = Some(crate::forces(&self.state(input, result)?)?);
             self.forces_done = true;
+        }
+        Ok(())
+    }
+
+    /// Forces of a prepared spin/FD delivery: -dF/dR for Fermi-Dirac, -dE/dR
+    /// for a fixed spin sector.
+    pub fn evaluate_forces_electronic(
+        &mut self,
+        input: StartInput<'_>,
+        run: &electronic::Run,
+    ) -> Result<(), ScfError> {
+        if self.requested.forces && !self.forces_done {
+            self.forces = Some(crate::forces(
+                &self.view(input, crate::ElectronicState::Reference(run))?,
+            )?);
+            self.forces_done = true;
+        }
+        Ok(())
+    }
+
+    /// Stress of a prepared spin/FD delivery, after its forces when requested.
+    pub fn evaluate_stress_electronic(
+        &mut self,
+        input: StartInput<'_>,
+        run: &electronic::Run,
+    ) -> Result<(), ScfError> {
+        if self.requested.stress && !self.stress_done {
+            if self.requested.forces && !self.forces_done {
+                return Err(ScfError::InvalidInput(
+                    "reference API: evaluate forces before stress",
+                ));
+            }
+            let state = self.view(input, crate::ElectronicState::Reference(run))?;
+            self.stress = Some(if let Some(symmetry) = &self.symmetry {
+                crate::stress::stress_prepared(&state, symmetry)?
+            } else {
+                crate::stress(&state)?
+            });
+            self.stress_done = true;
         }
         Ok(())
     }
@@ -221,11 +285,9 @@ async fn solve_continuation(
             "reference API: ionic seeds with electronic policy are unsupported",
         ));
     }
-    if request.policy.is_some()
-        && (request.derivatives.forces || request.derivatives.stress || request.save_ionic_seed)
-    {
+    if request.policy.is_some() && request.save_ionic_seed {
         return Err(ScfError::InvalidInput(
-            "reference API: spin/FD derivatives and ionic seeds are unsupported",
+            "reference API: spin/FD ionic seeds are unsupported",
         ));
     }
     if request.save_ionic_seed && request.derivatives.deferred {
@@ -281,6 +343,17 @@ async fn solve_continuation(
             result.materialize_orbitals()?;
             output.ionic_seed = Some(output.derivatives.ionic_seed(model(), result)?);
         }
+    }
+    if let Run::Electronic(run) = &mut output.run
+        && !request.derivatives.deferred
+    {
+        output.derivatives.prepare_electronic(model(), run)?;
+        output
+            .derivatives
+            .evaluate_forces_electronic(model(), run)?;
+        output
+            .derivatives
+            .evaluate_stress_electronic(model(), run)?;
     }
     Ok(output)
 }

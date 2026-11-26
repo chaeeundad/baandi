@@ -8,9 +8,9 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 13-strict-oracle
 input=target/tmp/examples/13-strict-oracle/input.toml
-target/release/dft-cli validate "$input"
-BAANDI_REFERENCE_STRICT=on target/release/dft-cli run "$input" --output-dir results/13-strict-oracle/strict
-BAANDI_REFERENCE_STRICT=off target/release/dft-cli run "$input" --output-dir results/13-strict-oracle/production
+target/release/baandi validate "$input"
+BAANDI_REFERENCE_STRICT=on target/release/baandi run "$input" --output-dir results/13-strict-oracle/strict
+BAANDI_REFERENCE_STRICT=off target/release/baandi run "$input" --output-dir results/13-strict-oracle/production
 ```
 
 `BAANDI_REFERENCE_STRICT=on` takes precedence and selects the frozen validation oracle. Inspect `scf.driver = "strict_oracle"` and the certificate before treating this as an oracle result. The production run is separate and should record `reference`. Compare energies in Ha only when both converge with identical physical settings; this tutorial supplies no measured difference or QE reference. See [ADR 0047](../../docs/decisions/0047-reference-driver-single-path.md).

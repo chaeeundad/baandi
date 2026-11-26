@@ -460,11 +460,13 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         )
     })?;
     let bands = if finite {
-        config
-            .occupations
-            .as_ref()
-            .and_then(|o| o.band_cap)
-            .unwrap_or(32)
+        config.fd_band_count().map_err(|e| {
+            fail(
+                "scf.nbands / occupations.band_cap",
+                e,
+                "set scf.nbands <= occupations.band_cap",
+            )
+        })?
     } else {
         options.bands.unwrap_or(default_bands)
     };

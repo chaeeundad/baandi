@@ -8,8 +8,8 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 02-si-kmesh
 input=target/tmp/examples/02-si-kmesh/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/02-si-kmesh
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/02-si-kmesh
 ```
 
 The half-shifted 2×2×2 Monkhorst–Pack grid enables compatible spatial symmetry. Inspect `results.json.symmetry` for operations, irreducible weights, multiplicities and the full-to-reduced map. Automatic FFT sizing respects symmetry; compare symmetry on/off at an identical FFT grid.

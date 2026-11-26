@@ -153,6 +153,20 @@ impl OccupationIdentity {
         }
     }
 }
+impl OccupationIdentity {
+    /// Reference spin/FD policy: theta, constraint and band cap, or the fixed
+    /// sector; the delivered fractional occupations follow from the model.
+    pub(crate) fn reference(
+        finite: Option<(f64, Constraint, usize)>,
+        sector: Option<&SpinSector>,
+    ) -> Self {
+        Self {
+            fixed: Vec::new(),
+            finite: finite.map(|(theta, constraint, bands)| (theta.to_bits(), constraint, bands)),
+            sector: sector.map(|s| (s.n_up, s.n_down, s.axis_cartesian.map(f64::to_bits))),
+        }
+    }
+}
 #[derive(Clone)]
 pub(crate) struct ForceIdentity {
     /// Granted only after converged verify-off delivery by the adapter.

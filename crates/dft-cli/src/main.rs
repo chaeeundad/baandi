@@ -13,8 +13,9 @@ use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(
+    name = "baandi",
     version,
-    about = "Gamma-only plane-wave input validation and FFT grid inspection"
+    about = "BAANDI plane-wave Kohn-Sham DFT engine"
 )]
 struct Cli {
     #[command(subcommand)]

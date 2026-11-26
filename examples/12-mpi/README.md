@@ -9,8 +9,8 @@ No UPF or generated output belongs in this directory.
 cargo build --release -p dft-cli --features mpi
 python3 examples/prepare.py 12-mpi
 input=target/tmp/examples/12-mpi/input.toml
-target/release/dft-cli validate "$input"
-mpirun -np 2 target/release/dft-cli run "$input" --output-dir results/12-mpi
+target/release/baandi validate "$input"
+mpirun -np 2 target/release/baandi run "$input" --output-dir results/12-mpi
 ```
 
 This input is identical to example 01. Install/configure a supported MPI toolchain first; see [MPI guide](../../docs/wiki/mpi.md). Rank zero owns output. Keep one thread per rank here and avoid oversubscription. Results need not be bit-identical across rank counts; exact checkpoints require the same ranks/partition. Compare performance only at equal accuracy and the same parallel model/rank count (BAANDI MPI versus QE MPI). No scaling claim is made for this tiny cell.

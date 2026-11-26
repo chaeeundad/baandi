@@ -50,10 +50,10 @@ cargo build --release -p dft-cli
 export PSEUDO_DIR=/absolute/path/outside/repository/pseudo
 python3 examples/prepare.py 01-si-gamma-lda
 input=target/tmp/examples/01-si-gamma-lda/input.toml
-target/release/dft-cli inspect-upf "$PSEUDO_DIR/Si.pz-vbc.UPF"
-target/release/dft-cli validate "$input"
-target/release/dft-cli grid "$input"
-target/release/dft-cli run "$input" --output-dir results/si-gamma
+target/release/baandi inspect-upf "$PSEUDO_DIR/Si.pz-vbc.UPF"
+target/release/baandi validate "$input"
+target/release/baandi grid "$input"
+target/release/baandi run "$input" --output-dir results/si-gamma
 ```
 
 The helper (Python 3.9+) copies the template into `target/tmp` with absolute UPF

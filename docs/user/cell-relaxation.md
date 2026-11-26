@@ -6,7 +6,7 @@ Miller/FFT support and `IonicSeed::in_cell`. See
 dev08 gen19 agreement (lattice 6.3e-8 Bohr, pressure 2.3e-9 Ha/Bohr^3 versus
 the legacy run). Those differences do not establish cutoff convergence.
 
-`dft-cli relax input.toml --output-dir relaxed` accepts these additional settings:
+`baandi relax input.toml --output-dir relaxed` accepts these additional settings:
 
 ```toml
 [relax]

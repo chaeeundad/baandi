@@ -102,6 +102,78 @@ fn force_state_with_operations<'a>(
     })
 }
 
+/// Reference spin/FD delivery (scalar FD, collinear fixed sector, collinear FD).
+/// Orbitals are already replicated by the electronic driver. The contract is
+/// the fixed-occupation one: a converged state with a passed fixed-point
+/// verification, or an explicit verify=off delivery labelled unverified. The
+/// derivative kernels then sum f_nk w_k per spin channel; for FD the quantity
+/// is the Mermin free energy F = E - TS, stationary in the occupations.
+pub fn electronic_state<'a>(
+    input: StartInput<'a>,
+    run: &'a mut super::electronic::Run,
+    operations: &'a [dft_geometry::symmetry::SymmetryOperation],
+) -> Result<ForceState<'a>, ScfError> {
+    prepare_electronic(&input, run, operations)?;
+    Ok(ForceState {
+        cell: input.cell,
+        atoms: input.atoms,
+        potentials: input.potentials,
+        options: input.options,
+        electronic: ElectronicState::Reference(run),
+        density_floor: None,
+        symmetry: operations,
+    })
+}
+pub(super) fn prepare_electronic(
+    input: &StartInput<'_>,
+    run: &mut super::electronic::Run,
+    operations: &[dft_geometry::symmetry::SymmetryOperation],
+) -> Result<(), ScfError> {
+    use crate::force_identity::ModelDescription;
+    if !run.converged {
+        return Err(ScfError::InvalidInput(
+            "reference derivatives require a converged delivery",
+        ));
+    }
+    let dims = run
+        .density
+        .first()
+        .and_then(|d| d.shape().try_into().ok())
+        .ok_or(ScfError::InvalidInput("reference delivery: density shape"))?;
+    let mut model = ModelDescription::new(
+        input.cell,
+        input.atoms,
+        input.potentials,
+        input.options,
+        dims,
+        run.blocks
+            .first()
+            .map(|c| c.iter().map(|b| b.point).collect())
+            .unwrap_or_default(),
+    );
+    model.symmetry = operations.to_vec();
+    if !run
+        .force_identity
+        .matches(&model, &run.occupation_identity())
+        || input.options.grid_override.is_some_and(|grid| grid != dims)
+    {
+        return Err(ScfError::InvalidInput(
+            "reference delivery: model or occupations differ from delivered state",
+        ));
+    }
+    let verified = run.verification.as_ref().is_some_and(|v| v.passed());
+    let opted_out =
+        input.options.verification == crate::model::Verification::Off && run.verification.is_none();
+    if input.options.standard.is_none() || (!verified && !opted_out) {
+        return Err(ScfError::InvalidInput(
+            "reference derivatives require verification or explicit verify=off",
+        ));
+    }
+    run.force_identity.unverified_delivery = opted_out && !verified;
+    run.force_identity.reference_delivery = true;
+    Ok(())
+}
+
 /// Stress shares the force model, occupations and verification contract.
 /// The retained options include the frozen reference cell: derivative kernels
 /// rebuild that ordered Miller support at input.cell, not a new cutoff sphere.

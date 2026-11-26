@@ -217,5 +217,7 @@
  "G7-UPF-BETA-TAIL": "G7: SG15 ONCV·HGH 의사퍼텐셜 읽기(투영자 꼬리 처리 규칙)",
  "R11B-ORACLE-SWITCHES": "리팩토링 R11b: 엄격 기준 내부 스위치를 기본값으로 고정하고 삭제",
  "R12-DOCS": "리팩토링 R12: 문서 정리, ADR 0047, README 수정 목록(승인용)",
- "G4G-OATOM-STALL": "G4G: 진공 속 산소 원자(HGH, PBE) 계산이 수렴 직전 멈추는 문제"
+ "G4G-OATOM-STALL": "G4G: 진공 속 산소 원자(HGH, PBE) 계산이 수렴 직전 멈추는 문제",
+ "DOC-USAGE-EXAMPLES": "사용 안내: README 사용법 절과 examples 13개(검증 테스트 포함)",
+ "G4D-G4G-RESEARCH": "연구: 산소 원자 정수 스핀 정체(G4G)와 자유 모멘트 PBE(G4D)"
 }

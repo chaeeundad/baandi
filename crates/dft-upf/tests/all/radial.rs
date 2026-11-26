@@ -306,3 +306,51 @@ fn invalid_radial_arguments() {
     );
     assert!(p.projector_transform(3, 1.0).is_err());
 }
+
+/// GK18: shared-Bessel transforms equal one `projector_transform_with_rule`
+/// per channel bit for bit (prefix lengths odd/even, both even-count rules,
+/// l = 0..3, q from 0 across the series/recurrence switch), and invalid
+/// channels report the same error without affecting the others.
+#[test]
+fn shared_bessel_transforms_are_bit_identical() {
+    use dft_upf::radial::{
+        RadialEvenRule, projector_transform_with_rule, projector_transforms_same_l,
+    };
+    let mesh = logmesh(803, 30.0);
+    let r = mesh.r().to_vec();
+    let mut chans: Vec<Vec<f64>> = vec![
+        r.iter().map(|r| r * (-r).exp()).collect(),
+        r.iter()
+            .take(600)
+            .map(|r| r * r * (-0.7 * r * r).exp())
+            .collect(),
+        r.iter()
+            .take(401)
+            .map(|r| (r - 1.).tanh() * (-r).exp())
+            .collect(),
+        r.iter().take(2).copied().collect(),
+    ];
+    chans.push(vec![f64::NAN; 10]);
+    chans.push(Vec::new());
+    let mut scratch = Vec::new();
+    for rule in [
+        RadialEvenRule::Simpson3_8,
+        RadialEvenRule::SimpsonQuadraticEnd,
+    ] {
+        for l in 0..=4usize {
+            for qi in 0..240 {
+                let q = qi as f64 * 0.047;
+                let samples: Vec<&[f64]> = chans.iter().map(Vec::as_slice).collect();
+                let shared = projector_transforms_same_l(&mesh, l, &samples, q, rule, &mut scratch);
+                for (s, v) in samples.iter().zip(shared) {
+                    let single = projector_transform_with_rule(&mesh, l, s, q, rule);
+                    match (single, v) {
+                        (Ok(a), Ok(b)) => assert_eq!(a.to_bits(), b.to_bits(), "l={l} q={q}"),
+                        (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+                        (a, b) => panic!("l={l} q={q}: {a:?} vs {b:?}"),
+                    }
+                }
+            }
+        }
+    }
+}

@@ -344,3 +344,100 @@ fn frozen_density_support_survives_expansion_shell_crossing() {
             .any(|(a, b)| a.norm_squared != b.norm_squared)
     );
 }
+
+/// GK18: the windowed enumeration visits exactly the admissible indices of
+/// the box in the box order, with identical vector bits; the summary equals
+/// the built basis; `dims_for_summary` equals `FftGridSpec::new(..).dims()`.
+/// Cubic, fcc, skewed, elongated and slab-like cells, Gamma, generic and
+/// boundary k, several cutoffs including exact-shell cases.
+#[test]
+fn windowed_enumeration_is_the_box_enumeration() {
+    let cells = [
+        cubic(TAU),
+        cubic(9.3),
+        silicon(),
+        Cell::from_user_rows_bohr([[7.2, 0., 0.], [1.1, 6.8, 0.], [0.4, -0.7, 7.5]]).unwrap(),
+        Cell::from_user_rows_bohr([[8.09, 0., 0.], [4.25, 6.88, 0.], [4.25, 2.37, 6.46]]).unwrap(),
+        Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 23.]]).unwrap(),
+        Cell::from_user_rows_bohr([[4., 0., 0.], [3.9, 0.9, 0.], [0.2, 0.3, 6.]]).unwrap(),
+    ];
+    let ks = [
+        [0.; 3],
+        [0.5, 0.5, 0.5],
+        [-0.1762, -0.3492, 0.1509],
+        [0.25, 0., -0.5],
+        [0.4999, -0.4999, 0.13],
+    ];
+    let mut checked = 0;
+    for cell in &cells {
+        for cutoff in [0.5, 2., 7.3, 20.] {
+            let cutoff = Hartree(cutoff);
+            let density = PlaneWaveBasis::new(cell, Hartree(4. * cutoff.0)).unwrap();
+            for k in ks {
+                let k_fractional = dft_geometry::kpoints::wrap_fractional(k).unwrap();
+                let bounds = bounding_box(cell, cutoff).unwrap().map(|b| b + 1);
+                let b = cell.reciprocal_columns_inverse_bohr();
+                let kc: [f64; 3] =
+                    std::array::from_fn(|i| (0..3).map(|j| b[i][j] * k_fractional[j]).sum());
+                let (mut full, mut windowed) = (Vec::new(), Vec::new());
+                for_each_in_box(b, cutoff, bounds, kc, |g| full.push(g)).unwrap();
+                for_each_in_sphere(cell, cutoff, bounds, kc, |g| windowed.push(g)).unwrap();
+                assert_eq!(full.len(), windowed.len());
+                for (a, w) in full.iter().zip(&windowed) {
+                    assert_eq!(a.miller, w.miller);
+                    assert_eq!(a.norm_squared.to_bits(), w.norm_squared.to_bits());
+                    for i in 0..3 {
+                        assert_eq!(a.cartesian[i].to_bits(), w.cartesian[i].to_bits());
+                    }
+                }
+                let basis = PlaneWaveBasis::at_k(cell, cutoff, k).unwrap();
+                let s = KBasisSummary::at_k(cell, cutoff, k).unwrap();
+                assert_eq!(s.count, basis.vectors().len());
+                assert_eq!(s.k_fractional, basis.k_fractional());
+                let max = basis
+                    .momenta()
+                    .iter()
+                    .map(|m| m.norm_squared)
+                    .fold(0., f64::max);
+                assert_eq!(s.max_momentum_norm_squared.to_bits(), max.to_bits());
+                for i in (0..3).filter(|_| s.count > 0) {
+                    assert_eq!(
+                        s.miller_min[i],
+                        basis.vectors().iter().map(|g| g.miller[i]).min().unwrap()
+                    );
+                    assert_eq!(
+                        s.miller_max[i],
+                        basis.vectors().iter().map(|g| g.miller[i]).max().unwrap()
+                    );
+                }
+                for grid in [
+                    None,
+                    Some(FftGridSpec::new(&density, &density, None).unwrap().dims()),
+                ] {
+                    let expect = FftGridSpec::new(&basis, &density, grid).map(|g| g.dims());
+                    let got = FftGridSpec::dims_for_summary(&s, &density, grid, || {
+                        PlaneWaveBasis::at_k(cell, cutoff, k)
+                    });
+                    assert_eq!(expect, got);
+                }
+                checked += 1;
+            }
+        }
+    }
+    // A grid too small for the wavefunctions: the summary path reports the
+    // same error as `new` (through the built basis).
+    let cell = cubic(TAU);
+    let density = PlaneWaveBasis::new(&cell, Hartree(0.5)).unwrap();
+    let s = KBasisSummary::at_k(&cell, Hartree(8.), [0.; 3]).unwrap();
+    let basis = PlaneWaveBasis::at_k(&cell, Hartree(8.), [0.; 3]).unwrap();
+    assert_eq!(
+        FftGridSpec::new(&basis, &density, None).map(|g| g.dims()),
+        FftGridSpec::dims_for_summary(&s, &density, None, || PlaneWaveBasis::at_k(
+            &cell,
+            Hartree(8.),
+            [0.; 3]
+        ))
+    );
+    assert!(FftGridSpec::new(&basis, &density, None).is_err());
+    assert_eq!(checked, cells.len() * 4 * ks.len());
+}

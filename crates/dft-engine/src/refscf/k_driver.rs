@@ -961,16 +961,42 @@ pub(super) async fn run_continuation<K: Collective>(
             output.record("density_gather", phase);
             let phase = Instant::now();
             let mut k_points = Vec::with_capacity(points.len());
+            // GK18: a pooled run whose caller does not read the orbitals keeps
+            // them with their owners (materialized on demand, same bits).
+            let lazy = if crate::refscf::lazy::lazy_result_allowed() && state.pool.is_some() {
+                super::k_pool::lazy_orbitals(
+                    &state,
+                    comm,
+                    std::mem::take(&mut step.solve.eigenvectors.0),
+                    bands,
+                )?
+            } else {
+                None
+            };
             // GK9 pools: the owner of each k broadcasts its full-row block.
-            let delivered = super::k_pool::deliver_orbitals(
-                &state,
-                &delivery_comm,
-                &step.solve.eigenvectors.0.iter().collect::<Vec<_>>(),
-            )?;
-            for ((meta, orbitals), point) in step.solve.per_k.iter().zip(delivered).zip(points) {
+            let (delivered, lazy): (Vec<_>, Vec<_>) = match lazy {
+                Some(handles) => handles
+                    .into_iter()
+                    .map(|h| ComplexMatrix::zeros(0, bands).map(|z| (z, Some(h))))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(numerical)?
+                    .into_iter()
+                    .unzip(),
+                None => super::k_pool::deliver_orbitals(
+                    &state,
+                    &delivery_comm,
+                    &step.solve.eigenvectors.0.iter().collect::<Vec<_>>(),
+                )?
+                .into_iter()
+                .map(|x| (x, None))
+                .unzip(),
+            };
+            for (((meta, orbitals), lazy), point) in
+                step.solve.per_k.iter().zip(delivered).zip(lazy).zip(points)
+            {
                 k_points.push(KPointSolution {
                     point: *point,
-                    lazy: None,
+                    lazy,
                     solution: EigenSolution {
                         locking: None,
                         spectral_completeness: None,

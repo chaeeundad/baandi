@@ -4604,3 +4604,91 @@ Needs dev08 (MPI8 socket 0, one thread per rank, phase profile on, one run per a
 and the MPI8-vs-MPI1 class on one case. Recalibrate `POOL_LATENCY_ROWS` from the scan (one number, all cases).
 Limits: pools are contiguous rank blocks (no NUMA-aware placement); `auto` considers equal pool sizes only; the
 potential is still gathered to the full grid on every rank (as in stage 1).
+
+## GK18-SETUP-SMALL — many-small-k setup and output: shared transcendental work, owned-k bases, lazy pooled delivery (2026-11-27; bit-identical, dev08 pending)
+
+Premise (relayed dev08 MPI8 gen55 GeTe, rank 0, verify off, profile off): external wall 33.91 s against QE best
+33.62 s (x1.009). Engine setup 3.50 s against QE init_run 1.23 s; CLI preflight `preflight_cell_basis_upf` 0.31 s;
+output `complex_orbital_gather` 0.55 s (0.36 s of it collectives) in an energy-only run; launch/teardown outside main
+0.27 s; `mpi_finalize` 0.06 s. Setup split (g55nv): k_start_h_apply 1.195, nonlocal_tables 0.387, bases_grids 0.319,
+atomic_columns 0.255, ritz 0.224, operator_potential 0.184, orthonormalize 0.154, k_radial_tables 0.136, fields
+(`atomic_local_tables_structure_factors`) 0.132, grid_layout 0.057 s.
+Diagnosis (Mac, O): the same stages run serially on the Mac (33 k = one pool rank's share) take 1.2x (FFT-bound H
+apply: 2.4x) to 7x (transcendental-heavy stages) less, so on dev08 the libm-heavy per-k work (hypot/atan2/sin/cos of
+the harmonics, sin_cos/erf of the radial quadratures) is relatively much dearer than on the Mac. The start H apply
+is the same kernel as the SCF H apply (Mac `sample`: FFT kernels and gathers); per column it costs what an SCF H
+column costs, and QE's wfcinit applies H to the same 19 columns per k, so its remaining lever is the FFT kernel
+(`M2_FFT=mkl`, already in the GK17 dev08 request). Every rank built all 260 k bases twice (preflight and engine),
+each with a full-grid `fft_to_g` map, though a pooled rank owns 33 k. The pooled delivery broadcast all 260 k
+orbital blocks (260 x 19 x 4.6k complex) to every rank although the CLI declared the orbitals unused.
+Changes (all bit-identical; no new switch, table stays 81):
+1. Lazy pooled delivery: `refscf::lazy::LazyOrbitals` gains a pooled-k source; when the caller set
+   `set_delivered_orbitals(false)` (the CLI does so for runs without forces, stress, orbital volumetric output,
+   observe/agent) and `M2_LAZY_RESULT` is on (default; `off` restores the eager delivery), the k driver keeps each
+   k block with its owning pool and `ScfResult::materialize_orbitals` (forces, stress, checkpoints, ionic seeds call
+   it) repeats that k's eager delivery in global k order (fill rows, pool sum, one broadcast), same bits. Fixed-
+   occupation k driver only; the spin/FD driver (`electronic.rs`) still delivers eagerly (BandBlock has no lazy form).
+2. `dft_basis::KBasisSummary::at_k` (count, Miller extents, largest |k+G|^2 without building or sorting the basis) and
+   `FftGridSpec::dims_for_summary` (grid checks of `new` proven from the extents, else the basis is built and `new`
+   decides, same error). The CLI preflight uses them per k; the engine k start uses them with several ranks (no
+   strain reference) for the band check, the grid, the pool decision and the radial-table q_max, and then builds
+   only the owned k bases (pools) or all (distributed). `at_k` itself enumerates an m3 window per (m1, m2) proven to
+   contain every admissible index (margin argument in the code; whole box for degenerate metrics).
+3. Real harmonics: `dft_upf::radial::real_spherical_harmonics_upto` (all (l, m) of one direction; norm, cos theta,
+   phi and sin/cos(|m| phi) once; per-(l, m) arithmetic unchanged). Used per row in `NonlocalOperator::new_selected`
+   and once per owned row and k for all atomic-orbital channels (`atomic_k_columns_memo`). The pair sin/cos is
+   computed through `black_box` arguments: without it LLVM fused them into one `sincos` call whose last bit differed
+   from `sin` on aarch64 (caught by the bit test; 1 ulp at l=1, m=-1).
+4. The k operator's `projector_rows(owned rows)` returns the owned tile the rows-only table already formed (same
+   `try_rows` result) instead of forming phases and products again; the table's finiteness check proves
+   |z|, 2|z| finite from component magnitudes below 2^1020 before falling back to the two hypot calls.
+5. Radial tables: `projector_transforms_same_l` evaluates j_l(q r) once per (species mesh, l, node) for all channels
+   of that l (projectors and atomic orbitals), units round-robin over ranks; the field tables evaluate j_0 once per
+   (species, node) for the atomic charge, local and core functions and the local factor r^2 V + Z r erf(r) once per
+   species (`short_prefactor`/`short_integral_from`, `spherical_density_transform_with_samples`). Every node value
+   keeps its single contributing rank and its bits.
+6. Owned k rows from `position_owners` (the stick partition alone) instead of a throwaway `DistributedPairFft`.
+Evidence (Mac): unit tests `windowed_enumeration_is_the_box_enumeration` (7 cells incl. fcc, skewed, slab-like,
+elongated; 4 cutoffs; Gamma, generic, boundary k: same indices, order and vector bits; summary = built basis;
+`dims_for_summary` = `new(..).dims()` incl. the error), `harmonic_set_is_bit_identical` (20k directions incl.
+poles/axes/extreme magnitudes, l <= 3), `shared_bessel_transforms_are_bit_identical` (l 0..4, both even rules,
+240 q across the series/recurrence switch, invalid channels), `norm_doubles_finite_matches_the_hypot_test`,
+`pooled_lazy_delivery_materializes_the_eager_bits` (P = 2, 3 one rank per pool, 4 = 2 x 2, 3 = 2 + 1: every
+delivered bit equal to the eager delivery on every rank, `M2_LAZY_RESULT=off` eager). Fingerprints
+(`k_setup_fingerprint`, 60 lines: skewed Gamma-in-list and elongated shifted MP, strict/standard, P = 1/2/3, pools
+off/on, fixed spin, FD) of a `git archive 68bc3c27` build and of this branch: identical (`diff` empty). CLI GeTe-shaped
+real PseudoDojo run (33 explicit generic k, 80 Ry, 48^3, 19 bands, serial): density SHA 2fe7a7fb...29931 and total
+energy bits equal in all four A/B runs. `scripts/check.sh` (CHECK_SCCACHE=0): exit 0, 996 passed, 0 failed, 234 ignored.
+Mac timing (O, release, one rank, real PseudoDojo Ge/Te, `BAANDI_PHASE_PROFILE=on`, two runs per arm, load 7-17),
+seconds base 68bc3c27 -> branch:
+
+| stage (33 k, serial) | base | branch |
+|---|---|---|
+| atomic_local_tables_structure_factors | 0.305 / 0.300 | 0.079 / 0.078 |
+| k_radial_tables | 0.193 / 0.192 | 0.114 / 0.111 |
+| k_start_nonlocal_tables | 0.087 / 0.089 | 0.053 / 0.061 |
+| k_start_atomic_columns | 0.061 / 0.062 | 0.022 / 0.024 |
+| k_start_operator_potential | 0.033 / 0.033 | 0.026 / 0.030 |
+| k_start_grid_layout | 0.011 / 0.011 | 0.010 / 0.011 |
+| k_start_orthonormalize / ritz | 0.071 / 0.051 | 0.064-0.070 / 0.046-0.052 |
+| k_start_h_apply (unchanged kernel) | 0.674 / 0.667 | 0.605 / 0.675 |
+| engine setup total | 1.560 / 1.555 | 1.092 / 1.190 |
+| CLI preflight | 0.014 / 0.016 | 0.008 / 0.010 |
+
+IrI3-shaped harness (`k_setup_tail` timing, real Ir/I, 24 k, 8 simulated ranks, pools on; host load 17): wall max
+2.17 / 1.93 -> 1.90 / 1.70 s; fields 0.067 -> 0.025, k_radial_tables 0.047 -> 0.022, bases_grids 0.065 -> 0.022 (8x
+fewer bases per rank), grid_layout 0.023 / 0.009 -> 0.005 / 0.006 s.
+Expected dev08 GeTe MPI8 (E, from the dev08 split and the Mac stage ratios): fields 0.13 -> ~0.04, k_radial_tables
+0.14 -> ~0.07, atomic_columns 0.26 -> ~0.09, nonlocal_tables 0.39 -> ~0.25, operator_potential 0.18 -> ~0.15,
+bases_grids 0.32 -> ~0.07, preflight 0.31 -> ~0.08, orbital gather 0.55 -> ~0 s: about 1.5 s, GeTe 33.9 -> ~32.4 s.
+Not changed: the start H apply (FFT-bound, same per-column cost as the SCF; dev08 arm `M2_FFT=mkl`), start MGS
+(GK11), Ritz GEMMs, per-k operator scratch (each k operator owns FFT stick blocks up to capacity x block plus `back`
+and GEMM workspace, first-touched in the start apply; sharing scratch across a rank's k is plan item GK6).
+dev08 request: GeTe, B12, IrI3 MPI8 socket 0, one thread per rank, verify off, profile on in both arms, one run per
+arm: A = 68bc3c27 (gen55), B = this branch; plus B with `BAANDI_M2_LAZY_RESULT=off` (isolates the delivery), and on
+GeTe B with `GLIBC_TUNABLES=glibc.malloc.mmap_threshold=33554432:glibc.malloc.trim_threshold=1073741824` (does
+fresh-page churn of per-k allocations matter on Linux?). Report setup split, cli preflight, output split, external
+wall, density hash (must be equal A/B).
+Lesson: on dev08 the transcendental functions dominate per-k scalar setup (5-7x the Mac, against 2.4x for the FFT
+kernel); compute each direction's harmonics and each node's Bessel samples once and share them over every channel
+that needs them. And a "debug convenience" eager broadcast of all orbitals cost more than the start's MGS.

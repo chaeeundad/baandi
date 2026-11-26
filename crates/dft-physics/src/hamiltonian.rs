@@ -39,6 +39,14 @@ pub enum HamiltonianError {
 fn finite(z: &Complex64) -> bool {
     z.re.is_finite() && z.im.is_finite()
 }
+/// `finite(z) && |z|` and `2 |z|` finite. GK18: components below 2^1020 in
+/// magnitude prove it without the two `hypot` calls (|z| < 2^1021 then); the
+/// exact test decides everything else, so the outcome is unchanged.
+fn norm_doubles_finite(z: &Complex64) -> bool {
+    const SAFE: f64 = 1.123_558_209_288_947_4e307; // 2^1020
+    (z.re.abs() < SAFE && z.im.abs() < SAFE)
+        || (finite(z) && z.norm().is_finite() && (2.0 * z.norm()).is_finite())
+}
 fn volume(v: f64) -> Result<(), HamiltonianError> {
     if v.is_finite() && v > 0.0 {
         Ok(())
@@ -1053,7 +1061,15 @@ impl NonlocalOperator {
         }
         Ok(if let Some(recipe) = &self.table.recipe {
             if recipe.local.is_some() {
-                recipe.try_rows(indices).ok_or(HamiltonianError::Shape)?
+                // GK18: the owned rows were formed at construction by the same
+                // `try_rows(owned_indices)`; asking for exactly those rows (the
+                // k start's operator) returns that tile instead of forming the
+                // phases and products again.
+                if indices == self.table.owned_indices.as_slice() {
+                    self.table.owned.clone()
+                } else {
+                    recipe.try_rows(indices).ok_or(HamiltonianError::Shape)?
+                }
             } else {
                 recipe.rows(indices)
             }
@@ -2633,7 +2649,8 @@ impl NonlocalOperator {
                 .map(|&(_, l, _)| Complex64::new(0.0, -1.0).powu(l as u32))
                 .collect();
             let volume_root = volume_bohr3.sqrt();
-            let mut harmonics = vec![0.0; keys.iter().max().map_or(0, |k| k + 1)];
+            let lmax = distinct.iter().map(|d| d.1).max().unwrap_or(0);
+            let mut harmonics = vec![0.0; (lmax + 1) * (lmax + 1)];
             for ig in 0..ng {
                 let g = &basis.momenta()[factor_rows.map_or(ig, |rows| rows[ig])];
                 let next = radial_cache.len();
@@ -2671,8 +2688,14 @@ impl NonlocalOperator {
                 } else {
                     g.cartesian
                 };
-                for &(key, l, m) in &distinct {
-                    harmonics[key] = real_spherical_harmonic(l, m, direction)?;
+                // GK18: all harmonics of the direction at once (shared
+                // direction terms; each value bit-identical to the single call).
+                if !distinct.is_empty() {
+                    dft_upf::radial::real_spherical_harmonics_upto(
+                        lmax,
+                        direction,
+                        &mut harmonics,
+                    )?;
                 }
                 for (c, &(i, _, _)) in channels.iter().enumerate() {
                     table[c][ig] = prefactor[c] * harmonics[keys[c]] * radial[i] / volume_root;
@@ -2712,11 +2735,7 @@ impl NonlocalOperator {
                 // Check all immutable factors and phase arguments once, before
                 // any rank enters a collective. No transcendental per-atom work
                 // is needed for rows belonging to other ranks.
-                if !table
-                    .iter()
-                    .flatten()
-                    .all(|z| finite(z) && z.norm().is_finite() && (2.0 * z.norm()).is_finite())
-                {
+                if !table.iter().flatten().all(norm_doubles_finite) {
                     return Err(HamiltonianError::NonFinite);
                 }
                 recipe_bytes += nc * ng * size_of::<Complex64>();
@@ -3152,6 +3171,44 @@ mod block_tests {
                     flops / times[1] / 1e3,
                     flops / times[0] / 1e3
                 );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod norm_check_tests {
+    use super::*;
+
+    /// GK18: the fast finite-norm test decides exactly as the two-hypot test.
+    #[test]
+    fn norm_doubles_finite_matches_the_hypot_test() {
+        let exact =
+            |z: &Complex64| finite(z) && z.norm().is_finite() && (2.0 * z.norm()).is_finite();
+        let edge = [
+            0.0,
+            -0.0,
+            1.0,
+            -3.5e-300,
+            1.123_558_209_288_947_4e307,
+            8.9e307,
+            8.99e307,
+            1.2e308,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        for &a in &edge {
+            for &b in &edge {
+                for z in [
+                    Complex64::new(a, b),
+                    Complex64::new(-a, b),
+                    Complex64::new(b, -a),
+                ] {
+                    assert_eq!(norm_doubles_finite(&z), exact(&z), "{z:?}");
+                }
             }
         }
     }

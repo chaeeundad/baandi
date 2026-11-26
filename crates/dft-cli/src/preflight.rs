@@ -634,14 +634,15 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let mut counts = Vec::new();
     for point in &points {
         let span = profile.map(|p| p.span(IC::InitCheckBasisCalls, IC::InitCheckBasisNanos));
-        let basis = PlaneWaveBasis::at_k(
+        // GK18: the count and the grid check need no sorted basis per k.
+        let basis = dft_basis::KBasisSummary::at_k(
             &prepared.cell,
             Hartree(options.cutoff_hartree),
             point.fractional,
         )
         .map_err(|e| fail("basis.ecutwfc_ry", e, "correct the cutoff"))?;
         drop(span);
-        let n = basis.vectors().len();
+        let n = basis.count;
         if let Some(p) = profile {
             p.count(IC::InitPreflightWaveRows, n);
         }
@@ -663,8 +664,19 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             ));
         }
         let span = profile.map(|p| p.span(IC::InitCheckGridCalls, IC::InitCheckGridNanos));
-        FftGridSpec::new(&basis, &prepared.density, Some(prepared.grid.dims()))
-            .map_err(|e| fail("basis.fft_grid", e, "increase FFT dimensions"))?;
+        FftGridSpec::dims_for_summary(
+            &basis,
+            &prepared.density,
+            Some(prepared.grid.dims()),
+            || {
+                PlaneWaveBasis::at_k(
+                    &prepared.cell,
+                    Hartree(options.cutoff_hartree),
+                    point.fractional,
+                )
+            },
+        )
+        .map_err(|e| fail("basis.fft_grid", e, "increase FFT dimensions"))?;
         drop(span);
         counts.push(n);
     }

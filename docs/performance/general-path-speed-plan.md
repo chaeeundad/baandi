@@ -333,3 +333,12 @@ Implemented in GK17 (ledger GK17-SCF-GAP): `K_KEPT_SLABS` + `K_KEPT_SLAB_MB` (ke
 bit-identical, default off pending dev08 RSS), `FFT_ONE_RANK_DIRECT` (bit-identical, default on), projector scan
 skip (bit-identical, no switch). Next, by expected gain: dev08 A/B of these plus `M2_FFT=mkl`; GK9 stage 2 for the
 remainder k (IrI3); kept slabs on the spin/FD path (`electronic_map`); GK11 generalized Ritz k start (setup).
+
+## 11. GK18: many-small-k setup (2026-11-27)
+
+GeTe dev08 gen55 (R): setup 3.50 s vs QE init_run 1.23 s, preflight 0.31 s, orbital gather 0.55 s (energy-only).
+The start H apply (1.2 s) costs what SCF H columns cost and matches QE's wfcinit work (19 columns per k); its lever
+is the FFT kernel. The rest was per-k transcendental work and replicated bookkeeping. GK18 (ledger) removes it
+bit-identically: harmonics per direction, Bessel samples per node shared over channels, erf factor per species,
+owned-only k bases from basis summaries (also in the preflight), owned projector tile reuse, lazy pooled delivery.
+E: about 1.5 s off GeTe at MPI8. Next: lazy delivery on the spin/FD driver, shared k-operator scratch (GK6), GK11.

@@ -537,15 +537,22 @@ fn real_files_cutoff_report() {
                 input["scf"]["max_iterations"] = toml::Value::Integer(300);
                 // R10BC removed the strict-only tolerance keys; the single
                 // standard path takes its accuracy from standard_threshold_ha.
+                // The stored templates predate R10BC; drop the strict-only keys
+                // (the default mixer replaces kerker-pulay).
                 let scf = input["scf"].as_table_mut().unwrap();
                 for key in [
                     "energy_tolerance_ha",
                     "density_residual_tolerance",
                     "eigen_tolerance",
+                    "mixing",
+                    "mixing_q0_inverse_bohr",
                 ] {
                     scf.remove(key);
                 }
                 scf.insert("standard_threshold_ha".into(), toml::Value::Float(1e-10));
+                if let Some(xc) = input.get_mut("xc").and_then(|x| x.as_table_mut()) {
+                    xc.remove("density_floor");
+                }
                 let text = toml::to_string(&input).unwrap()
                     + "\n[relax]\nmode='cell'\ncell_dofs='isotropic'\nmax_steps=100\nstress_tol_ha_bohr3=1e-7\nenergy_tol_ha=1e-9\n[symmetry]\nmode='auto'\n";
                 // Validate generated input before launching an expensive calculation.

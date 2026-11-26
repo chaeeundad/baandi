@@ -16,8 +16,17 @@ HERE = Path(__file__).resolve().parent
 PRESSURE_TOLERANCE = 1e-7  # Existing real-file stress tolerance, Ha/Bohr^3.
 
 
+# Keys of the stored (pre-R10BC) templates that the single standard path no
+# longer accepts; the archived templates stay unchanged as evidence.
+REMOVED_KEYS = ("density_residual_tolerance", "eigen_tolerance", "energy_tolerance_ha",
+                "mixing_q0_inverse_bohr", "mixing", "density_floor")
+
+
 def input_text(template, nc_dir, every, frame=None):
     text = template
+    for key in REMOVED_KEYS:
+        text = re.sub(r'^' + key + r'\s*=.*\n', '', text, flags=re.MULTILINE)
+    text = text.replace('[scf]\n', '[scf]\nstandard_threshold_ha = 1e-10\n', 1)
     for element in ("Si", "Mg", "O"):
         text = re.sub(r'^' + element + r'\s*=.*$',
                       element + ' = ' + json.dumps(str(nc_dir / (element + '.upf'))),

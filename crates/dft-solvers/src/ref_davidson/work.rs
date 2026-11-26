@@ -308,7 +308,9 @@ pub(crate) fn memory_observe(value: WorkspaceMemory) {
     });
 }
 
-/// Release a completed reference run's private row cache before delivery.
+/// Release a completed reference run's private row cache before delivery,
+/// including the complex (k-point) Davidson workspace kept by GK3.
 pub fn release_row_cache() {
     super::workspace::release_row_cache();
+    crate::ref_davidson_complex::release_workspace();
 }

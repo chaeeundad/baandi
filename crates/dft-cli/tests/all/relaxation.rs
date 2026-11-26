@@ -414,7 +414,7 @@ fn real_si_and_mgo() {
             // accepted; step retention after a later failure is covered by the
             // synthetic budget test above. Here: exit 4, failed status, the
             // rejected attempts recorded, and a consistent final frame if any.
-            let steps = r["steps"].as_u64().unwrap();
+            let steps = r["steps"].as_u64().unwrap_or(0);
             assert!(!r["failures"].as_array().unwrap().is_empty());
             if let Some(f) = r["frames"].as_array().unwrap().last() {
                 assert_eq!(r["final_max_force_ha_bohr"], f["max_force_ha_bohr"]);

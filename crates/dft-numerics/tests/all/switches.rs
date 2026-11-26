@@ -213,7 +213,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::K_FIRST_EMPTY_RULE), Value::Choice("off"));
     assert_eq!(value(Id::K_REDO_KEPT_HX), Value::Choice("on"));
     assert_eq!(value(Id::K_START_KEPT_HX), Value::Choice("on"));
-    assert_eq!(value(Id::REFSCF_K_POOLS), Value::Choice("off"));
+    assert_eq!(value(Id::REFSCF_K_POOLS), Value::Choice("auto"));
     assert_eq!(TABLE.len(), 76);
 }
 

@@ -231,5 +231,7 @@
  "GK4-K-ENERGY": "k점 SCF에서 매 단계 에너지 항 계산을 마지막에만(결과 동일)",
  "GK1B-NL-TABLES": "k점 비국소 표를 자기 몫만 계산, 스핀 시작 공유(결과 동일)",
  "GK10-BORDER-GRAM": "k점 Davidson에서 행렬 전체 대신 새로 붙은 부분만 갱신",
- "GK14-RADIAL-TABLES": "시작 오비탈·투영자 지름 적분을 미리 만든 촘촘한 표에서 보간(QE 방식)"
+ "GK14-RADIAL-TABLES": "시작 오비탈·투영자 지름 적분을 미리 만든 촘촘한 표에서 보간(QE 방식)",
+ "GK10B-CDAV-REALPATH": "k점 Davidson에 Gamma 최적화 이식, 첫 단계 H 재사용",
+ "GK9-K-POOLS": "k점을 프로세스 묶음(pool)별로 나눠 계산(QE -nk 방식)"
 }

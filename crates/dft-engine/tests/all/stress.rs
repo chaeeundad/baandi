@@ -31,6 +31,7 @@ fn oracle(state: &ForceState<'_>) {
             dft_physics::spin::SpinDensity::Collinear { channels, .. } => channels[0].shape(),
             _ => unreachable!(),
         },
+        ElectronicState::Reference(r) => r.density[0].shape(),
     };
     let mut options = state.options.clone();
     options.strain_reference = Some(Box::new(state.cell.clone()));
@@ -477,6 +478,7 @@ fn state_view<'a>(s: &ForceState<'a>) -> ForceState<'a> {
             ElectronicState::Fixed(r) => ElectronicState::Fixed(r),
             ElectronicState::Collinear(r) => ElectronicState::Collinear(r),
             ElectronicState::FiniteTemperature(r) => ElectronicState::FiniteTemperature(r),
+            ElectronicState::Reference(r) => ElectronicState::Reference(r),
         },
         density_floor: s.density_floor,
         symmetry: s.symmetry,

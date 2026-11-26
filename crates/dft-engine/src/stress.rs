@@ -15,7 +15,6 @@ pub type Tensor = terms::Tensor;
 /// `min(SCAN_THRESHOLD_HA, caller threshold)`, so a scan is never looser than
 /// before and follows a caller who tightens `scf.standard_threshold_ha`.
 pub const SCAN_THRESHOLD_HA: f64 = 1e-9;
-type Blocks<'a> = Vec<(&'a crate::KPointSolution, &'a [f64])>;
 pub type StressState<'a> = ForceState<'a>;
 #[derive(Debug)]
 pub struct PulayAssessment {
@@ -90,46 +89,8 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     // strict tolerances and fresh certificate (or passed verification) before
     // accepting the state.
     let validated = crate::forces::forces(state)?;
-    let (densities, blocks): (Vec<&Array3<f64>>, Blocks<'_>) = match &state.electronic {
-        ElectronicState::Fixed(r) => (
-            vec![&r.density],
-            r.k_points
-                .iter()
-                .map(|k| (k, r.occupations.as_slice()))
-                .collect(),
-        ),
-        ElectronicState::FiniteTemperature(r) => (
-            vec![&r.state.density],
-            r.state
-                .k_points
-                .iter()
-                .enumerate()
-                .map(|(k, p)| (p, r.occupations.block(0, k)))
-                .collect(),
-        ),
-        ElectronicState::Collinear(r) => {
-            let dft_physics::spin::SpinDensity::Collinear { channels, .. } = &r.density else {
-                return Err(ScfError::InvalidInput("stress: collinear density required"));
-            };
-            (
-                channels.iter().collect(),
-                r.k_points
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(s, ks)| {
-                        ks.iter().enumerate().map(move |(k, p)| {
-                            (
-                                p,
-                                r.finite_occupations
-                                    .as_ref()
-                                    .map_or(r.occupations[s].as_slice(), |f| f.block(s, k)),
-                            )
-                        })
-                    })
-                    .collect(),
-            )
-        }
-    };
+    let densities: Vec<&Array3<f64>> = state.electronic.densities()?;
+    let blocks = state.electronic.blocks();
     let volume = state.cell.volume_bohr3();
     let dims: [usize; 3] = densities[0]
         .shape()
@@ -246,11 +207,11 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     let mut kinetic = [[0.; 3]; 3];
     let mut nonlocal = [[0.; 3]; 3];
     let mut band_passes = 0;
-    for (k, occupations) in blocks {
-        let basis = state.options.basis(state.cell, k.point.fractional, 1.)?;
-        let f: Vec<_> = occupations.iter().map(|v| v * k.point.weight).collect();
-        let c: Vec<_> = (0..k.solution.eigenvectors.cols())
-            .map(|b| k.solution.eigenvectors.column(b).to_vec())
+    for (point, orbitals, occupations) in blocks {
+        let basis = state.options.basis(state.cell, point.fractional, 1.)?;
+        let f: Vec<_> = occupations.iter().map(|v| v * point.weight).collect();
+        let c: Vec<_> = (0..orbitals.cols())
+            .map(|b| orbitals.column(b).to_vec())
             .collect();
         add(
             &mut kinetic,
@@ -258,7 +219,7 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         );
         add(
             &mut nonlocal,
-            &terms::nonlocal(&basis, volume, &species, &k.solution.eigenvectors, &f)?,
+            &terms::nonlocal(&basis, volume, &species, orbitals, &f)?,
         );
         band_passes += f.len();
     }
@@ -401,16 +362,10 @@ fn stress_inner(
     let c = state.options.cutoff_hartree;
     let steps = [0.05 * c, 0.10 * c];
     let mut energies = [0.; 3];
-    let original_dims: [usize; 3] = match &state.electronic {
-        ElectronicState::Fixed(r) => r.density.shape(),
-        ElectronicState::FiniteTemperature(r) => r.state.density.shape(),
-        ElectronicState::Collinear(r) => match &r.density {
-            dft_physics::spin::SpinDensity::Collinear { channels, .. } => channels[0].shape(),
-            _ => unreachable!(),
-        },
-    }
-    .try_into()
-    .map_err(|_| ScfError::InvalidInput("stress: grid shape"))?;
+    let original_dims: [usize; 3] = state.electronic.densities()?[0]
+        .shape()
+        .try_into()
+        .map_err(|_| ScfError::InvalidInput("stress: grid shape"))?;
     let mut high = state.options.clone();
     high.strain_reference = None;
     high.cutoff_hartree = c + steps[1];
@@ -424,11 +379,7 @@ fn stress_inner(
         )
         .map_err(|e| ScfError::Numerical(e.to_string()))?;
     }
-    let points: Vec<_> = match &state.electronic {
-        ElectronicState::Fixed(r) => r.k_points.iter().map(|k| k.point).collect(),
-        ElectronicState::FiniteTemperature(r) => r.state.k_points.iter().map(|k| k.point).collect(),
-        ElectronicState::Collinear(r) => r.k_points[0].iter().map(|k| k.point).collect(),
-    };
+    let points = state.electronic.points();
     let mut shells_resolved = false;
     for point in points {
         shells_resolved |= high
@@ -502,6 +453,7 @@ fn stress_inner(
     let mut used = [None; 3];
     if budget >= 3
         && !matches!(state.electronic, ElectronicState::Fixed(r) if r.force_identity.reference_delivery)
+        && !matches!(state.electronic, ElectronicState::Reference(_))
     {
         let results: Vec<Result<(f64, Option<f64>), ScfError>> = std::thread::scope(|scope| {
             let handles: Vec<_> = [0., steps[0], steps[1]]
@@ -621,6 +573,56 @@ fn energy_at_prepared(
                 ));
             }
             Ok(run.outcome.result.total_hartree())
+        }
+        // Reference spin/FD scans: same occupation policy (theta, constraint,
+        // band cap or fixed sector), reference mixer and threshold; the
+        // variational energy is F (E for a fixed sector, where TS = 0).
+        ElectronicState::Reference(r) => {
+            let points = state.electronic.points();
+            let mut profile = crate::refscf::profile::Profile::from_standard_ha(
+                options
+                    .standard
+                    .ok_or(ScfError::InvalidInput(
+                        "reference stress scan requires standard profile",
+                    ))?
+                    .threshold_ha,
+            )?;
+            match options.mixing {
+                crate::Mixing::Pulay { beta, history } => {
+                    profile.beta = beta;
+                    profile.history = history;
+                }
+                crate::Mixing::Linear { beta } => {
+                    profile.beta = beta;
+                    profile.history = 0;
+                }
+                _ => {}
+            }
+            let input = crate::refstart::StartInput {
+                cell,
+                atoms: state.atoms,
+                potentials: state.potentials,
+                options: &options,
+            };
+            let run = if let Some(prepared) = prepared {
+                crate::refscf::electronic::run_prepared(input, profile, prepared, r.policy.clone())
+            } else {
+                if !state.symmetry.is_empty() {
+                    return Err(ScfError::InvalidInput(
+                        "reference symmetric cutoff scan requires stress_prepared",
+                    ));
+                }
+                crate::refscf::electronic::run(input, profile, &points, r.policy.clone())
+            }?;
+            if !run.converged
+                || (options.verification == crate::Verification::FixedPoint
+                    && !run.verification.as_ref().is_some_and(|v| v.passed()))
+            {
+                return Err(ScfError::InvalidInput(
+                    "reference stress scan did not converge",
+                ));
+            }
+            Ok(run.thermodynamics.free_energy_ha)
         }
         #[cfg(feature = "strict-oracle")]
         ElectronicState::Fixed(r) => {

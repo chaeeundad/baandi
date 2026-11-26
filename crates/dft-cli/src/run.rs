@@ -2932,11 +2932,11 @@ fn reference_electronic_run(
     use dft_engine::refscf::electronic::Policy;
     let theta = config.finite_temperature().map_err(|e| error(1, e))?;
     let sector = config.spin_sector(electrons).map_err(|e| error(1, e))?;
-    let cap = config
-        .occupations
-        .as_ref()
-        .and_then(|o| o.band_cap)
-        .unwrap_or(32);
+    let cap = if theta.is_some() {
+        config.fd_band_count().map_err(|e| error(1, e))?
+    } else {
+        0
+    };
     let policy = match (sector.clone(), theta) {
         (None, Some(theta_ha)) => Policy::FermiDirac {
             theta_ha,
@@ -2973,12 +2973,20 @@ fn reference_electronic_run(
     let mut request = dft_engine::refscf::api::Request::new(profile, points.to_vec());
     request.symmetry = symmetry;
     request.policy = Some(policy);
+    // Forces and stress of the delivered spin/FD state (-dF/dR and the
+    // F strain derivative for Fermi-Dirac), evaluated after the SCF records.
+    request.derivatives = dft_engine::refscf::api::Derivatives {
+        forces: config.output.as_ref().is_some_and(|o| o.forces),
+        stress: config.output.as_ref().is_some_and(|o| o.stress),
+        deferred: true,
+    };
     let delivery = if mode.observe || mode.agent {
         crate::telemetry::drive_reference(input, request, mode, out)?
     } else {
         dft_engine::refscf::api::solve(input, request).map_err(engine_error)?
     };
-    let r = delivery.run.into_electronic().map_err(engine_error)?;
+    let mut derivatives = delivery.derivatives;
+    let mut r = delivery.run.into_electronic().map_err(engine_error)?;
     let mut total = r.density[0].clone();
     if r.density.len() == 2 {
         total += &r.density[1];
@@ -3144,6 +3152,47 @@ fn reference_electronic_run(
     .record(&mut result);
     result["execution"]["effective_solver"] = json!("reference_complex_davidson");
     let run_config = dft_numerics::switches::RunConfig::current();
+    let mut tables = String::new();
+    let forces_requested = config.output.as_ref().is_some_and(|o| o.forces);
+    let stress_requested = config.output.as_ref().is_some_and(|o| o.stress);
+    if forces_requested || stress_requested {
+        // RUN-CONFIG: the SCF is over; the derivative scans do not count.
+        run_config.freeze_consulted();
+        let input = || dft_engine::refstart::StartInput {
+            cell: &prepared.cell,
+            atoms,
+            potentials,
+            options: opts,
+        };
+        if r.converged {
+            derivatives
+                .prepare_electronic(input(), &mut r)
+                .map_err(engine_error)?;
+            derivatives
+                .evaluate_forces_electronic(input(), &r)
+                .map_err(engine_error)?;
+            if let Some(force) = derivatives.forces.take() {
+                tables.push_str(&force_table(&force));
+                result["forces"] = force_json(&force);
+                result["forces"]["verification"] = json!(force.verification);
+            }
+            derivatives
+                .evaluate_stress_electronic(input(), &r)
+                .map_err(engine_error)?;
+            if let Some(stress) = derivatives.stress.take() {
+                tables.push_str(&stress_table(&stress));
+                result["stress"] = stress_json(&stress);
+                result["stress"]["verification"] = json!(stress.verification);
+            }
+        } else {
+            // Never drop a requested derivative silently.
+            for (key, requested) in [("forces", forces_requested), ("stress", stress_requested)] {
+                if requested {
+                    result[key] = json!({"status":"unavailable","reason":"scf_not_converged"});
+                }
+            }
+        }
+    }
     result["scf"]["switches"] = switches_json();
     result["run"] = run_block(
         run_config,
@@ -3173,7 +3222,7 @@ fn reference_electronic_run(
     Ok(RunReport {
         converged: r.converged,
         console: format!(
-            "Reference spin/FD: E={:.16e} Ha; -TS={:.16e} Ha; F={:.16e} Ha; M={:.12e} mu_B; iterations={}; converged={}\n",
+            "Reference spin/FD: E={:.16e} Ha; -TS={:.16e} Ha; F={:.16e} Ha; M={:.12e} mu_B; iterations={}; converged={}\n{tables}",
             r.thermodynamics.internal_energy_ha,
             -r.thermodynamics.entropy_term_ha,
             r.thermodynamics.free_energy_ha,
@@ -4498,6 +4547,9 @@ mod tests {
                 });
             }
             if finite {
+                // FD-FORCES: scf.nbands now sets the FD band count; keep the
+                // historical count (the cap, 12) of this fixture.
+                text = text.replace("nbands=3\n", "");
                 text.push_str("[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=12\n");
             }
             fs::write(&input, &text).unwrap();

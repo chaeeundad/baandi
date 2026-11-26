@@ -99,8 +99,11 @@ fn spin_and_finite_stress_envelopes() {
             "[spin]\nmode='collinear'\ntotal_moment=0.3\n",
         ),
     ] {
+        // FD-FORCES: scf.nbands sets the FD band count; FD cases keep their
+        // historical count, the cap (12).
+        let bands = if policy.is_empty() { "nbands=4\n" } else { "" };
         let text = format!(
-            "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=4\n{policy}{spin}[output]\ndirectory='{name}'\nstress=true\n"
+            "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\n{bands}{policy}{spin}[output]\ndirectory='{name}'\nstress=true\n"
         );
         fs::write(dir.join("input.toml"), text).unwrap();
         let out = Command::new(env!("CARGO_BIN_EXE_dft-cli"))

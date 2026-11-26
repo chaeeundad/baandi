@@ -1104,9 +1104,13 @@ positive. Kelvin uses the exact SI Boltzmann constant at the CLI boundary;
 the engine uses theta=k_B T in Ha. Gaussian, MP and cold schemes reject.
 Odd unpolarized electron counts are permitted only in FD mode.
 
-`band_cap` defaults to 32. The initial policy prepares and solves this entire
-cap, automatically adding empty bands up to it; `scf.nbands` is a lower bound
-and must not exceed the cap. The cap must fit every k basis. Insufficient
+The FD band count (per spin channel and k point) is `scf.nbands` when given,
+otherwise `band_cap` (default 32). `band_cap` stays the documented cap: an
+`scf.nbands` above an explicit `band_cap` is rejected at preflight
+(`scf.nbands = N exceeds occupations.band_cap = C`). Before FD-FORCES
+(2026-11-26) `scf.nbands` was ignored in FD mode and the cap was always the band
+count; inputs that set a smaller `nbands` now solve fewer bands. The policy
+prepares and solves every one of these bands. The band count must fit every k basis. Insufficient
 empty-state coverage fails with an instruction to increase the cap. The
 reported top-band diagnostics are not bounds on infinitely many omitted bands;
 repeat with at least four more bands and compare F/density.
@@ -1189,9 +1193,25 @@ or the strict certificate (`BAANDI_REFERENCE_STRICT=on`) is required;
 `values`, `per_term` (ewald/local/nonlocal/core), `net_force`,
 `maximum_absolute_component`, `elapsed_seconds`, `band_passes` and
 `unavailable_terms` and a named `derivative_ledger`. Missing derivatives never become zero or a partial total.
-The fixed unpolarized path prints the table; spin and FD also write `forces.txt`.
+The fixed unpolarized path prints the table; the strict-oracle spin and FD
+serializers also write `forces.txt`.
 With symmetry auto the same SCF spatial subgroup averages each term.
 For FD these are derivatives of free energy at fixed temperature and charge.
+
+FD-FORCES (2026-11-26): the default reference driver computes forces and stress
+for Fermi-Dirac (scalar and collinear) and collinear fixed-sector runs too.
+Before this change the reference spin/FD result (`output_profile =
+"reference_spin_fd_v1"`) silently omitted both blocks. `forces.quantity` and
+`stress.quantity` are `F` for FD (Mermin free energy F = E - TS; the
+occupation derivatives add no term because F is variational) and `E` for a
+fixed spin sector. The nonlocal and kinetic terms sum f_nk w_k over both spin
+channels. As for fixed occupations, the passed reference verification is the
+certificate (`verification = "verified"`, standard `preconditions`); with
+`scf.verify = "off"` the blocks say `unverified`. A non-converged run writes
+`{"status":"unavailable","reason":"scf_not_converged"}` for each requested
+block. Both console tables are printed. The stress block includes the Pulay
+assessment from three reference spin/FD cutoff-scan SCFs with the same
+occupation policy.
 State-contract extension version 2 includes the available-force branch and requires
 strict/converged/certificate-passed preconditions. Version 1 unavailable documents
 remain valid, and unavailable forces never carry numerical arrays. The outer

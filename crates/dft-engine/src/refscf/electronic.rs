@@ -53,6 +53,10 @@ impl Policy {
             2
         }
     }
+    /// Fermi-Dirac occupations (the variational quantity is F = E - TS).
+    pub fn is_finite(&self) -> bool {
+        self.finite().is_some()
+    }
     pub(super) fn finite(&self) -> Option<(f64, Constraint)> {
         match self {
             Self::FermiDirac { theta_ha, .. } => Some((*theta_ha, Constraint::Total)),
@@ -133,6 +137,35 @@ pub struct Run {
     pub kept_hx: Vec<super::kept_hx::Report>,
     pub setup_s: f64,
     pub total_s: f64,
+    /// Occupation policy of this delivery (derivatives read theta, cap, sector).
+    pub policy: Policy,
+    /// Setup-time model record checked by post-SCF derivatives.
+    pub(crate) force_identity: crate::force_identity::ForceIdentity,
+}
+impl Run {
+    /// Derivatives evaluate the Mermin free energy F = E - TS for finite
+    /// temperature and the internal energy for a fixed spin sector.
+    pub fn quantity(&self) -> &'static str {
+        if self.policy.is_finite() { "F" } else { "E" }
+    }
+    pub(crate) fn occupation_identity(&self) -> crate::force_identity::OccupationIdentity {
+        occupation_identity(&self.policy)
+    }
+}
+fn occupation_identity(policy: &Policy) -> crate::force_identity::OccupationIdentity {
+    let (finite, sector) = match policy {
+        Policy::FermiDirac { theta_ha, band_cap } => {
+            (Some((*theta_ha, Constraint::Total, *band_cap)), None)
+        }
+        Policy::FixedSpin(sector) => (None, Some(sector)),
+        Policy::SpinFermiDirac {
+            sector,
+            theta_ha,
+            constraint,
+            band_cap,
+        } => (Some((*theta_ha, *constraint, *band_cap)), Some(sector)),
+    };
+    crate::force_identity::OccupationIdentity::reference(finite, sector)
 }
 /// Opt-in diagnostic records retained even when the run rejects a history.
 /// Storage is reserved at setup; adapters inspect/serialize only after return.
@@ -1158,6 +1191,17 @@ pub(super) async fn run_continuation<K: Collective>(
                 }
                 blocks.push(delivered);
             }
+            let mut identity = crate::force_identity::ModelDescription::new(
+                input.cell,
+                input.atoms,
+                input.potentials,
+                &options,
+                dims,
+                points.to_vec(),
+            );
+            if let Some(p) = prepared {
+                identity.symmetry = p.operations(opts.crystal_density_group).to_vec();
+            }
             return Ok(Run {
                 stalls,
                 map_diagnostics,
@@ -1193,6 +1237,8 @@ pub(super) async fn run_continuation<K: Collective>(
                     .collect::<Result<_, _>>()?,
                 setup_s,
                 total_s: clock.elapsed().as_secs_f64(),
+                force_identity: identity.with_policy(occupation_identity(&policy)),
+                policy: policy.clone(),
             });
         }
         completed = iteration;

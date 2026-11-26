@@ -694,7 +694,16 @@ pub(super) fn k_state(
     // GK9 k pools: a rank's checkpoint holds its own whole k points; the
     // switch is in the agreement hash, the owned range is checked here.
     if let Some(pool) = &state.pool {
-        io.same(&[pool.local().start, pool.local().end, pool.nk])?;
+        let (j, i, p) = pool.position();
+        io.same(&[
+            pool.local().start,
+            pool.local().end,
+            pool.nk,
+            pool.npool(),
+            j,
+            i,
+            p,
+        ])?;
     }
     io.same(&state.ionic)?;
     io.same(&state.electrons)?;

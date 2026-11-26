@@ -194,6 +194,9 @@ impl Collective for SharedComm {
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
         timed(3, send.len(), || self.0.alltoall_f64(send, block, recv))
     }
+    fn split(&self, color: usize, key: usize) -> Result<dft_mpi::Comm, MpiError> {
+        self.0.split(color, key)
+    }
 }
 
 // Trace regression exercises the same wrapper as every engine collective.

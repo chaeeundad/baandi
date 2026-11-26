@@ -33,11 +33,11 @@ impl fmt::Display for MpiError {
 impl std::error::Error for MpiError {}
 
 mod collective;
-pub use collective::{Collective, SimRank, simulate, tree_associate};
+pub use collective::{Collective, Comm, SimRank, simulate, split_members, tree_associate};
 #[cfg(feature = "mpi")]
 mod ffi;
 #[cfg(feature = "mpi")]
-pub use ffi::{Universe, World};
+pub use ffi::{SubComm, Universe, World};
 #[cfg(not(feature = "mpi"))]
 mod single;
 #[cfg(not(feature = "mpi"))]

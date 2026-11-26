@@ -5357,6 +5357,9 @@ impl<K: Collective> Collective for PbeNoGather<'_, K> {
     fn alltoall_f64(&self, a: &[f64], n: usize, b: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
         self.0.alltoall_f64(a, n, b)
     }
+    fn split(&self, color: usize, key: usize) -> Result<dft_mpi::Comm, dft_mpi::MpiError> {
+        self.0.split(color, key)
+    }
 }
 
 #[test]

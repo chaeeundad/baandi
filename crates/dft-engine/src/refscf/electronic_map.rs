@@ -530,7 +530,8 @@ pub(super) fn evaluate<K: Collective>(
     let dv = cell.volume_bohr3() / points as f64;
     let pool = states[0].pool.clone();
     let pooled = pool.is_some();
-    let kc = super::k_pool::KComm::new(comm, pooled);
+    let layout = super::k_pool::KPool::comm_of(pool.as_ref());
+    let kc = super::k_pool::KComm::new(comm, &layout);
     let field_axis = states[0].fields.first_axis();
     // Channel potentials and their mean (collectives on every rank) before
     // the rank-local solves; with pools also gathered to the full grid.
@@ -562,8 +563,11 @@ pub(super) fn evaluate<K: Collective>(
             for k in 0..nk {
                 let mut op_potential = Vec::new();
                 if let Some(full) = full.as_mut() {
-                    op_potential
-                        .extend_from_slice(full.for_axis(state.blocks[k].operator.first_axis())?);
+                    op_potential.extend_from_slice(full.for_operator(
+                        state.blocks[k].operator.first_axis(),
+                        kc.rank(),
+                        kc.size(),
+                    )?);
                 } else {
                     let mut planes = crate::grid_dist::PlaneMap::new(
                         dims,
@@ -756,7 +760,7 @@ pub(super) fn evaluate<K: Collective>(
                     .iter()
                     .map(|v| v * weights[first + k])
                     .collect();
-                let band_kinetic = f
+                let band_kinetic: Vec<f64> = f
                     .iter()
                     .enumerate()
                     .map(|(j, &weight)| {
@@ -768,6 +772,13 @@ pub(super) fn evaluate<K: Collective>(
                                 .sum::<f64>()
                     })
                     .collect();
+                // GK9B: row partials of a pool of several ranks are summed
+                // in the pool so the records are replicated there.
+                let band_kinetic = if pooled && kc.size() > 1 {
+                    super::k_map::pool_sum(&kc, Vec::new(), band_kinetic)?.1
+                } else {
+                    band_kinetic
+                };
                 let mut nl = vec![0.; bands];
                 op.nonlocal_band_energies(&kc, &block.orbitals, &mut nl)
                     .map_err(numerical)?;
@@ -807,7 +818,11 @@ pub(super) fn evaluate<K: Collective>(
     let terms = match &pool {
         None => terms?,
         Some(pool) => {
-            let terms = channel_major(super::k_pool::allgather(comm, terms)?, pool, ns)?;
+            let terms = channel_major(
+                super::k_pool::allgather(comm, terms, pool.leader())?,
+                pool,
+                ns,
+            )?;
             exchange
                 .take()
                 .expect("pooled exchange")
@@ -1057,7 +1072,11 @@ fn share_blocks<K: Collective>(
         }
         Err(e) => (Vec::new(), Err(e)),
     };
-    let records = channel_major(super::k_pool::allgather(comm, records)?, pool, channels)?;
+    let records = channel_major(
+        super::k_pool::allgather(comm, records, pool.leader())?,
+        pool,
+        channels,
+    )?;
     let local = pool.local();
     let mut records = records.into_iter();
     let mut out = Vec::with_capacity(channels);

@@ -24,6 +24,112 @@ pub trait Collective {
     /// Equal-block all-to-all: block r of `send` goes to rank r, block r of
     /// `recv` comes from rank r.
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError>;
+    /// `MPI_Comm_split` semantics: ranks passing the same `color` form one
+    /// sub-communicator, ranked by `key` and then by their rank here.
+    /// Collective. The default serves one-rank collectives only; adapters
+    /// that wrap a multi-rank communicator forward it.
+    fn split(&self, color: usize, key: usize) -> Result<Comm, MpiError> {
+        let _ = (color, key);
+        if self.size() == 1 {
+            Ok(Comm::Single)
+        } else {
+            Err(MpiError::State(
+                "this collective adapter does not support sub-communicators",
+            ))
+        }
+    }
+}
+
+/// A sub-communicator made by [`Collective::split`] (GK9 k-point pools).
+pub enum Comm {
+    /// A group of one rank.
+    Single,
+    /// A group of simulated ranks ([`simulate`]).
+    Sim(SimRank),
+    /// An MPI communicator from `MPI_Comm_split`.
+    #[cfg(feature = "mpi")]
+    Mpi(crate::ffi::SubComm),
+}
+impl std::fmt::Debug for Comm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Comm(rank {} of {})", self.rank(), self.size())
+    }
+}
+macro_rules! dispatch {
+    ($self:ident, $c:ident => $e:expr, $single:expr) => {
+        match $self {
+            Comm::Single => $single,
+            Comm::Sim($c) => $e,
+            #[cfg(feature = "mpi")]
+            Comm::Mpi($c) => $e,
+        }
+    };
+}
+impl Collective for Comm {
+    fn rank(&self) -> usize {
+        dispatch!(self, c => c.rank(), 0)
+    }
+    fn size(&self) -> usize {
+        dispatch!(self, c => c.size(), 1)
+    }
+    fn barrier(&self) -> Result<(), MpiError> {
+        dispatch!(self, c => c.barrier(), Ok(()))
+    }
+    fn allgatherv_f64(
+        &self,
+        local: &[f64],
+        counts: &[usize],
+        out: &mut [f64],
+    ) -> Result<(), MpiError> {
+        dispatch!(self, c => c.allgatherv_f64(local, counts, out), {
+            if counts != [local.len()] || out.len() != local.len() {
+                return Err(MpiError::Shape("allgatherv counts"));
+            }
+            out.copy_from_slice(local);
+            Ok(())
+        })
+    }
+    fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), MpiError> {
+        dispatch!(self, c => c.tree_sum_f64(local, out), {
+            if out.len() != local.len() {
+                return Err(MpiError::Shape("tree_sum lengths"));
+            }
+            out.copy_from_slice(local);
+            Ok(())
+        })
+    }
+    fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), MpiError> {
+        dispatch!(self, c => c.bcast_f64(data, root), if root == 0 {
+            Ok(())
+        } else {
+            Err(MpiError::Shape("root out of range"))
+        })
+    }
+    fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
+        dispatch!(self, c => c.alltoall_f64(send, block, recv), {
+            if send.len() != block || recv.len() != block {
+                return Err(MpiError::Shape("alltoall lengths"));
+            }
+            recv.copy_from_slice(send);
+            Ok(())
+        })
+    }
+    fn split(&self, color: usize, key: usize) -> Result<Comm, MpiError> {
+        match self {
+            Comm::Single => Ok(Comm::Single),
+            Comm::Sim(c) => Collective::split(c, color, key),
+            #[cfg(feature = "mpi")]
+            Comm::Mpi(c) => Ok(Comm::Mpi(c.split(color, key)?)),
+        }
+    }
+}
+
+/// Members of `color` ordered by (key, rank) from the gathered (color, key)
+/// pairs of every rank; `MPI_Comm_split` ordering.
+pub fn split_members(pairs: &[(usize, usize)], color: usize) -> Vec<usize> {
+    let mut members: Vec<usize> = (0..pairs.len()).filter(|&r| pairs[r].0 == color).collect();
+    members.sort_by_key(|&r| (pairs[r].1, r));
+    members
 }
 
 impl Collective for crate::World {
@@ -53,6 +159,17 @@ impl Collective for crate::World {
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
         crate::World::alltoall_f64(self, send, block, recv)
     }
+    fn split(&self, color: usize, key: usize) -> Result<Comm, MpiError> {
+        #[cfg(feature = "mpi")]
+        {
+            Ok(Comm::Mpi(crate::World::split(self, color, key)?))
+        }
+        #[cfg(not(feature = "mpi"))]
+        {
+            let _ = (color, key);
+            Ok(Comm::Single)
+        }
+    }
 }
 
 /// The binomial-tree association over contributions held in rank order
@@ -78,6 +195,18 @@ struct Shared {
     size: usize,
     barrier: Barrier,
     slots: Mutex<Vec<Vec<f64>>>,
+    /// Hand-over of sub-group state during `split` (slot of the group leader).
+    groups: Mutex<Vec<Option<Arc<Shared>>>>,
+}
+impl Shared {
+    fn new(size: usize) -> Self {
+        Self {
+            size,
+            barrier: Barrier::new(size),
+            slots: Mutex::new(vec![Vec::new(); size]),
+            groups: Mutex::new(vec![None; size]),
+        }
+    }
 }
 /// One simulated rank (see [`simulate`]).
 #[derive(Clone)]
@@ -186,6 +315,34 @@ impl Collective for SimRank {
         self.release();
         Ok(())
     }
+    fn split(&self, color: usize, key: usize) -> Result<Comm, MpiError> {
+        let size = self.size();
+        let mut all = vec![0.; 2 * size];
+        self.allgatherv_f64(&[color as f64, key as f64], &vec![2; size], &mut all)?;
+        let pairs: Vec<(usize, usize)> = all
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| (p[0] as usize, p[1] as usize))
+            .collect();
+        let members = split_members(&pairs, color);
+        let leader = members[0];
+        if leader == self.rank {
+            self.shared.groups.lock().unwrap()[leader] = Some(Arc::new(Shared::new(members.len())));
+        }
+        self.shared.barrier.wait();
+        let shared = self.shared.groups.lock().unwrap()[leader]
+            .clone()
+            .expect("group published by its leader");
+        self.shared.barrier.wait();
+        Ok(Comm::Sim(SimRank {
+            rank: members
+                .iter()
+                .position(|&r| r == self.rank)
+                .expect("member"),
+            shared,
+        }))
+    }
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
         let size = self.size();
         if send.len() != block * size || recv.len() != block * size {
@@ -207,11 +364,7 @@ impl Collective for SimRank {
 /// Run `work` on `ranks` simulated ranks (threads) and return the per-rank results
 /// in rank order.
 pub fn simulate<R: Send>(ranks: usize, work: impl Fn(&SimRank) -> R + Sync) -> Vec<R> {
-    let shared = Arc::new(Shared {
-        size: ranks,
-        barrier: Barrier::new(ranks),
-        slots: Mutex::new(vec![Vec::new(); ranks]),
-    });
+    let shared = Arc::new(Shared::new(ranks));
     let work = &work;
     std::thread::scope(|scope| {
         let handles: Vec<_> = (0..ranks)
@@ -231,6 +384,41 @@ pub fn simulate<R: Send>(ranks: usize, work: impl Fn(&SimRank) -> R + Sync) -> V
 mod tests {
     use super::*;
     use crate::{block_counts, block_displacements};
+
+    /// Sub-groups behave as independent communicators with MPI_Comm_split
+    /// ordering (key, then rank); their collectives agree with the serial
+    /// association of their members, and groups can be split again.
+    #[test]
+    fn split_groups_are_independent_communicators() {
+        for ranks in [1usize, 2, 3, 5, 8] {
+            let out = simulate(ranks, |comm| {
+                let color = comm.rank() % 2;
+                let key = ranks - comm.rank();
+                let sub = comm.split(color, key).unwrap();
+                let v = [comm.rank() as f64 + 0.25, 1e16 * (comm.rank() % 3) as f64];
+                let mut s = [0.; 2];
+                sub.tree_sum_f64(&v, &mut s).unwrap();
+                let mut all = vec![0.; sub.size()];
+                sub.allgatherv_f64(&[comm.rank() as f64], &vec![1; sub.size()], &mut all)
+                    .unwrap();
+                let inner = sub.split(0, sub.rank()).unwrap();
+                (sub.rank(), sub.size(), s, all, inner.size())
+            });
+            for (r, (sub_rank, sub_size, s, all, inner)) in out.iter().enumerate() {
+                let mut members: Vec<usize> = (0..ranks).filter(|q| q % 2 == r % 2).collect();
+                members.reverse(); // key = ranks - rank: descending rank
+                assert_eq!(*sub_size, members.len());
+                assert_eq!(*inner, members.len());
+                assert_eq!(members[*sub_rank], r);
+                assert_eq!(all, &members.iter().map(|&q| q as f64).collect::<Vec<_>>());
+                let mut c: Vec<Vec<f64>> = members
+                    .iter()
+                    .map(|&q| vec![q as f64 + 0.25, 1e16 * (q % 3) as f64])
+                    .collect();
+                assert_eq!(s.to_vec(), tree_associate(&mut c));
+            }
+        }
+    }
 
     #[test]
     fn collectives_agree_between_ranks_and_with_the_serial_association() {

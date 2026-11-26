@@ -21,6 +21,8 @@ unsafe extern "C" {
     fn MPI_Comm_rank(comm: Handle, rank: *mut c_int) -> c_int;
     fn MPI_Comm_size(comm: Handle, size: *mut c_int) -> c_int;
     fn MPI_Barrier(comm: Handle) -> c_int;
+    fn MPI_Comm_split(comm: Handle, color: c_int, key: c_int, newcomm: *mut Handle) -> c_int;
+    fn MPI_Comm_free(comm: *mut Handle) -> c_int;
     fn MPI_Wtime() -> f64;
     fn MPI_Bcast(
         buffer: *mut c_void,
@@ -133,7 +135,7 @@ impl Universe {
         Ok(Self { owned: true })
     }
     pub fn world(&self) -> World {
-        World { _private: () }
+        World { handle: 0 }
     }
 }
 impl Drop for Universe {
@@ -145,15 +147,67 @@ impl Drop for Universe {
     }
 }
 
-/// MPI_COMM_WORLD.
+/// MPI_COMM_WORLD, or (inside a [`SubComm`]) a communicator made by
+/// `MPI_Comm_split`. The handle is stored as an address so the type stays
+/// `Send + Sync` (MPI is driven from one thread per process).
 #[derive(Clone, Copy)]
 pub struct World {
-    _private: (),
+    /// 0: MPI_COMM_WORLD; otherwise the address of a split communicator
+    /// owned by a live [`SubComm`].
+    handle: usize,
+}
+/// A communicator from [`World::split`]; every [`World`] method applies to it
+/// through `Deref`. Freed (`MPI_Comm_free`) on drop, which every member must
+/// do (collective in MPI terms; the engine drops pools on every rank alike).
+pub struct SubComm {
+    world: World,
+}
+impl std::ops::Deref for SubComm {
+    type Target = World;
+    fn deref(&self) -> &World {
+        &self.world
+    }
+}
+impl Drop for SubComm {
+    fn drop(&mut self) {
+        let mut handle = self.world.handle as Handle;
+        // SAFETY: the handle came from MPI_Comm_split and is freed once here.
+        let _ = unsafe { MPI_Comm_free(&mut handle) };
+    }
 }
 impl World {
     fn comm(&self) -> Handle {
+        if self.handle != 0 {
+            return self.handle as Handle;
+        }
         // Only the address of the library's predefined object is taken.
         std::ptr::addr_of!(ompi_mpi_comm_world) as Handle
+    }
+    /// `MPI_Comm_split`: ranks with equal `color` form one communicator,
+    /// ordered by `key` then by their rank here. Collective on this
+    /// communicator; the result frees its handle on drop.
+    pub fn split(&self, color: usize, key: usize) -> Result<SubComm, MpiError> {
+        let mut out: Handle = std::ptr::null_mut();
+        // SAFETY: valid communicator; `out` receives the new handle, which the
+        // returned SubComm owns and frees exactly once.
+        check("MPI_Comm_split", unsafe {
+            MPI_Comm_split(
+                self.comm(),
+                count(color, "split color")?,
+                count(key, "split key")?,
+                &mut out,
+            )
+        })?;
+        if out.is_null() {
+            return Err(MpiError::State(
+                "MPI_Comm_split returned a null communicator",
+            ));
+        }
+        Ok(SubComm {
+            world: World {
+                handle: out as usize,
+            },
+        })
     }
     fn double(&self) -> Handle {
         std::ptr::addr_of!(ompi_mpi_double) as Handle

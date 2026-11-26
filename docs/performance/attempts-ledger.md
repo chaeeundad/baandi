@@ -4539,3 +4539,68 @@ default must be unchanged. Accuracy: density/energy bits A = B = C = D; E roundi
 Not done (next): GK9 stage 2 for IrI3's remainder k; slabs on the spin/FD path; QE-level FFT kernel speed if E wins.
 Lesson: on a pooled k path the per-k kept-HX update is as expensive as a third of the H applications and recomputes
 psi(r) that the previous density pass formed; and a one-rank plan still paid a full self-transpose per vector.
+
+## GK9B-POOL-SUBCOMM — k-point pools of several ranks (sub-communicators) and an `auto` pool count (2026-11-27; rounding class, dev08 pending)
+
+Premise (relayed dev08 MPI8, stage 1 merged with `auto` = one rank per pool): GeTe -11 %, B12 -6 %, IrI3 neutral;
+IrI3 has 51 k on 8 ranks, the critical rank holds 7 of 51 (7 / 6.375 = 1.10), and QE was fastest there with -nk 1
+or 2 (-nk 4 9 % slower). Stage 1 could only choose between one rank per pool and the fully distributed layout.
+Change:
+- `dft-mpi`: `Collective::split(color, key)` (MPI_Comm_split semantics; default refuses for multi-rank adapters),
+  `Comm` (one rank / simulated group / MPI sub-communicator), FFI `MPI_Comm_split` + `MPI_Comm_free`
+  (`World` now carries a handle address, `SubComm` owns and frees it), simulated split through the shared state.
+  `SharedComm`, `TimedCollective` and the test adapters forward it.
+- `refscf/k_pool.rs`: `KPool` = npool pools of contiguous ranks (`block_counts(ranks, npool)`) owning contiguous k
+  blocks (`block_counts(nk, npool)`); `KComm::Pool` runs every per-k operation (start, Davidson, kept HX, residuals,
+  band energies, band densities, FD band growth) on the pool communicator, i.e. each k is G/stick-distributed over
+  its pool exactly as the distributed layout distributes it over all ranks. Pool members' row partials of the
+  squared residual norms and kinetic terms get one pool sum per k so the records are replicated in the pool; only
+  pool leaders send records. The density exchange is generalized: every rank sends, per owned k, the runs of its
+  operator planes that each field-plane owner holds (both plane axes, per-k operator axes allgathered once at the
+  start), and the owner adds them in global (channel, k) order; the potential is gathered once and each rank reads
+  its own operator planes. Delivery: pool sum of the rows, then a broadcast from the pool leader. Checkpoints check
+  (k range, nk, npool, pool, rank in pool, pool size).
+- Switches: `BAANDI_REFSCF_K_POOLS` keeps off|auto|on (`on` = one rank per pool; with fewer k than ranks the largest
+  divisor of the rank count not above nk), new `BAANDI_REFSCF_K_NPOOL=<n>` forces n pools (clamped to ranks and nk;
+  1 = distributed; unequal pool sizes allowed). Table 80 -> 81. Path note: `pools`, `pools:npool=N` or
+  `distributed` with the reason. A communicator adapter without sub-communicators keeps the distributed layout.
+`auto` rule (general, no material constant): candidates npool dividing the rank count and not above nk;
+T(npool) = max over pools of sum_k (N_pw,k / p + L ceil(log2 p)), p = ranks / npool, L = 32 rows; smallest T,
+ties to more pools. Rationale: the first term is the work of a k split over its pool plus the k-count imbalance
+between pools (the max), the second the per-k price of distributing over p ranks (reductions and transposes per
+Davidson step, growing with log2 p, independent of N_pw), expressed in rows of local work so the rule compares
+like with like for any N_pw. L is a machine constant: solving the dev08 stage-1 A/B (one rank per pool against the
+distributed layout) for L gives 27 (GeTe, N_pw 4.6k) and 24 rows (B12, 6.6k); the whole-SCF ratios include
+non-k work, so these are lower bounds; 32 is used. QE notes: QE's default uses pools only when ranks exceed half the
+z planes, but its best -nk on our cases was 4 (GeTe), 2 (B12), 1-2 (IrI3); the rule likewise moves to pools of
+several ranks when the k remainder is large relative to the per-k work (IrI3) and keeps one rank per pool for many
+small k. Predictions (E; IrI3 N_pw about 15.5k estimated from its 72^3 grid): GeTe 260 k -> npool 4 (T within 0.2 %
+of npool 8: a tie), B12 172 k -> 4 (-1.3 % vs 8), IrI3 51 k -> 4 (-7 % vs 8, -1 % vs 2). These are the A/B points
+dev08 should scan with `REFSCF_K_NPOOL` (1, 2, 4, 8) to calibrate L.
+Evidence (Mac, synthetic pseudopotentials, simulated ranks; never QE evidence):
+- Bit identity against main ff61ea0c: 46 fingerprints (energy, density, eigenvalues, orbitals), pools off at
+  P = 1, 2, 3, 8 and stage-1 `on` at P = 2, 3, 8 (scalar strict/standard on Gamma-in-list and MP222 shifted, FD,
+  fixed spin): identical (`diff` empty) between a build of `git archive ff61ea0c` and this branch.
+- npool 1 = distributed layout bit for bit at every rank count of the matrix (asserted per row, P = 2, 3, 4, 8).
+- Class matrix (`refscf_k_pools.rs`, release, `--include-ignored`): 264 rows against P = 1 with arms on, npool=1,
+  npool=2, npool=4 (clamped, unequal pools 3+3+2 at 3 k on 8 ranks), auto; 80 rows with pools of several ranks:
+  strict |dE| <= 1.6e-13 Ha, standard <= 2.6e-9 Ha (all rows: strict <= 6.5e-13, standard <= 2.6e-9 Ha; the slab
+  Gamma-in-list fixture; standard rows elsewhere <= 6.4e-13 Ha); same k count; map counts equal in 253 of 264
+  (75 of 80 sub-pool rows); the 11 others are all the slab Gamma-in-list strict fixture (33 -> 34..36 maps), whose
+  distributed layout moves the count by as much over rank counts 2..8 (the test gates on that spread).
+- Fixed (P, npool) bit-reproducible: P = 4 npool 2 (2 x 2), P = 3 npool 2 (2 + 1), P = 4 auto, FD/spin P = 3
+  npool 2 and on; every rank delivers the same bits.
+- Pooled checkpoint restart bit-identical at P = 2 on and P = 4 npool 2.
+- `auto` choices on the fixtures: 3 k at P = 2, 3 -> one rank per pool, 3 k at P = 8
+  -> npool 2 (pools of 4), 8 k -> one rank per pool.
+- Mac timing (O, simulated ranks are threads with barrier collectives, latency overstated; one run per arm),
+  B12-shaped synthetic, P = 8: 11 k ecut 10: off 3.49 s, on 1.42, auto (npool 4) 1.54, npool 2 2.05; 16 k ecut 8:
+  off 3.95, on 1.04, auto (8) 1.04, npool 4 1.32. Same maps and H columns in every arm, |dE| <= 1.4e-14 Ha. On the
+  simulator one rank per pool wins even at 11 k on 8 ranks: the simulator's collective cost is far above dev08's
+  (about 1 us per small reduction at MPI8), so this does not calibrate L; dev08 does.
+- No MPI toolchain on the Mac: `cargo clippy -p dft-mpi --features mpi` type-checks the FFI; dev08 runs mpirun.
+Needs dev08 (MPI8 socket 0, one thread per rank, phase profile on, one run per arm): IrI3, B12, GeTe with
+`BAANDI_REFSCF_K_NPOOL` = 1, 2, 4, 8 and `auto`; si64 Gamma unchanged; real-MPI two-run reproducibility at npool 2/4
+and the MPI8-vs-MPI1 class on one case. Recalibrate `POOL_LATENCY_ROWS` from the scan (one number, all cases).
+Limits: pools are contiguous rank blocks (no NUMA-aware placement); `auto` considers equal pool sizes only; the
+potential is still gathered to the full grid on every rank (as in stage 1).

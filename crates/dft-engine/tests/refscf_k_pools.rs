@@ -1,15 +1,19 @@
-//! GK9 stage 1: k-point pools of size one (`BAANDI_REFSCF_K_POOLS`, ADR 0041
-//! option D). Acceptance on simulated ranks (dft_mpi::simulate), synthetic
-//! pseudopotentials, never QE evidence:
+//! GK9 k-point pools (`BAANDI_REFSCF_K_POOLS`, `BAANDI_REFSCF_K_NPOOL`, ADR
+//! 0041 option D): stage 1 (one rank per pool) and GK9B stage 2 (pools of
+//! several ranks on sub-communicators). Acceptance on simulated ranks
+//! (dft_mpi::simulate), synthetic pseudopotentials, never QE evidence:
 //! * one rank: pools are never used; on and off are bit-identical;
-//! * P = 2, 3 (8 in the ignored matrix) with pools on against P = 1: delivered
-//!   energy within strict 1e-10 Ha (strict-threshold runs) and standard
-//!   5e-9 Ha, same k count, map counts reported (and equal on these fixtures);
-//! * a fixed rank count is bit-reproducible (two runs);
-//! * fewer k points than ranks keeps the distributed layout bit for bit;
+//! * npool 1 is the distributed layout bit for bit at every rank count;
+//! * P = 2, 3 (8 in the ignored matrix) with npool = P (`on`), 2 and 4
+//!   (including unequal pool sizes, P = 3 npool 2) and `auto` against P = 1:
+//!   delivered energy within strict 1e-10 Ha (strict-threshold runs) and
+//!   standard 5e-9 Ha, same k count, map counts equal or within the
+//!   distributed layout's own rank-count spread (printed);
+//! * a fixed (P, npool) is bit-reproducible (two runs);
 //! * generality set: cubic, skewed, elongated and slab-like cells, Gamma in an
-//!   explicit list and a shifted mesh, Fermi-Dirac and fixed-spin k runs;
-//! * a pooled checkpoint restarts bit-identically at a fixed rank count.
+//!   explicit list (3 k: fewer k than ranks gives pools of several ranks) and
+//!   a shifted mesh, Fermi-Dirac and fixed-spin k runs;
+//! * a pooled checkpoint restarts bit-identically at a fixed (P, npool).
 //!
 //! Full matrix: cargo test --release -p dft-engine --test refscf_k_pools -- --include-ignored --nocapture
 #[allow(dead_code)]
@@ -122,8 +126,47 @@ fn bits_of<'a>(values: impl Iterator<Item = &'a f64>) -> Vec<u64> {
     values.map(|v| v.to_bits()).collect()
 }
 
+/// `off`, `auto`, `on`, or `npool=N` (`auto` with `refscf_k_npool = N`).
 fn config(pools: &str) -> RunConfig {
-    RunConfig::from_pairs(&[("refscf_k_pools", pools)]).unwrap()
+    match pools.strip_prefix("npool=") {
+        Some(n) => {
+            RunConfig::from_pairs(&[("refscf_k_pools", "auto"), ("refscf_k_npool", n)]).unwrap()
+        }
+        None => RunConfig::from_pairs(&[("refscf_k_pools", pools)]).unwrap(),
+    }
+}
+
+/// Pool count an arm asks for at `p` ranks and `nk` k points (the engine's
+/// rule for `on` and forced counts), and the layout note it must produce.
+fn expected(pools: &str, p: usize, nk: usize) -> (usize, String) {
+    let npool = match pools.strip_prefix("npool=") {
+        Some(n) => n.parse::<usize>().unwrap().clamp(1, p.min(nk)),
+        None if pools == "on" => (1..=p.min(nk))
+            .filter(|&d| p.is_multiple_of(d))
+            .max()
+            .unwrap(),
+        None => 1,
+    };
+    let path = if p < 2 || npool < 2 {
+        "distributed".to_string()
+    } else if npool == p {
+        "pools".to_string()
+    } else {
+        format!("pools:npool={npool}")
+    };
+    (npool, path)
+}
+
+/// Pool arms at `p` ranks: one rank per pool, the distributed layout as one
+/// pool, and pools of several ranks (unequal sizes at P = 3).
+fn arms(p: usize) -> Vec<String> {
+    let mut out = vec!["on".to_string(), "npool=1".into(), "auto".into()];
+    for n in [2usize, 4] {
+        if n < p {
+            out.push(format!("npool={n}"));
+        }
+    }
+    out
 }
 
 fn scalar<K: Collective>(
@@ -289,8 +332,8 @@ fn diff(a: &Outcome, b: &Outcome) -> (f64, f64) {
     ((a.energy - b.energy).abs(), occupied)
 }
 
-/// Spread of the distributed layout (pools off) against one rank over the
-/// rank counts of a matrix row: (max occupied eigenvalue difference, Ha;
+/// Spread of the distributed layout (pools off) against one rank over every
+/// rank count from 2 to the largest of a matrix row: (max occupied eigenvalue difference, Ha;
 /// max map-count difference). Today's own rank-count sensitivity of a fixture.
 #[derive(Clone, Copy, Default)]
 struct Spread {
@@ -311,7 +354,7 @@ fn check_class(
     one: &Outcome,
     pooled: &Outcome,
     spread: Option<Spread>,
-    expect_pools: bool,
+    expect: Option<&str>,
 ) {
     let bound = if strict { STRICT_HA } else { STANDARD_HA };
     let (energy, occupied) = diff(one, pooled);
@@ -328,11 +371,9 @@ fn check_class(
         pooled.path
     );
     assert!(one.converged && pooled.converged, "{label}");
-    assert_eq!(
-        pooled.path.as_deref(),
-        Some(if expect_pools { "pools" } else { "distributed" }),
-        "{label}"
-    );
+    if let Some(path) = expect {
+        assert_eq!(pooled.path.as_deref(), Some(path), "{label}");
+    }
     assert!(energy <= bound, "{label}: energy {energy:e} Ha > {bound:e}");
     let sanity = 1e-8_f64.max(10. * spread.occupied);
     assert!(
@@ -364,23 +405,40 @@ fn scalar_matrix(ranks: &[usize], cell_names: &[&str]) {
             for strict in [true, false] {
                 let class = if strict { "strict" } else { "standard" };
                 let one = on_rank0(1, |c| scalar(c, &cell, positions, &points, strict, "on"));
+                // Today's rank-count sensitivity of the fixture: the
+                // distributed layout at every rank count 2..=max(ranks).
                 let mut spread = Spread::default();
-                for &p in ranks {
+                for p in 2..=ranks.iter().copied().max().unwrap_or(1) {
                     let off = on_rank0(p, |c| scalar(c, &cell, positions, &points, strict, "off"));
                     spread.occupied = spread.occupied.max(diff(&one, &off).1);
                     spread.maps = spread.maps.max(off.maps.abs_diff(one.maps));
                 }
                 for &p in ranks {
-                    let pooled =
-                        on_rank0(p, |c| scalar(c, &cell, positions, &points, strict, "on"));
-                    check_class(
-                        &format!("{name} {set} {class} P={p} nk={}", points.len()),
-                        strict,
-                        &one,
-                        &pooled,
-                        Some(spread),
-                        points.len() >= p,
-                    );
+                    let off = on_rank0(p, |c| scalar(c, &cell, positions, &points, strict, "off"));
+                    for arm in arms(p) {
+                        let pooled =
+                            on_rank0(p, |c| scalar(c, &cell, positions, &points, strict, &arm));
+                        let (npool, path) = expected(&arm, p, points.len());
+                        if npool == 1 && arm != "auto" {
+                            assert_eq!(pooled.bits, off.bits, "{name} {set} P={p} {arm}: npool 1");
+                        }
+                        check_class(
+                            &format!(
+                                "{name} {set} {class} P={p} nk={} {arm}{}",
+                                points.len(),
+                                if arm == "auto" {
+                                    String::new()
+                                } else {
+                                    format!(" (npool {npool})")
+                                }
+                            ),
+                            strict,
+                            &one,
+                            &pooled,
+                            Some(spread),
+                            (arm != "auto").then_some(path.as_str()),
+                        );
+                    }
                 }
             }
         }
@@ -404,19 +462,21 @@ fn pools_fd_and_spin_k_runs_agree() {
         for strict in [true, false] {
             let one = on_rank0(1, |c| electronic_run(c, spin, strict, "on"));
             for p in [2, 3] {
-                let pooled = on_rank0(p, |c| electronic_run(c, spin, strict, "on"));
-                check_class(
-                    &format!(
-                        "{} {} P={p} nk=8",
-                        if spin { "spin" } else { "fd" },
-                        if strict { "strict" } else { "standard" }
-                    ),
-                    strict,
-                    &one,
-                    &pooled,
-                    None,
-                    true,
-                );
+                for arm in arms(p) {
+                    let pooled = on_rank0(p, |c| electronic_run(c, spin, strict, &arm));
+                    check_class(
+                        &format!(
+                            "{} {} P={p} nk=8 {arm}",
+                            if spin { "spin" } else { "fd" },
+                            if strict { "strict" } else { "standard" }
+                        ),
+                        strict,
+                        &one,
+                        &pooled,
+                        None,
+                        (arm != "auto").then_some(expected(&arm, p, 8).1.as_str()),
+                    );
+                }
             }
         }
     }
@@ -428,19 +488,21 @@ fn pools_fd_and_spin_k_runs_agree_at_eight_ranks() {
     for spin in [false, true] {
         for strict in [true, false] {
             let one = on_rank0(1, |c| electronic_run(c, spin, strict, "on"));
-            let pooled = on_rank0(8, |c| electronic_run(c, spin, strict, "on"));
-            check_class(
-                &format!(
-                    "{} {} P=8 nk=8",
-                    if spin { "spin" } else { "fd" },
-                    if strict { "strict" } else { "standard" }
-                ),
-                strict,
-                &one,
-                &pooled,
-                None,
-                true,
-            );
+            for arm in arms(8) {
+                let pooled = on_rank0(8, |c| electronic_run(c, spin, strict, &arm));
+                check_class(
+                    &format!(
+                        "{} {} P=8 nk=8 {arm}",
+                        if spin { "spin" } else { "fd" },
+                        if strict { "strict" } else { "standard" }
+                    ),
+                    strict,
+                    &one,
+                    &pooled,
+                    None,
+                    (arm != "auto").then_some(expected(&arm, 8, 8).1.as_str()),
+                );
+            }
         }
     }
 }
@@ -474,23 +536,52 @@ fn pools_one_rank_identical_and_fixed_ranks_reproducible() {
         );
     }
     for spin in [false, true] {
-        let a = dft_mpi::simulate(3, |c| electronic_run(c, spin, false, "on"));
-        let b = dft_mpi::simulate(3, |c| electronic_run(c, spin, false, "on"));
-        for x in a.iter().chain(&b) {
-            assert_eq!(x.bits, a[0].bits, "spin={spin}: fixed P=3 bit-reproducible");
+        for arm in ["on", "npool=2"] {
+            let a = dft_mpi::simulate(3, |c| electronic_run(c, spin, false, arm));
+            let b = dft_mpi::simulate(3, |c| electronic_run(c, spin, false, arm));
+            for x in a.iter().chain(&b) {
+                assert_eq!(
+                    x.bits, a[0].bits,
+                    "spin={spin} {arm}: fixed P=3 bit-reproducible"
+                );
+            }
         }
+    }
+    // Pools of several ranks (2 x 2 and unequal 2 + 1): fixed (P, npool)
+    // bit-reproducible, every rank delivers the same bits.
+    for (p, arm) in [(4, "npool=2"), (3, "npool=2"), (4, "auto")] {
+        let a = dft_mpi::simulate(p, |c| scalar(c, &cell, positions, &points, false, arm));
+        let b = dft_mpi::simulate(p, |c| scalar(c, &cell, positions, &points, false, arm));
+        for x in a.iter().chain(&b) {
+            assert_eq!(x.bits, a[0].bits, "P={p} {arm}: bit-reproducible");
+        }
+        println!(
+            "GK9B reproducible P={p} {arm}: two runs bit-identical, layout {:?} (E={:.15e} Ha, {} maps)",
+            a[0].path, a[0].energy, a[0].maps
+        );
     }
 }
 
-/// Fewer k points than ranks keeps today's distributed layout bit for bit.
+/// npool 1 (forced, and `auto` when it picks one pool) is the distributed
+/// layout bit for bit; fewer k than ranks gives pools of several ranks.
 #[test]
-fn pools_fall_back_when_fewer_k_than_ranks() {
+fn npool_one_is_the_distributed_layout_and_few_k_use_sub_pools() {
     let (_, cell, positions) = cells().into_iter().nth(1).unwrap();
     let points = gamma_in_list();
-    let off = on_rank0(4, |c| scalar(c, &cell, positions, &points, false, "off"));
-    let on = on_rank0(4, |c| scalar(c, &cell, positions, &points, false, "auto"));
-    assert_eq!(on.path.as_deref(), Some("distributed"));
-    assert_eq!(off.bits, on.bits);
+    for p in [2usize, 3, 4] {
+        let off = on_rank0(p, |c| scalar(c, &cell, positions, &points, false, "off"));
+        let one = on_rank0(p, |c| {
+            scalar(c, &cell, positions, &points, false, "npool=1")
+        });
+        assert_eq!(one.path.as_deref(), Some("distributed"));
+        assert_eq!(off.bits, one.bits, "P={p}: npool 1");
+    }
+    let sub = on_rank0(4, |c| scalar(c, &cell, positions, &points, false, "on"));
+    assert_eq!(
+        sub.path.as_deref(),
+        Some("pools:npool=2"),
+        "3 k on 4 ranks: 2 pools of 2"
+    );
 }
 
 /// Collectives on the world communicator per map, pools off and on (P = 3,
@@ -534,6 +625,9 @@ fn pools_collective_counts_per_map() {
         fn alltoall_f64(&self, a: &[f64], n: usize, b: &mut [f64]) -> Result<(), MpiError> {
             self.count(3, a.len());
             self.inner.alltoall_f64(a, n, b)
+        }
+        fn split(&self, color: usize, key: usize) -> Result<dft_mpi::Comm, MpiError> {
+            self.inner.split(color, key)
         }
     }
     let (_, cell, positions) = cells().into_iter().nth(1).unwrap();
@@ -611,71 +705,76 @@ fn pooled_checkpoint_restarts_bit_identically() {
         threads: 1,
         ranks,
     };
-    dft_mpi::simulate(2, |comm| {
-        let config = config("on");
-        let _scope = config.enter();
-        let build = || {
-            k_driver::stepper_with(
-                StartInput {
-                    cell: &cell,
-                    atoms: &atoms,
-                    potentials: &potentials,
-                    options: &options,
-                },
-                Profile::default(),
-                &points,
-                comm,
-            )
-        };
-        let energy = |run: &dft_engine::refscf::driver::Run| {
-            let r = &run.outcome.result;
-            let mut bits = bits_of(r.density.iter());
-            bits.push(r.energy.total_hartree().to_bits());
-            bits
-        };
-        let uninterrupted = build().run_to_end().unwrap();
-        assert!(uninterrupted.outcome.converged);
-        assert_eq!(
-            config
-                .path_note(Id::REFSCF_K_POOLS)
-                .map(|n| n.path)
-                .as_deref(),
-            Some("pools")
-        );
-        let mut s = build();
-        s.initialize().unwrap();
-        loop {
-            let r = s.step().unwrap();
-            assert!(!s.is_done());
-            if r.iteration >= 2 && r.safe_point {
-                break;
-            }
-        }
-        let cp = s.checkpoint(identity(2), comm.rank()).unwrap();
-        let captured = s.run_to_end().unwrap();
-        assert_eq!(
-            energy(&captured),
-            energy(&uninterrupted),
-            "capture changed trajectory"
-        );
-        let mut restored = build();
-        restored.restore(&cp, &identity(2), comm.rank()).unwrap();
-        let resumed = restored.run_to_end().unwrap();
-        assert_eq!(energy(&resumed), energy(&uninterrupted), "pooled restart");
-        if comm.rank() == 0 {
-            println!(
-                "GK9 pooled checkpoint P=2 at map {}: restart bit-identical ({} maps)",
-                cp.iteration,
-                resumed.records.len()
+    for (ranks, arm, layout) in [(2usize, "on", "pools"), (4, "npool=2", "pools:npool=2")] {
+        dft_mpi::simulate(ranks, |comm| {
+            let config = config(arm);
+            let _scope = config.enter();
+            let build = || {
+                k_driver::stepper_with(
+                    StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    Profile::default(),
+                    &points,
+                    comm,
+                )
+            };
+            let energy = |run: &dft_engine::refscf::driver::Run| {
+                let r = &run.outcome.result;
+                let mut bits = bits_of(r.density.iter());
+                bits.push(r.energy.total_hartree().to_bits());
+                bits
+            };
+            let uninterrupted = build().run_to_end().unwrap();
+            assert!(uninterrupted.outcome.converged);
+            assert_eq!(
+                config
+                    .path_note(Id::REFSCF_K_POOLS)
+                    .map(|n| n.path)
+                    .as_deref(),
+                Some(layout)
             );
-        }
-    });
+            let mut s = build();
+            s.initialize().unwrap();
+            loop {
+                let r = s.step().unwrap();
+                assert!(!s.is_done());
+                if r.iteration >= 2 && r.safe_point {
+                    break;
+                }
+            }
+            let cp = s.checkpoint(identity(ranks), comm.rank()).unwrap();
+            let captured = s.run_to_end().unwrap();
+            assert_eq!(
+                energy(&captured),
+                energy(&uninterrupted),
+                "capture changed trajectory"
+            );
+            let mut restored = build();
+            restored
+                .restore(&cp, &identity(ranks), comm.rank())
+                .unwrap();
+            let resumed = restored.run_to_end().unwrap();
+            assert_eq!(energy(&resumed), energy(&uninterrupted), "pooled restart");
+            if comm.rank() == 0 {
+                println!(
+                    "GK9 pooled checkpoint P={ranks} {arm} at map {}: restart bit-identical ({} maps)",
+                    cp.iteration,
+                    resumed.records.len()
+                );
+            }
+        });
+    }
 }
 
 /// Mac observation only (not acceptance): a k synthetic of B12/GeTe-like
 /// shape (12 atoms, 22 bands, skewed cell, GK9_K generic k points, default
 /// 16), standard class, pools off and on at GK9_RANKS simulated ranks
-/// (default 8), one run per arm. GK9_ECUT (Ha, default 8).
+/// (default 8), one run per arm (GK9_ARMS, default `off,on`). GK9_ECUT (Ha,
+/// default 8).
 /// cargo test --release -p dft-engine --test refscf_k_pools timing -- --ignored --nocapture
 #[test]
 #[ignore = "Mac timing observation; run in release"]
@@ -720,7 +819,9 @@ fn timing() {
         ..options()
     };
     let mut energies = Vec::new();
-    for pools in ["off", "on"] {
+    // GK9_ARMS: comma-separated arms (`off`, `on`, `auto`, `npool=N`).
+    let arms = std::env::var("GK9_ARMS").unwrap_or_else(|_| "off,on".into());
+    for pools in arms.split(',') {
         let out = dft_mpi::simulate(ranks, |comm| {
             let config = config(pools);
             let _scope = config.enter();
@@ -755,5 +856,7 @@ fn timing() {
         );
         energies.push(e);
     }
-    assert!((energies[0] - energies[1]).abs() <= STANDARD_HA);
+    for e in &energies {
+        assert!((e - energies[0]).abs() <= STANDARD_HA);
+    }
 }

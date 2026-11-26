@@ -5053,3 +5053,14 @@ without the self-transpose copies; projector/x finiteness scans skipped in the n
 GeTe-shaped 33 k -10.6 %, B12-shaped 22 k -7.9 %, IrI3-shaped -5.9 % (slab memory 0.65-1.2 GB per rank); direct
 sticks B12 -3.4 %, GeTe -0.7 %. Evidence: 60-run bit matrix (P = 1/3, pools on/off, verification on/off), FFT unit
 test. dev08 A/B pending. Details: attempts ledger GK17-SCF-GAP.
+
+## GK9B-POOL-SUBCOMM — k-point pools of several ranks, `auto` pool count (2026-11-27)
+
+Profile: after stage 1 (one rank per pool) IrI3 (51 k on 8 ranks, 7-of-51 critical rank) stayed neutral, and QE's
+best -nk on the k cases was 1-4, not 8. Change: `Collective::split` (MPI_Comm_split in dft-mpi, simulated split),
+pools of p ranks that distribute each k over the pool as the distributed layout does over the world, generalized
+density exchange (runs of operator planes, global k order), pool-leader records, `BAANDI_REFSCF_K_NPOOL=<n>`;
+`auto` = min over npool | ranks of max_pool sum_k (N_pw,k / p + 32 ceil(log2 p)). Pools off and stage-1 `on` are
+bit-identical to main (46 fingerprints); npool 1 = distributed layout bit for bit; 264 class rows strict <= 6.5e-13
+Ha, standard <= 2.6e-9 Ha; fixed (P, npool) reproducible. dev08 NPOOL scan pending (calibrates the latency constant).
+Details: attempts ledger GK9B-POOL-SUBCOMM.

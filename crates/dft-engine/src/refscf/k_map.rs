@@ -109,11 +109,13 @@ pub(super) fn evaluate<K: Collective>(
     // integrals share one element-wise tree sum per map.
     let deferred = dft_numerics::switches::on(dft_numerics::switches::Id::K_LEAN_ENERGY);
     let band_terms = !(deferred && lean);
-    // GK9 pools: this rank solves its own whole k points with the serial
-    // collective (`kc`); the potential is gathered once, the per-k records
-    // are allgathered and the densities exchanged once after the loop.
+    // GK9 pools: this rank's pool solves its own whole k points on the pool
+    // collective (`kc`: serial for one-rank pools); the potential is gathered
+    // once, the per-k records are allgathered and the densities exchanged
+    // once after the loop.
     let pooled = state.pool.is_some();
-    let kc = super::k_pool::KComm::new(comm, pooled);
+    let layout = super::k_pool::KPool::comm_of(state.pool.as_ref());
+    let kc = super::k_pool::KComm::new(comm, &layout);
     let field_axis = state.fields.first_axis();
     let mut full_potential = if pooled {
         Some(super::k_pool::FullField::gather(
@@ -134,8 +136,11 @@ pub(super) fn evaluate<K: Collective>(
         for k in 0..nk_local {
             let mut op_potential = Vec::new();
             if let Some(full) = full_potential.as_mut() {
-                op_potential
-                    .extend_from_slice(full.for_axis(state.blocks[k].operator.first_axis())?);
+                op_potential.extend_from_slice(full.for_operator(
+                    state.blocks[k].operator.first_axis(),
+                    kc.rank(),
+                    kc.size(),
+                )?);
             } else {
                 let mut planes = crate::grid_dist::PlaneMap::new(
                     dims,
@@ -239,6 +244,14 @@ pub(super) fn evaluate<K: Collective>(
             } else {
                 None
             };
+            // GK9B: a pool of several ranks holds row partials of the squared
+            // residual norms and kinetic terms; one pool sum per k makes the
+            // records replicated in the pool (one-rank pools hold full rows).
+            let (r2, kinetic) = if pooled && kc.size() > 1 {
+                pool_sum(&kc, r2, kinetic)?
+            } else {
+                (r2, kinetic)
+            };
             let mut op_density = vec![0.; op.plane_points()];
             // GK17 `K_KEPT_SLABS`: the density pass stores the planes of the
             // leading bands for the next map's kept-HX update. The per-band
@@ -300,7 +313,7 @@ pub(super) fn evaluate<K: Collective>(
                 Ok((v, p, t)) => (v, p, Ok(t)),
                 Err(e) => (Vec::new(), Vec::new(), Err(e)),
             };
-            let terms = super::k_pool::allgather(comm, terms)?;
+            let terms = super::k_pool::allgather(comm, terms, pool.leader())?;
             if terms.len() != pool.nk {
                 return Err(ScfError::InvalidInput("k pools: record count"));
             }
@@ -513,14 +526,20 @@ pub(super) fn complete_audit<K: Collective>(
         // GK9 pools: each rank forms the terms of its own k points with the
         // serial collective and the replay adds all of them in k order.
         let pooled = state.pool.is_some();
-        let kc = super::k_pool::KComm::new(comm, pooled);
+        let layout = super::k_pool::KPool::comm_of(state.pool.as_ref());
+        let kc = super::k_pool::KComm::new(comm, &layout);
         let local = (|| -> Result<Vec<(Vec<f64>, f64)>, ScfError> {
             let mut terms = Vec::with_capacity(state.blocks.len());
             for (block, x) in state.blocks.iter_mut().zip(&step.solve.eigenvectors.0) {
                 let weights: Vec<_> = occupations.iter().map(|f| f * block.point.weight).collect();
-                let kinetic = (0..weights.len())
+                let kinetic: Vec<_> = (0..weights.len())
                     .map(|j| band_kinetic(&block.operator, x, j, weights[j]))
                     .collect();
+                let kinetic = if pooled && kc.size() > 1 {
+                    pool_sum(&kc, Vec::new(), kinetic)?.1
+                } else {
+                    kinetic
+                };
                 terms.push((
                     kinetic,
                     band_nonlocal(&mut block.operator, &kc, x, &weights)?,
@@ -528,8 +547,8 @@ pub(super) fn complete_audit<K: Collective>(
             }
             Ok(terms)
         })();
-        let terms = if pooled {
-            super::k_pool::allgather(comm, local)?
+        let terms = if let Some(pool) = &state.pool {
+            super::k_pool::allgather(comm, local, pool.leader())?
         } else {
             local?
         };
@@ -613,6 +632,19 @@ pub(super) fn complete_audit<K: Collective>(
     Ok(())
 }
 
+/// One sum over a k pool of two row-partial vectors (kept separate on return).
+pub(super) fn pool_sum<K: Collective>(
+    kc: &K,
+    a: Vec<f64>,
+    b: Vec<f64>,
+) -> Result<(Vec<f64>, Vec<f64>), ScfError> {
+    let n = a.len();
+    let mut both = a;
+    both.extend(b);
+    let mut total = sum(kc, &both)?;
+    let b = total.split_off(n);
+    Ok((total, b))
+}
 /// Residual term of the functional-difference bound as the completed audit
 /// has always formed it (per-k weight times the occupied residual sum).
 fn residual_term(per_k: &[PerK], state: &KStartState, occupations: &[f64]) -> f64 {

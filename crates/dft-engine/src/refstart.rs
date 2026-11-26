@@ -419,6 +419,9 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
     ) -> Result<(), dft_mpi::MpiError> {
         self.timed(|| self.inner.alltoall_f64(send, block, recv))
     }
+    fn split(&self, color: usize, key: usize) -> Result<dft_mpi::Comm, dft_mpi::MpiError> {
+        self.timed(|| self.inner.split(color, key))
+    }
 }
 
 /// Build the final-cutoff cold start, collective on `comm` (including size 1).
@@ -1868,8 +1871,9 @@ pub(crate) fn extend_k_orbitals<K: Collective>(
     comm: &K,
 ) -> Result<(), ScfError> {
     use dft_numerics::linalg::ComplexMatrix as Matrix;
-    // GK9: a pooled rank holds whole k blocks; their sums are rank-local.
-    let comm = &crate::refscf::k_pool::KComm::new(comm, state.pool.is_some());
+    // GK9: a pooled rank holds whole k blocks; their sums run on the pool.
+    let layout = crate::refscf::k_pool::KPool::comm_of(state.pool.as_ref());
+    let comm = &crate::refscf::k_pool::KComm::new(comm, &layout);
     for (block, x) in state.blocks.iter_mut().zip(&mut state.orbitals.0) {
         let have = x.cols();
         if bands <= have {
@@ -2017,7 +2021,7 @@ fn start_kpoints_inner<K: Collective>(
         bases.iter().map(|b| b.vectors().len()).collect(),
         comm,
         pools,
-    );
+    )?;
     finish_kpoints(
         input,
         points,
@@ -2342,7 +2346,8 @@ fn finish_kpoints<K: Collective>(
     // every rank) and each rank builds only its own whole k points with the
     // serial collective; the outcome is agreed before the next collective.
     let owned = pool.as_ref().map(|p| p.local());
-    let kc = &crate::refscf::k_pool::KComm::new(comm, pool.is_some());
+    let layout = crate::refscf::k_pool::KPool::comm_of(pool.as_ref());
+    let kc = &crate::refscf::k_pool::KComm::new(comm, &layout);
     let mut full_potentials = pool
         .is_some()
         .then(|| {
@@ -2441,7 +2446,11 @@ fn finish_kpoints<K: Collective>(
                 let mut potential = Vec::new();
                 if let Some(full) = full_potentials.as_mut() {
                     // GK9: the channel potential was gathered once for all k.
-                    potential.extend_from_slice(full[c].for_axis(op.first_axis())?);
+                    potential.extend_from_slice(full[c].for_operator(
+                        op.first_axis(),
+                        kc.rank(),
+                        kc.size(),
+                    )?);
                 } else {
                     let mut planes = crate::grid_dist::PlaneMap::new(
                         dims,
@@ -2646,8 +2655,20 @@ fn finish_kpoints<K: Collective>(
         }
         Ok(())
     })();
-    if pool.is_some() {
+    let mut pool = pool;
+    if let Some(pool) = pool.as_mut() {
         crate::refscf::k_pool::agree(comm, built)?;
+        // Plane axis of every k operator, for the density exchange: the pool
+        // leaders contribute their k (small integers, exact in the sum).
+        let mut axes = vec![0.; pool.nk];
+        if pool.leader() {
+            for (k, block) in pool.local().zip(&blocks[0]) {
+                axes[k] = 1. + block.operator.first_axis() as f64;
+            }
+        }
+        let mut all = vec![0.; pool.nk];
+        comm.tree_sum_f64(&axes, &mut all).map_err(err)?;
+        pool.op_axis = all.iter().map(|&a| a as usize - 1).collect();
     } else {
         built?;
     }

@@ -1009,6 +1009,19 @@ pub(super) async fn run_continuation<K: Collective>(
         };
     }
     boundary.ready_state(checkpoint_state!()).await;
+    // GF1 (`SPIN_FD_START_KEPT_HX`): seed every channel's kept HX with the
+    // start's H X of the start Ritz orbitals (incl. the FD buffer columns);
+    // `prepare` hits only while the orbitals are still those exact vectors
+    // and corrects the potential change exactly. A restored run drops it.
+    for (s, state) in states.iter_mut().enumerate() {
+        let start_hx = std::mem::take(&mut state.start_hx);
+        if completed == 0 {
+            for (k, (x, hx, potential)) in start_hx.into_iter().enumerate() {
+                kept[s].retain(k, state, &x, &hx, &potential);
+            }
+        }
+    }
+    let redo_kept = config.on(Id::SPIN_FD_REDO_KEPT_HX);
     for iteration in completed + 1..=opts.max_iterations {
         if let Some(s) = &mut workspace.symmetry {
             s.iteration = iteration;
@@ -1111,8 +1124,13 @@ pub(super) async fn run_continuation<K: Collective>(
                 ethr = next_ethr_ry(ethr, dr2, electrons);
                 redo = true;
                 warm(&mut states, &step);
-                for cache in &mut kept {
-                    cache.invalidate();
+                // GF1 (`SPIN_FD_REDO_KEPT_HX`): the redo solves the same input
+                // potential from the coarse solve's X, whose HX is kept
+                // exactly (zero potential change); off applies H again.
+                if !redo_kept {
+                    for cache in &mut kept {
+                        cache.invalidate();
+                    }
                 }
                 continue;
             }

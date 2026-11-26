@@ -57,6 +57,8 @@ reference_strict='off'
 cdav_border_gram='off'
 # GK16 field-table rounding also moves it past the stall; pin the quadrature.
 radial_table_fields='off'
+# GF1 start kept-HX rounding (spin/FD start) also moves it; pin a fresh H.
+spin_fd_start_kept_hx='off'
 "#
             ),
         )

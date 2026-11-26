@@ -546,6 +546,41 @@ pub(crate) fn parallel_model(
         ("mpi_row_block", None)
     }
 }
+/// GF1: the k layout that actually ran, from the `REFSCF_K_POOLS` path note
+/// the engine recorded (`pools` = one rank per pool, `pools:npool=N` = N pools
+/// of several ranks, `distributed` or unset = every k over all ranks). Returns
+/// the number of k points solved concurrently, the `parallel.k_pools` record
+/// and the plane-wave layout of one k (`parallel.g_vectors`).
+pub(crate) fn k_pool_layout(ranks: usize) -> (usize, Value, &'static str) {
+    use dft_mpi::Collective;
+    let note = dft_numerics::switches::RunConfig::current()
+        .path_note(dft_numerics::switches::Id::REFSCF_K_POOLS);
+    // The engine's communicator (also a simulated one in tests).
+    let ranks = dft_engine::parallel::SharedComm::active().map_or(ranks.max(1), |c| c.size());
+    let npool = match note.as_ref().map(|n| n.path.as_str()) {
+        Some("pools") => ranks,
+        Some(p) => p
+            .strip_prefix("pools:npool=")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(1),
+        None => 1,
+    }
+    .clamp(1, ranks);
+    let g_vectors = if npool > 1 && npool == ranks {
+        "whole_k_per_rank"
+    } else if npool > 1 {
+        "distributed_within_pool"
+    } else {
+        "distributed"
+    };
+    let record = json!({
+        "path": note.as_ref().map_or("distributed", |n| n.path.as_str()),
+        "fallback_reason": note.as_ref().and_then(|n| n.fallback.clone()),
+        "npool": npool,
+        "ranks_per_pool": dft_mpi::block_counts(ranks, npool),
+    });
+    (npool, record, g_vectors)
+}
 /// What the solver actually did (filled from the SCF result).
 pub(crate) struct Solver<'a> {
     pub gamma_real_used: bool,
@@ -2334,6 +2369,7 @@ fn execute_mode_inner(
             "single_column": s.single_column, "bordered": s.bordered, "broadcast": s.broadcast,
         });
         let (reduction_solves, reduction_sites) = dft_engine::parallel::reduction_stats();
+        let (k_concurrency, k_pools, g_vectors) = k_pool_layout(crate::parallel::size());
         let reductions = json!({
             "solves": reduction_solves,
             "buckets": dft_engine::parallel::REDUCTION_BUCKETS,
@@ -2356,6 +2392,10 @@ fn execute_mode_inner(
             },
             "ranks": crate::parallel::size(),
             "rank": crate::parallel::rank(),
+            // GF1: the k layout that ran (pool count and the path note).
+            "k_concurrency": k_concurrency,
+            "k_pools": k_pools,
+            "g_vectors": g_vectors,
             "distributed_solves": dft_engine::parallel::distributed_solves(),
             // F21: `off` = count-only (calls and payload bytes, no clock; seconds 0).
             "stage_timers": if dft_numerics::stage_clock::on() { "on" } else { "off" },
@@ -3179,6 +3219,8 @@ fn reference_electronic_run(
     };
     let path = config.scf_path().map_err(|e| error(1, e))?;
     let (model, _) = parallel_model(crate::parallel::size(), 1, true, None);
+    // GF1: k_concurrency was a constant 1; it is the pool count that ran.
+    let (k_concurrency, k_pools, g_vectors) = k_pool_layout(crate::parallel::size());
     let mut result = json!({"schema_version":2,"output_profile":"reference_spin_fd_v1",
         "scf":options_json(opts),"preflight":preflight,"species":species,"xc":opts.functional.name(),
         "input_sha256":sha256(input_bytes),"gamma_real_used":false,"gamma_real_fallback_reason":"spin/FD uses complex Davidson",
@@ -3204,7 +3246,7 @@ fn reference_electronic_run(
         "convergence":{"converged":r.converged,"iterations":r.history.len()},"verified":false,
         "single_path":single_path_json(&path,opts),
         "execution":execution_json(config,&path,opts,Solver { gamma_real_used:false,gamma_real_fallback_reason:Some("spin/FD"),parallel_model:model }),
-        "parallel":{"model":model,"ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"k_concurrency":1,"g_vectors":"distributed"},
+        "parallel":{"model":model,"ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"k_concurrency":k_concurrency,"k_pools":k_pools,"g_vectors":g_vectors},
         "timings":{"setup_s":r.setup_s,"engine_total_s":r.total_s},
         "reference_scf":{"start":start_report_json(r.start_report),"schema":"reference-spin-fd-1","iterations":rows,"stalls":stalls,"verification_calls":calls(&r.verification_calls),
             "kept_hx":r.kept_hx.iter().enumerate().map(|(s,k)|json!({"spin_index":s,"cache_hits":k.cache_hits,"full_h_starting_columns_replaced":k.full_h_starting_columns_replaced})).collect::<Vec<_>>(),
@@ -5240,8 +5282,10 @@ mod tests {
                     fs::write(
                         dir.join(format!("{name}.toml")),
                         format!(
-                            "{}{occ_text}{output}[performance]\nrefscf_k_pools='on'\nm2_lazy_result='{arm}'\n",
-                            if occ == "fd" { base.replace("nbands=3", "nbands=5") } else { base.to_string() }
+                            "{}{occ_text}{output}[performance]\nrefscf_k_pools='{}'\nm2_lazy_result='{arm}'\n",
+                            if occ == "fd" { base.replace("nbands=3", "nbands=5") } else { base.to_string() },
+                            // GF1: the FD runs use the default `auto` (dev08 gen57 setting).
+                            if occ == "fd" { "auto" } else { "on" }
                         ),
                     )
                     .unwrap();
@@ -5264,6 +5308,21 @@ mod tests {
                     let result: Value =
                         serde_json::from_slice(&fs::read(out.join("results.json")).unwrap())
                             .unwrap();
+                    // GF1: the layout that ran is reported (both drivers).
+                    let pools = &result["scf"]["switches"]["BAANDI_REFSCF_K_POOLS"];
+                    assert_eq!(pools["path"], json!("pools"), "{name}: {pools}");
+                    assert_eq!(pools["fallback_reason"], Value::Null, "{name}");
+                    // The fixed-occupation output writes `parallel` only
+                    // for a real MPI world (the CLI size is 1 here).
+                    if *occ == "fd" {
+                        assert_eq!(result["parallel"]["k_concurrency"], json!(2), "{name}");
+                        assert_eq!(result["parallel"]["k_pools"]["npool"], json!(2), "{name}");
+                        assert_eq!(
+                            result["parallel"]["g_vectors"],
+                            json!("whole_k_per_rank"),
+                            "{name}"
+                        );
+                    }
                     let switch = &result["scf"]["switches"]["BAANDI_M2_LAZY_RESULT"];
                     let lazy = *arm == "on" && !forces;
                     assert_eq!(

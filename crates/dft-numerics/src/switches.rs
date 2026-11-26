@@ -342,6 +342,10 @@ table! {
         "G4G research: per-channel real-space Pulay replaces the Broyden proposal (serial fixed-sector only); default off pending dev08 O run";
     K_START_MEMO: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GK1: k atomic start computes each orbital radial transform once per (species channel, exact |k+G|) and reuses it over atoms and m; bit-identical; off restores the per-(row, atom, m) quadrature";
+    K_NL_TABLE_MEMO: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK1B: k start builds projector radial/angular factors for the rank's owned rows only (rows-only table, outcome agreed by one collective); bit-identical; off restores the full k-sphere factor table on every rank";
+    K_START_SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK1B: collinear spin k start builds bases, grids, projector tables, atomic columns and the start Ritz once and gives every channel its own operator and a copy of the orbitals; bit-identical; off builds the whole start per channel";
 }
 
 struct Resolved {

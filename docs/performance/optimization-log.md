@@ -4964,3 +4964,14 @@ order; the former loop stays as `atomic_k_columns_direct` behind `BAANDI_K_START
 orbitals (test `k_start_memo`, 2 species, 3 k, 1 and 3 ranks). Mac (O, serial, loaded host): column stage
 14-42 s -> 1.2-4.4 s on a 40-column, npw ~5000, 4-k fixture. Per-stage timers added to the k start for dev08.
 Rejected here: batching the start MGS collectives (not bit-identical; superseded by GK11).
+
+## GK1B-NL-TABLES — rows-only k projector tables and shared spin start (2026-11-26)
+
+Profile: after GK1, the per-k stage timers show `k_start_nonlocal_tables` as the largest k-start stage on every rank:
+`NonlocalOperator::new_owned_with_rule` evaluated projector factors over the full k sphere for lazy full columns,
+which the k operator never reads. Change: rows-only factor tables for the k start (`BAANDI_K_NL_TABLE_MEMO`, default
+on; one extra reduction agrees on construction errors) and one shared start for both collinear spin channels
+(`BAANDI_K_START_SPIN_SHARE`, default on). Bit-identical (start orbitals, H X, whole fixed-spin runs; tests in
+`dft-physics` hamiltonian and `dft-engine/tests/k_start_memo.rs`). Mac (O, release, npw ~5000, 40 columns, 4 k):
+`k_start_nonlocal_tables` rank 0 1.5 -> 0.38 s at 4 simulated ranks, 1.6 -> 0.29 s at 8; whole k start 1.9 -> 0.78 s
+and 2.4 -> 0.72 s; serial unchanged.

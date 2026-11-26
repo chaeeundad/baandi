@@ -146,3 +146,177 @@ fn bloch_phase_reconstruction_and_fft_quadrature() {
         .is_err()
     );
 }
+
+// ADR 0049: default tolerance and input symmetrization.
+const ANGSTROM_TO_BOHR: f64 = 1.0 / 0.529_177_210_903;
+/// Materials Project style hcp record: lattice in Angstrom and fractional
+/// coordinates rounded to six decimals (Ru-like a=2.714, c=4.282 Angstrom).
+fn hcp_six_decimals(a: f64, c: f64) -> (Cell, Vec<Atom>) {
+    let r6 = |v: f64| (v * 1e6).round() / 1e6;
+    let h = r6(a * 3f64.sqrt() / 2.);
+    let rows = [[r6(a / 2.), -h, 0.], [r6(a / 2.), h, 0.], [0., 0., r6(c)]]
+        .map(|v| v.map(|x| x * ANGSTROM_TO_BOHR));
+    let cell = Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = vec![
+        Atom::new("Ru", [0.333333, 0.666667, 0.25]),
+        Atom::new("Ru", [0.666667, 0.333333, 0.75]),
+    ];
+    (cell, atoms)
+}
+fn exact_hcp(a: f64, c: f64) -> (Cell, Vec<Atom>) {
+    let h = a * 3f64.sqrt() / 2.;
+    let rows =
+        [[a / 2., -h, 0.], [a / 2., h, 0.], [0., 0., c]].map(|v| v.map(|x| x * ANGSTROM_TO_BOHR));
+    let cell = Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = vec![
+        Atom::new("Ru", [1. / 3., 2. / 3., 0.25]),
+        Atom::new("Ru", [2. / 3., 1. / 3., 0.75]),
+    ];
+    (cell, atoms)
+}
+fn irreducible(cell: &Cell, atoms: &[Atom], tol: f64, grid: [usize; 3]) -> usize {
+    let ops = detect(cell, atoms, tol).unwrap();
+    let full = monkhorst_pack(grid, [0.; 3]).unwrap();
+    reduce_mesh(&full, &ops, true, false).unwrap().points.len()
+}
+
+#[test]
+fn hcp_six_decimal_coordinates_find_full_group_and_symmetrize() {
+    for (a, c) in [(2.714, 4.282), (3.209, 5.211)] {
+        // Ru-like and Mg-like c/a.
+        let (cell, atoms) = hcp_six_decimals(a, c);
+        // The old 1e-7 Bohr default misses most of D6h.
+        let strict = detect(&cell, &atoms, 1e-7).unwrap().len();
+        assert!(strict < 24, "strict tolerance found {strict}");
+        let ops = detect(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+        assert_eq!(ops.len(), 24); // P6_3/mmc, includes inversion.
+        assert!(
+            ops.iter()
+                .any(|o| o.rotation == [[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
+        );
+        let s = symmetrize(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+        assert_eq!(s.operations_count, 24);
+        assert!(s.positions_changed && s.translations_snapped);
+        assert!(s.max_atom_displacement_bohr > 1e-7 && s.max_atom_displacement_bohr < 1e-5);
+        assert!(s.max_lattice_change_bohr < 1e-5);
+        // Rounding errors cancel by pairs here, so the projection lands on the
+        // exact Wyckoff 2c/2d sites to roundoff (fractional, dimensionless).
+        let exact = exact_hcp(a, c).1;
+        for (p, e) in s.fractional.iter().zip(&exact) {
+            for (x, y) in p.iter().zip(e.fractional_position) {
+                assert!((x - y).abs() < 1e-14);
+            }
+        }
+        let new_cell = Cell::from_matrix_columns_bohr(s.lattice_columns_bohr).unwrap();
+        let new_atoms: Vec<_> = s.fractional.iter().map(|p| Atom::new("Ru", *p)).collect();
+        // Exact to roundoff: the tight tolerance finds the same group.
+        let tight = detect(&new_cell, &new_atoms, 1e-10).unwrap();
+        assert_eq!(tight.len(), 24);
+        // Translations are commensurate with an even FFT grid along c.
+        assert!(compatible_fft_grid([24, 24, 40], &tight).is_ok());
+        // Same irreducible k set as the exact structure on hcp-compatible meshes.
+        let (ec, ea) = exact_hcp(a, c);
+        for grid in [[6, 6, 4], [12, 12, 8], [9, 9, 6]] {
+            let reduced = irreducible(&new_cell, &new_atoms, DEFAULT_TOLERANCE_BOHR, grid);
+            assert_eq!(reduced, irreducible(&ec, &ea, 1e-7, grid));
+            println!(
+                "hcp a={a} c={c} grid={grid:?}: tol 1e-7 -> {} k, default -> {reduced} k",
+                irreducible(&cell, &atoms, 1e-7, grid)
+            );
+        }
+    }
+}
+
+#[test]
+fn exact_inputs_are_left_bit_identical() {
+    let diamond = Cell::from_user_rows_bohr([[0., 5., 5.], [5., 0., 5.], [5., 5., 0.]]).unwrap();
+    let si = [Atom::new("Si", [0.; 3]), Atom::new("Si", [0.25; 3])];
+    let (hcp, ru) = exact_hcp(2.714, 4.282);
+    let skew = Cell::from_user_rows_bohr([[5., 0.3, 0.1], [0.4, 6., 0.2], [0.6, 0.7, 7.]]).unwrap();
+    let low = [
+        Atom::new("X", [0.13, 0.23, 0.37]),
+        Atom::new("Y", [0.41, 0.07, 0.83]),
+    ];
+    for (cell, atoms) in [(&diamond, &si[..]), (&hcp, &ru[..]), (&skew, &low[..])] {
+        let s = symmetrize(cell, atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+        assert!(!s.positions_changed && !s.lattice_changed, "{s:?}");
+        assert!(s.max_atom_displacement_bohr <= SYMMETRIZATION_ROUNDOFF_BOHR);
+        assert_eq!(s.lattice_columns_bohr, cell.lattice_columns_bohr());
+        for (p, a) in s.fractional.iter().zip(atoms) {
+            assert_eq!(p.map(f64::to_bits), a.fractional_position.map(f64::to_bits));
+        }
+        assert_eq!(
+            s.operations_count,
+            detect(cell, atoms, 1e-7).unwrap().len(),
+            "exact inputs: same group as the old default"
+        );
+    }
+}
+
+#[test]
+fn distortion_above_tolerance_keeps_lower_group() {
+    let (cell, mut atoms) = exact_hcp(2.714, 4.282);
+    // 1e-3 in fractional z = 8.1e-3 Bohr, far above the 1e-4 Bohr default.
+    atoms[1].fractional_position[2] += 1e-3;
+    let low = detect(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap().len();
+    assert!(low < 24);
+    let s = symmetrize(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+    assert_eq!(s.operations_count, low);
+    // The projection only removes the in-tolerance noise of the lower group: the
+    // physical distortion stays (fractional z difference, dimensionless).
+    assert!(((s.fractional[1][2] - s.fractional[0][2]) - (0.5 + 1e-3)).abs() < 1e-12);
+    // Just above the tolerance (2e-4 Bohr) also keeps the lower group.
+    let (cell, mut atoms) = exact_hcp(2.714, 4.282);
+    atoms[1].fractional_position[2] += 2e-4 / (4.282 * ANGSTROM_TO_BOHR);
+    assert!(detect(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap().len() < 24);
+}
+
+#[test]
+fn origin_shifts_snap_or_stay_consistent() {
+    let (cell, exact) = exact_hcp(2.714, 4.282);
+    // Within tolerance: a uniform 3e-6 shift is removed by snapping translations.
+    let small: Vec<_> = exact
+        .iter()
+        .map(|a| Atom::new("Ru", a.fractional_position.map(|x| x + 3e-6)))
+        .collect();
+    let s = symmetrize(&cell, &small, DEFAULT_TOLERANCE_BOHR).unwrap();
+    assert!(s.translations_snapped && s.operations_count == 24);
+    for (p, e) in s.fractional.iter().zip(&exact) {
+        for (x, y) in p.iter().zip(e.fractional_position) {
+            assert!((x - y).abs() < 1e-14);
+        }
+    }
+    // An arbitrary origin is not snapped; the group stays exact and the
+    // structure is untouched (no change beyond roundoff).
+    let far: Vec<_> = exact
+        .iter()
+        .map(|a| Atom::new("Ru", a.fractional_position.map(|x| x + 0.0123)))
+        .collect();
+    let s = symmetrize(&cell, &far, DEFAULT_TOLERANCE_BOHR).unwrap();
+    assert_eq!(s.operations_count, 24);
+    assert!(!s.positions_changed);
+    // A user-chosen loose tolerance absorbs a real 8.1e-3 Bohr distortion; the
+    // applied displacement is reported and stays within that tolerance.
+    let mut distorted = exact.clone();
+    distorted[1].fractional_position[2] += 1e-3;
+    let s = symmetrize(&cell, &distorted, 2e-2).unwrap();
+    assert_eq!(s.operations_count, 24);
+    assert!(s.max_atom_displacement_bohr > 1e-3 && s.max_atom_displacement_bohr <= 2e-2);
+}
+
+#[test]
+#[ignore = "diagnostic scan of hcp k counts; prints only"]
+fn hcp_k_count_scan() {
+    let (cell, atoms) = hcp_six_decimals(2.714, 4.282);
+    println!(
+        "ops at 1e-7: {}",
+        detect(&cell, &atoms, 1e-7).unwrap().len()
+    );
+    for n in 6..=16 {
+        for m in 3..=10 {
+            let old = irreducible(&cell, &atoms, 1e-7, [n, n, m]);
+            let new = irreducible(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, [n, n, m]);
+            println!("grid {n}x{n}x{m}: {old} -> {new}");
+        }
+    }
+}

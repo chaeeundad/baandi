@@ -4221,3 +4221,51 @@ cell): ecut 12 Ha P=1 solve 1.37/1.30 -> 1.17/1.17 s, wall 1.95/1.87 -> 1.75/1.7
 H columns (2151) and Davidson iterations (213). Needs dev08 MPI8 one run per arm (GeTe, B12, IrI3; si64 unchanged
 because Gamma uses the real solver). Lesson: the k solver had kept the full-recompute Gram after the Gamma path
 went border-only; check the complex twin whenever a real-path reduction-size change is adopted.
+
+## GK14-RADIAL-TABLES — uniform radial transform tables for the k start and k projectors (2026-11-26; rounding class, default on, dev08 pending)
+
+Premise change against B18 (H-6): H-6 was set aside because QE-style tables (4-point Lagrange, 0.01 Bohr^-1) carry a
+1e-8..1e-9 relative error that exceeded the old 1e-12 Ha gate. The adoption classes are now strict 1e-10 Ha and
+standard 5e-9 Ha, and a higher-order, finer table reaches the quadrature's own roundoff, so the premise no longer holds.
+dev08 evidence for the stage (GeTe 260 k, MPI8, after GK1 + GK1B): `k_start_atomic_columns` 57 s and
+`k_start_nonlocal_tables` 18 s, both one radial quadrature (~15 us, ~1500-point mesh) per distinct |k+G| per channel,
+and at generic k nearly every |k+G| is distinct, so the exact memo cannot help.
+Change: `dft_upf::radial::RadialTransformTable` (uniform nodes q_i = i h, h = 0.005 Bohr^-1, 8-point Lagrange in
+the node index, parity (-1)^l for nodes left of zero, table to q_max + 5 nodes; `eval` allocation-free, `None`
+outside [0, q_max] -> caller falls back to the quadrature). `refstart::finish_kpoints` builds one table per species
+projector and per atomic-orbital channel once per k start (per cell), q_max = largest |k+G| over all k bases; nodes
+are split round-robin over ranks and combined by one tree sum (each node has one nonzero contribution, so node bits
+equal the single-rank quadrature for any rank count). `NonlocalOperator::new_owned_rows_only_tabulated`
+(`dft-physics`) reads the projector transforms from the tables; `atomic_k_columns_memo` reads the orbital
+transforms. Switches `BAANDI_RADIAL_TABLE_NL` and `BAANDI_RADIAL_TABLE_START` (both default on; the NL table acts on
+the rows-only path, the start table on the memo path; off = GK1/GK1B quadrature). Gamma-only path, forces, stress
+and the strict oracle untouched. Table: 69 entries.
+Error vs spacing (worst |table - quadrature| / channel peak, q <= 11 Bohr^-1, PseudoDojo Ge, Te, Si, O, Mg, Fe, Ir, I,
+B and Si.pz-vbc, all projectors and orbitals; `dft-upf` test `radial_table::scan`), worst file / best file:
+
+| points \ h (Bohr^-1) | 0.02 | 0.01 | 0.005 | 0.0025 |
+|---|---|---|---|---|
+| 4 | 3.3e-6 / 4.4e-7 | 2.1e-7 / 2.7e-8 | 1.3e-8 / 1.7e-9 | 8.1e-10 / 1.1e-10 |
+| 6 | 2.8e-8 / 1.2e-9 | 4.5e-10 / 1.8e-11 | 7.0e-12 / 2.9e-13 | 1.1e-13 / 4.7e-15 |
+| 8 | 4.7e-10 / 4.4e-12 | 1.9e-12 / 1.7e-14 | 7.4e-15 / 8.3e-16 | 1.1e-15 / 7.3e-16 |
+
+Delivered-energy effect, real Ge + Te PBE, skewed 2-atom cell, 15 Ha, 3 k (Gamma + 2 generic), verified, 2 ranks
+(test `k_radial_table::real_gete`), |E(table) - E(quadrature)| for the NL table: 4 pt/0.01 (QE-like) 3.2e-9 Ha
+(outside strict, eigenvalues 2.0e-10 Ha), 4 pt/0.02 5.3e-8 Ha, 6 pt/0.02 4.1e-12 Ha, 6 pt/0.01 5.7e-14 Ha,
+8 pt/0.005 (default) 0 (bit-equal total; eigenvalues within 4.4e-15 Ha). Start table alone: <= 1.1e-13 Ha at every
+spacing (start only). Synthetic k set (cubic, skewed, elongated, shifted 4-k mesh, Gamma in list; 1 and 2 ranks;
+fixed spin and Fermi-Dirac), all arms: |dE| <= 2.7e-15 Ha unpolarized, 1.1e-15 fixed spin, 5.2e-14 FD (FD convergence
+noise); map counts identical in every case. Forces/stress use their own quadrature tables (unchanged).
+Mac observation (O, release, serial, GeTe-like 4-atom skewed cell, 28 Ha, npw ~6190, 8 generic k, 24-36 bands),
+seconds off / on / off:
+
+| fixture | k_radial_tables | k_start_nonlocal_tables | k_start_atomic_columns | complex_k_atomic_starts |
+|---|---|---|---|---|
+| real Ge/Te (PseudoDojo, 18 radial channels each) | 0 / 0.185 / 0 | 1.47 / 0.046 / 1.60 | 4.58 / 0.025 / 5.15 | 6.69 / 0.88 / 7.43 |
+| synthetic 1501-point meshes | 0 / 0.265 / 0 | 4.67 / 0.021 / 6.23 | 3.51 / 0.017 / 3.63 | 8.51 / 0.79 / 10.30 |
+
+Expected dev08 (E): GeTe `k_start_atomic_columns` 57 s + `k_start_nonlocal_tables` 18 s -> table build
+(~nodes x channels x 15 us / 8 ranks, well below 1 s) plus O(npw) interpolation per k. Needs dev08 MPI8 one run
+per arm (GeTe, B12, IrI3; si64 Gamma unchanged by construction). Lesson: the accuracy objection to radial tables
+was a property of the 4-point stencil, not of tabulation; at 8 points the table error sits at the quadrature's
+roundoff for a few thousand nodes per channel.

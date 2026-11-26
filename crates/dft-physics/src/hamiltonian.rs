@@ -2451,7 +2451,7 @@ impl NonlocalOperator {
         species: &[Species<'_>],
         rule: dft_upf::radial::RadialEvenRule,
     ) -> Result<Self, HamiltonianError> {
-        Self::new_selected(basis, volume_bohr3, species, rule, None, false)
+        Self::new_selected(basis, volume_bohr3, species, rule, None, false, None)
     }
     /// Build only selected full-sphere rows; full columns remain available lazily.
     /// `indices` must be sorted and unique. The engine selects the owned Gamma
@@ -2468,7 +2468,15 @@ impl NonlocalOperator {
         {
             return Err(HamiltonianError::Shape);
         }
-        Self::new_selected(basis, volume_bohr3, species, rule, Some(indices), false)
+        Self::new_selected(
+            basis,
+            volume_bohr3,
+            species,
+            rule,
+            Some(indices),
+            false,
+            None,
+        )
     }
     /// GK1B: like [`Self::new_owned_with_rule`], but the radial/angular
     /// factors are evaluated and kept for the `indices` rows only (per-rank
@@ -2491,7 +2499,45 @@ impl NonlocalOperator {
         {
             return Err(HamiltonianError::Shape);
         }
-        Self::new_selected(basis, volume_bohr3, species, rule, Some(indices), true)
+        Self::new_selected(
+            basis,
+            volume_bohr3,
+            species,
+            rule,
+            Some(indices),
+            true,
+            None,
+        )
+    }
+    /// GK14: [`Self::new_owned_rows_only_with_rule`] with the projector radial
+    /// transforms read from run tables instead of the quadrature.
+    /// `tables[s][i]` is the table of projector `i` of `species[s]` (same
+    /// `rule`); a species whose entry does not have one table per projector,
+    /// and any |k+G| beyond a table's range, uses the direct quadrature. The
+    /// result approximates the quadrature operator to the table's measured
+    /// error (not bit-identical).
+    pub fn new_owned_rows_only_tabulated(
+        basis: &PlaneWaveBasis,
+        volume_bohr3: f64,
+        species: &[Species<'_>],
+        rule: dft_upf::radial::RadialEvenRule,
+        indices: &[usize],
+        tables: &[Vec<dft_upf::radial::RadialTransformTable>],
+    ) -> Result<Self, HamiltonianError> {
+        if indices.windows(2).any(|p| p[0] >= p[1])
+            || indices.last().is_some_and(|&i| i >= basis.momenta().len())
+        {
+            return Err(HamiltonianError::Shape);
+        }
+        Self::new_selected(
+            basis,
+            volume_bohr3,
+            species,
+            rule,
+            Some(indices),
+            true,
+            Some(tables),
+        )
     }
     fn new_selected(
         basis: &PlaneWaveBasis,
@@ -2500,6 +2546,7 @@ impl NonlocalOperator {
         rule: dft_upf::radial::RadialEvenRule,
         selected: Option<&[usize]>,
         rows_only: bool,
+        tables: Option<&[Vec<dft_upf::radial::RadialTransformTable>]>,
     ) -> Result<Self, HamiltonianError> {
         // Factor rows: the owned rows (rows-only) or the whole basis.
         let factor_rows = if rows_only { selected } else { None };
@@ -2535,9 +2582,10 @@ impl NonlocalOperator {
         let mut validation = selected.map(|_| PhaseValidation::new());
         let mut recipe_atoms = Vec::new();
         let mut recipe_bytes = 0;
-        for s in species {
+        for (si, s) in species.iter().enumerate() {
             let pp = s.potential;
             let np = pp.projectors().len();
+            let tabulated = tables.and_then(|t| t.get(si)).filter(|t| t.len() == np);
             for i in 0..np {
                 for j in 0..np {
                     if pp.projectors()[i].l() != pp.projectors()[j].l()
@@ -2569,15 +2617,31 @@ impl NonlocalOperator {
             for ig in 0..ng {
                 let g = &basis.momenta()[factor_rows.map_or(ig, |rows| rows[ig])];
                 let next = radial_cache.len();
-                let slot = match radial_cache.entry(g.norm_squared.to_bits()) {
-                    std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        for i in 0..np {
-                            radial_values[next * np + i] =
-                                pp.projector_transform_with_rule(i, g.norm_squared.sqrt(), rule)?;
+                let slot = if let Some(tab) = tabulated {
+                    // GK14: interpolation per row, no shell hash (at generic
+                    // k nearly every |k+G| is distinct).
+                    let q = g.norm_squared.sqrt();
+                    for (i, t) in tab.iter().enumerate() {
+                        radial_values[ig * np + i] = match t.eval(q) {
+                            Some(v) => v,
+                            None => pp.projector_transform_with_rule(i, q, rule)?,
+                        };
+                    }
+                    ig
+                } else {
+                    match radial_cache.entry(g.norm_squared.to_bits()) {
+                        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            for i in 0..np {
+                                radial_values[next * np + i] = pp.projector_transform_with_rule(
+                                    i,
+                                    g.norm_squared.sqrt(),
+                                    rule,
+                                )?;
+                            }
+                            entry.insert(next);
+                            next
                         }
-                        entry.insert(next);
-                        next
                     }
                 };
                 let radial = &radial_values[slot * np..(slot + 1) * np];

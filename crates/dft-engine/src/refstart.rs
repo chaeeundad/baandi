@@ -20,7 +20,9 @@ use dft_physics::{
     hamiltonian::{NonlocalOperator, Species, structure_factor},
 };
 use dft_solvers::distributed_fft::{DistributedPairFft, PlanCache};
-use dft_upf::radial::{projector_transform_with_rule, real_spherical_harmonic, spherical_bessel};
+use dft_upf::radial::{
+    RadialTransformTable, projector_transform_with_rule, real_spherical_harmonic, spherical_bessel,
+};
 use std::{
     collections::BTreeMap,
     f64::consts::{PI, SQRT_2},
@@ -1890,43 +1892,51 @@ struct KColumnScratch {
 /// come out in the original (species, channel, atom, m) order. Species without
 /// atoms are skipped, as in the direct loop; on invalid input both return an
 /// error (the message may come from a different row).
+#[allow(clippy::too_many_arguments)]
 fn atomic_k_columns_memo(
     species: &[Species<'_>],
     basis: &PlaneWaveBasis,
     rows: &[usize],
     volume: f64,
     rule: crate::RadialEvenRule,
+    tables: Option<&[Vec<RadialTransformTable>]>,
     s: &mut KColumnScratch,
     columns: &mut Vec<Vec<C>>,
 ) -> Result<(), ScfError> {
     use std::collections::hash_map::Entry;
     let momenta = basis.momenta();
     let n = rows.len();
-    for sp in species {
+    for (si, sp) in species.iter().enumerate() {
         if sp.positions_bohr.is_empty() {
             continue;
         }
-        for channel in atomic_orbitals(sp.potential) {
+        for (ci, channel) in atomic_orbitals(sp.potential).enumerate() {
             let l = channel.l;
             let ms = 2 * l + 1;
+            // GK14: interpolate from the run table when one is given.
+            let table = tables.and_then(|t| t.get(si)).and_then(|t| t.get(ci));
             s.radial_by_bits.clear();
             s.radial_y.clear();
             s.radial_y.resize(ms * n, 0.);
             for (r, &g) in rows.iter().enumerate() {
                 let q = &momenta[g];
-                let radial = match s.radial_by_bits.entry(q.norm_squared.to_bits()) {
-                    Entry::Occupied(e) => *e.get(),
-                    Entry::Vacant(e) => *e.insert(
-                        projector_transform_with_rule(
-                            sp.potential.mesh(),
-                            l,
-                            &channel.radial_times_r,
-                            q.norm_squared.sqrt(),
-                            rule,
-                        )
-                        .map_err(err)?
-                            / volume.sqrt(),
-                    ),
+                let tabulated = table.and_then(|t| t.eval(q.norm_squared.sqrt()));
+                let radial = match tabulated {
+                    Some(v) => v / volume.sqrt(),
+                    None => match s.radial_by_bits.entry(q.norm_squared.to_bits()) {
+                        Entry::Occupied(e) => *e.get(),
+                        Entry::Vacant(e) => *e.insert(
+                            projector_transform_with_rule(
+                                sp.potential.mesh(),
+                                l,
+                                &channel.radial_times_r,
+                                q.norm_squared.sqrt(),
+                                rule,
+                            )
+                            .map_err(err)?
+                                / volume.sqrt(),
+                        ),
+                    },
                 };
                 for (mi, m) in (-(l as isize)..=l as isize).enumerate() {
                     let y = if q.norm_squared == 0. {
@@ -1953,6 +1963,89 @@ fn atomic_k_columns_memo(
         }
     }
     Ok(())
+}
+
+/// GK14 run tables: per species (in `species` order), one table per projector
+/// (`nl`) and one per atomic-orbital channel (`start`); empty for species
+/// without atoms (their rows keep the quadrature). Nodes are split round-robin
+/// over the ranks and combined by one sum; each node has exactly one nonzero
+/// contribution, so the node values equal the single-rank quadrature bits for
+/// any rank count. A quadrature failure on any rank fails every rank.
+type KRadialTables = (
+    Vec<Vec<RadialTransformTable>>,
+    Vec<Vec<RadialTransformTable>>,
+);
+fn k_radial_tables<K: Collective>(
+    species: &[Species<'_>],
+    q_max: f64,
+    rule: crate::RadialEvenRule,
+    comm: &K,
+    nl: bool,
+    start: bool,
+) -> Result<KRadialTables, ScfError> {
+    use dft_upf::radial::{RADIAL_TABLE_POINTS as POINTS, RADIAL_TABLE_STEP as STEP};
+    let nodes = RadialTransformTable::nodes(q_max, STEP, POINTS).map_err(err)?;
+    // (species, projector table?, l, samples)
+    let mut channels: Vec<(usize, bool, usize, &[f64])> = Vec::new();
+    for (s, sp) in species.iter().enumerate() {
+        if sp.positions_bohr.is_empty() {
+            continue;
+        }
+        if nl {
+            for p in sp.potential.projectors() {
+                channels.push((s, true, p.l(), p.radial_times_r()));
+            }
+        }
+        if start {
+            for c in atomic_orbitals(sp.potential) {
+                channels.push((s, false, c.l, &c.radial_times_r));
+            }
+        }
+    }
+    let total = channels.len() * nodes;
+    let mut values = vec![0.; total + 1];
+    let (rank, size) = (comm.rank(), comm.size().max(1));
+    let mut failed = false;
+    for j in (rank..total).step_by(size) {
+        let (c, i) = (j / nodes, j % nodes);
+        let (s, _, l, f) = channels[c];
+        match projector_transform_with_rule(
+            species[s].potential.mesh(),
+            l,
+            f,
+            i as f64 * STEP,
+            rule,
+        ) {
+            Ok(v) => values[j] = v,
+            Err(_) => failed = true,
+        }
+    }
+    values[total] = f64::from(u8::from(failed));
+    let values = sum(comm, &values)?;
+    if values[total] > 0. {
+        return Err(ScfError::Numerical(
+            "reference k start: radial table quadrature failed".into(),
+        ));
+    }
+    let mut out_nl: Vec<Vec<RadialTransformTable>> = species.iter().map(|_| Vec::new()).collect();
+    let mut out_start: Vec<Vec<RadialTransformTable>> =
+        species.iter().map(|_| Vec::new()).collect();
+    for (c, &(s, projector, l, _)) in channels.iter().enumerate() {
+        let table = RadialTransformTable::from_nodes(
+            l,
+            q_max,
+            STEP,
+            POINTS,
+            values[c * nodes..(c + 1) * nodes].to_vec(),
+        )
+        .map_err(err)?;
+        if projector {
+            out_nl[s].push(table);
+        } else {
+            out_start[s].push(table);
+        }
+    }
+    Ok((out_nl, out_start))
 }
 
 // Shared atomic-orbital Ritz construction; SCF and fixed-density starts use
@@ -2001,6 +2094,34 @@ fn finish_kpoints<K: Collective>(
     let nl_rows_only = dft_numerics::switches::on(dft_numerics::switches::Id::K_NL_TABLE_MEMO);
     let mut memo_scratch = KColumnScratch::default();
     let clock = Instant::now();
+    // GK14: radial tables once per start (per cell), covering every k sphere.
+    // NL tables act on the rows-only projector path, start tables on the memo
+    // columns; the off arms of those switches keep the quadrature reference.
+    let nl_table =
+        nl_rows_only && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_NL);
+    let start_table =
+        memo && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_START);
+    let (nl_tables, start_tables) = if nl_table || start_table {
+        let stage = Instant::now();
+        let q_max = bases
+            .iter()
+            .flat_map(|b| b.momenta())
+            .map(|m| m.norm_squared)
+            .fold(0., f64::max)
+            .sqrt();
+        let (n, s) = k_radial_tables(
+            &species,
+            q_max,
+            o.radial_even_rule,
+            comm,
+            nl_table,
+            start_table,
+        )?;
+        commons[0].setup.record("k_radial_tables", stage);
+        (nl_table.then_some(n), start_table.then_some(s))
+    } else {
+        (None, None)
+    };
     for (point, basis) in points.iter().zip(bases) {
         let common = &mut commons[0];
         if bands > basis.vectors().len() {
@@ -2021,13 +2142,23 @@ fn finish_kpoints<K: Collective>(
         let nl = if nl_rows_only {
             // GK1B: owned-row factors only. Failures are now rank-local, so
             // the ranks agree on the outcome before any further collective.
-            let local = NonlocalOperator::new_owned_rows_only_with_rule(
-                &basis,
-                cell.volume_bohr3(),
-                &species,
-                o.radial_even_rule,
-                &rows,
-            );
+            let local = match &nl_tables {
+                Some(tables) => NonlocalOperator::new_owned_rows_only_tabulated(
+                    &basis,
+                    cell.volume_bohr3(),
+                    &species,
+                    o.radial_even_rule,
+                    &rows,
+                    tables,
+                ),
+                None => NonlocalOperator::new_owned_rows_only_with_rule(
+                    &basis,
+                    cell.volume_bohr3(),
+                    &species,
+                    o.radial_even_rule,
+                    &rows,
+                ),
+            };
             let failed = sum(comm, &[f64::from(u8::from(local.is_err()))])?[0];
             let nl = local?;
             if failed > 0. {
@@ -2086,6 +2217,7 @@ fn finish_kpoints<K: Collective>(
                 &rows,
                 cell.volume_bohr3(),
                 o.radial_even_rule,
+                start_tables.as_deref(),
                 &mut memo_scratch,
                 &mut columns,
             )?;

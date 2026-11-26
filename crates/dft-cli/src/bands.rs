@@ -273,7 +273,7 @@ impl Context {
                     &self.cell,
                     &self.atoms,
                     &self.config.symmetry_full_mesh().map_err(|e| err(1, e))?,
-                    self.config.symmetry.tolerance_bohr,
+                    self.config.detection_tolerance(),
                     self.config.basis.time_reversal(),
                     &p,
                 )

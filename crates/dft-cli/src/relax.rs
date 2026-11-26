@@ -367,7 +367,7 @@ impl Context {
         if self.config.symmetry.mode == crate::config::SymmetryMode::Auto {
             p.enable_symmetry(
                 &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                self.config.symmetry.tolerance_bohr,
+                self.config.detection_tolerance(),
                 self.config.basis.time_reversal(),
             )
             .map_err(|e| error(4, e))?;
@@ -489,7 +489,7 @@ impl Context {
                         &self.cell,
                         &atoms,
                         &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                        self.config.symmetry.tolerance_bohr,
+                        self.config.detection_tolerance(),
                         self.config.basis.time_reversal(),
                     )
                     .map_err(|e| error(4, e))?,
@@ -688,7 +688,7 @@ impl Context {
                             &self.cell,
                             &atoms,
                             &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                            self.config.symmetry.tolerance_bohr,
+                            self.config.detection_tolerance(),
                             self.config.basis.time_reversal(),
                         )
                         .map_err(|e| error(4, e))?,

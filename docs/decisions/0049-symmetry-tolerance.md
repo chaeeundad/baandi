@@ -67,10 +67,29 @@ cover symmetry.
 3. **Relaxation.** Fixed-cell and cell relaxations start from the projected,
    exactly symmetric geometry; forces and stress are symmetrized with the run's
    operations (existing P19A/P20A/P23A paths; the relaxation test asserts a
-   constant operation count over the trajectory), so the trajectory keeps the start group to roundoff. The group is
-   still re-detected per geometry at the configured tolerance (unchanged code);
-   a trajectory that comes within the tolerance of a higher symmetry can gain
-   operations. That is a documented limitation, not pinned in this ticket.
+   constant operation count over the trajectory), so the trajectory keeps the start group to roundoff.
+   **Amendment GS1B (2026-11-27):** the loose tolerance is applied once, to
+   the input, by the projection. Every later detection (run setup, k
+   reduction, reference symmetry, every relaxation step, checkpoint and bands)
+   uses `min(tolerance_bohr, 1e-9 Bohr)` (`Config::detection_tolerance`,
+   recorded as `results.json.symmetry.detection_tolerance_bohr`). The
+   projected input carries its group at 1e-9 Bohr (checked by `symmetrize`),
+   so the start group is unchanged and relaxations keep it. Reason (dev08
+   gen59, reproduced on the Mac in release): in
+   `cell_relaxation::tetragonal_shape_returns_to_cubic` the tetragonal cell
+   approached cubic; the cell optimizer writes each new lattice into the
+   config, whose group was re-detected at 1e-4 Bohr, so once |c - a| fell
+   below 1e-4 Bohr the cubic group was found, the SCF stress was symmetrized
+   with cubic operations, the anisotropic stress that drives c -> a was
+   averaged away, and the cell froze at |c - a| = 9.6e-5 Bohr (relative
+   2.48e-5 against the 1e-5 test bound; with `tolerance_bohr = 1e-7` the same
+   test reaches 6.4e-8). The tetragonal case of `reference_cell_protocol`
+   stalled the same way (rebuilt pressure residual 4.4e-8 against
+   1e-9 Ha/Bohr^3). Remaining limitation: a trajectory that comes within
+   1e-9 Bohr of a higher symmetry can still gain operations; the driving force
+   left at that distance is below every stress and force tolerance we gate.
+   The cell optimizer's ionic and strain projectors are built once from the
+   start group (unchanged).
 
 ## Alternatives considered
 

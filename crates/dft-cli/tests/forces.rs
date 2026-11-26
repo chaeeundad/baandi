@@ -142,9 +142,14 @@ fn reference_fermi_dirac_and_spin_write_forces_and_stress() {
     let fd = |theta: f64| {
         format!("[occupations]\nmode='fermi_dirac'\nsmearing_ha={theta}\nband_cap=16\n")
     };
-    // Without scf.nbands the cap remains the band count (TS = 9.9e-4 Ha).
+    // Without scf.nbands the count grows automatically up to the cap and the
+    // derivatives use the grown state (TS = 9.9e-4 Ha).
     let result = check(run(base.replace("NBANDS", "") + &fd(0.03)), "F");
-    assert_eq!(result["band_data"]["shape"][2], 16);
+    let growth = &result["reference_scf"]["band_count_growth"];
+    assert_eq!(growth["mode"], "automatic", "{growth}");
+    assert_eq!(growth["band_cap"], 16);
+    assert!(growth["final_bands"].as_u64().unwrap() <= 16);
+    assert_eq!(result["band_data"]["shape"][2], growth["final_bands"]);
     assert!(
         result["thermodynamics"]["entropy_term_ha"]
             .as_f64()
@@ -154,6 +159,10 @@ fn reference_fermi_dirac_and_spin_write_forces_and_stress() {
     // scf.nbands below the cap sets the band count of the FD run.
     let result = check(run(base.replace("NBANDS", "nbands=12") + &fd(0.02)), "F");
     assert_eq!(result["band_data"]["shape"][2], 12);
+    assert_eq!(
+        result["reference_scf"]["band_count_growth"]["mode"],
+        "fixed"
+    );
     // scf.nbands above the explicit cap is rejected before any SCF.
     let output = run(base.replace("NBANDS", "nbands=20") + &fd(0.03));
     assert!(!output.status.success());

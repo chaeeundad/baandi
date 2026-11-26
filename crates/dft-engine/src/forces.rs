@@ -132,6 +132,77 @@ pub enum ElectronicState<'a> {
 /// replicated coefficients in the `options.basis(cell, k, 1)` order, and the
 /// occupations without k weight.
 pub(crate) type DerivativeBlock<'a> = (KPoint, &'a ComplexMatrix, &'a [f64]);
+
+/// MPI-DERIV: evaluate the per-block part `eval` of a derivative (a fixed
+/// number `stride` of values per block) and hand every part to `accumulate` in
+/// global block order. Without an active communicator (threads-only path) the
+/// blocks are evaluated and accumulated one after the other, exactly as the
+/// former single loop. With two or more ranks each rank evaluates a contiguous
+/// range of blocks (`dft_mpi::block_counts`), and one allgatherv delivers all
+/// parts to every rank; the accumulation then runs in the same global order on
+/// the same values, so the result is bit-identical to the replicated
+/// evaluation and independent of the rank count. Requires the replicated
+/// delivered state (every rank holds every block), which the reference
+/// delivery guarantees. Each rank's segment starts with a status value so a
+/// failure on one rank is reported on all ranks instead of leaving the others
+/// waiting in the collective.
+pub(crate) fn accumulate_blocks(
+    blocks: &[DerivativeBlock<'_>],
+    stride: usize,
+    mut eval: impl FnMut(&DerivativeBlock<'_>, &mut [f64]) -> Result<(), ScfError>,
+    mut accumulate: impl FnMut(&[f64]),
+) -> Result<(), ScfError> {
+    use dft_mpi::Collective;
+    let Some(comm) = crate::parallel::SharedComm::active() else {
+        let mut part = vec![0.0; stride];
+        for block in blocks {
+            eval(block, &mut part)?;
+            accumulate(&part);
+        }
+        return Ok(());
+    };
+    let counts = dft_mpi::block_counts(blocks.len(), comm.size());
+    let first = dft_mpi::block_displacements(&counts)[comm.rank()];
+    let own = &blocks[first..first + counts[comm.rank()]];
+    let mut local = vec![0.0; 1 + own.len() * stride];
+    let mut failure = None;
+    if stride > 0 {
+        for (block, slot) in own.iter().zip(local[1..].chunks_exact_mut(stride)) {
+            if let Err(e) = eval(block, slot) {
+                failure = Some(e);
+                local[0] = 1.0;
+                break;
+            }
+        }
+    }
+    let counts: Vec<_> = counts.iter().map(|c| 1 + c * stride).collect();
+    let mut all = vec![0.0; counts.iter().sum()];
+    comm.allgatherv_f64(&local, &counts, &mut all)
+        .map_err(|e| ScfError::Numerical(format!("derivative block gather: {e}")))?;
+    if let Some(e) = failure {
+        return Err(e);
+    }
+    let mut at = 0;
+    for &count in &counts {
+        if all[at] != 0.0 {
+            return Err(ScfError::Numerical(
+                "derivative block evaluation failed on another rank".into(),
+            ));
+        }
+        at += count;
+    }
+    if stride == 0 {
+        return Ok(());
+    }
+    let mut at = 0;
+    for count in counts {
+        for values in all[at + 1..at + count].chunks_exact(stride) {
+            accumulate(values);
+        }
+        at += count;
+    }
+    Ok(())
+}
 impl<'a> ElectronicState<'a> {
     /// Channel densities (one unpolarized, up/down collinear), electrons/Bohr^3.
     pub(crate) fn densities(&self) -> Result<Vec<&'a Array3<f64>>, ScfError> {
@@ -601,22 +672,36 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
     let mut band_passes = 0;
     let band_first = dft_numerics::switches::on(dft_numerics::switches::Id::FORCE_BAND_FIRST);
-    for (point, orbitals, occupations) in blocks {
-        let basis = state.options.basis(state.cell, point.fractional, 1.0)?;
-        let operator = NonlocalOperator::new(&basis, volume, &species)?;
-        let occupations: Vec<_> = occupations.iter().map(|f| f * point.weight).collect();
-        let part = if band_first {
-            nonlocal_band_first(&operator, &basis, orbitals, &occupations)?
-        } else {
-            terms::nonlocal(&operator, &basis, orbitals, &occupations)?
-        };
-        band_passes += occupations.len();
-        for (sum, part) in nonlocal.iter_mut().zip(part) {
-            for axis in 0..3 {
-                sum[axis] += part[axis];
+    // MPI-DERIV: per-k parts distributed over ranks, accumulated in k order.
+    accumulate_blocks(
+        &blocks,
+        3 * state.atoms.len(),
+        |(point, orbitals, occupations), out| {
+            let basis = state.options.basis(state.cell, point.fractional, 1.0)?;
+            let operator = NonlocalOperator::new(&basis, volume, &species)?;
+            let occupations: Vec<_> = occupations.iter().map(|f| f * point.weight).collect();
+            let part = if band_first {
+                nonlocal_band_first(&operator, &basis, orbitals, &occupations)?
+            } else {
+                terms::nonlocal(&operator, &basis, orbitals, &occupations)?
+            };
+            if part.len() != out.len() / 3 {
+                return Err(ScfError::InvalidInput("nonlocal forces: atom count"));
             }
-        }
-    }
+            for (slot, value) in out.as_chunks_mut::<3>().0.iter_mut().zip(part) {
+                slot.copy_from_slice(&value);
+            }
+            Ok(())
+        },
+        |part| {
+            for (sum, part) in nonlocal.iter_mut().zip(part.as_chunks::<3>().0) {
+                for axis in 0..3 {
+                    sum[axis] += part[axis];
+                }
+            }
+        },
+    )?;
+    band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
     for term in [&mut ewald, &mut local, &mut nonlocal, &mut core] {
         symmetrize(state.cell, term, state.symmetry)?;
     }
@@ -764,6 +849,59 @@ fn symmetrize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// MPI-DERIV: global k order on every rank count, and a failing block on
+    /// one rank is reported on every rank (no rank left in the collective).
+    #[test]
+    fn distributed_blocks_keep_order_and_report_failures() {
+        let matrix = ComplexMatrix::zeros(1, 1).unwrap();
+        let occupations = [2.0];
+        let blocks: Vec<DerivativeBlock<'_>> = (0..5)
+            .map(|i| {
+                (
+                    KPoint {
+                        fractional: [i as f64, 0., 0.],
+                        weight: 1.,
+                    },
+                    &matrix,
+                    &occupations[..],
+                )
+            })
+            .collect();
+        for ranks in [2, 3, 7] {
+            let results = dft_mpi::simulate(ranks, |comm| {
+                crate::parallel::set_communicator(Some(std::sync::Arc::new(comm.clone())));
+                let mut order = Vec::new();
+                let ok = accumulate_blocks(
+                    &blocks,
+                    2,
+                    |b, out| {
+                        out.copy_from_slice(&[b.0.fractional[0], -b.0.fractional[0]]);
+                        Ok(())
+                    },
+                    |p| order.push(p.to_vec()),
+                );
+                let failed = accumulate_blocks(
+                    &blocks,
+                    2,
+                    |b, _| {
+                        if b.0.fractional[0] == 3. {
+                            Err(ScfError::NonFinite)
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |_| {},
+                );
+                crate::parallel::set_communicator(None);
+                (ok.is_ok(), order, failed.is_err())
+            });
+            for (ok, order, failed) in results {
+                assert!(ok && failed);
+                let expected: Vec<_> = (0..5).map(|i| vec![i as f64, -(i as f64)]).collect();
+                assert_eq!(order, expected);
+            }
+        }
+    }
     #[test]
     fn symmetry_rotates_polar_vectors_and_permutes_atoms() {
         use dft_geometry::symmetry::{SpinAction, SymmetryOperation};

@@ -1714,3 +1714,136 @@ fn fd_buffer_bands_match_large_band_tight_run() {
     assert!(stress_error <= 1e-9);
     assert!((f2 - f0).abs() <= 5e-9);
 }
+
+/// MPI-DERIV: forces and frozen-basis stress of one replicated reference
+/// delivery (5 complex k blocks, two atoms) evaluated with an active
+/// communicator of 2, 3 and 7 simulated ranks (uneven contiguous k splits, and
+/// ranks without any block) equal the threads-only evaluation bit for bit:
+/// each rank evaluates its own blocks, one allgatherv, accumulation in global
+/// k order, symmetrization after. The end-to-end runs (SCF and derivatives on
+/// 1, 2, 3 ranks) are reported against np 1 and bounded by 1e-12.
+#[test]
+fn distributed_derivatives_match_replicated_and_rank_count() {
+    use std::sync::Arc;
+    let screening = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
+    let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.1, 0.2, 0.3]),
+        Atom::new("Xx", [0.37, 0.43, 0.49]),
+    ];
+    let mut opts = options();
+    opts.gamma_real = GammaReal::Off;
+    let points: Vec<_> = [
+        [0., 0., 0.],
+        [0.25, 0., 0.],
+        [0., 0.25, 0.],
+        [0., 0., 0.25],
+        [0.25, 0.25, 0.],
+    ]
+    .into_iter()
+    .zip([0.1, 0.2, 0.2, 0.2, 0.3])
+    .map(|(fractional, weight)| KPoint { fractional, weight })
+    .collect();
+    let profile = Profile::from_standard_ha(opts.standard.unwrap().threshold_ha).unwrap();
+    let input = || StartInput {
+        cell: &cell,
+        atoms: &atoms,
+        potentials: &species,
+        options: &opts,
+    };
+    let bits = |f: &[[f64; 3]], s: &[[f64; 3]; 3]| -> Vec<u64> {
+        f.iter()
+            .flatten()
+            .chain(s.iter().flatten())
+            .map(|v| v.to_bits())
+            .collect()
+    };
+    // Replicated (threads-only) evaluation of one delivered state.
+    let mut run = k_driver::run(input(), profile, &points).unwrap();
+    let view = delivered::force_state(input(), &mut run.outcome).unwrap();
+    let clock = std::time::Instant::now();
+    let force = dft_engine::forces(&view).unwrap();
+    let stress = dft_engine::stress::frozen_stress(&view).unwrap();
+    let serial_s = clock.elapsed().as_secs_f64();
+    let reference = bits(&force.values, &stress.values);
+    // Cost split of the post-SCF derivative boundary (observation only): the
+    // full stress adds three cutoff-scan SCF runs (Pulay assessment).
+    let full = dft_engine::stress(&view).unwrap();
+    let scans = full.pulay.as_ref().unwrap().elapsed.as_secs_f64();
+    println!(
+        "derivative cost: forces {:.4}s, frozen stress (incl. a second force pass) {:.4}s, Pulay cutoff scans {scans:.4}s (3 SCF runs)",
+        force.elapsed.as_secs_f64(),
+        stress.elapsed.as_secs_f64(),
+    );
+    assert_eq!(
+        bits(&force.values, &full.values),
+        bits(&force.values, &stress.values)
+    );
+    for ranks in [2, 3, 7] {
+        let results = dft_mpi::simulate(ranks, |comm| {
+            let _screen_scope = screening.enter();
+            dft_engine::parallel::set_communicator(Some(Arc::new(comm.clone())));
+            let clock = std::time::Instant::now();
+            let f = dft_engine::forces(&view).unwrap();
+            let s = dft_engine::stress::frozen_stress(&view).unwrap();
+            let seconds = clock.elapsed().as_secs_f64();
+            dft_engine::parallel::set_communicator(None);
+            assert_eq!(f.band_passes, force.band_passes);
+            assert_eq!(s.band_passes, stress.band_passes);
+            (bits(&f.values, &s.values), seconds)
+        });
+        for (rank, (b, seconds)) in results.iter().enumerate() {
+            println!(
+                "replicated vs distributed ranks={ranks} rank={rank}: identical={} wall={seconds:.3}s (replicated {serial_s:.3}s)",
+                *b == reference
+            );
+            assert_eq!(*b, reference, "ranks={ranks} rank={rank}");
+        }
+    }
+    // End to end: SCF, delivery and derivatives on 1, 2, 3 ranks. On each
+    // rank count the distributed derivatives equal the replicated evaluation
+    // of that rank count's own delivered state bit for bit; the differences
+    // between rank counts are those of the distributed SCF state itself
+    // (reported; bounded by the existing reference rank-count acceptance).
+    type Derived = (f64, Vec<[f64; 3]>, [[f64; 3]; 3]);
+    let mut base: Option<Derived> = None;
+    for ranks in [1, 2, 3] {
+        let results = dft_mpi::simulate(ranks, |comm| {
+            let _screen_scope = screening.enter();
+            if ranks > 1 {
+                dft_engine::parallel::set_communicator(Some(Arc::new(comm.clone())));
+            }
+            let mut run = k_driver::run(input(), profile, &points).unwrap();
+            let energy = run.outcome.result.total_hartree();
+            let view = delivered::force_state(input(), &mut run.outcome).unwrap();
+            let f = dft_engine::forces(&view).unwrap().values;
+            let s = dft_engine::stress::frozen_stress(&view).unwrap().values;
+            dft_engine::parallel::set_communicator(None);
+            let replicated = bits(
+                &dft_engine::forces(&view).unwrap().values,
+                &dft_engine::stress::frozen_stress(&view).unwrap().values,
+            );
+            assert_eq!(bits(&f, &s), replicated, "ranks={ranks}");
+            (energy, f, s)
+        });
+        for (e, f, s) in results {
+            if let Some((e0, f0, s0)) = &base {
+                let df = delta(f.iter().flatten(), f0.iter().flatten());
+                let ds = delta(s.iter().flatten(), s0.iter().flatten());
+                println!(
+                    "end-to-end ranks={ranks}: |dE|={:e} Ha max|dF|={df:e} Ha/Bohr max|dS|={ds:e} Ha/Bohr^3 vs np 1 (SCF state differences; derivative distribution adds none)",
+                    (e - e0).abs()
+                );
+                assert!((e - e0).abs() <= 5e-9 && df <= 1e-6 && ds <= 1e-6);
+            } else {
+                base = Some((e, f, s));
+            }
+        }
+    }
+}

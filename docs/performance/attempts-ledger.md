@@ -3679,6 +3679,22 @@ Also si128 FFT_KERNEL_BY_LENGTH (now wired): all 10 lane shapes choose MKL (16-4
 calibration); wall 33.63 -> 33.46 s; kernels -0.9 s but slab gather/scatter, middle pack/unpack and multiply +0.5 s
 (same pattern as M2_FFT=mkl in P3e). Evidence: dev08 /data/sig-dft/wo/RESULT.md.
 
+### MPI-DERIV (2026-11-26, Mac correctness; dev08 acceptance pending): k-distributed post-SCF derivatives
+
+Trigger: dev08 MPQE entry 17 (B12, 172 k, MPI8) spent >36 min after a ~9 min SCF+verification in forces/stress.
+Change: the per-k nonlocal force loop and the per-k kinetic+nonlocal stress loop run through
+`forces::accumulate_blocks`: with an active communicator each rank evaluates a contiguous k range, one allgatherv
+of the per-k parts (3*atoms or 18 values per k plus one status value per rank), accumulation in global k order,
+symmetrization after. Threads-only path is the former loop (bit-identical). Mac simulated ranks 2/3/7 on a 5-k
+two-atom fixture: forces and frozen stress bit-identical to the replicated evaluation (difference 0). Also
+found (not changed, ticket non-goal): the full stress always runs the Pulay assessment, three extra cold SCF
+runs at c, 1.05c, 1.10c with the scan threshold min(1e-9 Ha, caller) and verification; on the Mac fixture
+forces 0.003 s, frozen stress 0.009 s (it re-runs the force pass), scans 0.062 s. On B12 the scans are
+expected to be the larger part of the 36 min; dev08 must report `stress.pulay_assessment.elapsed_seconds`
+separately from `stress.elapsed_seconds` and `forces.elapsed_seconds`. Early record: results.json with
+`status = derivatives_pending` is written before derivatives. Lesson: before distributing a post-SCF stage,
+split its wall into kernels and hidden SCF runs.
+
 ### KEPTHX2 (2026-11-26, development protocol): REFSCF_KEPT_HX ADOPTED
 
 Kept slabs now written inside the density accumulation loop with buffers reused across maps. dev08 MPI8 one run

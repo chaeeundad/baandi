@@ -1330,6 +1330,21 @@ fn protect_outputs(dir: &Path, inputs: &[PathBuf]) -> Result<(), RunError> {
     }
     Ok(())
 }
+/// MPI-DERIV early record: results.json written after the SCF (and its
+/// verification) and before forces/stress start, so a run stopped during the
+/// derivatives still leaves the energies, eigenvalues and console summary
+/// (total energy, gap). It carries `"status": "derivatives_pending"` and a
+/// `run` block with `completed = false` (parse_results.py rejects it as
+/// interrupted); the final write replaces the whole file, without `status`.
+fn write_early_record(out: &Path, result: &Value, console: &str) -> Result<(), RunError> {
+    let mut early = result.clone();
+    early["status"] = json!("derivatives_pending");
+    early["console_before_derivatives"] = json!(console);
+    early["run"] = json!({"schema":"run-report-1","exit_reason":"derivatives_pending",
+        "rank":crate::parallel::rank(),"ranks":crate::parallel::size(),"completed":false});
+    write_json(&out.join("results.json"), &early)
+}
+
 fn write_json(path: &Path, value: &Value) -> Result<(), RunError> {
     let data = serde_json::to_vec_pretty(value).map_err(|e| error(5, e))?;
     fs::write(path, data)?;
@@ -2651,6 +2666,9 @@ fn execute_mode_inner(
     if let Some(d) = &dispersion {
         add_dispersion_energy(&mut result, d);
     }
+    if config.output.as_ref().is_some_and(|o| o.forces) || config.wants_stress() {
+        write_early_record(&out, &result, &console)?;
+    }
     let force = if let Some(derivatives) = &mut reference_derivatives {
         derivatives
             .evaluate_forces(
@@ -3202,6 +3220,7 @@ fn reference_electronic_run(
             options: opts,
         };
         if r.converged {
+            write_early_record(out, &result, &tables)?;
             derivatives
                 .prepare_electronic(input(), &mut r)
                 .map_err(engine_error)?;
@@ -5250,6 +5269,30 @@ mod tests {
         assert!(output["json_write_body"].as_f64().unwrap() > 0.);
         assert_eq!(output["engine"]["total"], 0.1);
         fs::remove_file(path).unwrap();
+    }
+    /// MPI-DERIV: the early record keeps energies and eigenvalues, marks the
+    /// file as pending (not completed) and does not modify the final result.
+    #[test]
+    fn early_record_keeps_energies_and_is_marked_pending() {
+        let dir = std::env::temp_dir().join(format!("mpi-deriv-early-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let result = json!({"energies":{"total":{"ha":-7.5}},
+            "k_points":[{"weight":1.0,"eigenvalues":{"ha":[-0.4,0.1]}}]});
+        write_early_record(&dir, &result, "HOMO/LUMO gap: direct 0.5 Ha\n").unwrap();
+        let read: Value =
+            serde_json::from_slice(&fs::read(dir.join("results.json")).unwrap()).unwrap();
+        assert_eq!(read["status"], "derivatives_pending");
+        assert_eq!(read["run"]["completed"], false);
+        assert_eq!(read["energies"], result["energies"]);
+        assert_eq!(read["k_points"], result["k_points"]);
+        assert!(
+            read["console_before_derivatives"]
+                .as_str()
+                .unwrap()
+                .contains("gap")
+        );
+        assert!(result.get("status").is_none());
+        fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
     fn streamed_binary_hash_matches_whole_file_at_chunk_boundaries() {

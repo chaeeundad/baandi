@@ -961,17 +961,15 @@ pub(super) async fn run_continuation<K: Collective>(
             output.record("density_gather", phase);
             let phase = Instant::now();
             let mut k_points = Vec::with_capacity(points.len());
-            for (index, (meta, x)) in step
-                .solve
-                .per_k
-                .iter()
-                .zip(&step.solve.eigenvectors.0)
-                .enumerate()
-            {
-                let block = &state.blocks[index];
-                let orbitals = gather_orbitals(block, &delivery_comm, x)?;
+            // GK9 pools: the owner of each k broadcasts its full-row block.
+            let delivered = super::k_pool::deliver_orbitals(
+                &state,
+                &delivery_comm,
+                &step.solve.eigenvectors.0.iter().collect::<Vec<_>>(),
+            )?;
+            for ((meta, orbitals), point) in step.solve.per_k.iter().zip(delivered).zip(points) {
                 k_points.push(KPointSolution {
-                    point: block.point,
+                    point: *point,
                     lazy: None,
                     solution: EigenSolution {
                         locking: None,

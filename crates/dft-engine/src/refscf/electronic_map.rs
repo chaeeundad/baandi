@@ -521,14 +521,21 @@ pub(super) fn evaluate<K: Collective>(
             "electronic reference map: retained bands exceed the solved block",
         ));
     }
+    // Local k blocks: every k without pools, this rank's own with GK9 pools.
     let nk = states[0].blocks.len();
     let ns = states.len();
     let electrons = states[0].electrons;
     let dims = states[0].grid.dims();
     let points = dims.iter().product::<usize>();
     let dv = cell.volume_bohr3() / points as f64;
-    let mut blocks = Vec::with_capacity(ns);
-    for (s, state) in states.iter_mut().enumerate() {
+    let pool = states[0].pool.clone();
+    let pooled = pool.is_some();
+    let kc = super::k_pool::KComm::new(comm, pooled);
+    let field_axis = states[0].fields.first_axis();
+    // Channel potentials and their mean (collectives on every rank) before
+    // the rank-local solves; with pools also gathered to the full grid.
+    let mut potentials = Vec::with_capacity(ns);
+    for (s, state) in states.iter().enumerate() {
         let potential: Vec<_> = state
             .ionic
             .iter()
@@ -536,115 +543,142 @@ pub(super) fn evaluate<K: Collective>(
             .map(|(a, b)| a + b)
             .collect();
         let v0 = sum(comm, &[potential.iter().sum::<f64>()])?[0] / points as f64;
-        let mut channel = Vec::with_capacity(nk);
-        for k in 0..nk {
-            let mut planes = crate::grid_dist::PlaneMap::new(
-                dims,
-                comm.rank(),
-                comm.size(),
-                state.fields.first_axis(),
-                state.blocks[k].operator.first_axis(),
-            );
-            let mut op_potential = Vec::new();
-            planes.a_to_b(comm, &potential, &mut op_potential)?;
-            let op = &mut state.blocks[k].operator;
-            let epoch = op
-                .owned_epoch()
-                .unwrap_or(0)
-                .checked_add(1)
-                .ok_or(ScfError::InvalidInput("spin potential epoch overflow"))?;
-            op.set_owned_potential(&op_potential, epoch)
-                .map_err(numerical)?;
-            let diagonal: Vec<_> = op.diagonal_static().iter().map(|d| d + v0).collect();
-            let hx = kept[s].prepare(k, comm, op, &state.orbitals.0[k], &op_potential)?;
-            // FD: all retained bands are mandatory, even underflowed tails;
-            // the buffer columns beyond them (`solve_width`) are not.
-            // Fixed sector: first empty is mandatory as in the legacy policy.
-            let strict = policy.strict_bands(s, bands);
-            let mut options = ref_davidson::Options::new(width, ethr / 2., strict);
-            options.first_step = first;
-            options.return_hx = true;
-            options.profile = diagnostics;
-            let mut solution = ref_davidson_complex::solve_with_initial_hx(
-                comm,
-                op,
-                &state.orbitals.0[k],
-                &diagonal,
-                options,
-                hx.as_ref(),
-            )
-            .map_err(numerical)?;
-            let mut calls = Vec::new();
-            for retry in 0..6 {
-                calls.push(super::k_driver::solve_record(
-                    &mut solution,
-                    k,
-                    ethr,
-                    first && retry == 0,
-                    diagnostics,
-                ));
-                // The fixed-occupation reference driver permits a few pending
-                // buffer roots. That allowance cannot include mandatory FD
-                // roots (or the fixed sector's gap edge): any of them can
-                // change the number solve and the resulting spin density.
-                // FD buffer columns are never required: with them the pending
-                // count is at most delta <= max(5, width / 4).
-                if solution.converged[..strict].iter().all(|&v| v)
-                    && solution.converged.iter().filter(|&&v| !v).count() <= 5.max(width / 4)
-                {
-                    break;
+        let full = if pooled {
+            Some(super::k_pool::FullField::gather(
+                comm, dims, field_axis, &potential,
+            )?)
+        } else {
+            None
+        };
+        potentials.push((potential, v0, full));
+    }
+    let solved = (|| -> Result<Vec<Vec<Block>>, ScfError> {
+        let mut blocks = Vec::with_capacity(ns);
+        for (s, (state, (potential, v0, full))) in
+            states.iter_mut().zip(potentials.iter_mut()).enumerate()
+        {
+            let v0 = *v0;
+            let mut channel = Vec::with_capacity(nk);
+            for k in 0..nk {
+                let mut op_potential = Vec::new();
+                if let Some(full) = full.as_mut() {
+                    op_potential
+                        .extend_from_slice(full.for_axis(state.blocks[k].operator.first_axis())?);
+                } else {
+                    let mut planes = crate::grid_dist::PlaneMap::new(
+                        dims,
+                        comm.rank(),
+                        comm.size(),
+                        field_axis,
+                        state.blocks[k].operator.first_axis(),
+                    );
+                    planes.a_to_b(comm, potential, &mut op_potential)?;
                 }
-                if retry == 5 {
-                    return Err(ScfError::InvalidInput(
-                        "electronic reference Davidson exhausted six calls",
-                    ));
-                }
-                options.first_step = false;
-                solution = ref_davidson_complex::solve(
-                    comm,
+                let op = &mut state.blocks[k].operator;
+                let epoch = op
+                    .owned_epoch()
+                    .unwrap_or(0)
+                    .checked_add(1)
+                    .ok_or(ScfError::InvalidInput("spin potential epoch overflow"))?;
+                op.set_owned_potential(&op_potential, epoch)
+                    .map_err(numerical)?;
+                let diagonal: Vec<_> = op.diagonal_static().iter().map(|d| d + v0).collect();
+                let hx = kept[s].prepare(k, &kc, op, &state.orbitals.0[k], &op_potential)?;
+                // FD: all retained bands are mandatory, even underflowed tails;
+                // the buffer columns beyond them (`solve_width`) are not.
+                // Fixed sector: first empty is mandatory as in the legacy policy.
+                let strict = policy.strict_bands(s, bands);
+                let mut options = ref_davidson::Options::new(width, ethr / 2., strict);
+                options.first_step = first;
+                options.return_hx = true;
+                options.profile = diagnostics;
+                let mut solution = ref_davidson_complex::solve_with_initial_hx(
+                    &kc,
                     op,
-                    &solution.eigenvectors,
+                    &state.orbitals.0[k],
                     &diagonal,
                     options,
+                    hx.as_ref(),
                 )
                 .map_err(numerical)?;
+                let mut calls = Vec::new();
+                for retry in 0..6 {
+                    calls.push(super::k_driver::solve_record(
+                        &mut solution,
+                        k,
+                        ethr,
+                        first && retry == 0,
+                        diagnostics,
+                    ));
+                    // The fixed-occupation reference driver permits a few pending
+                    // buffer roots. That allowance cannot include mandatory FD
+                    // roots (or the fixed sector's gap edge): any of them can
+                    // change the number solve and the resulting spin density.
+                    // FD buffer columns are never required: with them the pending
+                    // count is at most delta <= max(5, width / 4).
+                    if solution.converged[..strict].iter().all(|&v| v)
+                        && solution.converged.iter().filter(|&&v| !v).count() <= 5.max(width / 4)
+                    {
+                        break;
+                    }
+                    if retry == 5 {
+                        return Err(ScfError::InvalidInput(
+                            "electronic reference Davidson exhausted six calls",
+                        ));
+                    }
+                    options.first_step = false;
+                    solution = ref_davidson_complex::solve(
+                        &kc,
+                        op,
+                        &solution.eigenvectors,
+                        &diagonal,
+                        options,
+                    )
+                    .map_err(numerical)?;
+                }
+                let hx = solution.hx.as_ref().expect("requested HX");
+                let local: Vec<_> = (0..bands)
+                    .map(|j| {
+                        (0..op.local_rows().len())
+                            .map(|i| {
+                                (hx[(i, j)]
+                                    - solution.eigenvalues[j] * solution.eigenvectors[(i, j)])
+                                    .norm_sqr()
+                            })
+                            .sum()
+                    })
+                    .collect();
+                let residuals = sum(&kc, &local)?.into_iter().map(f64::sqrt).collect();
+                kept[s].retain(k, state, &solution.eigenvectors, hx, &op_potential);
+                let mut eigenvalues = solution.eigenvalues;
+                let (orbitals, solved) = if width > bands {
+                    // Only the retained bands enter occupations, coverage,
+                    // density, energies and delivery; the buffer is dropped.
+                    eigenvalues.truncate(bands);
+                    let mut retained = solution.eigenvectors.clone();
+                    retained.resize_columns(bands).map_err(numerical)?;
+                    (retained, Some(solution.eigenvectors))
+                } else {
+                    (solution.eigenvectors, None)
+                };
+                channel.push(Block {
+                    eigenvalues,
+                    occupations: vec![0.; bands],
+                    residuals,
+                    orbitals,
+                    solved,
+                    calls,
+                });
             }
-            let hx = solution.hx.as_ref().expect("requested HX");
-            let local: Vec<_> = (0..bands)
-                .map(|j| {
-                    (0..op.local_rows().len())
-                        .map(|i| {
-                            (hx[(i, j)] - solution.eigenvalues[j] * solution.eigenvectors[(i, j)])
-                                .norm_sqr()
-                        })
-                        .sum()
-                })
-                .collect();
-            let residuals = sum(comm, &local)?.into_iter().map(f64::sqrt).collect();
-            kept[s].retain(k, state, &solution.eigenvectors, hx, &op_potential);
-            let mut eigenvalues = solution.eigenvalues;
-            let (orbitals, solved) = if width > bands {
-                // Only the retained bands enter occupations, coverage,
-                // density, energies and delivery; the buffer is dropped.
-                eigenvalues.truncate(bands);
-                let mut retained = solution.eigenvectors.clone();
-                retained.resize_columns(bands).map_err(numerical)?;
-                (retained, Some(solution.eigenvectors))
-            } else {
-                (solution.eigenvectors, None)
-            };
-            channel.push(Block {
-                eigenvalues,
-                occupations: vec![0.; bands],
-                residuals,
-                orbitals,
-                solved,
-                calls,
-            });
+            blocks.push(channel);
         }
-        blocks.push(channel);
-    }
-    let weights: Vec<_> = states[0].blocks.iter().map(|b| b.point.weight).collect();
+        Ok(blocks)
+    })();
+    let mut blocks = match &pool {
+        None => solved?,
+        Some(pool) => share_blocks(comm, pool, solved, ns, bands)?,
+    };
+    let weights: Vec<_> = super::k_map::k_weights(&states[0]);
     let evaluation = if let Some((theta, constraint)) = policy.finite() {
         let energies: Vec<_> = blocks
             .iter()
@@ -676,7 +710,9 @@ pub(super) fn evaluate<K: Collective>(
                     edge_electrons: evaluation.edge_electrons,
                 };
                 for (state, channel) in states.iter_mut().zip(&blocks) {
-                    for (x, b) in state.orbitals.0.iter_mut().zip(channel) {
+                    // GK9 pools: this rank's blocks are the global k `local()`.
+                    let first = state.pool.as_ref().map_or(0, |p| p.local().start);
+                    for (x, b) in state.orbitals.0.iter_mut().zip(channel.iter().skip(first)) {
                         x.clone_from(b.warm_start());
                     }
                 }
@@ -702,48 +738,103 @@ pub(super) fn evaluate<K: Collective>(
     let mut density = vec![vec![0.; input[0].len()]; ns];
     let (mut kinetic, mut nonlocal, mut band_sum, mut guard, mut residual_bound) =
         (0., 0., 0., 0., 0.);
+    // Per (channel, local k): the weighted kinetic term of every band and the
+    // nonlocal term; the densities go straight to the field planes (or, with
+    // pools, into the one exchange of the map).
+    let mut exchange = pool
+        .as_ref()
+        .map(|p| super::k_pool::DensityExchange::new(p, dims, field_axis, ns));
+    let first = pool.as_ref().map_or(0, |p| p.local().start);
+    let terms = (|| -> Result<Vec<(Vec<f64>, f64)>, ScfError> {
+        let mut terms = Vec::with_capacity(ns * nk);
+        for (s, channel) in blocks.iter().enumerate() {
+            let state = &mut states[s];
+            for (k, block) in channel.iter().skip(first).take(nk).enumerate() {
+                let op = &mut state.blocks[k].operator;
+                let f: Vec<_> = block
+                    .occupations
+                    .iter()
+                    .map(|v| v * weights[first + k])
+                    .collect();
+                let band_kinetic = f
+                    .iter()
+                    .enumerate()
+                    .map(|(j, &weight)| {
+                        weight
+                            * op.kinetic_diagonal()
+                                .iter()
+                                .enumerate()
+                                .map(|(i, t)| t * block.orbitals[(i, j)].norm_sqr())
+                                .sum::<f64>()
+                    })
+                    .collect();
+                let mut nl = vec![0.; bands];
+                op.nonlocal_band_energies(&kc, &block.orbitals, &mut nl)
+                    .map_err(numerical)?;
+                terms.push((
+                    band_kinetic,
+                    nl.iter().zip(&f).map(|(a, b)| a * b).sum::<f64>(),
+                ));
+                let mut plane_density = vec![0.; op.plane_points()];
+                op.band_density_sum(
+                    &kc,
+                    &block.orbitals,
+                    &f,
+                    cell.volume_bohr3(),
+                    &mut plane_density,
+                )
+                .map_err(numerical)?;
+                if let (Some(ex), Some(pool)) = (exchange.as_mut(), pool.as_ref()) {
+                    ex.add(pool, s, k, op.first_axis(), &plane_density)?;
+                } else {
+                    let mut planes = crate::grid_dist::PlaneMap::new(
+                        dims,
+                        comm.rank(),
+                        comm.size(),
+                        field_axis,
+                        op.first_axis(),
+                    );
+                    let mut local = Vec::new();
+                    planes.b_to_a(comm, &plane_density, &mut local)?;
+                    for (a, b) in density[s].iter_mut().zip(local) {
+                        *a += b;
+                    }
+                }
+            }
+        }
+        Ok(terms)
+    })();
+    let terms = match &pool {
+        None => terms?,
+        Some(pool) => {
+            let terms = channel_major(super::k_pool::allgather(comm, terms)?, pool, ns)?;
+            exchange
+                .take()
+                .expect("pooled exchange")
+                .finish(comm, pool, &mut density)?;
+            terms
+        }
+    };
+    // The one-rank loop's accumulation in global (channel, k) order.
+    let global_k = weights.len();
     for (s, channel) in blocks.iter().enumerate() {
-        let state = &mut states[s];
         for (k, block) in channel.iter().enumerate() {
-            let op = &mut state.blocks[k].operator;
-            let f: Vec<_> = block.occupations.iter().map(|v| v * weights[k]).collect();
-            for (j, &weight) in f.iter().enumerate() {
+            let (band_kinetic, band_nonlocal) = &terms[s * global_k + k];
+            for (j, &occupation) in block.occupations.iter().enumerate() {
+                let weight = occupation * weights[k];
                 band_sum += weight * block.eigenvalues[j];
                 guard += weight * block.residuals[j].powi(2);
                 residual_bound += weight * block.residuals[j];
-                kinetic += weight
-                    * op.kinetic_diagonal()
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| t * block.orbitals[(i, j)].norm_sqr())
-                        .sum::<f64>();
+                kinetic += band_kinetic[j];
             }
-            let mut nl = vec![0.; bands];
-            op.nonlocal_band_energies(comm, &block.orbitals, &mut nl)
-                .map_err(numerical)?;
-            nonlocal += nl.iter().zip(&f).map(|(a, b)| a * b).sum::<f64>();
-            let mut plane_density = vec![0.; op.plane_points()];
-            op.band_density_sum(
-                comm,
-                &block.orbitals,
-                &f,
-                cell.volume_bohr3(),
-                &mut plane_density,
-            )
-            .map_err(numerical)?;
-            let mut planes = crate::grid_dist::PlaneMap::new(
-                dims,
-                comm.rank(),
-                comm.size(),
-                state.fields.first_axis(),
-                state.blocks[k].operator.first_axis(),
-            );
-            let mut local = Vec::new();
-            planes.b_to_a(comm, &plane_density, &mut local)?;
-            for (a, b) in density[s].iter_mut().zip(local) {
-                *a += b;
-            }
+            nonlocal += band_nonlocal;
         }
+    }
+    // GK9 pools: the replayed kinetic term is already global on every rank and
+    // enters a tree sum of rank partials below; only rank 0 contributes it
+    // (x + 0 = x exactly).
+    if pooled && comm.rank() != 0 {
+        kinetic = 0.;
     }
     if let Some(s) = &mut workspace.symmetry {
         s.apply(&mut states[0].fields, comm, &mut density)?;
@@ -919,6 +1010,79 @@ pub(super) fn evaluate<K: Collective>(
         fd_number_slope_e_per_ha,
         xc_mask_crossings,
     })
+}
+/// GK9 pools: records arrive rank-major (each rank's channel-major block of
+/// its own k points); reorder to global channel-major (channel, k) order.
+fn channel_major<T>(
+    records: Vec<T>,
+    pool: &super::k_pool::KPool,
+    channels: usize,
+) -> Result<Vec<T>, ScfError> {
+    if records.len() != channels * pool.nk {
+        return Err(ScfError::InvalidInput("k pools: record count"));
+    }
+    let mut slots: Vec<Option<T>> = records.into_iter().map(Some).collect();
+    let mut out = Vec::with_capacity(slots.len());
+    for s in 0..channels {
+        for k in 0..pool.nk {
+            let r = pool.owner(k);
+            let at = channels * pool.first[r] + s * pool.counts[r] + (k - pool.first[r]);
+            out.push(slots[at].take().expect("each record once"));
+        }
+    }
+    Ok(out)
+}
+/// GK9 pools: allgather the solve records of every rank's own (channel, k)
+/// blocks; the orbitals stay with their owner (other k get an empty block).
+fn share_blocks<K: Collective>(
+    comm: &K,
+    pool: &super::k_pool::KPool,
+    local: Result<Vec<Vec<Block>>, ScfError>,
+    channels: usize,
+    bands: usize,
+) -> Result<Vec<Vec<Block>>, ScfError> {
+    let (mut owned, records) = match local {
+        Ok(blocks) => {
+            let records = blocks
+                .iter()
+                .flatten()
+                .map(|b| super::k_map::PerK {
+                    eigenvalues: b.eigenvalues.clone(),
+                    residuals: b.residuals.clone(),
+                    converged: Vec::new(),
+                    calls: b.calls.clone(),
+                })
+                .collect();
+            (blocks, Ok(records))
+        }
+        Err(e) => (Vec::new(), Err(e)),
+    };
+    let records = channel_major(super::k_pool::allgather(comm, records)?, pool, channels)?;
+    let local = pool.local();
+    let mut records = records.into_iter();
+    let mut out = Vec::with_capacity(channels);
+    owned.resize_with(channels, Vec::new);
+    for mine in owned {
+        let mut mine = mine.into_iter();
+        let mut channel = Vec::with_capacity(pool.nk);
+        for k in 0..pool.nk {
+            let record = records.next().expect("channel-major records");
+            channel.push(if local.contains(&k) {
+                mine.next().expect("owned block")
+            } else {
+                Block {
+                    eigenvalues: record.eigenvalues,
+                    occupations: vec![0.; bands],
+                    residuals: record.residuals,
+                    orbitals: ComplexMatrix::zeros(0, 0).map_err(numerical)?,
+                    solved: None,
+                    calls: record.calls,
+                }
+            });
+        }
+        out.push(channel);
+    }
+    Ok(out)
 }
 // Separate name avoids shadowing the input Fields value in evaluate.
 fn fields_output<K: Collective>(

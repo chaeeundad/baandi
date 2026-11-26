@@ -71,6 +71,13 @@ pub(super) struct Reader<'a> {
     cursor: usize,
 }
 impl<'a> Reader<'a> {
+    /// A reader over an in-memory encoding (GK9 k-pool record exchange).
+    pub(super) fn new(data: &'a [u8]) -> Self {
+        Self { data, cursor: 0 }
+    }
+    pub(super) fn remaining(&self) -> usize {
+        self.data.len() - self.cursor
+    }
     fn take(&mut self, n: usize) -> Result<&'a [u8], ScfError> {
         let end = self
             .cursor
@@ -684,6 +691,11 @@ pub(super) fn k_state(
     state: &mut crate::refstart::KStartState,
 ) -> Result<(), ScfError> {
     io.same(&state.blocks.len())?;
+    // GK9 k pools: a rank's checkpoint holds its own whole k points; the
+    // switch is in the agreement hash, the owned range is checked here.
+    if let Some(pool) = &state.pool {
+        io.same(&[pool.local().start, pool.local().end, pool.nk])?;
+    }
     io.same(&state.ionic)?;
     io.same(&state.electrons)?;
     for (block, x) in state.blocks.iter_mut().zip(&mut state.orbitals.0) {

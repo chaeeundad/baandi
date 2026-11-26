@@ -5014,3 +5014,16 @@ potential change skips the correction transforms), bordered Cholesky extension o
 switch `BAANDI_K_FIRST_EMPTY_RULE` default off. Real-potential CLI (Mac, one run per arm): map-1 H columns -32 to -40 %,
 total H -5 to -15 %, same maps and iterations, energies within 1.3e-13 Ha; solve -4 to -15 %. SCF classes on the k set
 |dE| <= 4.2e-14 Ha with equal map counts. dev08 A/B pending (GeTe, B12, IrI3).
+
+## GK9-K-POOLS — k-point pools of size one, stage 1 (2026-11-27)
+
+Profile: dev08 MPI8 GeTe (260 k, N_pw about 4.6k) 42.6 s vs QE -nk 4 32.3 s, B12 (172 k) 88.9 s vs QE -nk 2 82.3 s;
+every k used the whole communicator, so many-k small-N_pw cases paid collective latency per Davidson iteration.
+Change: `BAANDI_REFSCF_K_POOLS=off|auto|on` (default off): ranks own contiguous blocks of whole k points and solve
+them with the serial collective; per map one potential allgatherv, two record allgathervs and one density alltoall
+(density and every k sum replayed in global k order). k and spin/FD drivers, verification, delivery, seeds and
+checkpoints; falls back with one rank, nk < ranks or an external trace. Pools off bit-identical to main at P = 1-3;
+pools on vs P = 1 on 64 rows: strict |dE| <= 2.4e-13 Ha, standard <= 4.2e-9 Ha (fixture whose distributed layout
+shows the same), fixed-P bit-reproducible. World collectives per map (P = 3, 8 k): 290 -> 25. Mac simulated-rank
+observation (B12-shaped, 16 k): P = 8 wall 4.43 -> 1.18 s. dev08 A/B pending (GeTe, B12, IrI3; si64 unchanged).
+Details: attempts ledger GK9-K-POOLS.

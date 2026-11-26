@@ -752,6 +752,9 @@ pub(super) async fn run_continuation<K: Collective>(
         points,
         comm,
         policy.channels(),
+        // GK9 pools: the external trace (subspace loss, rotation probe)
+        // reads every k block's rows and keeps the distributed layout.
+        trace.is_none(),
     )?;
     // FD buffer bands: the solved block holds `bands` plus the buffer; the
     // start's columns are kept bit for bit and the buffer is appended.
@@ -1424,18 +1427,23 @@ pub(super) async fn run_continuation<K: Collective>(
             let mut blocks = Vec::new();
             for (s, channel) in step.blocks.iter().enumerate() {
                 densities.push(states[s].fields.gather(comm, &step.density[s])?);
+                // GK9 pools: the owner of each k broadcasts its full-row block.
+                let first = states[s].pool.as_ref().map_or(0, |p| p.local().start);
+                let owned: Vec<_> = channel
+                    .iter()
+                    .skip(first)
+                    .take(states[s].blocks.len())
+                    .map(|b| &b.orbitals)
+                    .collect();
+                let orbitals = super::k_pool::deliver_orbitals(&states[s], comm, &owned)?;
                 let mut delivered = Vec::new();
-                for (k, b) in channel.iter().enumerate() {
+                for (k, (b, orbitals)) in channel.iter().zip(orbitals).enumerate() {
                     delivered.push(BandBlock {
                         point: points[k],
                         eigenvalues_ha: b.eigenvalues.clone(),
                         occupations: b.occupations.clone(),
                         residuals_ha: b.residuals.clone(),
-                        orbitals: super::k_driver::gather_orbitals(
-                            &states[s].blocks[k],
-                            comm,
-                            &b.orbitals,
-                        )?,
+                        orbitals,
                     });
                 }
                 blocks.push(delivered);
@@ -1564,14 +1572,10 @@ fn grow<K: Collective>(
     *bands = next;
     Ok(())
 }
-/// Smallest plane-wave basis over the k blocks of one channel.
+/// Smallest plane-wave basis over the k points of one channel (every global
+/// k, also with GK9 pools).
 fn min_basis(state: &refstart::KStartState) -> usize {
-    state
-        .blocks
-        .iter()
-        .map(|b| b.basis.vectors().len())
-        .min()
-        .unwrap_or(0)
+    state.basis_sizes().into_iter().min().unwrap_or(0)
 }
 fn collect_calls(step: &Map, out: &mut Vec<(usize, usize, SolveRecord)>) {
     for (s, c) in step.blocks.iter().enumerate() {
@@ -1582,7 +1586,9 @@ fn collect_calls(step: &Map, out: &mut Vec<(usize, usize, SolveRecord)>) {
 }
 fn warm(states: &mut [refstart::KStartState], step: &Map) {
     for (state, channel) in states.iter_mut().zip(&step.blocks) {
-        for (x, b) in state.orbitals.0.iter_mut().zip(channel) {
+        // GK9 pools: this rank's blocks are the global k `local()`.
+        let first = state.pool.as_ref().map_or(0, |p| p.local().start);
+        for (x, b) in state.orbitals.0.iter_mut().zip(channel.iter().skip(first)) {
             x.clone_from(b.warm_start());
         }
     }

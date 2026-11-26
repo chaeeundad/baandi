@@ -491,16 +491,23 @@ impl KSeed {
                     .map(|cell| cell.lattice_columns_bohr())
             || self.cutoff != input.options.cutoff_hartree
             || self.dims != state.grid.dims()
-            || self.points != state.blocks.iter().map(|b| b.point).collect::<Vec<_>>()
+            || self.points
+                != state.pool.as_ref().map_or_else(
+                    || state.blocks.iter().map(|b| b.point).collect::<Vec<_>>(),
+                    |p| p.points.clone(),
+                )
             || (self.charge - state.electrons).abs() > 1e-8 * state.electrons.max(1.)
         {
             return Err(ScfError::InvalidInput(
                 "reference k ionic seed: incompatible cell, basis, grid, mesh or charge",
             ));
         }
+        // GK9 pools: this rank's blocks are the global k points `local()`.
+        let first = state.pool.as_ref().map_or(0, |p| p.local().start);
         for ((full, block), owned) in self
             .orbitals
             .iter()
+            .skip(first)
             .zip(&state.blocks)
             .zip(&mut state.orbitals.0)
         {

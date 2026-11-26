@@ -236,5 +236,8 @@
  "GK9-K-POOLS": "k점을 프로세스 묶음(pool)별로 나눠 계산(QE -nk 방식)",
  "GD1-DERIV-SPEED": "힘·응력 계산 속도 개선(금속에서 QE보다 50~200배 느림)",
  "GS1-SYM-TOL": "대칭 판정 허용오차를 일반 코드 수준으로(소수 6자리 좌표에서 대칭 놓침)",
- "GF1-FD-PATH": "금속(FD) 경로에 k점 묶음 적용과 SCF 속도 개선"
+ "GF1-FD-PATH": "금속(FD) 경로에 k점 묶음 적용과 SCF 속도 개선",
+ "GS1B-RELAX-GROUP": "이완 중에는 엄격한 허용오차로만 대칭 재판정",
+ "GS1C-GRID-SUBGROUP": "지정된 FFT 격자와 맞는 대칭만 남기고 계산 계속(QE 방식)",
+ "GF2-FD-SCF-COST": "금속 SCF 단위 비용 분석과 개선(Ta6Zn7 410 s vs QE 217 s)"
 }

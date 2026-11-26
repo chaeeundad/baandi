@@ -55,7 +55,11 @@ the Pulay assessment are unchanged. Every density-space object of a step,
 including the Hartree-metric estimator of the standard stop rule, uses the
 frozen reference Miller set on the frozen FFT grid (ONEPATH-2B: the estimator
 used the current cell's own sphere and failed with "Miller index ... outside the
-canonical frequencies" once the cell had expanded).
+canonical frequencies" once the cell had expanded; CELL-FROZEN-DENSITY: the
+density plan of the default reference path did the same and failed with
+"density sphere reaches FFT Nyquist; enlarge fft_grid", so its sphere is now the
+reference Miller set with current-cell |G|^2, and its mixing set is decided on
+the reference |G|^2).
 Cell runs set the initial eigen tolerance to the requested eigen tolerance and
 disable residual-based eigen scheduling; these two options act on the strict
 reference path only (the standard path ratchets its own eigen tolerance).

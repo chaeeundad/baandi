@@ -182,5 +182,13 @@
     "status": "open",
     "phase": "P10B",
     "detail": "No MKL runtime on Apple Silicon. Claude must run crates/dft-mkl/tests/dev08.sh using existing remote UPF and MKLROOT=/opt/intel/oneapi/mkl/2026.1. ABI, strict 1e-13 FFT agreement, 1e-12 Ha SCF agreement, thread bit identity, QE and performance gates are unverified. Default remains Rust; no performance recommendation yet."
+  },
+  {
+    "id": "I-STOP-ACCURACY",
+    "title": "Standard stop rule bounds the density residual, not the delivered energy error",
+    "severity": "medium",
+    "status": "open",
+    "phase": "standard-class recalibration (decision 3 of 2026-11-11)",
+    "detail": "R7A synthetic sheared Gamma frozen-strain case after CELL-FROZEN-DENSITY: standard threshold 5e-9 Ha stops at map 7 with dr2 9.96e-9 Ry (threshold 1e-8 Ry) and delivers dE 2.4e-8 Ha against the strict oracle; at 5e-13 dE 4.7e-15 Ha. The R7A Gamma standard-threshold assertion is reduced to a gross 1e-6 Ha bound until the standard class is recalibrated against delivered accuracy (user decision 2026-11-26, option A). Owner: after 2026-12-01."
   }
 ]

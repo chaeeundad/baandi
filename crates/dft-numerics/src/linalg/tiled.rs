@@ -385,6 +385,32 @@ impl GemmWorkspace {
         self.multiply_into_finite_inputs(a, oa, b, ob, out)
     }
 
+    /// `multiply_into` for a caller that has already established finiteness
+    /// of an operand: `a_finite` / `b_finite` true means every element of that
+    /// operand was checked finite (directly, or as the validated output of an
+    /// earlier product) since its last mutation, so its scan is skipped. Any
+    /// operand not flagged is scanned. Arithmetic, dimension checks and the
+    /// output finiteness check are those of `multiply_into`.
+    #[allow(clippy::too_many_arguments)] // two operands with their finiteness flags
+    pub fn multiply_into_known_finite(
+        &mut self,
+        a: &ComplexMatrix,
+        oa: MatrixOp,
+        a_finite: bool,
+        b: &ComplexMatrix,
+        ob: MatrixOp,
+        b_finite: bool,
+        out: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        if !a_finite {
+            a.validate_finite()?;
+        }
+        if !b_finite {
+            b.validate_finite()?;
+        }
+        self.multiply_into_finite_inputs(a, oa, b, ob, out)
+    }
+
     // Both operands must have been checked since their last mutation. Private
     // so only the projection workspace can reuse its validation of the basis.
     fn multiply_into_finite_inputs(

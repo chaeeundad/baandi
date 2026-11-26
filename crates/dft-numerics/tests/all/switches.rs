@@ -202,7 +202,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::REFSCF_SPIN_PULAY), Value::Choice("off"));
     assert_eq!(value(Id::K_LEAN_ENERGY), Value::Choice("on"));
     assert_eq!(value(Id::K_START_MEMO), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 64);
+    assert_eq!(value(Id::CDAV_REUSE), Value::Choice("on"));
+    assert_eq!(TABLE.len(), 65);
 }
 
 #[test]

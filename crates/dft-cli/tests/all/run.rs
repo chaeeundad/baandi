@@ -641,7 +641,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 64);
+    assert_eq!(switches.len(), 65);
     assert!(switches.get("BAANDI_BUFFER_TOL").is_none());
     let expected_keys = [
         "band_accuracy",

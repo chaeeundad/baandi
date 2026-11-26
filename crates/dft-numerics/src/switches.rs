@@ -336,6 +336,8 @@ table! {
         "G4G research: Hermitian Gamma kinetic complements and real starting Ritz matrix; rejected (centred fixture stops converging), default off";
     REFSCF_CANONICAL_CLUSTER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4G research: canonical coordinates within roundoff-degenerate Ritz clusters; default off";
+    CDAV_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK3: complex reference Davidson keeps its workspace across calls, merges error-flag agreements into its numerical collectives and skips finite scans of known-finite GEMM operands; bit-identical; off restores per-call allocation and per-product agreements";
     REFSCF_SPIN_PULAY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4G research: per-channel real-space Pulay replaces the Broyden proposal (serial fixed-sector only); default off pending dev08 O run";
     K_START_MEMO: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

@@ -1,8 +1,8 @@
-# README factual corrections awaiting approval (D6)
+# README factual corrections applied (D6)
 
 Prepared for R12-DOCS against README.md at `27d91ece` (2026-11-25).
-**No README edits are made by this ticket.** Proposed changes below need the
-user’s D6 approval before application. Line numbers refer to the unchanged file;
+**Application: applied (D6 approved 2026-11-26), option A, by R12B-README.**
+The proposals below are retained as the approval record. Line numbers refer to the original file;
 “current text” is copied exactly (line 84 uses a marked excerpt), so the reviewer
 can check each replacement without repeating forbidden mixed-model speed ratios.
 
@@ -10,14 +10,16 @@ The generator owns **two** blocks: `status:begin/end` (from
 `docs/feature-status.json`) and `validation:begin/end` (stored evidence).
 The first table covers prose outside both blocks. The second includes the
 status statements explicitly requested by R12 (lines 94/101/104/112) and other
-stale status entries. After approval, update their source JSON and regenerate;
-never hand-edit generated text. Freshness does not establish semantic currency.
+stale status entries. R12B-README updated their source JSON and regenerated;
+generated text was not hand-edited. Freshness does not establish semantic currency.
 The full README was reviewed; unchanged research ambitions, license, build
 statements and explicit material-validation limits need no correction.
 
 ## User-maintained prose
 
 ### README.md line 35
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -31,6 +33,8 @@ Reason: Forces/stress are implemented; this does not claim QM/MM/solvent integra
 
 ### README.md line 49
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -42,6 +46,8 @@ Proposed text: Rules: stepwise and batch execution preserve the same numerical t
 Reason: R8a–R8d implement B/C/E and part of D. Candidate/verification boundaries can be unsafe even between map returns. The frozen oracle certificate differs from production verification (ADR 0047).
 
 ### README.md line 56
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -55,6 +61,8 @@ Reason: P19A/G6 implement spatial symmetry; it is no longer time reversal only.
 
 ### README.md line 60
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -66,6 +74,8 @@ Proposed text: - Reference Davidson eigensolvers, Broyden/plain density mixing, 
 Reason: Production mixer/driver changed; Pulay/strict certification describe historical/oracle behavior (ADR 0047).
 
 ### README.md line 64
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -79,6 +89,8 @@ Reason: The original list puts implemented capabilities in development. No new p
 
 ### README.md line 66
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -90,6 +102,8 @@ Proposed text: Current supported workflows and limits are indexed in docs/INDEX.
 Reason: The existing status table contains stale implementation statements; it must not override the current contract.
 
 ### README.md line 70
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -103,9 +117,11 @@ Reason: Remove only the false absence claim, retaining the experimental/material
 
 ## Generated status source corrections
 
-These rows belong to `docs/feature-status.json`; they are listed for approval only.
+These rows were applied through `docs/feature-status.json` and regenerated.
 
 ### README.md line 84
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text (exact excerpt; the full line is in README.md):
 
@@ -122,6 +138,8 @@ Reason: The old paragraph describes no real-Gamma path and mixes BAANDI threads 
 
 ### README.md line 90
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -133,6 +151,8 @@ Proposed text: Periodic NC plane-wave Kohn–Sham DFT; unpolarized and supported
 Reason: The overview says spin-unpolarized although collinear support is implemented.
 
 ### README.md line 94
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -146,6 +166,8 @@ Reason: R2/R10 routing and mixer defaults supersede Pulay/linear production cont
 
 ### README.md line 97
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -157,6 +179,8 @@ Proposed text: Thread budget via [scf] threads = N (default 1); same-build/backe
 Reason: Scope the old unconditional “any thread count” statement to the documented determinism contract; rank-count agreement is not bit identity.
 
 ### README.md line 101
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -170,6 +194,8 @@ Reason: The old EMPTY_LOOSE/BUFFER_TOL controls and legacy standard path must no
 
 ### README.md line 104
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -181,6 +207,8 @@ Proposed text: Fermi–Dirac occupations and chemical potential for supported un
 Reason: R8b added FD exact continuation. The original plan’s line-104 “still true” note predates that implementation; see tests/reference/checkpoint/reference-v2-results.json.
 
 ### README.md line 109
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -194,6 +222,8 @@ Reason: “Default for every command” and “strict is a reference tool only�
 
 ### README.md line 111
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -205,6 +235,8 @@ Proposed text: BFGS/FIRE and Cartesian constraints with reference SCF and live w
 Reason: Current relax.rs does not persist reference_seed in restart.json; do not advertise bit-identical reference optimizer continuation.
 
 ### README.md line 112
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -218,6 +250,8 @@ Reason: R7 implemented the port. The old table is not fresh reference-driver evi
 
 ### README.md line 118
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -229,6 +263,8 @@ Proposed text: Optional Intel MKL FFT/matrix backend is implemented behind a com
 Reason: End-to-end measurements already exist; this is no longer merely a promising kernel-level development item.
 
 ### README.md line 119
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -242,6 +278,8 @@ Reason: Avoid describing old Kerker/Pulay controls as the current reference mixe
 
 ### README.md line 122
 
+Status: applied (D6 approved 2026-11-26).
+
 Current text:
 
 ```text
@@ -253,6 +291,8 @@ Proposed text: Reference stepper/runtime, observed and supervised CLI, checkpoin
 Reason: R8a–R8d make “no runtime code yet” false; do not claim general self-healing from the historical demo.
 
 ### README.md line 132
+
+Status: applied (D6 approved 2026-11-26).
 
 Current text:
 
@@ -266,6 +306,8 @@ Reason: ADR 0041/M2/Stage R implement MPI; GPU and MPI no longer share an unavai
 
 ## Generated validation block: provenance follow-up, not replacement data
 
+Status: applied (D6 approved 2026-11-26).
+
 Do not replace stored numerical values with the gen14–gen28 summaries. The
 existing QE table, v1 checkpoint counts and P11 self-healing numbers retain their
 original inputs, drivers and limitations. An approved generator change should
@@ -273,10 +315,15 @@ label those drivers and add separately stored reference v2/runtime evidence.
 In particular, the v1 checkpoint paragraph and budget-recovery demo do not
 establish v2 runtime-audit restoration or reference budget recovery. The NLCC
 checkpoint-unavailable statement in that block is historical v1 scope, not a
-blanket statement about v2. The current ticket does not own the generator or
-new evidence, so neither is changed.
+blanket statement about v2. The original R12-DOCS ticket did not own the generator or new evidence.
+R12B-README owns the generator follow-up: historical drivers are now labelled,
+and separate checkpoint v2/runtime sections read the existing evidence files.
+Stored values are preserved, including the v2 report’s BLOCKED status and
+explain failure; no new measurements are claimed.
 
 ## Additional review boundaries
+
+Status: applied (D6 approved 2026-11-26). All four boundaries retained.
 
 - Line 61’s deterministic-threading statement is a same-build/backend contract,
   not cross-platform or MPI rank-count bit identity; the proposed line-97 text

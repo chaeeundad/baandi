@@ -13,6 +13,44 @@ def load():
 
 
 class ReadmeIsCurrent(unittest.TestCase):
+    def test_reference_evidence_changes_invalidate_generated_results(self):
+        m = load()
+        baseline = m.reference_runtime_results()
+        original = m.load
+        changes = [
+            ("checkpoint/reference-v2-results.json", lambda d: d.update(status="CHANGED")),
+            ("checkpoint/reference-v2-results.json", lambda d: d["memory_results"][0].update(identity=False)),
+            ("checkpoint/reference-v2-results.json", lambda d: d["file_results"][0].update(identity=False)),
+            ("checkpoint/reference-v2-results.json", lambda d: d["electronic_supplement"].update(cases_passed=123)),
+            ("checkpoint/reference-v2-results.json", lambda d: d["cross_process"].update(explain_passed=True)),
+            ("runtime/generated/reference-results.json", lambda d: d["observation_runs"][0].update(identity=False)),
+            ("runtime/generated/reference-results.json", lambda d: d["benchmark_identity"]["cases"][0].update(energy_delta_ha=0.123)),
+            ("runtime/generated/reference-results.json", lambda d: d["agent_endpoint"].update(status="CHANGED")),
+        ]
+        for relative, mutate in changes:
+            def changed(path):
+                data = original(path)
+                if os.path.relpath(path, m.REF) == relative:
+                    mutate(data)
+                return data
+            with self.subTest(source=relative), patch.object(m, "load", side_effect=changed):
+                self.assertNotEqual(baseline, m.reference_runtime_results())
+
+    def test_reference_evidence_retains_provenance_and_limits(self):
+        import re
+        m = load()
+        text = "\n".join(m.reference_runtime_results())
+        for phrase in ("**BLOCKED**", "32 / 32", "Two-map exhaustion only",
+                       "no physical MPI run", "explain check passed: False",
+                       "ResultExport container", "not normal result files",
+                       "does not restore runtime audit state", "checkpoint after policy mutation",
+                       "Warm v2 imports", "16 / 16", "counts include per-rank records",
+                       "matching numerical rejections", "endpoint status: unavailable",
+                       "Reference budget-extension recovery is unsupported", "not QE"):
+            self.assertIn(phrase, text)
+        for target in re.findall(r"\]\(([^)]+)\)", text):
+            self.assertTrue(Path(ROOT, target.split("#")[0]).is_file(), target)
+
     def test_structural_evidence_changes_invalidate_generated_results(self):
         m = load()
         baseline = m.structural_results()

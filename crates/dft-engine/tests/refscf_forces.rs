@@ -1405,7 +1405,19 @@ mod frozen_strain {
                 "R7A k={} threshold={threshold:e} E={energy:.16e} Ha dE={de:e} Ha dStress={ds:e} Ha/Bohr^3",
                 points.len()
             );
-            assert!(de <= if threshold < 1e-10 { 1e-10 } else { 5e-9 });
+            if threshold < 1e-10 || !gamma {
+                assert!(de <= if threshold < 1e-10 { 1e-10 } else { 5e-9 });
+            } else {
+                // Open issue STOP-ACCURACY (user decision 2026-11-26, option A):
+                // the standard stop rule bounds the density residual, not the
+                // delivered energy error. After CELL-FROZEN-DENSITY this Gamma
+                // case stops at map 7 with dr2 9.96e-9 Ry (threshold 1e-8 Ry)
+                // and dE 2.4e-8 Ha; before, dr2 1.10e-8 Ry forced two more maps.
+                // The stress physics is checked at the tight threshold above;
+                // the recalibration of the standard class (decision 3 of
+                // 2026-11-11) owns this bound. Only gross failures stop here.
+                assert!(de <= 1e-6, "R7A Gamma standard-threshold dE {de:e} Ha");
+            }
             if threshold < 1e-10 {
                 assert!(ds <= 1e-8);
                 if let Some(p) = &stress.pulay {

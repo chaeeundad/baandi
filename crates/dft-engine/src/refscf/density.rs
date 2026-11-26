@@ -44,11 +44,28 @@ impl DensityPlan {
         dense_cutoff_ha: f64,
         smooth_cutoff_ha: f64,
     ) -> Result<Self, Error> {
-        Self::with_fft(comm, cell, dims, dense_cutoff_ha, smooth_cutoff_ha, None)
+        Self::with_fft(
+            comm,
+            cell,
+            None,
+            dims,
+            dense_cutoff_ha,
+            smooth_cutoff_ha,
+            None,
+        )
     }
+    /// `strain_reference` (frozen Miller protocol, ADR 0033 and
+    /// `ScfOptions::strain_reference`): the density sphere is the reference
+    /// cell's Miller set at `dense_cutoff_ha` with |G|^2 of `cell`, the same
+    /// list as `options.basis(cell, [0; 3], 4.)` used by the start, the strict
+    /// oracle and the frozen FFT grid; the smooth flag is decided on the
+    /// reference |G|^2 so that the mixed set is the frozen set. Building the
+    /// sphere from `cell` alone (CELL-FROZEN-DENSITY) gained Miller indices
+    /// beyond the frozen grid after a cell expansion. None is unchanged.
     pub(crate) fn with_fft<K: Collective>(
         comm: &K,
         cell: &Cell,
+        strain_reference: Option<&Cell>,
         dims: [usize; 3],
         dense_cutoff_ha: f64,
         smooth_cutoff_ha: f64,
@@ -57,7 +74,17 @@ impl DensityPlan {
         if smooth_cutoff_ha <= 0.0 || smooth_cutoff_ha > dense_cutoff_ha {
             return Err(invalid("density cutoffs"));
         }
-        let basis = PlaneWaveBasis::new(cell, Hartree(dense_cutoff_ha)).map_err(numerical)?;
+        let (basis, reference) = match strain_reference {
+            None => (
+                PlaneWaveBasis::new(cell, Hartree(dense_cutoff_ha)).map_err(numerical)?,
+                None,
+            ),
+            Some(reference) => {
+                let frozen =
+                    PlaneWaveBasis::new(reference, Hartree(dense_cutoff_ha)).map_err(numerical)?;
+                (frozen.in_cell(cell).map_err(numerical)?, Some(frozen))
+            }
+        };
         let fft = if let Some(fft) = shared {
             fft
         } else {
@@ -81,7 +108,13 @@ impl DensityPlan {
             selected: Vec::new(),
             offsets: Vec::new(),
         };
-        for g in basis.vectors().iter().filter(|g| half(g.miller)) {
+        let smooth_g2 = reference.as_ref().unwrap_or(&basis).vectors();
+        for (g, s) in basis
+            .vectors()
+            .iter()
+            .zip(smooth_g2)
+            .filter(|(g, _)| half(g.miller))
+        {
             // Reject an aliased / missing sphere rather than wrapping a cutoff
             // beyond the grid's canonical frequency range.
             let ijk = g.miller.map(|m| m as i64);
@@ -97,7 +130,7 @@ impl DensityPlan {
                 result.miller.push(g.miller);
                 result.g2.push(g.norm_squared);
                 result.smooth.push(
-                    g.norm_squared <= 2.0 * smooth_cutoff_ha * (1.0 + dft_basis::CUTOFF_TOLERANCE),
+                    s.norm_squared <= 2.0 * smooth_cutoff_ha * (1.0 + dft_basis::CUTOFF_TOLERANCE),
                 );
                 result.selected.push(p);
             }

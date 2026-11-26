@@ -202,6 +202,7 @@ pub(super) async fn run_continuation<K: Collective>(
     let mut plan = DensityPlan::with_fft(
         &prep_comm,
         cell,
+        o.strain_reference.as_deref(),
         dims,
         4. * o.cutoff_hartree,
         4. * o.cutoff_hartree,

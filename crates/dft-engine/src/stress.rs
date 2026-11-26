@@ -351,8 +351,35 @@ fn symmetrize(
     }
     result
 }
+/// Whether a stress evaluation also runs the isotropic cutoff-derivative Pulay
+/// assessment (three extra SCF runs at 100 %, 105 % and 110 % cutoff). The
+/// assessment is a diagnostic: the stress tensor is the frozen-Miller tensor
+/// bit for bit either way. PULAY-OPTIN (user decision 2026-11-26, ADR 0033
+/// amendment): off by default; adapters opt in explicitly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PulayAssessmentMode {
+    /// Frozen-Miller stress only (`StressResult::pulay` is None, no extra SCF).
+    #[default]
+    Off,
+    /// Frozen-Miller stress plus the three-SCF cutoff scan.
+    CutoffScan,
+}
+/// Stress with the assessment selected explicitly: `Off` is `frozen_stress`,
+/// `CutoffScan` is `stress` (or `stress_prepared` when `prepared` is given).
+pub fn stress_with(
+    state: &StressState<'_>,
+    prepared: Option<&crate::refscf::symmetry::Prepared>,
+    mode: PulayAssessmentMode,
+) -> Result<StressResult, ScfError> {
+    match (mode, prepared) {
+        (PulayAssessmentMode::Off, _) => frozen_stress(state),
+        (PulayAssessmentMode::CutoffScan, Some(p)) => stress_prepared(state, p),
+        (PulayAssessmentMode::CutoffScan, None) => stress(state),
+    }
+}
 /// Stress with a separately reported isotropic cutoff-derivative Pulay estimate.
-/// No anisotropic convergence claim follows from this estimate.
+/// No anisotropic convergence claim follows from this estimate. Always runs
+/// the assessment; see `stress_with` for the explicit switch.
 pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
     stress_inner(state, None)
 }

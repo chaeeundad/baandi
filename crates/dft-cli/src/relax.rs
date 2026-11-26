@@ -665,20 +665,31 @@ impl Context {
                 density_floor: None,
                 symmetry: &ops,
             };
+            // Nominal-cutoff frames (final rebuild, basis rebuilds) carry the
+            // opt-in Pulay assessment (PULAY-OPTIN, default off).
+            let mode = self.config.pulay_assessment();
             let stress = if self.opts.strain_reference.is_none() {
-                if reference && self.config.symmetry.mode == crate::config::SymmetryMode::Auto {
-                    let prepared = dft_engine::refscf::symmetry::Prepared::new(
-                        &self.cell,
-                        &atoms,
-                        &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                        self.config.symmetry.tolerance_bohr,
-                        self.config.basis.time_reversal(),
+                let prepared = if mode == dft_engine::PulayAssessmentMode::CutoffScan
+                    && reference
+                    && self.config.symmetry.mode == crate::config::SymmetryMode::Auto
+                {
+                    Some(
+                        dft_engine::refscf::symmetry::Prepared::new(
+                            &self.cell,
+                            &atoms,
+                            &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                            self.config.symmetry.tolerance_bohr,
+                            self.config.basis.time_reversal(),
+                        )
+                        .map_err(|e| error(4, e))?,
                     )
-                    .map_err(|e| error(4, e))?;
-                    dft_engine::stress::stress_prepared(&view, &prepared)
                 } else {
-                    dft_engine::stress(&view)
-                }
+                    None
+                };
+                pulay_assessment = (mode == dft_engine::PulayAssessmentMode::Off).then(
+                    || json!({"status":"not_evaluated","reason":crate::run::PULAY_NOT_EVALUATED}),
+                );
+                dft_engine::stress::stress_with(&view, prepared.as_ref(), mode)
             } else {
                 dft_engine::stress::frozen_stress(&view)
             }
@@ -687,13 +698,13 @@ impl Context {
             if let Some(d) = &dispersion {
                 crate::run::add_dispersion_stress(&mut stress, d);
             }
-            pulay_assessment = stress.pulay.map(|p| {
-                json!({
+            if let Some(p) = stress.pulay {
+                pulay_assessment = Some(json!({
                     "method":p.method, "correction_ha_bohr3":p.correction,
                     "uncertainty_ha_bohr3":p.uncertainty, "cutoff_steps_ha":p.cutoff_steps_ha,
                     "shells_resolved":p.shells_resolved, "warning":p.warning,
-                })
-            });
+                }));
+            }
             Some(stress.symmetric)
         } else {
             None

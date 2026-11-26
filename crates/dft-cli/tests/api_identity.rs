@@ -342,6 +342,7 @@ fn facade_delivery_matches_existing_dispatch() {
         let mut request = api::Request::new(profile, points.clone());
         request.derivatives.forces = true;
         request.derivatives.stress = true;
+        request.derivatives.pulay_assessment = dft_engine::PulayAssessmentMode::CutoffScan;
         request.save_ionic_seed = true;
         let eager = api::solve(input(), request).unwrap();
         let eager_run = eager.run.into_scalar().unwrap();
@@ -389,6 +390,9 @@ fn facade_delivery_matches_existing_dispatch() {
             forces: true,
             stress: true,
             deferred: true,
+            // PULAY-OPTIN default: no assessment; the tensor below is compared
+            // bit for bit with `dft_engine::stress` (assessment on).
+            pulay_assessment: dft_engine::PulayAssessmentMode::Off,
         };
         let mut deferred = api::solve(input(), request).unwrap();
         assert!(deferred.derivatives.forces.is_none());
@@ -425,8 +429,10 @@ fn facade_delivery_matches_existing_dispatch() {
             deferred.derivatives.forces.take().unwrap().values,
             dft_engine::forces(&state).unwrap().values
         );
+        let deferred_stress = deferred.derivatives.stress.take().unwrap();
+        assert!(deferred_stress.pulay.is_none());
         assert_eq!(
-            deferred.derivatives.stress.take().unwrap().values,
+            deferred_stress.values,
             dft_engine::stress(&state).unwrap().values
         );
         assert_eq!(

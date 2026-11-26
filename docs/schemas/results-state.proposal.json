@@ -283,28 +283,50 @@
               "const": false
             },
             "pulay_assessment": {
-              "type": "object",
-              "required": [
-                "method",
-                "isotropic_correction_ha_bohr3",
-                "uncertainty_ha_bohr3",
-                "warning"
-              ],
-              "properties": {
-                "method": {
-                  "const": "isotropic_cutoff_derivative_5_10_percent"
+              "$comment": "PULAY-OPTIN (2026-11-26): opt-in via [output] stress_pulay_assessment = true; otherwise status not_evaluated and cutoff_scf_runs 0",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "method",
+                    "isotropic_correction_ha_bohr3",
+                    "uncertainty_ha_bohr3",
+                    "warning"
+                  ],
+                  "properties": {
+                    "method": {
+                      "const": "isotropic_cutoff_derivative_5_10_percent"
+                    },
+                    "isotropic_correction_ha_bohr3": {
+                      "type": "number"
+                    },
+                    "uncertainty_ha_bohr3": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "warning": {
+                      "type": "boolean"
+                    }
+                  }
                 },
-                "isotropic_correction_ha_bohr3": {
-                  "type": "number"
-                },
-                "uncertainty_ha_bohr3": {
-                  "type": "number",
-                  "minimum": 0
-                },
-                "warning": {
-                  "type": "boolean"
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "reason"
+                  ],
+                  "properties": {
+                    "status": {
+                      "const": "not_evaluated"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
                 }
-              }
+              ]
             },
             "per_term": {
               "type": "object",
@@ -418,7 +440,10 @@
               "minimum": 0
             },
             "cutoff_scf_runs": {
-              "const": 3
+              "enum": [
+                0,
+                3
+              ]
             },
             "strain_steps": {
               "type": "array",

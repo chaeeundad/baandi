@@ -108,9 +108,13 @@ At completion, including step-budget exhaustion, a fresh single point rebuilds
 at the final cell with the nominal cutoff and an appropriate FFT grid. The JSON
 contains both frames, their energy/force/stress/pressure differences, and a
 warning if the largest stress difference exceeds `pulay_warning_ha_bohr3`.
-The rebuilt frame also includes P22A's independent isotropic cutoff-derivative
-Pulay estimate and uncertainty. The rebuild difference and that estimate are
-distinct diagnostics; neither proves cutoff convergence.
+With `[output] stress_pulay_assessment = true` the rebuilt frame (and every
+`basis_rebuild` frame) also includes P22A's independent isotropic
+cutoff-derivative Pulay estimate and uncertainty (three extra SCFs per frame).
+Since PULAY-OPTIN (2026-11-26) this is off by default and the frame records
+`pulay_assessment = {"status": "not_evaluated", "reason": ...}`; the stress
+and the rebuild difference are identical either way. The rebuild difference
+and that estimate are distinct diagnostics; neither proves cutoff convergence.
 
 `rebuild_every=N` optionally begins a new smooth segment after N accepted moves.
 It resets optimizer memory and consecutive-convergence counting, starts fresh,

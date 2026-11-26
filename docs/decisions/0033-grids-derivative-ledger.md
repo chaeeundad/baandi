@@ -94,3 +94,18 @@ stop on unavailable/unconverged results, retain failed steps, and distinguish
 exact restart from cell-transfer warm starts. See [stage oracles](../validation/stage-oracles.md)
 for multi-step displacement/strain tests and [migration](../architecture/state-contracts.md#migration-and-invalid-combinations)
 for explicit rejections.
+
+## Amendment 2026-11-26 (PULAY-OPTIN, user decision)
+
+The isotropic cutoff-derivative Pulay assessment (`pulay_assessment`, three
+extra SCF runs at c, 1.05c and 1.10c) is no longer part of every stress
+evaluation. It is off by default and opt-in through `[output]
+stress_pulay_assessment = true` (engine: `stress::PulayAssessmentMode`,
+`refscf::api::Derivatives::pulay_assessment`, `stress::stress_with`). Reason:
+on dev08 the scans were 51 % of the wall on GeTe and 71 % on B12 (1861 s of
+2626 s), QE performs no such scan, and the assessment never changes the stress
+tensor. The frozen-Miller tensor is bit-identical with the assessment on or
+off. When off, `StressResult::pulay` is None and the CLI writes
+`pulay_assessment = {"status": "not_evaluated", "reason": ...}` with
+`cutoff_scf_runs = 0`; the statement above that the frozen-set stress is not a
+cutoff-converged stress is unchanged, and users who need the estimate enable it.

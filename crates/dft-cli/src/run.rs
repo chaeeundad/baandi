@@ -1829,6 +1829,7 @@ fn execute_mode_inner(
                 forces: config.output.as_ref().is_some_and(|o| o.forces),
                 stress: config.wants_stress(),
                 deferred: true,
+                pulay_assessment: config.pulay_assessment(),
             };
             let delivered = if mode.observe || mode.agent {
                 crate::telemetry::drive_reference(input, request, mode, &out)?
@@ -3028,6 +3029,7 @@ fn reference_electronic_run(
         forces: config.output.as_ref().is_some_and(|o| o.forces),
         stress: config.output.as_ref().is_some_and(|o| o.stress),
         deferred: true,
+        pulay_assessment: config.pulay_assessment(),
     };
     let delivery = if mode.observe || mode.agent {
         crate::telemetry::drive_reference(input, request, mode, out)?
@@ -3586,22 +3588,25 @@ fn requested_stress(
     )
     .reference()
     {
-        if let Some(prepared) = reference_symmetry(config)? {
-            dft_engine::stress::stress_prepared(&state, &prepared)
-        } else {
-            dft_engine::stress::stress(&state)
-        }
+        let prepared = reference_symmetry(config)?;
+        dft_engine::stress::stress_with(&state, prepared.as_ref(), config.pulay_assessment())
     } else {
-        dft_engine::stress::stress(&state)
+        dft_engine::stress::stress_with(&state, None, config.pulay_assessment())
     }
     .map(Some)
     .map_err(engine_error)
 }
 
 fn stress_json(s: &dft_engine::stress::StressResult) -> Value {
-    let pulay=s.pulay.as_ref().map(|p|json!({"method":p.method,"isotropic_correction_ha_bohr3":p.correction,"uncertainty_ha_bohr3":p.uncertainty,"cutoff_steps_ha":p.cutoff_steps_ha,"warning_threshold_ha_bohr3":p.warning_threshold,"warning":p.warning,"shells_resolved":p.shells_resolved,"uncertainty_kind":"two_step_spread_not_bound","anisotropic_convergence":"not_established","elapsed_seconds":p.elapsed.as_secs_f64(),"scan_profile":p.scan_profile,"scan_thresholds_ha":p.scan_thresholds_ha,"scan_energy_resolution_ha":p.scan_energy_resolution_ha}));
-    json!({"status":"available","units":s.units,"frame":"cartesian_tensor","sign_convention":"tensile_positive","quantity":s.quantity,"values":s.values,"pressure_ha_bohr3":s.pressure,"symmetric":s.symmetric,"antisymmetric":s.antisymmetric,"antisymmetric_norm_ha_bohr3":s.antisymmetric_norm,"basis_protocol":s.basis_protocol,"cutoff_ha":s.cutoff_ha,"strain_steps":s.strain_steps,"cutoff_converged":false,"pulay_assessment":pulay,"per_term":s.terms.iter().map(|(name,t)|((*name).to_string(),json!(t))).collect::<serde_json::Map<_,_>>(),"derivative_ledger":s.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"active":e.active,"stress_capability":if e.active {"available"}else{"not_applicable"},"reason":e.reason})).collect::<Vec<_>>(),"unavailable_terms":[],"preconditions":{"convergence_profile":"strict","converged":true,"fixed_point_certificate_passed":true},"elapsed_seconds":s.elapsed.as_secs_f64(),"band_passes":s.band_passes,"precondition_force_band_passes":s.precondition_force_band_passes,"cutoff_scf_runs":3})
+    // PULAY-OPTIN (2026-11-26): the assessment is opt-in; when it did not run
+    // the record says so and no cutoff-scan SCF ran.
+    let pulay=s.pulay.as_ref().map_or_else(||json!({"status":"not_evaluated","reason":PULAY_NOT_EVALUATED}),|p|json!({"method":p.method,"isotropic_correction_ha_bohr3":p.correction,"uncertainty_ha_bohr3":p.uncertainty,"cutoff_steps_ha":p.cutoff_steps_ha,"warning_threshold_ha_bohr3":p.warning_threshold,"warning":p.warning,"shells_resolved":p.shells_resolved,"uncertainty_kind":"two_step_spread_not_bound","anisotropic_convergence":"not_established","elapsed_seconds":p.elapsed.as_secs_f64(),"scan_profile":p.scan_profile,"scan_thresholds_ha":p.scan_thresholds_ha,"scan_energy_resolution_ha":p.scan_energy_resolution_ha}));
+    let cutoff_scf_runs = if s.pulay.is_some() { 3 } else { 0 };
+    json!({"status":"available","units":s.units,"frame":"cartesian_tensor","sign_convention":"tensile_positive","quantity":s.quantity,"values":s.values,"pressure_ha_bohr3":s.pressure,"symmetric":s.symmetric,"antisymmetric":s.antisymmetric,"antisymmetric_norm_ha_bohr3":s.antisymmetric_norm,"basis_protocol":s.basis_protocol,"cutoff_ha":s.cutoff_ha,"strain_steps":s.strain_steps,"cutoff_converged":false,"pulay_assessment":pulay,"per_term":s.terms.iter().map(|(name,t)|((*name).to_string(),json!(t))).collect::<serde_json::Map<_,_>>(),"derivative_ledger":s.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"active":e.active,"stress_capability":if e.active {"available"}else{"not_applicable"},"reason":e.reason})).collect::<Vec<_>>(),"unavailable_terms":[],"preconditions":{"convergence_profile":"strict","converged":true,"fixed_point_certificate_passed":true},"elapsed_seconds":s.elapsed.as_secs_f64(),"band_passes":s.band_passes,"precondition_force_band_passes":s.precondition_force_band_passes,"cutoff_scf_runs":cutoff_scf_runs})
 }
+/// Reason recorded when the opt-in Pulay assessment did not run.
+pub(crate) const PULAY_NOT_EVALUATED: &str =
+    "disabled by default; set [output] stress_pulay_assessment = true";
 fn stress_table(s: &dft_engine::stress::StressResult) -> String {
     let mut text = format!(
         "\nFrozen-Miller tensile-positive stress, Ha/Bohr^3: {:?}\nPressure (-trace/3): {:.12e} Ha/Bohr^3\n",
@@ -4798,7 +4803,7 @@ mod tests {
         // G5: actual complex-k derivative output, including the three reference
         // cutoff scans, and the established stress-specific default threshold.
         let derivatives = format!(
-            "{}[output]\nforces=true\nstress=true\n",
+            "{}[output]\nforces=true\nstress=true\nstress_pulay_assessment=true\n",
             base.replace("max_iterations=2", "max_iterations=100")
                 .replace("verify='off'", "verify='fixed_point'")
         );
@@ -4831,7 +4836,9 @@ mod tests {
         );
         fs::write(
             &input,
-            format!("{symmetric_derivatives}[output]\nforces=true\nstress=true\n"),
+            format!(
+                "{symmetric_derivatives}[output]\nforces=true\nstress=true\nstress_pulay_assessment=true\n"
+            ),
         )
         .unwrap();
         execute(&input, Some(&out)).unwrap();

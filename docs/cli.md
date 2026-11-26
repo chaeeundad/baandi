@@ -1104,7 +1104,7 @@ Stress (`output.stress`) and the variable-cell relaxation modes `cell` and
 relaxation)` are gone). The stress needs a passed verification exactly like the
 forces; `stress.preconditions` carries the same standard keys as
 `forces.preconditions`; the three cutoff-scan SCFs of the isotropic Pulay
-estimate run the standard path with the verification at
+estimate (opt-in, `[output] stress_pulay_assessment = true`) run the standard path with the verification at
 `min(1e-9 Ha, scf.standard_threshold_ha)` (repeated once at the caller's
 threshold when that is looser; no strict fallback), recorded in
 `stress.pulay_assessment.scan_profile` (`standard_verified`),
@@ -1350,10 +1350,17 @@ preconditions. LDA-PZ, LDA-PW, PBE, collinear spin, NLCC and FD free-energy
 stress are supported in the corresponding existing engine/CLI models.
 
 Only frozen-Miller stress is reported as the stress. The separate isotropic
-Pulay estimate performs three additional SCFs at 100%, 105% and 110% cutoff,
-reports a two-step uncertainty diagnostic, and warns above 1e-5 Ha/Bohr^3 or
-when no shell is sampled. It never silently corrects the tensor and never
-asserts cutoff convergence. This can cost more than the analytic pass.
+Pulay estimate is opt-in: `[output] stress_pulay_assessment = true` (default
+false since PULAY-OPTIN, 2026-11-26; it was 51-71 % of the wall of dev08 stress
+runs). When enabled it performs three additional SCFs at 100%, 105% and 110%
+cutoff, reports a two-step uncertainty diagnostic, and warns above 1e-5
+Ha/Bohr^3 or when no shell is sampled; `stress.cutoff_scf_runs` is 3. When
+disabled, `stress.pulay_assessment` is `{"status": "not_evaluated", "reason":
+"disabled by default; set [output] stress_pulay_assessment = true"}` and
+`stress.cutoff_scf_runs` is 0. The stress tensor is bit-identical either way:
+the estimate never silently corrects the tensor and never asserts cutoff
+convergence. The same key enables it on the nominal-cutoff frames of a cell
+relaxation; Python uses `Session.stress(pulay_assessment=True)`.
 
 Fixed unpolarized runs print a stress table; spin/FD write `stress.txt` as well
 as JSON. ASE `get_stress` uses tensile-positive eV/Angstrom^3 and order

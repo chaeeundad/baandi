@@ -577,6 +577,18 @@ impl Config {
     }
     /// The input asks for stress: `output.stress` or a variable-cell
     /// relaxation (`relax.mode = "cell"` or `"ions_cell"`).
+    /// Pulay assessment mode of every stress evaluation of this input.
+    pub fn pulay_assessment(&self) -> dft_engine::PulayAssessmentMode {
+        if self
+            .output
+            .as_ref()
+            .is_some_and(|o| o.stress_pulay_assessment)
+        {
+            dft_engine::PulayAssessmentMode::CutoffScan
+        } else {
+            dft_engine::PulayAssessmentMode::Off
+        }
+    }
     pub fn wants_stress(&self) -> bool {
         self.output.as_ref().is_some_and(|o| o.stress)
             || self
@@ -836,6 +848,11 @@ pub struct Output {
     pub forces: bool,
     #[serde(default)]
     pub stress: bool,
+    /// PULAY-OPTIN (2026-11-26): run the isotropic cutoff-derivative Pulay
+    /// assessment of the stress (three extra SCFs); default off. Applies to
+    /// `output.stress` and to the nominal-cutoff frames of cell relaxation.
+    #[serde(default)]
+    pub stress_pulay_assessment: bool,
     pub directory: Option<String>,
     pub volumetric: Option<Volumetric>,
 }

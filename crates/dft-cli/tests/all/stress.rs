@@ -56,8 +56,61 @@ fn stress_output_identity_schema_and_paths() {
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     assert_eq!(result["total_energy"], no_stress["total_energy"]);
     assert_eq!(density, fs::read(dir.join("out/density.bin")).unwrap());
+    // PULAY-OPTIN (2026-11-26): the cutoff-scan assessment is off by default.
+    // Off: no scan SCF and a not_evaluated record; on: the three scans. The
+    // tensor is bit for bit the same either way.
+    assert_eq!(
+        result["stress"]["pulay_assessment"]["status"],
+        "not_evaluated"
+    );
+    assert_eq!(result["stress"]["cutoff_scf_runs"], 0);
+    let with_assessment = base.replace(
+        "stress=true\n",
+        "stress=true\nstress_pulay_assessment=true\n",
+    );
+    let started = std::time::Instant::now();
+    let on = run(&with_assessment);
+    let on_seconds = started.elapsed().as_secs_f64();
+    assert!(on.status.success());
+    assert!(schema_ok());
+    let on: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
+    assert_eq!(on["stress"]["cutoff_scf_runs"], 3);
+    assert_eq!(
+        on["stress"]["pulay_assessment"]["method"],
+        "isotropic_cutoff_derivative_5_10_percent"
+    );
+    let started = std::time::Instant::now();
+    assert!(run(base).status.success());
+    let off_seconds = started.elapsed().as_secs_f64();
+    let bits = |v: &serde_json::Value| -> Vec<u64> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|row| row.as_array().unwrap().iter())
+            .map(|x| x.as_f64().unwrap().to_bits())
+            .collect()
+    };
+    for key in ["values", "symmetric", "antisymmetric"] {
+        assert_eq!(
+            bits(&result["stress"][key]),
+            bits(&on["stress"][key]),
+            "{key}"
+        );
+    }
+    assert_eq!(
+        result["stress"]["pressure_ha_bohr3"]
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        on["stress"]["pressure_ha_bohr3"]
+            .as_f64()
+            .unwrap()
+            .to_bits()
+    );
+    println!("PULAY-OPTIN wall: assessment off {off_seconds:.3} s, on {on_seconds:.3} s");
     // The strict reference keeps its certificate preconditions.
-    let strict = run_with(base, "on");
+    let strict = run_with(&with_assessment, "on");
     assert!(strict.status.success());
     assert!(schema_ok());
     let strict: serde_json::Value =

@@ -134,7 +134,15 @@ fn reference_fermi_dirac_and_spin_write_forces_and_stress() {
                 .unwrap()
                 .is_finite()
         );
-        assert!(result["stress"]["pulay_assessment"].is_object());
+        // PULAY-OPTIN: the assessment is opt-in; its record and the scan count
+        // agree either way.
+        let pulay = &result["stress"]["pulay_assessment"];
+        if pulay["status"] == "not_evaluated" {
+            assert_eq!(result["stress"]["cutoff_scf_runs"], 0);
+        } else {
+            assert_eq!(pulay["method"], "isotropic_cutoff_derivative_5_10_percent");
+            assert_eq!(result["stress"]["cutoff_scf_runs"], 3);
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("Cartesian forces") && stdout.contains("stress"));
         result
@@ -144,7 +152,19 @@ fn reference_fermi_dirac_and_spin_write_forces_and_stress() {
     };
     // Without scf.nbands the count grows automatically up to the cap and the
     // derivatives use the grown state (TS = 9.9e-4 Ha).
-    let result = check(run(base.replace("NBANDS", "") + &fd(0.03)), "F");
+    // The assessment is enabled here (spin/FD scans) and must leave the tensor
+    // bit for bit unchanged against the default-off run.
+    let result = check(
+        run(base.replace("NBANDS", "").replace(
+            "stress=true\n",
+            "stress=true\nstress_pulay_assessment=true\n",
+        ) + &fd(0.03)),
+        "F",
+    );
+    assert_eq!(result["stress"]["cutoff_scf_runs"], 3);
+    let off = check(run(base.replace("NBANDS", "") + &fd(0.03)), "F");
+    assert_eq!(off["stress"]["pulay_assessment"]["status"], "not_evaluated");
+    assert_eq!(off["stress"]["values"], result["stress"]["values"]);
     let growth = &result["reference_scf"]["band_count_growth"];
     assert_eq!(growth["mode"], "automatic", "{growth}");
     assert_eq!(growth["band_cap"], 16);

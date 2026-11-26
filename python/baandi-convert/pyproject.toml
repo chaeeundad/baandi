@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baandi-convert"
+version = "1"
+requires-python = ">=3.9"
+description = "Workstation-side converter from structure files or Materials Project ids to BAANDI TOML input"
+license = { text = "MIT" }
+# Nothing is required for Materials Project ids (plain HTTPS fallback, cached records).
+dependencies = []
+
+[project.optional-dependencies]
+# ASE (LGPL-2.1+) reads structure files; it runs as an external package, never linked into BAANDI.
+ase = ["ase>=3.22"]
+pymatgen = ["pymatgen"]
+mp = ["mp-api"]
+
+[project.scripts]
+baandi-convert = "baandi_convert:main"
+
+[tool.setuptools]
+py-modules = ["baandi_convert"]

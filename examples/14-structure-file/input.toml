@@ -1,0 +1,80 @@
+# Example 14: what `baandi-convert Si.cif --skeleton` writes (see README.md).
+# This committed copy was written with the converter's own TOML writer from the
+# values in Si.cif, without ASE, so reader_version is not recorded; rerun the
+# README command to get your own copy. The pseudopotential name was edited.
+# Written by baandi-convert 1; numbers carry 17 significant digits.
+# [system.provenance] is recorded in results.json and never used for the physics.
+[system]
+name = "Si diamond (from Si.cif)"
+lattice_unit = "angstrom"
+# Each row is one lattice vector.
+lattice_vectors = [
+  [5.4299999999999997, 0.0, 0.0],
+  [0.0, 5.4299999999999997, 0.0],
+  [0.0, 0.0, 5.4299999999999997],
+]
+
+[system.provenance]
+source_kind = "file"
+source = "examples/14-structure-file/Si.cif"
+source_sha256 = "aa09a5160e2013f4cb2d3cc0d2d7c82054f7da0b5273fb4c3ecd313b5c73c1d3"
+source_format = "cif"
+source_index = -1
+reader = "ase"
+reader_version = "not recorded: committed example reproduces the converter layout; rerun the README command to record your ASE version"
+pbc_in_file = [true, true, true]
+converter = "baandi-convert"
+converter_version = "1"
+converted_utc = "2026-11-26T00:00:00Z"
+units_written = "angstrom"
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.0, 0.0, 0.0]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.0, 0.5, 0.5]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.5, 0.0, 0.5]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.5, 0.5, 0.0]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.25, 0.25, 0.25]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.25, 0.75, 0.75]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.75, 0.25, 0.75]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.75, 0.75, 0.25]
+
+[pseudopotentials]
+# One norm-conserving UPF v2 file per species, matching [xc]; relative paths
+# resolve against this file. Inspect each with `baandi inspect-upf FILE`.
+Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"
+
+[basis]
+# Placeholder cutoff: converge it for your pseudopotentials and property.
+ecutwfc_ry = 30.0
+# Gamma only; for a Monkhorst-Pack mesh replace kpoints by, for example, kgrid = [4, 4, 4].
+kpoints = [[0.0, 0.0, 0.0]]
+
+[xc]
+functional = "lda-pz"
+
+[scf]
+# All keys are optional; see docs/cli.md. Examples:
+# max_iterations = 100
+# nbands = 16

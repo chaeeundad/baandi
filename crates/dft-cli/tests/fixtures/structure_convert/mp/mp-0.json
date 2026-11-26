@@ -1,0 +1,27 @@
+{
+ "client": {
+  "name": "synthetic",
+  "version": "hand-written test fixture"
+ },
+ "database_version": "synthetic-offline-fixture (not a Materials Project record)",
+ "endpoint": "none: hand-written test fixture",
+ "mp_id": "mp-0",
+ "retrieved_utc": "2026-11-26T00:00:00Z",
+ "schema": "baandi-mp-cache-1",
+ "structure": {
+  "@class": "Structure",
+  "@module": "pymatgen.core.structure",
+  "charge": 0,
+  "lattice": {
+   "matrix": [
+    [0.0, 2.715, 2.715],
+    [2.715, 0.0, 2.715],
+    [2.715, 2.715, 0.0]
+   ]
+  },
+  "sites": [
+   {"abc": [0.0, 0.0, 0.0], "label": "Si", "species": [{"element": "Si", "occu": 1}]},
+   {"abc": [0.25, 0.25, 0.25], "label": "Si", "species": [{"element": "Si", "occu": 1}]}
+  ]
+ }
+}

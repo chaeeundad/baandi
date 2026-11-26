@@ -2420,6 +2420,9 @@ fn execute_mode_inner(
     if !config.input_expressions.is_empty() {
         result["input_expressions"] = json!(config.input_expressions);
     }
+    if let Some(provenance) = config.system.provenance_json() {
+        result["structure_provenance"] = provenance;
+    }
     if !config.basis.legacy_gamma() {
         result["kpoints"] = json!({
             "grid": config.basis.kgrid, "shift": config.basis.kgrid.map(|_| config.basis.kshift.unwrap_or([0.0;3])),
@@ -3217,6 +3220,9 @@ fn reference_electronic_run(
         r.converged,
     );
     add_xc_screening_json(&mut result);
+    if let Some(provenance) = config.system.provenance_json() {
+        result["structure_provenance"] = provenance;
+    }
     if mode.observe || mode.agent {
         crate::telemetry::annotate_reference_result(&mut result, out)?;
     }

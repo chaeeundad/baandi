@@ -217,3 +217,26 @@ AVX-512 and change the rounding of the default path on dev08. Apple Silicon:
 build, tests and Clippy pass on this Mac (aarch64). x86_64 does not use pulp at
 run time (the packed kernel there is faer's matmul), but it compiles there.
 
+
+## Workstation-side structure conversion (baandi-convert, 2026-11-26)
+
+`python/baandi-convert` is a standalone Python 3.9+ tool that writes the explicit
+`[system]` TOML from structure files or Materials Project ids
+([Converting structures](cli.md#converting-structures)). Its Python packages are
+optional, installed by the user on a workstation, and are **not** linked into,
+built with, or needed by any Rust crate, the `baandi`/`dft-cli` executable or a
+compute node. Nothing is vendored; the repository CI needs none of them (the
+ASE-dependent tests skip).
+
+| Package | License | Role | Needed for |
+| --- | --- | --- | --- |
+| ASE (`ase`) | LGPL-2.1-or-later | structure file reader (`ase.io.read`), used as an external package | file conversion with the default reader |
+| pymatgen | MIT | alternative file reader (`--reader pymatgen`); dependency of mp-api | optional |
+| mp-api | BSD-style (LBNL modified BSD; check the installed version) | Materials Project client, used when installed | optional; `--mp` otherwise uses the standard library over HTTPS |
+
+The converter itself uses only the Python standard library. BAANDI is MIT
+licensed; calling an LGPL package from a separate Python process or module does
+not link it into BAANDI, and no ASE, pymatgen or mp-api source is copied.
+Materials Project data carry their own terms of use (see the Materials Project
+website; not re-audited offline); a converted input records the `mp_id` and database version for
+attribution.

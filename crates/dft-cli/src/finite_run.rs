@@ -306,6 +306,9 @@ pub(super) fn execute(
     if let (Some(r), Value::Object(extra)) = (result.as_object_mut(), path_record) {
         r.extend(extra);
     }
+    if let Some(provenance) = config.system.provenance_json() {
+        result["structure_provenance"] = provenance;
+    }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         converged,

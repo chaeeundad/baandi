@@ -1330,6 +1330,9 @@ fn outputs(
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});
     ctx.selection.record(&mut result);
+    if let Some(provenance) = ctx.config.system.provenance_json() {
+        result["structure_provenance"] = provenance;
+    }
     for (name, text) in [
         ("trajectory.extxyz", xyz),
         ("final.xyz", final_xyz),

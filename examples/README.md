@@ -59,6 +59,13 @@ establish numerical convergence or physical accuracy.
 | [11-python](11-python/) | Python batch, forces and stepwise API |
 | [12-mpi](12-mpi/) | MPI with the same Si input |
 | [13-strict-oracle](13-strict-oracle/) | Strict oracle for validation |
+| [14-structure-file](14-structure-file/) | Structure file or Materials Project id to input (`baandi-convert`) |
+
+To start from your own structure file (CIF, POSCAR, extended XYZ, XSF and other
+ASE-readable formats) or a Materials Project id, run the workstation-side
+converter `python3 python/baandi-convert/baandi_convert.py FILE --skeleton -o input.toml`
+(example 14, [Converting structures](../docs/cli.md#converting-structures)). The
+CLI itself reads only the explicit TOML form.
 
 ## Earlier inputs
 

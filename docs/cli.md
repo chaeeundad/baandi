@@ -18,7 +18,92 @@ Use the schema in [si_lda.toml](../examples/si_lda.toml). Each input
 `system.lattice_vectors` row is a vector; it is transposed to matrix columns
 internally. `lattice_unit` is `bohr` or `angstrom`. Atoms have a species label
 and fractional coordinates. Relative pseudopotential paths resolve against the
-input file's directory. All structured tables reject unknown fields.
+input file's directory. All structured tables reject unknown fields, except the
+free-form `[system.provenance]` table described under
+[Converting structures](#converting-structures).
+
+## Converting structures
+
+The CLI reads structures only in the explicit form above. It never opens CIF,
+POSCAR or other structure files and never contacts a database: compute and MPI
+nodes may have no Python, ASE or network, and a run must not depend on them.
+Conversion is a separate, workstation-side step done by `baandi-convert`
+([`python/baandi-convert`](../python/baandi-convert/baandi_convert.py), Python 3.9+):
+
+```sh
+# run in place, or `pip install ./python/baandi-convert[ase]` for a `baandi-convert` command
+python3 python/baandi-convert/baandi_convert.py Si.cif -o si.toml
+python3 python/baandi-convert/baandi_convert.py --mp mp-149 -o si.toml
+python3 python/baandi-convert/baandi_convert.py POSCAR --skeleton --units bohr -o si.toml
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--format F` | ASE format name (`cif`, `vasp`, `extxyz`, `xsf`, ...); default: ASE detection |
+| `--index I` | image of a multi-structure file; default -1 (the last) |
+| `--reader ase\|pymatgen` | file reader; default ASE |
+| `--skeleton` | also write placeholder `[pseudopotentials]`, `[basis]`, `[xc]` and `[scf]` sections with comments |
+| `--units angstrom\|bohr` | lattice unit written; default `angstrom` keeps the file's numbers; `bohr` divides by 0.529177210903 Å (CODATA 2018) |
+| `--name NAME` | `system.name`; default the formula, for example `Si8` |
+| `--assume-periodic` | accept a file whose periodic flags are not all true, using its full cell as a periodic box |
+| `--refresh`, `--cache-dir DIR` | refetch a cached Materials Project record; cache root |
+| `-o FILE`, `--force` | output file (default standard output); overwrite an existing file |
+
+Output: `[system]` with `lattice_unit`, the three lattice rows and one
+`[[system.atoms]]` entry per site (element symbol as species label, fractional
+coordinates as read, not wrapped), every number written with 17 significant
+digits so it reads back to the same double. Species labels are element symbols;
+rename them in the TOML if you need two labels for one element.
+
+Rejected, with a message naming the cause: partial site occupancy or more than
+one species on a site (CIF `_atom_site_occupancy` < 1, ASE occupancy records,
+pymatgen/Materials Project disordered sites); two sites closer than 0.5 Å
+(duplicated or disordered sites); no three-dimensional cell (volume below
+1e-6 Å^3, or a record without a lattice); non-element site labels; files whose
+periodic flags are not all true unless `--assume-periodic`. A missing ASE gives
+`pip install ase`.
+
+Materials Project (`--mp ID`, ids `mp-N` or `mvc-N`): the `mp-api` client is used
+when installed, otherwise plain HTTPS to the public API (summary endpoint, plus
+`/heartbeat` for the database version) with the standard library. The key comes
+from `MP_API_KEY` or from `~/.config/baandi/mp_api_key` (the bare key); it is sent
+only as the request header, never printed, logged or written, and is replaced by
+`***` in error messages. The fetched record (pymatgen structure dictionary,
+`mp_id`, `database_version`, retrieval time, client and version) is cached as
+`$BAANDI_CACHE_DIR/mp/ID.json` (default `~/.cache/baandi/mp/ID.json`); later
+conversions of the same id are offline and need no key. A missing cache without
+a key is an error that names both key locations.
+
+Provenance: the converter writes a `[system.provenance]` table, for example
+
+```toml
+[system.provenance]
+source_kind = "file"            # or "materials_project"
+source = "Si.cif"               # as given; source_path is the absolute path
+source_sha256 = "..."           # of the file, or of the cached MP record
+source_format = "cif"
+reader = "ase"                  # ase, pymatgen, mp-api or urllib
+reader_version = "3.26.0"
+converter = "baandi-convert"
+converted_utc = "2026-11-26T00:00:00Z"
+```
+
+with `mp_id`, `database_version` and `retrieved_utc` for Materials Project
+records. The CLI accepts this table in any input, allows only strings, numbers,
+booleans and arrays of them (TOML dates are read as strings), never uses it for
+the physics, and copies it unchanged into `results.json` as the top-level
+`structure_provenance` object (run, bands, dos and relax outputs). Inputs
+without the table produce no such key. Example:
+[14-structure-file](../examples/14-structure-file/). Tests:
+`python3 -I python/baandi-convert/tests/test_baandi_convert.py -v` (ASE reader
+tests skip with a note when ASE is missing; no test uses the network) and
+`cargo test -p dft-cli --test all structure_convert`.
+
+Why a converter and not structure sources in the input: an earlier design let
+the TOML name `file(...)` or `mp(...)` and resolved them at startup. It was
+replaced (user decision, 2026-11-26) because it would make every run, on every
+MPI rank, depend on Python, ASE and possibly network. With the converter the
+input file is complete, self-describing and reproducible by itself.
 
 Optional SCF fields and defaults:
 

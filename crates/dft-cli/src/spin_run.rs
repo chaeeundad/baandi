@@ -275,6 +275,9 @@ pub(super) fn execute(
     if let (Some(r), Value::Object(extra)) = (result.as_object_mut(), path_record) {
         r.extend(extra);
     }
+    if let Some(provenance) = config.system.provenance_json() {
+        result["structure_provenance"] = provenance;
+    }
     write_json(&out.join("results.json"), &result)?;
     // Conventional total-density binary remains a documented additional format.
     let total_bytes: Vec<u8> = total.iter().flat_map(|v| v.to_le_bytes()).collect();

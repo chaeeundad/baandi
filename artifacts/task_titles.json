@@ -228,5 +228,8 @@
  "GSPEED-PLAN": "k점·PBE·스핀·금속 일반 경로 속도 차이 분석과 개선 계획",
  "GK1-START-MEMO": "k점 시작 오비탈의 반복 적분을 한 번만 계산(결과 동일)",
  "GK3-CDAV-WORKSPACE": "k점 Davidson 작업공간 재사용·오류 확인 통합(결과 동일)",
- "GK4-K-ENERGY": "k점 SCF에서 매 단계 에너지 항 계산을 마지막에만(결과 동일)"
+ "GK4-K-ENERGY": "k점 SCF에서 매 단계 에너지 항 계산을 마지막에만(결과 동일)",
+ "GK1B-NL-TABLES": "k점 비국소 표를 자기 몫만 계산, 스핀 시작 공유(결과 동일)",
+ "GK10-BORDER-GRAM": "k점 Davidson에서 행렬 전체 대신 새로 붙은 부분만 갱신",
+ "GK14-RADIAL-TABLES": "시작 오비탈·투영자 지름 적분을 미리 만든 촘촘한 표에서 보간(QE 방식)"
 }

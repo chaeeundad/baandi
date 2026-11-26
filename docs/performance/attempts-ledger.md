@@ -4094,3 +4094,19 @@ No speed claim; local oracle/reference baseline identity passes 3 cases each, al
 | `LEAN_PROJ_CACHE` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
 | `RESTART_KEEP` | Retired; fixed off. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
 | `EWALD_CACHE` | Retired; fixed on. | CLI metadata readers removed or made constant; oracle-only arithmetic frozen. Both baselines exact (delta energy 0 Ha). |
+
+## GSPEED-PLAN — general (k, spin/FD) path speed analysis (2026-11-26; analysis only, no code)
+
+Trigger (relayed dev08 MPI8, same inputs as QE 7.6): IrI3 QE 132 s vs BAANDI 1194 s (SCF+forces+stress, gen41),
+GeTe 260 k QE 43 s vs BAANDI SCF 378 s, B12 172 k QE 84 s vs BAANDI SCF 560 s. Plan and file:line map:
+docs/performance/general-path-speed-plan.md. Code findings (exact): (1) no k pools, every k is G-distributed over all
+ranks and solved sequentially (~17 collectives per complex Davidson iteration, ~10 of them 1-double error agreements);
+(2) k atomic start evaluates the radial quadrature per (row, atom, m) instead of per (species channel, |k+G|), and
+orthonormalizes by column MGS with one tree sum per column pair; spin runs build the whole k start twice;
+(3) complex Davidson recomputes full S/H Grams every iteration (real path: border + triangle) and allocates its
+workspace per call; (4) per-k per-map kinetic/nonlocal energy terms and per-k potential/density plane maps;
+(5) collinear spin disables time reversal and symmetry reduction (full mesh). Mac observation (O, release, 20000
+calls, 1534-point mesh): radial quadrature 12.7/17.0/18.2 us per call for l = 0/1/2; estimate (E) B12 atomic-start
+fill 80-260 s of 560 s, removable by a bit-identical memo. No speed claim; ranking waits for the kprof phase profiles
+and a QE `-nk 1/2/4/8` scan. Lesson: before generalizing a fast path, list which Gamma optimizations the new path
+inherits; the k start and the complex solver inherited none of the P3/P4 start and Davidson work.

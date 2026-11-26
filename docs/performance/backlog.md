@@ -273,3 +273,14 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 - Replicated construction work per rank (O, two constructions at si32 np=8): `ionic_local` 0.044 s (per-G independent: G-range split plus one allgatherv, bit-identical), the remaining Ewald evaluation (reciprocal G split: rounding class of E only, density untouched), `DistributedRealHamiltonian::new` packing every projector over all N before keeping the local rows.
 - Atomic start at np=8: block orthonormalization of the 128 span columns (Gram + Cholesky with the dependence rule) instead of the 128-broadcast chain (rounding class of the trajectory: stage 1 to convergence); split the Ritz rotation Q C by band columns (one allgatherv).
 - `between` (O, si32 np=8): session set-up 0.036 s, stop rule 0.019 s, ladder hand-off 0.028 s: replicated full-grid passes; distribute only if dev08 shows them above 1 %.
+
+## General k / spin / FD path (GSPEED-PLAN, 2026-11-26; plan docs/performance/general-path-speed-plan.md)
+Labels E = estimate before the dev08 kprof profiles. Bit-identical batch first: GK1 k atomic-start radial memo
+(B12 E 70-250 s), GK3 complex Davidson workspace reuse and merged error agreements, GK4 per-k energy terms at the
+audit only, GK5/GK6 one potential move per axis and shared full-grid/FFT buffers, GK7 diagnostic symmetry
+projection opt-in, GK8 lean energy/permap/verification gate on the spin/FD path, GK2 one k start shared by both
+spin channels. Layout/algorithm: GK9 k-point pools (ADR 0041 option D; E 1.5-2.5x of the k loop at MPI8), GK10
+border Gram in the complex Davidson, GK11 generalized Ritz k start, GK12 time reversal and moment-preserving
+symmetry for collinear spin (policy + ADR), GK13 QE-like FD empty-band threshold, GK14 fine radial tables (reopens
+B18 H-6 with the new 1e-10/5e-9 classes as premise). First step GK0: read kprof (setup split, per-map phases,
+Davidson iterations per k vs QE, IrI3 spin/Pulay/k count, QE layout) and request the QE -nk scan.

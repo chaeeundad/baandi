@@ -351,3 +351,92 @@ fn electronic_fixed_spin_and_fd_restart() {
         });
     }
 }
+
+/// Automatic FD band growth (2 -> 6 -> 10 bands in the first map) survives an
+/// exact checkpoint v2 continuation on three ranks: before the growth (2-band
+/// block) and after it (grown block, events and band count restored).
+#[test]
+fn electronic_fd_band_growth_restart() {
+    use dft_engine::refscf::electronic::{self, BandGrowth, Policy};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = common::potential_with_atomic_start(1., 1., false, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 2.5,
+        gamma_real: GammaReal::Off,
+        max_iterations: 3,
+        verification: Verification::Off,
+        ..Default::default()
+    };
+    let points = [KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    dft_mpi::simulate(3, |comm| {
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+            .unwrap()
+            .enter();
+        let build = || {
+            electronic::stepper_growing(
+                StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &points,
+                Policy::FermiDirac {
+                    theta_ha: 0.05,
+                    band_cap: 12,
+                },
+                BandGrowth::From(2),
+                comm,
+            )
+        };
+        let bits = |r: &electronic::Run| {
+            (
+                r.energy.total_hartree().to_bits(),
+                r.thermodynamics.free_energy_ha.to_bits(),
+                r.density
+                    .iter()
+                    .flatten()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                r.blocks
+                    .iter()
+                    .flatten()
+                    .flat_map(|b| b.orbitals.as_slice())
+                    .flat_map(|v| [v.re.to_bits(), v.im.to_bits()])
+                    .collect::<Vec<_>>(),
+                r.band_growth.clone(),
+            )
+        };
+        let expected = build().run_to_end().unwrap();
+        let report = expected.band_growth.clone().unwrap();
+        assert_eq!((report.initial_bands, report.final_bands), (2, 10));
+        assert_eq!(report.events.len(), 2);
+        for at in [0, 1] {
+            let mut s = build();
+            s.initialize().unwrap();
+            if at > 0 {
+                loop {
+                    let r = s.step().unwrap();
+                    assert!(!s.is_done());
+                    if r.iteration >= at && r.safe_point {
+                        break;
+                    }
+                }
+            }
+            let cp = s.checkpoint(identity(3), comm.rank()).unwrap();
+            drop(s);
+            let mut s = build();
+            s.restore(&cp, &identity(3), comm.rank()).unwrap();
+            assert_eq!(bits(&s.run_to_end().unwrap()), bits(&expected));
+        }
+    });
+}

@@ -1106,16 +1106,34 @@ positive. Kelvin uses the exact SI Boltzmann constant at the CLI boundary;
 the engine uses theta=k_B T in Ha. Gaussian, MP and cold schemes reject.
 Odd unpolarized electron counts are permitted only in FD mode.
 
-The FD band count (per spin channel and k point) is `scf.nbands` when given,
-otherwise `band_cap` (default 32). `band_cap` stays the documented cap: an
-`scf.nbands` above an explicit `band_cap` is rejected at preflight
-(`scf.nbands = N exceeds occupations.band_cap = C`). Before FD-FORCES
-(2026-11-26) `scf.nbands` was ignored in FD mode and the cap was always the band
-count; inputs that set a smaller `nbands` now solve fewer bands. The policy
-prepares and solves every one of these bands. The band count must fit every k basis. Insufficient
-empty-state coverage fails with an instruction to increase the cap. The
-reported top-band diagnostics are not bounds on infinitely many omitted bands;
-repeat with at least four more bands and compare F/density.
+`band_cap` defaults to 32. The band count must fit every k basis. FD band
+count on the reference driver (per spin channel and k point):
+
+- `scf.nbands` explicit: the fixed count is `scf.nbands` (FD-FORCES,
+  2026-11-26; before that `scf.nbands` was ignored in FD mode and the cap was
+  always the band count). An `scf.nbands` above an explicit `band_cap` is
+  rejected at preflight (`scf.nbands = N exceeds occupations.band_cap = C`).
+  Every one of these bands is prepared and solved; insufficient empty-state
+  coverage fails with an instruction to increase the count.
+  `band_count_growth.mode` is `fixed`.
+- `scf.nbands` omitted (automatic): the run starts at
+  `max(ceil(n) + 4, ceil(1.2 n))` bands, n the largest channel electron target
+  (N/2 unpolarized), at most `band_cap`. When a map fails the empty-state
+  coverage criterion (top-band occupation fraction above 1e-8 or edge electrons
+  above 1e-10 N at any k; unchanged), the count grows to
+  `max(bands + 4, ceil(1.2 bands))`, at most `band_cap`, and the same SCF
+  iteration is solved again without restarting (density mixing history kept).
+  Each growth prints one stderr line (`band growth: ...`) and is recorded in
+  `results.json.reference_scf.band_count_growth` (`mode`, `initial_bands`,
+  `final_bands`, `band_cap`, `growth_rule`, `events[]` with iteration,
+  verification map, from/to and the rejected edge numbers). At the cap the run
+  fails with the coverage message plus the band count reached; raise
+  `band_cap`. Forces and stress are evaluated on the delivered (grown) state.
+
+The reported top-band diagnostics are not bounds on infinitely many omitted bands;
+repeat with at least four more bands and compare F/density. The strict oracle
+FD path (`finite_run`) has no automatic growth: it solves the fixed count
+(`scf.nbands`, otherwise `band_cap`).
 
 When to use it for an insulator-like cell: if fixed occupations stall (density residual
 floors around 1e-3, the SCF wanders) and the printed HOMO/LUMO gap is below about

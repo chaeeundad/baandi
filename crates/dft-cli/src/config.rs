@@ -376,6 +376,16 @@ impl Config {
             (None, c) => Ok(c.unwrap_or(DEFAULT_FD_BAND_CAP)),
         }
     }
+    /// Reference FD band count: automatic growth from the engine's start rule
+    /// up to `band_cap` (`fd_band_count`) unless `scf.nbands` is explicit,
+    /// which keeps the fixed count `scf.nbands`.
+    pub fn fd_band_growth(
+        &self,
+        finite: bool,
+    ) -> Option<dft_engine::refscf::electronic::BandGrowth> {
+        (finite && self.scf.as_ref().and_then(|s| s.nbands).is_none())
+            .then_some(dft_engine::refscf::electronic::BandGrowth::Automatic)
+    }
     pub fn finite_constraint(&self) -> dft_physics::occupations::Constraint {
         use dft_physics::occupations::Constraint;
         self.spin

@@ -22,6 +22,9 @@ pub struct Request {
     pub points: Vec<KPoint>,
     pub symmetry: Option<symmetry::Prepared>,
     pub policy: Option<electronic::Policy>,
+    /// Fermi-Dirac only: automatic band count up to the policy's band cap.
+    /// `None` keeps the fixed count (the cap).
+    pub band_growth: Option<electronic::BandGrowth>,
     pub seed: Option<IonicSeed>,
     pub derivatives: Derivatives,
     /// Export the delivered density/orbitals after derivatives for ionic reuse.
@@ -34,6 +37,7 @@ impl Request {
             points,
             symmetry: None,
             policy: None,
+            band_growth: None,
             seed: None,
             derivatives: Derivatives::default(),
             save_ionic_seed: false,
@@ -372,6 +376,7 @@ async fn run_request<K: dft_mpi::Collective>(
                 request.profile,
                 points,
                 policy,
+                request.band_growth,
                 comm,
                 request.symmetry.as_ref(),
                 None,

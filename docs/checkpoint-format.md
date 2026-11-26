@@ -132,7 +132,11 @@ order for orbitals, using little-endian binary64 bytes. A nonconverged export
 remains nonconverged, and `restart` returns a failure status after publishing it.
 
 Exact v2 supports fixed-cutoff Gamma, complex k, and electronic spin/FD
-steppers; prepared-symmetry report state is retained. Capture after a runtime
+steppers; prepared-symmetry report state is retained. A reference FD run with
+automatic band count (`scf.nbands` omitted) additionally records the growth
+mode, the current band count and the growth events after the policy record, and
+a restart resizes the orbital blocks to that count before reading them; the
+fixed-count state is unchanged. Capture after a runtime
 policy mutation rejects because v2 does not persist its runtime audit. Gamma coarse-ladder or
 external seeded continuations, external electronic trace sinks, warm imports,
 and terminal exact captures currently reject explicitly. No cross-build,

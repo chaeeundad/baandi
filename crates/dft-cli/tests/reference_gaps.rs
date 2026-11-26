@@ -262,3 +262,107 @@ energy_tol_ha=1e-12
         assert!(de <= 5e-9 && df <= 1e-6 && dr <= 1e-6);
     }
 }
+
+/// Automatic FD band count on the reference driver: scf.nbands omitted grows
+/// the count on coverage rejections (one stderr line each) and records it in
+/// reference_scf.band_count_growth; explicit scf.nbands keeps the fixed count
+/// (the cap) and reaches the same free energy.
+#[test]
+fn reference_fd_automatic_band_count() {
+    let root = directory("fd-bands");
+    let base = synthetic(&root)
+        .replace("nbands=3\n", "")
+        .replace(
+            "functional='lda-pz'",
+            "functional='lda-pw'\nallow_functional_override=true",
+        )
+        .replace(
+            "kshift=[0.5,0.5,0.5]",
+            "kshift=[0.5,0.5,0.5]\nktime_reversal=false",
+        )
+        + FD_GROWTH;
+    let invoke = |name: &str, text: &str| {
+        fs::write(root.join(format!("{name}.toml")), text).unwrap();
+        let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+        for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("BAANDI_")) {
+            c.env_remove(k);
+        }
+        let output = c
+            .current_dir(&root)
+            .args(["run", &format!("{name}.toml"), "--output-dir", name])
+            .output()
+            .unwrap();
+        let doc = fs::read(root.join(name).join("results.json"))
+            .ok()
+            .map(|b| serde_json::from_slice::<Value>(&b).unwrap());
+        (output, doc)
+    };
+    let (output, doc) = invoke("auto", &base);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let doc_auto = doc.unwrap();
+    let growth = &doc_auto["reference_scf"]["band_count_growth"];
+    assert_eq!(growth["mode"], "automatic", "{growth}");
+    assert_eq!(growth["initial_bands"], 5);
+    assert_eq!(growth["band_cap"], 12);
+    let events = growth["events"].as_array().unwrap();
+    assert!(!events.is_empty(), "{growth}");
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|l| l.starts_with("band growth:"))
+            .count(),
+        events.len(),
+        "{stderr}"
+    );
+    assert_eq!(growth["final_bands"], events.last().unwrap()["to_bands"]);
+    assert_eq!(doc_auto["occupations"]["shape"][2], growth["final_bands"]);
+    assert_eq!(doc_auto["convergence"]["converged"], true);
+    // Explicit scf.nbands: fixed count = scf.nbands, no growth.
+    let (output, doc) = invoke("explicit", &base.replace("[scf]\n", "[scf]\nnbands=12\n"));
+    assert!(output.status.success());
+    let doc_explicit = doc.unwrap();
+    let fixed = &doc_explicit["reference_scf"]["band_count_growth"];
+    assert_eq!(fixed["mode"], "fixed");
+    assert_eq!(fixed["final_bands"], 12);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("band growth:"));
+    let f = |d: &Value| d["thermodynamics"]["free_energy_ha"].as_f64().unwrap();
+    let mu = |d: &Value| {
+        d["occupations"]["chemical_potential"][0]["mu_ha"]
+            .as_f64()
+            .unwrap()
+    };
+    eprintln!(
+        "auto {growth}\nF auto {:.15} explicit {:.15} diff {:.3e}; mu diff {:.3e}",
+        f(&doc_auto),
+        f(&doc_explicit),
+        f(&doc_auto) - f(&doc_explicit),
+        mu(&doc_auto) - mu(&doc_explicit)
+    );
+    assert!((f(&doc_auto) - f(&doc_explicit)).abs() <= 5e-9);
+    assert!((mu(&doc_auto) - mu(&doc_explicit)).abs() <= 1e-7);
+    // Cap reached: the existing message plus the count reached.
+    let (output, _) = invoke("capped", &base.replace("band_cap=12", "band_cap=6"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("insufficient empty-state coverage at explicit cap")
+            && stderr.contains("automatic band count reached 6 bands; occupations.band_cap = 6"),
+        "{stderr}"
+    );
+    // Explicit scf.nbands below the needed count: the existing failure,
+    // without growth (the automatic run needed more than 5 bands).
+    let (output, _) = invoke(
+        "explicit-short",
+        &base.replace("[scf]\n", "[scf]\nnbands=5\n"),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study\")")
+            && !stderr.contains("band growth:"),
+        "{stderr}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+const FD_GROWTH: &str = "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.02\nband_cap=12\n";

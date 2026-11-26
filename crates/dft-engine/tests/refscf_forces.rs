@@ -1548,3 +1548,83 @@ mod frozen_strain {
         }
     }
 }
+
+/// Automatic FD band growth keeps the derivative contract: forces and stress
+/// of the delivered (grown) state match an explicit fixed-count run of the
+/// same model within the standard accuracy class.
+#[test]
+fn fd_band_growth_forces_stress_match_explicit_count() {
+    use dft_engine::refscf::{
+        api::{Derivatives, Request, solve},
+        electronic::{BandGrowth, Policy},
+    };
+    let screening = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
+    let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.1, 0.2, 0.3]),
+        Atom::new("Xx", [0.37, 0.43, 0.49]),
+    ];
+    let points = vec![KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let profile = Profile::from_standard_ha(5e-13).unwrap();
+    let (theta_ha, cap) = (0.02, 16);
+    let run = |bands: Option<usize>, growth: Option<BandGrowth>| {
+        let mut opts = options();
+        opts.cutoff_hartree = 3.;
+        opts.gamma_real = GammaReal::Off;
+        opts.bands = bands;
+        opts.standard = Some(dft_engine::StandardProfile {
+            threshold_ha: profile.threshold_ry / 2.,
+        });
+        let mut request = Request::new(profile, points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha,
+            band_cap: bands.unwrap_or(cap),
+        });
+        request.band_growth = growth;
+        request.derivatives = Derivatives {
+            forces: true,
+            stress: true,
+            deferred: false,
+        };
+        let input = StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        let d = solve(input, request).unwrap();
+        let forces = d.derivatives.forces.unwrap().values;
+        let stress = d.derivatives.stress.unwrap().values;
+        let r = d.run.into_electronic().unwrap();
+        assert!(r.converged && r.verification.as_ref().unwrap().passed());
+        (r, forces, stress)
+    };
+    let (explicit, f0, s0) = run(Some(cap), None);
+    let (grown, f1, s1) = run(None, Some(BandGrowth::Automatic));
+    let report = grown.band_growth.clone().unwrap();
+    let force_error = delta(f0.iter().flatten(), f1.iter().flatten());
+    let stress_error = delta(s0.iter().flatten(), s1.iter().flatten());
+    let free_error =
+        (grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha).abs();
+    println!(
+        "FD growth {} -> {} bands ({} events): |dF|={free_error:e} Ha max|dforce|={force_error:e} Ha/Bohr max|dstress|={stress_error:e} Ha/Bohr^3; max|force|={:e}",
+        report.initial_bands,
+        report.final_bands,
+        report.events.len(),
+        f0.iter().flatten().fold(0_f64, |m, v| m.max(v.abs())),
+    );
+    assert_eq!(report.initial_bands, 5);
+    assert!(!report.events.is_empty() && report.final_bands < cap);
+    assert!(free_error <= 5e-9);
+    assert!(force_error <= 1e-6);
+    assert!(stress_error <= 1e-8);
+}

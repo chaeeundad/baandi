@@ -1632,6 +1632,97 @@ pub(crate) fn start_electronic<K: Collective>(
 ) -> Result<KStartState, ScfError> {
     start_kpoints_inner(input, points, comm, true)
 }
+/// Automatic FD band growth: append columns to every k block until it holds
+/// `bands` orthonormal columns. The candidates are the start's deterministic
+/// complements, plane-wave unit vectors in ascending |k+G|^2 order (ties by G
+/// index), each orthogonalised twice against the current block (classical
+/// Gram-Schmidt with one reduction per pass); dependent candidates are skipped.
+/// The existing columns are kept bit for bit. Operator scratch grows to the
+/// start's rule of two columns per band (bounded by the basis size).
+pub(crate) fn extend_k_orbitals<K: Collective>(
+    state: &mut KStartState,
+    bands: usize,
+    comm: &K,
+) -> Result<(), ScfError> {
+    use dft_numerics::linalg::ComplexMatrix as Matrix;
+    for (block, x) in state.blocks.iter_mut().zip(&mut state.orbitals.0) {
+        let have = x.cols();
+        if bands <= have {
+            continue;
+        }
+        let total = block.basis.vectors().len();
+        if bands > total {
+            return Err(ScfError::InvalidInput(
+                "reference k start: too many bands for a k basis",
+            ));
+        }
+        let rows = block.operator.local_rows().to_vec();
+        let mut position = vec![usize::MAX; total];
+        for (r, &g) in rows.iter().enumerate() {
+            position[g] = r;
+        }
+        let mut order: Vec<_> = (0..total).collect();
+        order.sort_by(|&a, &b| {
+            block.basis.momenta()[a]
+                .norm_squared
+                .total_cmp(&block.basis.momenta()[b].norm_squared)
+                .then(a.cmp(&b))
+        });
+        let mut q = Matrix::zeros(rows.len(), have).map_err(err)?;
+        q.reserve_columns(bands).map_err(err)?;
+        q.as_mut_slice().copy_from_slice(x.as_slice());
+        let mut col = vec![C::default(); rows.len()];
+        let mut local = Vec::with_capacity(2 * bands);
+        for g in order {
+            col.fill(C::default());
+            if position[g] != usize::MAX {
+                col[position[g]] = C::new(1., 0.);
+            }
+            for _ in 0..2 {
+                local.clear();
+                for j in 0..q.cols() {
+                    let z: C = q
+                        .column(j)
+                        .iter()
+                        .zip(&col)
+                        .map(|(a, b)| a.conj() * b)
+                        .sum();
+                    local.extend([z.re, z.im]);
+                }
+                let z = sum(comm, &local)?;
+                for (j, z) in z.as_chunks::<2>().0.iter().enumerate() {
+                    let z = C::new(z[0], z[1]);
+                    for (a, b) in col.iter_mut().zip(q.column(j)) {
+                        *a -= z * b;
+                    }
+                }
+            }
+            let norm = sum(comm, &[col.iter().map(|z| z.norm_sqr()).sum()])?[0].sqrt();
+            if norm <= dft_numerics::linalg::DEPENDENCE_TOLERANCE {
+                continue;
+            }
+            let j = q.cols();
+            q.resize_columns(j + 1).map_err(err)?;
+            for (a, b) in q.column_mut(j).iter_mut().zip(&col) {
+                *a = b / norm;
+            }
+            if q.cols() == bands {
+                break;
+            }
+        }
+        if q.cols() < bands {
+            return Err(ScfError::InvalidInput(
+                "reference band growth: insufficient complement rank",
+            ));
+        }
+        block
+            .operator
+            .ensure_capacity((2 * bands).min(total))
+            .map_err(err)?;
+        *x = q;
+    }
+    Ok(())
+}
 fn start_kpoints_inner<K: Collective>(
     input: StartInput<'_>,
     points: &[dft_geometry::kpoints::KPoint],

@@ -2703,6 +2703,12 @@ impl ReferenceContext {
                 constraint: self.config.finite_constraint(),
             }),
         };
+        request.band_growth = self.config.fd_band_growth(
+            request
+                .policy
+                .as_ref()
+                .is_some_and(|p| !matches!(p, Policy::FixedSpin(_))),
+        );
         request.symmetry = self
             .config
             .prepared_symmetry()?

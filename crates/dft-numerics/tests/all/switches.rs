@@ -219,7 +219,9 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::FFT_ONE_RANK_DIRECT), Value::Choice("on"));
     assert_eq!(value(Id::K_KEPT_SLABS), Value::Choice("off"));
     assert_eq!(value(Id::K_KEPT_SLAB_MB), Value::Number(Some(1024.)));
-    assert_eq!(TABLE.len(), 81);
+    assert_eq!(value(Id::SPIN_FD_START_KEPT_HX), Value::Choice("on"));
+    assert_eq!(value(Id::SPIN_FD_REDO_KEPT_HX), Value::Choice("on"));
+    assert_eq!(TABLE.len(), 83);
 }
 
 #[test]

@@ -1759,9 +1759,11 @@ pub struct KBlock {
 }
 pub struct KStartState {
     pub initial_h_columns: usize,
-    /// GK10B (`K_START_KEPT_HX`): per k, the start Ritz orbitals X of the
-    /// first channel, their H X (HQ C) and the operator potential it was
-    /// applied with; the k driver seeds its kept HX with them so map 1 does
+    /// GK10B (`K_START_KEPT_HX`; GF1 `SPIN_FD_START_KEPT_HX` for the spin/FD
+    /// start, every channel whose start potential equals the first's, FD
+    /// buffer columns appended by `extend_k_orbitals`): per k, the start Ritz
+    /// orbitals X, their H X (HQ C) and the operator potential it was
+    /// applied with; the driver seeds its kept HX with them so map 1 does
     /// not apply H to the start again. The kept cache hits only while the
     /// orbitals are still bit-identical to X (a seed or ladder replaces
     /// them). Empty otherwise.
@@ -1881,11 +1883,29 @@ pub(crate) fn extend_k_orbitals<K: Collective>(
     // GK9: a pooled rank holds whole k blocks; their sums run on the pool.
     let layout = crate::refscf::k_pool::KPool::comm_of(state.pool.as_ref());
     let comm = &crate::refscf::k_pool::KComm::new(comm, &layout);
-    for (block, x) in state.blocks.iter_mut().zip(&mut state.orbitals.0) {
+    for (k, (block, x)) in state
+        .blocks
+        .iter_mut()
+        .zip(&mut state.orbitals.0)
+        .enumerate()
+    {
         let have = x.cols();
         if bands <= have {
             continue;
         }
+        // GF1 (`SPIN_FD_START_KEPT_HX`): a start H X kept for exactly these
+        // columns is extended by H applied to the appended columns, with the
+        // operator still holding the start potential it was formed with.
+        let extend_hx = state.start_hx.get(k).is_some_and(|(sx, shx, v)| {
+            sx.rows() == x.rows()
+                && sx.cols() == have
+                && shx.cols() == have
+                && block.operator.owned_epoch() == Some(1)
+                && v.len() == block.operator.plane_points()
+                && sx.as_slice().iter().zip(x.as_slice()).all(|(a, b)| {
+                    a.re.to_bits() == b.re.to_bits() && a.im.to_bits() == b.im.to_bits()
+                })
+        });
         let total = block.basis.vectors().len();
         if bands > total {
             return Err(ScfError::InvalidInput(
@@ -1955,6 +1975,27 @@ pub(crate) fn extend_k_orbitals<K: Collective>(
             .operator
             .ensure_capacity((2 * bands).min(total))
             .map_err(err)?;
+        if extend_hx {
+            let rows = q.rows();
+            let mut appended = Matrix::zeros(rows, bands - have).map_err(err)?;
+            appended
+                .as_mut_slice()
+                .copy_from_slice(&q.as_slice()[rows * have..]);
+            let mut h_appended = Matrix::zeros(rows, bands - have).map_err(err)?;
+            block
+                .operator
+                .apply_block(comm, &appended, &mut h_appended)
+                .map_err(err)?;
+            let (sx, shx, _) = &mut state.start_hx[k];
+            let mut hx = Matrix::zeros(rows, bands).map_err(err)?;
+            hx.as_mut_slice()[..rows * have].copy_from_slice(shx.as_slice());
+            hx.as_mut_slice()[rows * have..].copy_from_slice(h_appended.as_slice());
+            *shx = hx;
+            sx.clone_from(&q);
+        } else if k < state.start_hx.len() {
+            // Stale for the enlarged block: never seeded.
+            state.start_hx.clear();
+        }
         *x = q;
     }
     Ok(())
@@ -2095,7 +2136,12 @@ fn start_kpoints_inner<K: Collective>(
         q_max,
         &db,
         commons,
-        !general_occupations,
+        // GK10B (fixed occupations) / GF1 (spin/FD): keep the start H X.
+        dft_numerics::switches::on(if general_occupations {
+            dft_numerics::switches::Id::SPIN_FD_START_KEPT_HX
+        } else {
+            dft_numerics::switches::Id::K_START_KEPT_HX
+        }),
         pool,
     )
 }
@@ -2418,10 +2464,9 @@ fn finish_kpoints<K: Collective>(
     let mut blocks: Vec<Vec<KBlock>> = (0..channels).map(|_| Vec::new()).collect();
     let mut orbitals: Vec<Vec<Matrix>> = (0..channels).map(|_| Vec::new()).collect();
     let mut initial_h_columns = 0;
-    // Only the fixed-occupation k driver consumes it (`start_kpoints`).
-    let keep_start_hx = keep_hx
-        && channels == 1
-        && dft_numerics::switches::on(dft_numerics::switches::Id::K_START_KEPT_HX);
+    // The caller decided (switch K_START_KEPT_HX or SPIN_FD_START_KEPT_HX).
+    let keep_start_hx = keep_hx;
+    let mut same_start_potential = vec![true; channels];
     let mut start_hx = Vec::new();
     let memo = dft_numerics::switches::on(dft_numerics::switches::Id::K_START_MEMO);
     let nl_rows_only = dft_numerics::switches::on(dft_numerics::switches::Id::K_NL_TABLE_MEMO);
@@ -2581,7 +2626,19 @@ fn finish_kpoints<K: Collective>(
                 }
                 op.set_owned_potential(&potential, 1).map_err(err)?;
                 ops.push(op);
-                start_potential = potential;
+                // H Q below is applied with the first channel's operator; a
+                // further channel shares its H X only if its potential has the
+                // same bits (GF1, every local k).
+                if c == 0 {
+                    start_potential = potential;
+                } else if potential.len() != start_potential.len()
+                    || potential
+                        .iter()
+                        .zip(&start_potential)
+                        .any(|(a, b)| a.to_bits() != b.to_bits())
+                {
+                    same_start_potential[c] = false;
+                }
             }
             drop(nl);
             let common = &mut commons[0];
@@ -2791,6 +2848,19 @@ fn finish_kpoints<K: Collective>(
         built?;
     }
     commons[0].setup.record("complex_k_atomic_starts", clock);
+    // GF1: a further collinear channel shares the first channel's start H X
+    // when its start potential had the same bits at every local k (then its
+    // operator is the same H); channel 0 takes the original.
+    let mut channel_hx: Vec<_> = (0..channels)
+        .map(|c| {
+            if c > 0 && same_start_potential[c] {
+                start_hx.clone()
+            } else {
+                Vec::new()
+            }
+        })
+        .collect();
+    channel_hx[0] = std::mem::take(&mut start_hx);
     let mut out = Vec::with_capacity(channels);
     for (c, ((mut common, blocks), orbitals)) in
         commons.into_iter().zip(blocks).zip(orbitals).enumerate()
@@ -2798,11 +2868,7 @@ fn finish_kpoints<K: Collective>(
         common.orbitals = RealMatrix::zeros(0, bands).map_err(err)?;
         out.push(KStartState {
             initial_h_columns: if c == 0 { initial_h_columns } else { 0 },
-            start_hx: if c == 0 {
-                std::mem::take(&mut start_hx)
-            } else {
-                Vec::new()
-            },
+            start_hx: std::mem::take(&mut channel_hx[c]),
             common,
             blocks,
             orbitals: KOrbitals(orbitals),

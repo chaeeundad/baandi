@@ -4721,3 +4721,74 @@ dev08 request: GeTe and IrI3 MPI8 pooled, `run` and `run --observe`, energy-only
 present, no `complex_orbital_gather`), `BAANDI_M2_LAZY_RESULT` consulted=true, density hash equal to gen56.
 Lesson: an opt-out flag guarded by a broad "observe means needed" rule silently disabled the optimization in the very
 mode the benchmark uses; assert the switch's consulted flag in a CLI-level test, not only at engine level.
+
+## GF1-FD-PATH — spin/FD k path: pool layout report, GK10B start/redo kept HX and GK17 slabs ported (2026-11-27; rounding class, dev08 pending)
+
+Premise (relayed dev08 MPI8 gen57, MP metals, `reference_spin_fd_v1`): `parallel.k_concurrency` 1 and model
+`mpi_stick_rows` on Ru 244 k, Au 366 k, Hf 156 k, Sr 75 k, read as "pools do not engage on the FD path"; Au (366 k,
+npw about 1375, 14 bands) SCF engine 15.0 s against QE electrons 10.6 s, 9 maps against QE 7, map 1 with twice the
+calls (first-iteration redo).
+Finding 1 (C, Mac): the pools DID engage. The spin/FD result writer had `"k_concurrency":1,"g_vectors":"distributed"`
+as constants; the `REFSCF_K_POOLS` switch entry with `fallback_reason` null is the engine's "pools" path note (every
+distributed fallback records a reason). Fix: `run::k_pool_layout` derives `parallel.k_concurrency` (= npool),
+`parallel.k_pools` {path, fallback_reason, npool, ranks_per_pool} and `parallel.g_vectors`
+(`whole_k_per_rank` / `distributed_within_pool` / `distributed`) from the path note and the engine communicator; the
+same three fields are added to the fixed-occupation `parallel` block. CLI test
+`energy_only_pooled_run_delivers_orbitals_lazily` now runs the FD arm with `auto` and asserts path `pools`,
+k_concurrency 2, npool 2, `whole_k_per_rank` (fixed arm: path note). The model string `mpi_stick_rows` is unchanged
+(consumers parse it); read it together with `k_pools`.
+Finding 2 (C): item-by-item k_map.rs against electronic_map.rs. Already shared (solver/operator layer): GK3 CDAV reuse,
+GK10/GK10B border Gram/factor/stream, GK17 one-rank direct sticks and known-finite GEMMs, GK9/GK9B pools, GK18B lazy
+delivery. Missing and ported (table 81 -> 83):
+- `SPIN_FD_START_KEPT_HX` (default on, rounding class): the spin/FD start keeps H X = (H Q) C of its Ritz orbitals
+  (`finish_kpoints` now takes the caller's decision; H Q is applied with channel 0's operator and the potential stored
+  is channel 0's, i.e. unchanged for one channel); a further collinear channel shares it only when its start potential
+  has the same bits at every local k; `extend_k_orbitals` (FD buffer columns) appends H applied to the new columns
+  while the operator still holds the start potential (epoch 1), otherwise the entry is dropped; the driver seeds every
+  channel's kept HX before map 1 (dropped on a restored run).
+- `SPIN_FD_REDO_KEPT_HX` (default on, rounding class): the first-iteration redo keeps the coarse solve's X/HX (same
+  input potential; `prepare` skips the transforms on a zero change) instead of invalidating.
+- `K_KEPT_SLABS` (default off, bit-identical) now also on the spin/FD map: the density pass stores the leading
+  retained bands' planes (budget shared over channels x local k), `KeptHx::mark_slabs` marks the entry retained before
+  the density pass.
+Not ported: GK4 lean energy (on the pooled Au shape the per-map nonlocal band energies are an 18-projector x 1375-row x
+14-band GEMM per k and the output-field XC/Hartree is one distributed grid pass: well below 1 % of a map; the
+fixed-occupation lean audit would need a deferred completion at stop/verification/max-iteration for an estimated
+< 1 % gain), GK10B `K_FIRST_EMPTY_RULE` (FD occupations are unknown before the first solve), per-map batching of the
+per-k residual reduction (only matters without pools or with multi-rank pools; `auto` gives one rank per pool on
+all four metals).
+Evidence (Mac, O/C; synthetic unless stated, never QE evidence):
+- Bit identity vs main 43ae80bd (`k_setup_fingerprint`, 60 lines: scalar strict/standard x P = 1/2/3 x pools off/on,
+  fixed spin and FD x P = 1/2 x pools off/on): branch with both ports off identical (`diff` empty); ports off +
+  `K_KEPT_SLABS=on` identical; defaults: the 48 scalar lines identical, the 12 spin/FD lines within 5.7e-14 Ha, equal
+  map counts.
+- `dft-engine/tests/refscf_fd_kept.rs`: FD skewed MP222 (8 k), FD two-atom elongated Gamma-in-list (3 k), fixed spin
+  MP222, strict 1e-12 Ry and standard, P = 1 serial and pooled P = 2, 3, 8: |F(on) - F(off)| <= 6.5e-14 Ha,
+  |F(on, P) - F(P=1)| <= 5.1e-14 Ha, equal map counts in all 24 rows; map-1 H columns 468 -> 340, 250 -> 202,
+  592 -> 528; total H 1779 -> 1650, 1057 -> 1009, 2532 -> 2468 (strict rows). Slabs on (4096 and 1 MiB budgets) =
+  slabs off bit for bit (FD and spin, P = 1, 2); fixed-P runs bit-reproducible; automatic band growth (From(2),
+  serial and pooled P = 2) grows once, converges, |dF| <= 7.4e-14 Ha against ports off.
+- Real PseudoDojo (`real_metals_redo`, ignored, `DFT_NC_DIR`): fcc Al (10 Ha) and Au (18 Ha), FD 0.0073 Ha, shifted
+  3x3x3 (27 k), P = 1 and pooled P = 3, both runs redo map 1: map-1 H columns Al 1872 (off) -> 1548 (start only) ->
+  1224 (both), Au 2340 -> 1854 -> 1368; total H Al 4501 -> 3852 (-14 %), Au 7990 -> 7018 (-12 %); |dF| <= 7.7e-13 Ha,
+  equal maps.
+- `refscf_k_pools` full matrix incl. ignored (scalar 264 rows, FD/spin P = 2, 3, 8 with the ports on): pass.
+- `dft-cli/tests/reference_stalls.rs` (rounding-dependent fixed-sector stall fixture, already pinning GK10/GK16
+  switches) moved past its stall with the start port on; its input now also pins `spin_fd_start_kept_hx='off'`.
+  `scripts/check.sh` (CHECK_SCCACHE=0): exit 0, 1001 passed, 0 failed, 236 ignored.
+- CLI Au (fcc 4.078 A, PseudoDojo Au 19 e, 80 Ry = npw about 1375 like dev08, 0.2 eV FD, cap 14, shifted 4x4x4 = 32 k,
+  serial = one pool rank's share, verify off): map-1 H columns 2844 -> 1692, total 8481 -> 7329 (-13.6 %), 7 maps both,
+  |dF| 3.5e-12 Ha. Wall not usable (host load 21-45).
+Finding 3 (map count, R/O): Au on the Mac stops after 7 maps; at map 6 dr2 = 1.5e-9 Ry is below the 1e-8 Ry threshold
+but the electronic driver's `STANDARD_RESIDUAL_GUARD` (sum w f |r|^2 = 7.8e-9 against threshold/2 = 5e-9) refuses
+the stop. The fixed-occupation k driver and QE have no such guard. With `BAANDI_STANDARD_RESIDUAL_GUARD=off`: 6 maps,
+H 7329 -> 5934 (-19 %), delivered |F - F_tight| 1.4e-9 Ha (tight run at 5e-13 Ha; guard on 6.9e-11 Ha), inside the
+standard 5e-9 Ha class. This is a stop-rule policy question (decision 2026-11-11 item 3: match QE's delivered
+accuracy), not changed here; dev08 should measure it on the metals.
+dev08 request (MPI8 socket 0, one thread per rank, verify off, profile on in both arms, one run per arm): Au, Ru, Hf,
+Sr with A = defaults, B = `BAANDI_SPIN_FD_START_KEPT_HX=off BAANDI_SPIN_FD_REDO_KEPT_HX=off` (= gen57 arithmetic),
+C = A + `BAANDI_K_KEPT_SLABS=on`, D = A + `BAANDI_STANDARD_RESIDUAL_GUARD=off` (maps, F against a tight run);
+report `parallel.k_pools`, maps, map-1 calls and H columns, SCF engine seconds, peak RSS (C). GeTe/B12/IrI3 and si64
+must be bit-identical to gen57 (scalar path untouched).
+Lesson: a constant in a result writer ("k_concurrency":1) was read as the engine's layout; report a layout from the
+decision the engine recorded, and check the switch's path note before concluding a path did not engage.

@@ -89,6 +89,13 @@ impl KeptHx {
             e.slab_bands = slab_bands;
         }
     }
+    /// GF1: the density pass of the spin/FD map stored the leading
+    /// `slab_bands` planes of k's retained x (retained before the density).
+    pub fn mark_slabs(&mut self, k: usize, slab_bands: usize) {
+        if let Some(Some(e)) = self.entries.get_mut(k) {
+            e.slab_bands = slab_bands;
+        }
+    }
     pub fn preserve_input(&mut self, p: bool) {
         self.preserve = p;
     }

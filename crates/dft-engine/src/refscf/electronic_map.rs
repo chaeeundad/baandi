@@ -787,14 +787,24 @@ pub(super) fn evaluate<K: Collective>(
                     nl.iter().zip(&f).map(|(a, b)| a * b).sum::<f64>(),
                 ));
                 let mut plane_density = vec![0.; op.plane_points()];
-                op.band_density_sum(
+                // GF1 port of GK17 `K_KEPT_SLABS` (default off): keep the
+                // planes of the leading retained bands for the next map's
+                // kept-HX update of this channel and k (the budget is shared
+                // by every channel's k; rank-independent band count).
+                let pp = op.plane_points();
+                let (slab, slab_bands) =
+                    kept[s].slab_sink(k, ns * nk, bands, 16 * points.div_ceil(kc.size()), pp);
+                op.band_density_sum_keeping(
                     &kc,
                     &block.orbitals,
                     &f,
                     cell.volume_bohr3(),
                     &mut plane_density,
+                    slab,
+                    slab_bands,
                 )
                 .map_err(numerical)?;
+                kept[s].mark_slabs(k, slab_bands);
                 if let (Some(ex), Some(pool)) = (exchange.as_mut(), pool.as_ref()) {
                     ex.add(pool, s, k, op.first_axis(), &plane_density)?;
                 } else {

@@ -371,9 +371,13 @@ table! {
     FFT_ONE_RANK_DIRECT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GK17: the one-rank stick FFT of a complex k operator (every pooled k operator, every serial k run; the real Gamma operator keeps the transpose path) runs its stick transforms in per-vector batch buffers and reads/writes the middle stage there directly, without packing into the transpose send buffer, the self-alltoall copy and the unpack into the stick buffer; rustfft lanes only (vendor lanes keep the transpose path); bit-identical; off restores the transpose path";
     K_KEPT_SLABS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "GK17 (plan GK15): the fixed-occupation reference k map keeps the real-space planes psi_b(r) that its density pass computes for the leading bands of each k (bounded by K_KEPT_SLAB_MB per rank), and the next map's kept-HX update reuses them, so (V_new - V_old) psi_b needs only the forward transform; bit-identical; costs the slab memory; off = inverse and forward transform per band";
+        "GK17 (plan GK15; GF1: also the spin/FD map, budget shared by its channels): the fixed-occupation reference k map keeps the real-space planes psi_b(r) that its density pass computes for the leading bands of each k (bounded by K_KEPT_SLAB_MB per rank), and the next map's kept-HX update reuses them, so (V_new - V_old) psi_b needs only the forward transform; bit-identical; costs the slab memory; off = inverse and forward transform per band";
     K_KEPT_SLAB_MB: Kind::Number { default: Some(1024.), valid: |v| (0. ..=1048576.).contains(&v) && v.fract() == 0. }, "1024", "integer MiB 0..1048576",
         "GK17: per-rank budget of K_KEPT_SLABS in MiB, split evenly over the rank's k points in k order (bands per k = min(bands, budget / (k count x plane bytes))); 0 keeps no slab";
+    SPIN_FD_START_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GF1 (port of GK10B K_START_KEPT_HX to the spin/FD driver): the reference spin/FD k start keeps H X of its Ritz orbitals (H Q C, one GEMM; the FD buffer columns appended after the start get one H application each) and the driver seeds every channel's kept HX with it, so map 1 does not apply H to the start orbitals again (potential change corrected exactly); rounding class; off applies H in map 1";
+    SPIN_FD_REDO_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GF1 (port of GK10B K_REDO_KEPT_HX to the spin/FD driver): the first-iteration redo starts from the coarse solve's kept X and HX (same input potential, zero change, no transforms) instead of applying H again; rounding class; off invalidates the kept HX before the redo";
 }
 
 struct Resolved {

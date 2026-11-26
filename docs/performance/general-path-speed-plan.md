@@ -282,3 +282,54 @@ stored with sha256, accuracy against the case's strict reference.
 - QE's pool default and tolerance come from the notes; QE's actual layout in
   the relayed runs is unknown.
 - The Mac quadrature timing is an observation on a different CPU.
+
+## 10. After GK16: where the remaining SCF gap is (GK17, 2026-11-27)
+
+Inputs: relayed dev08 MPI8 gen52 (pools auto, energy-only, verification inside the SCF span) and QE 7.6 clocks of
+IrI3 (R); Mac `sample` profiles of one pool rank's share run serially (O; with pools every rank solves whole k
+points with one-rank operators, so a serial run of the same per-k shapes is the pooled per-rank workload); code (C).
+Labels as in the header.
+
+Target metric (verify off, R, approximate: verification removed by its relayed duration):
+
+| case | BAANDI wall - verification | QE best | ratio | 0.90 x QE |
+|---|---|---|---|---|
+| GeTe (260 k, 48^3, 19 bands) | 41.3 - 4.9 = 36.4 s | 33.6 s (-nk 4) | 1.08 | 30.2 s |
+| B12 (172 k, 54^3, 22 bands) | 90.6 - 18 = 72.6 s | 86.0 s (-nk 2) | 0.84 | 77.4 s |
+| IrI3 (51 k, 72^3, 42 bands) | 127 - 12 = 115 s | 124 s (nk 1) | 0.93 | 111.6 s |
+
+More work or dearer work? IrI3 is the only case with QE clocks (R). QE: 14 iterations, 765 Davidson calls
+(51 k x 15), h_psi 2981 calls; fftw 202000 calls = 2 per H column + 1 per band in sum_band, so about
+(202000 - 51 x 42 x 14) / 2 = 86k H columns (E). BAANDI: 12 maps, 42.7k H columns (0.50x QE) plus the kept-HX
+update (2 FFTs per band per k per map, no nonlocal), FFTs about 51 x 12 x (2 x 70 + 2 x 42 + 42) = 163k (0.81x QE).
+Yet the SCF time per k-iteration is the same: 106 x 8 / (51 x 12) = 1.39 core-s (BAANDI) against
+121.2 x 8 / (51 x 14) = 1.36 (QE). Part is the pool imbalance (the critical rank holds 7 of 51 k: 7 / 6.375 = 1.10);
+the rest is cost per FFT / per column: at QE's own unit costs (fftw 54.27 s x 8 / 202000 = 2.15 ms core per 72^3
+transform; calbec + add_vuspsi 14.84 s x 8 / 86k = 1.38 ms per column) the critical rank would spend about 48 s in
+FFTs and 8 s in nonlocal; adding QE-like Davidson algebra (20 s) and density (16 s) gives about 90 s against about
+106 s. So the gap is cost per unit of work, not more H columns (GeTe: 7 maps against QE's 9; map 1 holds 29 % of
+the H columns and 44 % of the Davidson iterations, as QE's redo structure).
+
+Mac profiles (O, release, `sample` 1 ms, real PseudoDojo, explicit generic k, verify off):
+
+| share of k-map time | GeTe-shaped, 33 k (12086 samples) | IrI3-shaped, 3 k (15299 samples) |
+|---|---|---|
+| FFT kernels (rustfft) | 63 % | 43 % |
+| FFT data movement (gathers, scatters, clears, self-transpose copy) | 15 % | 12 % |
+| GEMM (nonlocal + Davidson; faer on the Mac, MKL zgemm on dev08) | 14 % | 37 % |
+| by phase: H apply / kept-HX update / density / Davidson rotate+Gram | 48 / 23 / 15 / 10 % | 44 / 19 / 10 / 20 % |
+
+Findings: (1) the kept-HX update is a full inverse + forward FFT of every band of every k in every map (the same FFT
+count as QE's start-of-call h_psi) and costs 19-23 %; its inverse half recomputes psi_b(r) that the density pass of
+the previous map already formed. (2) With one rank per k the stick FFT still packed its sticks into the transpose
+buffer, copied it to itself through the serial alltoall and unpacked it (C). (3) The projector block (rows x 2 x
+projectors, 51 MB per IrI3 k) was scanned for finiteness twice per H application although it is checked at
+construction and immutable (C). (4) The FFT kernel itself dominates GeTe; QE's MKL/FFTW kernels may be faster per
+transform than rustfft on dev08 (unmeasured; `BAANDI_M2_FFT=mkl` reaches the k operators, `FFT_KERNEL_BY_LENGTH`
+does not, because k operators plan private lanes). (5) IrI3's pool imbalance (51 k on 8 ranks) is about 9 %;
+removing it needs GK9 stage 2 (sub-communicators for the remainder k).
+
+Implemented in GK17 (ledger GK17-SCF-GAP): `K_KEPT_SLABS` + `K_KEPT_SLAB_MB` (kept psi_b(r) planes, plan item GK15,
+bit-identical, default off pending dev08 RSS), `FFT_ONE_RANK_DIRECT` (bit-identical, default on), projector scan
+skip (bit-identical, no switch). Next, by expected gain: dev08 A/B of these plus `M2_FFT=mkl`; GK9 stage 2 for the
+remainder k (IrI3); kept slabs on the spin/FD path (`electronic_map`); GK11 generalized Ritz k start (setup).

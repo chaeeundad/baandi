@@ -5041,3 +5041,15 @@ k projector factors (bit-identical); (4) k operators keep V(r) on owned planes o
 (bit-identical; 0.43-0.46 GB per rank on B12/GeTe without pools at MPI8 on Linux). Bit-identity: 60 fingerprints
 equal to main 69107e9e with the table switch off. Mac (O): IrI3 P=1 8 k setup 8.75 -> 2.76 s, P=8 pools 24 k
 3.36 -> 1.77 s. dev08 A/B pending (GeTe, B12, IrI3; si64 unchanged). Details: attempts ledger GK16-SETUP-TAIL.
+
+## GK17-SCF-GAP — k-path SCF gap decomposition; kept psi(r) slabs and one-rank direct sticks (2026-11-27)
+
+Gap decomposition (plan section 10): IrI3 BAANDI does 0.50x QE's H columns and 0.81x its FFTs but the same SCF
+core-seconds per k-iteration; the gap is cost per unit of work plus a 10 % pool imbalance (7 of 51 k on the critical
+rank). Mac profiles of one pool rank's share: FFT 55-78 %, kept-HX update 19-23 %. Changes, all bit-identical:
+`BAANDI_K_KEPT_SLABS` (default off, budget `BAANDI_K_KEPT_SLAB_MB` 1024): the kept-HX update reuses the density
+pass's psi_b(r) planes, forward transform only; `BAANDI_FFT_ONE_RANK_DIRECT` (default on): one-rank complex k FFTs
+without the self-transpose copies; projector/x finiteness scans skipped in the nonlocal GEMMs. Mac (O): slabs
+GeTe-shaped 33 k -10.6 %, B12-shaped 22 k -7.9 %, IrI3-shaped -5.9 % (slab memory 0.65-1.2 GB per rank); direct
+sticks B12 -3.4 %, GeTe -0.7 %. Evidence: 60-run bit matrix (P = 1/3, pools on/off, verification on/off), FFT unit
+test. dev08 A/B pending. Details: attempts ledger GK17-SCF-GAP.

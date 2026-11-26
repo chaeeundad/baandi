@@ -555,6 +555,22 @@ pub struct DistributedPairFft {
     kept_fuse: bool,
     holes: Option<[HoleClear; 3]>,
     fused_rows: Option<FusedRows>,
+    /// GK17 `FFT_ONE_RANK_DIRECT`: one-rank plans with rustfft lanes keep the
+    /// stick domain of every batch vector in `input` (inverse direction) and
+    /// `output` (forward direction), `block` complex values per vector in the
+    /// layout of a one-rank transpose block ([stick][first-axis index]). The
+    /// middle stage reads and writes them directly; `send`/`recv` stay empty.
+    direct: Option<DirectSticks>,
+}
+
+/// Per-vector stick buffers of a one-rank plan (GK17). With one rank the
+/// transpose block of vector t is the stick buffer itself (max_sticks =
+/// local sticks, max_planes = n0), so the values the transpose path moves
+/// through `send` and `recv` are exactly these; input and output stay
+/// separate so a kept-plane batch never reads a slot it already wrote.
+struct DirectSticks {
+    input: Vec<C>,
+    output: Vec<C>,
 }
 
 impl DistributedPairFft {
@@ -569,6 +585,20 @@ impl DistributedPairFft {
         Self::with_lanes(shape, indices, rank, ranks, vendor)
     }
 
+    /// GK17: [`Self::new`] for a consumer that accepts the one-rank direct
+    /// stick buffers (`FFT_ONE_RANK_DIRECT`; the complex k operators). Same
+    /// bits as `new`; with one rank and rustfft lanes the transpose stages
+    /// (profile stages 2, 3, 13, 14) do not run.
+    pub fn new_direct(
+        shape: [usize; 3],
+        indices: &[[usize; 3]],
+        rank: usize,
+        ranks: usize,
+    ) -> Result<Self, DistFftError> {
+        let vendor = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_FFT) == "mkl";
+        Self::build(shape, indices, rank, ranks, vendor, true)
+    }
+
     /// Plan with rustfft lanes (`vendor` false) or MKL DFTI batch lanes (`vendor`
     /// true on an MKL build; a pure build has none and uses rustfft, bit-identical).
     pub fn with_lanes(
@@ -577,6 +607,17 @@ impl DistributedPairFft {
         rank: usize,
         ranks: usize,
         vendor: bool,
+    ) -> Result<Self, DistFftError> {
+        Self::build(shape, indices, rank, ranks, vendor, false)
+    }
+
+    fn build(
+        shape: [usize; 3],
+        indices: &[[usize; 3]],
+        rank: usize,
+        ranks: usize,
+        vendor: bool,
+        allow_direct: bool,
     ) -> Result<Self, DistFftError> {
         let total = shape
             .iter()
@@ -657,7 +698,23 @@ impl DistributedPairFft {
         } else {
             None
         };
+        // GK17: one rank, rustfft lanes (vendor lanes may depend on buffer
+        // placement, so they keep the transpose path).
+        let direct = (allow_direct
+            && ranks == 1
+            && !lanes.is_vendor()
+            && config.on(dft_numerics::switches::Id::FFT_ONE_RANK_DIRECT))
+        .then(|| DirectSticks {
+            input: vec![C::default(); block],
+            output: vec![C::default(); block],
+        });
+        let transpose = if direct.is_some() {
+            0
+        } else {
+            2 * block * ranks
+        };
         Ok(Self {
+            direct,
             fused_rows,
             holes,
             shape,
@@ -677,8 +734,8 @@ impl DistributedPairFft {
             slab: vec![C::default(); n[1] * n[2]],
             planes,
             occupied,
-            send: vec![0.; 2 * block * ranks],
-            recv: vec![0.; 2 * block * ranks],
+            send: vec![0.; transpose],
+            recv: vec![0.; transpose],
             lanes,
             profile: dft_numerics::real::fft_profile::Probe::new(n),
             kept_fuse: dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KEPT_FUSE),
@@ -712,6 +769,10 @@ impl DistributedPairFft {
             slab: vec![C::default(); self.slab.len()],
             send: vec![0.; self.send.len()],
             recv: vec![0.; self.recv.len()],
+            direct: self.direct.as_ref().map(|d| DirectSticks {
+                input: vec![C::default(); d.input.len()],
+                output: vec![C::default(); d.output.len()],
+            }),
             lanes: Lanes::Shared(lanes.clone()),
             profile: dft_numerics::real::fft_profile::Probe::new(self.n),
             kept_fuse: self.kept_fuse,
@@ -802,7 +863,13 @@ impl DistributedPairFft {
     /// Grow the transpose buffers to batches of `np` vectors (no-op once grown).
     fn reserve_batch(&mut self, np: usize) {
         let len = 2 * self.block * self.ranks * np;
-        if self.send.len() < len {
+        if let Some(d) = self.direct.as_mut() {
+            let len = self.block * np;
+            if d.input.len() < len {
+                d.input.resize(len, C::default());
+                d.output.resize(len, C::default());
+            }
+        } else if self.send.len() < len {
             self.send.resize(len, 0.);
             self.recv.resize(len, 0.);
         }
@@ -844,6 +911,12 @@ impl DistributedPairFft {
         mut coefficient: impl FnMut(usize, usize) -> C,
     ) -> Result<(), DistFftError> {
         self.reserve_batch(np);
+        if self.direct.is_some() {
+            if comm.size() != self.ranks || comm.rank() != self.rank {
+                return Err(MpiError::Shape("communicator differs from the plan").into());
+            }
+            return self.begin_direct(np, coefficient);
+        }
         let (nx, mp) = (self.n[0], self.max_planes);
         for t in 0..np {
             let mark = self.profile.start();
@@ -901,6 +974,47 @@ impl DistributedPairFft {
             );
         }
         result
+    }
+
+    /// GK17 one-rank form of the stick step: clear, scatter and the inverse
+    /// first-axis transforms run in vector t's own input block, which holds
+    /// exactly the values the transpose path would deliver to `recv` (same
+    /// operands, same transform calls on equal-length buffers).
+    fn begin_direct(
+        &mut self,
+        np: usize,
+        mut coefficient: impl FnMut(usize, usize) -> C,
+    ) -> Result<(), DistFftError> {
+        let block = self.block;
+        let d = self.direct.as_mut().expect("direct sticks");
+        for t in 0..np {
+            let sticks = &mut d.input[t * block..(t + 1) * block];
+            let mark = self.profile.start();
+            let clear_points = if let Some(holes) = &self.holes {
+                holes[0].clear(sticks);
+                holes[0].points
+            } else {
+                sticks.fill(C::default());
+                sticks.len()
+            };
+            for (g, &i) in self.scatter.iter().enumerate() {
+                sticks[i] = coefficient(t, g);
+            }
+            self.profile.finish(
+                mark,
+                0,
+                self.scatter.len(),
+                16 * clear_points + 32 * self.scatter.len(),
+                None,
+            );
+            if !sticks.is_empty() {
+                let mark = self.profile.start();
+                self.lanes.run(0, true, sticks)?;
+                self.profile
+                    .finish(mark, 1, sticks.len(), 32 * sticks.len(), Some(0));
+            }
+        }
+        Ok(())
     }
 
     /// Step 2 of G->r for owned plane i: 2D transform; result in `plane()`.
@@ -977,9 +1091,17 @@ impl DistributedPairFft {
             self.middle.fill(C::default());
             self.middle.len()
         };
-        for &(m, owner, off) in &self.occupied {
-            let k = 2 * ((owner * np + t) * self.block + off + i);
-            self.middle[m] = C::new(self.recv[k], self.recv[k + 1]);
+        if let Some(d) = &self.direct {
+            // One rank: owner 0, so the transpose offset is t * block + off + i.
+            let base = t * self.block + i;
+            for &(m, _, off) in &self.occupied {
+                self.middle[m] = d.input[base + off];
+            }
+        } else {
+            for &(m, owner, off) in &self.occupied {
+                let k = 2 * ((owner * np + t) * self.block + off + i);
+                self.middle[m] = C::new(self.recv[k], self.recv[k + 1]);
+            }
         }
         self.profile.finish(
             mark,
@@ -1005,10 +1127,17 @@ impl DistributedPairFft {
                 .finish(mark, 11, self.middle.len(), 32 * self.middle.len(), Some(1));
         }
         let mark = self.profile.start();
-        for &(m, owner, off) in &self.occupied {
-            let k = 2 * ((owner * np + t) * self.block + off + i);
-            self.send[k] = self.middle[m].re;
-            self.send[k + 1] = self.middle[m].im;
+        if let Some(d) = self.direct.as_mut() {
+            let base = t * self.block + i;
+            for &(m, _, off) in &self.occupied {
+                d.output[base + off] = self.middle[m];
+            }
+        } else {
+            for &(m, owner, off) in &self.occupied {
+                let k = 2 * ((owner * np + t) * self.block + off + i);
+                self.send[k] = self.middle[m].re;
+                self.send[k + 1] = self.middle[m].im;
+            }
         }
         self.profile.finish(
             mark,
@@ -1086,6 +1215,34 @@ impl DistributedPairFft {
         np: usize,
     ) -> Result<(), DistFftError> {
         let ll = self.scatter.len();
+        if let Some(d) = self.direct.as_mut() {
+            // GK17 one rank: the forward middle stage already wrote vector t's
+            // stick domain into its output block (the values `recv` would hold
+            // after the self-transpose); transform and scale it in place.
+            let block = self.block;
+            if comm.size() != self.ranks || comm.rank() != self.rank {
+                return Err(MpiError::Shape("communicator differs from the plan").into());
+            }
+            if out.len() != ll * np || d.output.len() < block * np {
+                return Err(FftError::IncompatibleArray.into());
+            }
+            for t in 0..np {
+                let sticks = &mut d.output[t * block..(t + 1) * block];
+                if !sticks.is_empty() {
+                    let mark = self.profile.start();
+                    self.lanes.run(0, false, sticks)?;
+                    self.profile
+                        .finish(mark, 15, sticks.len(), 32 * sticks.len(), Some(0));
+                }
+                let mark = self.profile.start();
+                for (o, &i) in out[t * ll..(t + 1) * ll].iter_mut().zip(&self.scatter) {
+                    *o = sticks[i] / self.total as f64;
+                }
+                self.profile
+                    .finish(mark, 16, self.scatter.len(), 32 * self.scatter.len(), None);
+            }
+            return Ok(());
+        }
         if out.len() != ll * np || self.send.len() < 2 * self.block * self.ranks * np {
             return Err(FftError::IncompatibleArray.into());
         }
@@ -1273,13 +1430,53 @@ impl DistributedPairFft {
         planes: &[C],
     ) -> Result<(), DistFftError> {
         let _profile_scope = self.profile.apply_scope();
+        if potential.len() != self.total {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        self.kept_batch(comm, data, potential, false, np, kept, planes)
+    }
+
+    /// GK17: [`Self::apply_local_batch_kept`] with the potential given on the
+    /// owned planes only (the layout of [`Self::apply_local_batch_planes`]).
+    /// Same products in the same order, so a kept plane equal to the slab
+    /// `to_real_plane_in` produced for that vector gives the bits of
+    /// `apply_local_batch_planes`.
+    pub fn apply_local_batch_kept_planes<K: Collective>(
+        &mut self,
+        comm: &K,
+        data: &mut [C],
+        potential: &[f64],
+        np: usize,
+        kept: usize,
+        planes: &[C],
+    ) -> Result<(), DistFftError> {
+        let _profile_scope = self.profile.apply_scope();
+        if potential.len() != self.plane_points() {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        self.kept_batch(comm, data, potential, true, np, kept, planes)
+    }
+
+    /// True when ordinary applications stream the last axis through rows
+    /// (`FFT_FUSED_ROWS`); kept planes then do not reproduce their bits.
+    pub fn fused_rows_active(&self) -> bool {
+        self.fused_rows.is_some()
+    }
+
+    #[allow(clippy::too_many_arguments)] // batch, potential layout and kept planes
+    fn kept_batch<K: Collective>(
+        &mut self,
+        comm: &K,
+        data: &mut [C],
+        potential: &[f64],
+        layout_planes: bool,
+        np: usize,
+        kept: usize,
+        planes: &[C],
+    ) -> Result<(), DistFftError> {
         let ll = self.scatter.len();
         let pp = self.plane_points();
-        if potential.len() != self.total
-            || data.len() != ll * np
-            || kept > np
-            || planes.len() < kept * pp
-        {
+        if data.len() != ll * np || kept > np || planes.len() < kept * pp {
             return Err(FftError::IncompatibleArray.into());
         }
         let fresh = np - kept;
@@ -1298,7 +1495,7 @@ impl DistributedPairFft {
                     let mark = self.profile.start();
                     let nz = self.n[2];
                     for y in 0..self.n[1] {
-                        let start = self.grid_start(i, y);
+                        let start = self.potential_start(layout_planes, i, y);
                         for ((dst, &src), &v) in self.slab[y * nz..(y + 1) * nz]
                             .iter_mut()
                             .zip(&source[y * nz..(y + 1) * nz])
@@ -1314,7 +1511,7 @@ impl DistributedPairFft {
                     let mark = self.profile.start();
                     self.slab.copy_from_slice(source);
                     self.profile.finish(mark, 17, line, 32 * line, None);
-                    self.multiply_slab(potential, false, i);
+                    self.multiply_slab(potential, layout_planes, i);
                 }
                 self.to_reciprocal_plane_in(t, np, i)?;
             }
@@ -1322,7 +1519,7 @@ impl DistributedPairFft {
         for t in 0..fresh {
             for i in 0..self.plane_count() {
                 self.to_real_plane_in(t, fresh, i)?;
-                self.multiply_slab(potential, false, i);
+                self.multiply_slab(potential, layout_planes, i);
                 self.to_reciprocal_plane_in(kept + t, np, i)?;
             }
         }
@@ -1447,6 +1644,97 @@ mod tests {
         }
     }
 
+    /// GK17: the one-rank direct stick buffers give the transpose path's bits
+    /// for batched applications (planes and full-grid potentials), standalone
+    /// inverse planes, partially and fully kept batches and a reciprocal-only
+    /// round trip, with and without sparse clears, over growing and
+    /// shrinking batch widths; more than one rank never selects the mode.
+    #[test]
+    fn one_rank_direct_sticks_are_bit_identical() {
+        use dft_numerics::switches::RunConfig;
+        let bits = |v: &[C]| {
+            v.iter()
+                .map(|z| (z.re.to_bits(), z.im.to_bits()))
+                .collect::<Vec<_>>()
+        };
+        let mut fixtures = cases();
+        fixtures.push(([2, 3, 5], vec![[0, 0, 0]]));
+        fixtures.push(([2, 3, 5], vec![]));
+        for (shape, idx) in fixtures {
+            let total: usize = shape.iter().product();
+            let potential: Vec<_> = (0..total).map(|i| 0.5 + (i as f64).sin()).collect();
+            for holes in ["off", "on"] {
+                let run = |direct: &str| {
+                    simulate(1, |comm| {
+                        let config = RunConfig::from_pairs(&[
+                            ("fft_one_rank_direct", direct),
+                            ("fft_sparse_clear", holes),
+                        ])
+                        .unwrap();
+                        let _scope = config.enter();
+                        let mut p = DistributedPairFft::new_direct(shape, &idx, 0, 1).unwrap();
+                        assert_eq!(p.direct.is_some(), direct == "on");
+                        assert!(
+                            DistributedPairFft::new(shape, &idx, 0, 1)
+                                .unwrap()
+                                .direct
+                                .is_none()
+                        );
+                        let pp = p.plane_points();
+                        let mut planar = Vec::with_capacity(pp);
+                        for i in 0..p.plane_count() {
+                            for y in 0..p.rows() {
+                                let s = p.grid_start(i, y);
+                                planar.extend_from_slice(&potential[s..s + shape[2]]);
+                            }
+                        }
+                        let mut record = Vec::new();
+                        for np in [3, 1, 0, 5, 2] {
+                            let local = random_c(p.local_len() * np, 7 + np as u64);
+                            let mut a = local.clone();
+                            p.apply_local_batch(comm, &mut a, &potential, np).unwrap();
+                            let mut b = local.clone();
+                            p.apply_local_batch_planes(comm, &mut b, &planar, np)
+                                .unwrap();
+                            p.begin_to_real_batch(comm, &local, np).unwrap();
+                            let mut planes = Vec::new();
+                            for t in 0..np {
+                                for i in 0..p.plane_count() {
+                                    p.to_real_plane_in(t, np, i).unwrap();
+                                    planes.extend_from_slice(p.plane());
+                                }
+                            }
+                            assert_eq!(planes.len(), np * pp);
+                            let kept = np / 2;
+                            let mut c = local.clone();
+                            p.apply_local_batch_kept(comm, &mut c, &potential, np, kept, &planes)
+                                .unwrap();
+                            assert_eq!(bits(&a), bits(&b));
+                            assert_eq!(bits(&a), bits(&c));
+                            record.push((a, planes));
+                        }
+                        record
+                    })
+                    .pop()
+                    .unwrap()
+                };
+                let (on, off) = (run("on"), run("off"));
+                for ((a, pa), (b, pb)) in on.iter().zip(&off) {
+                    assert_eq!(bits(a), bits(b), "{shape:?} holes {holes}");
+                    assert_eq!(bits(pa), bits(pb), "{shape:?} holes {holes}");
+                }
+            }
+        }
+        // Several ranks keep the transpose path.
+        let (shape, idx) = cases().remove(0);
+        simulate(2, |comm| {
+            let config = RunConfig::from_pairs(&[("fft_one_rank_direct", "on")]).unwrap();
+            let _scope = config.enter();
+            let p = DistributedPairFft::new_direct(shape, &idx, comm.rank(), 2).unwrap();
+            assert!(p.direct.is_none());
+        });
+    }
+
     #[test]
     fn a2a_balance_preserves_fft_bits_and_minimizes_padding() {
         type RankResult = (Vec<usize>, usize, Vec<(Vec<C>, Vec<C>)>);
@@ -1477,6 +1765,8 @@ mod tests {
                             let config = RunConfig::from_pairs(&[
                                 ("fft_a2a_balance", arm),
                                 ("m2_sticks", mirror),
+                                // Counts the transpose stages, also at one rank.
+                                ("fft_one_rank_direct", "off"),
                                 ("fft_profile", "on"),
                                 ("phase_profile", "on"),
                                 ("stage_timers", "off"),
@@ -2144,8 +2434,10 @@ mod tests {
                                 );
                             }
                             assert_eq!(delta.0[0][1], np as u64);
-                            assert_eq!(delta.0[3][1], u64::from(p.block > 0));
-                            assert_eq!(delta.0[13][1], u64::from(p.block > 0));
+                            // GK17: one-rank direct sticks have no transpose stage.
+                            let transposed = p.block > 0 && p.direct.is_none();
+                            assert_eq!(delta.0[3][1], u64::from(transposed));
+                            assert_eq!(delta.0[13][1], u64::from(transposed));
                             assert_eq!(delta.0[8][1], (np * p.plane_count()) as u64);
                             assert_eq!(delta.0[8][2], (np * p.plane_points()) as u64);
                             assert_eq!(delta.0[8][3], (40 * np * p.plane_points()) as u64);

@@ -105,8 +105,8 @@ impl DistributedComplexHamiltonian {
                 ));
             }
         }
-        let fft =
-            DistributedPairFft::new(grid.dims(), grid.g_to_fft(), rank, ranks).map_err(error)?;
+        let fft = DistributedPairFft::new_direct(grid.dims(), grid.g_to_fft(), rank, ranks)
+            .map_err(error)?;
         let rows = fft.local_len();
         let plane_points = fft.plane_points();
         let p = nonlocal.projector_count();
@@ -285,9 +285,19 @@ impl DistributedComplexHamiltonian {
         if p == 0 {
             return Ok(());
         }
-        let product =
-            self.gemm
-                .multiply_into(&self.projectors, Adjoint, x, Identity, &mut self.projection);
+        // GK17: the projectors were checked finite at construction and never
+        // change; every caller checked x at its entry agreement. Skipping the
+        // two operand scans (the projector block is rows x p, the largest
+        // operand of the apply) leaves the arithmetic unchanged.
+        let product = self.gemm.multiply_into_known_finite(
+            &self.projectors,
+            Adjoint,
+            true,
+            x,
+            Identity,
+            true,
+            &mut self.projection,
+        );
         self.agree(comm, product.is_err())?;
         product?;
         let len = 2 * p * x.cols();
@@ -353,11 +363,13 @@ impl DistributedComplexHamiltonian {
         self.project(comm, x)?;
         if self.projectors.cols() > 0 {
             self.back.resize_columns(x.cols())?;
-            let product = self.gemm.multiply_into(
+            let product = self.gemm.multiply_into_known_finite(
                 &self.projectors,
                 MatrixOp::Identity,
+                true,
                 &self.coupled,
                 MatrixOp::Identity,
+                false,
                 &mut self.back,
             );
             self.agree(comm, product.is_err())?;
@@ -405,6 +417,63 @@ impl DistributedComplexHamiltonian {
         self.agree(comm, hx.validate_finite().is_err())
     }
 
+    /// GK17: [`Self::add_local_change`] where the first `kept` columns of x
+    /// come with their real-space planes (`planes[b * plane_points()..]`, the
+    /// slabs [`Self::band_density_sum_keeping`] stored for this same x), so
+    /// only the forward transform runs for them. Bit-identical to
+    /// `add_local_change` when the planes belong to x; with fused rows
+    /// ([`Self::kept_planes_exact`] false) the caller must not use it.
+    pub fn add_local_change_kept<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &ComplexMatrix,
+        change: &[f64],
+        hx: &mut ComplexMatrix,
+        planes: &[C],
+        kept: usize,
+    ) -> Result<(), SolverError> {
+        let pp = self.plane_points();
+        self.agree(
+            comm,
+            x.rows() != self.local_rows().len()
+                || x.cols() > self.capacity
+                || hx.rows() != x.rows()
+                || hx.cols() != x.cols()
+                || change.len() != pp
+                || kept > x.cols()
+                || planes.len() < kept * pp
+                || !self.kept_planes_exact()
+                || change.iter().any(|v| !v.is_finite())
+                || x.validate_finite().is_err()
+                || hx.validate_finite().is_err(),
+        )?;
+        if x.cols() == 0 {
+            return Ok(());
+        }
+        self.back.resize_columns(x.cols())?;
+        self.back.as_mut_slice().copy_from_slice(x.as_slice());
+        self.fft
+            .apply_local_batch_kept_planes(
+                comm,
+                self.back.as_mut_slice(),
+                change,
+                x.cols(),
+                kept,
+                planes,
+            )
+            .map_err(error)?;
+        for (h, d) in hx.as_mut_slice().iter_mut().zip(self.back.as_slice()) {
+            *h += d;
+        }
+        self.agree(comm, hx.validate_finite().is_err())
+    }
+
+    /// True when stored density planes reproduce the bits of the local
+    /// application's inverse transform (false under `FFT_FUSED_ROWS`).
+    pub fn kept_planes_exact(&self) -> bool {
+        !self.fft.fused_rows_active()
+    }
+
     /// Sum f_b |u_b(r)|² / volume in band order on owned planes. The driver
     /// supplies weights f_b = occupation_b * k_weight, including TR reduction.
     pub fn band_density_sum<K: Collective>(
@@ -415,12 +484,33 @@ impl DistributedComplexHamiltonian {
         volume: f64,
         density: &mut [f64],
     ) -> Result<(), SolverError> {
+        self.band_density_sum_keeping(comm, x, weights, volume, density, &mut [], 0)
+    }
+
+    /// [`Self::band_density_sum`] that also stores the real-space planes of
+    /// the first `keep_bands` columns in `keep` (`keep[b * plane_points()..]`,
+    /// the slab of each owned plane in order; GK17 kept slabs). The density
+    /// arithmetic is unchanged.
+    #[allow(clippy::too_many_arguments)] // density inputs plus the slab sink
+    pub fn band_density_sum_keeping<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &ComplexMatrix,
+        weights: &[f64],
+        volume: f64,
+        density: &mut [f64],
+        keep: &mut [C],
+        keep_bands: usize,
+    ) -> Result<(), SolverError> {
+        let pp = self.plane_points();
         self.agree(
             comm,
             x.rows() != self.local_rows().len()
                 || x.cols() > self.capacity
                 || weights.len() != x.cols()
-                || density.len() != self.plane_points()
+                || density.len() != pp
+                || keep_bands > x.cols()
+                || keep.len() < keep_bands * pp
                 || !volume.is_finite()
                 || volume <= 0.
                 || x.validate_finite().is_err()
@@ -439,6 +529,10 @@ impl DistributedComplexHamiltonian {
                 self.fft
                     .to_real_plane_in(band, x.cols(), i)
                     .map_err(error)?;
+                if band < keep_bands {
+                    let at = band * pp + i * plane_len;
+                    keep[at..at + plane_len].copy_from_slice(self.fft.plane());
+                }
                 for (n, z) in density[i * plane_len..(i + 1) * plane_len]
                     .iter_mut()
                     .zip(self.fft.plane())

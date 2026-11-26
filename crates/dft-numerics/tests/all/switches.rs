@@ -215,7 +215,10 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::K_START_KEPT_HX), Value::Choice("on"));
     assert_eq!(value(Id::REFSCF_K_POOLS), Value::Choice("auto"));
     assert_eq!(value(Id::RADIAL_TABLE_FIELDS), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 77);
+    assert_eq!(value(Id::FFT_ONE_RANK_DIRECT), Value::Choice("on"));
+    assert_eq!(value(Id::K_KEPT_SLABS), Value::Choice("off"));
+    assert_eq!(value(Id::K_KEPT_SLAB_MB), Value::Number(Some(1024.)));
+    assert_eq!(TABLE.len(), 80);
 }
 
 #[test]

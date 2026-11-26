@@ -130,7 +130,8 @@ pub(super) fn evaluate<K: Collective>(
         let mut vectors = Vec::new();
         let mut products = Vec::new();
         let mut terms = Vec::new();
-        for k in 0..state.blocks.len() {
+        let nk_local = state.blocks.len();
+        for k in 0..nk_local {
             let mut op_potential = Vec::new();
             if let Some(full) = full_potential.as_mut() {
                 op_potential
@@ -239,12 +240,20 @@ pub(super) fn evaluate<K: Collective>(
                 None
             };
             let mut op_density = vec![0.; op.plane_points()];
-            op.band_density_sum(
+            // GK17 `K_KEPT_SLABS`: the density pass stores the planes of the
+            // leading bands for the next map's kept-HX update. The per-band
+            // byte count is rank-independent (grid points / k-solve ranks).
+            let pp = op.plane_points();
+            let (slab, slab_bands) =
+                kept.slab_sink(k, nk_local, bands, 16 * points.div_ceil(kc.size()), pp);
+            op.band_density_sum_keeping(
                 &kc,
                 &solve.eigenvectors,
                 &weights,
                 cell.volume_bohr3(),
                 &mut op_density,
+                slab,
+                slab_bands,
             )
             .map_err(numerical)?;
             if let (Some(ex), Some(pool)) = (exchange.as_mut(), state.pool.as_ref()) {
@@ -263,7 +272,7 @@ pub(super) fn evaluate<K: Collective>(
                     *a += b;
                 }
             }
-            kept.retain(k, state, &solve.eigenvectors, hx, &op_potential);
+            kept.retain_with_slabs(k, state, &solve.eigenvectors, hx, &op_potential, slab_bands);
             timings.density += clock.elapsed();
             terms.push(KTerms {
                 per_k: PerK {

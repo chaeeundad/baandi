@@ -4344,6 +4344,103 @@ map,projection_squared_fraction,projection_norm_fraction,half_angle_squared_frac
 200,6.98510299734058426e-01,8.35769286187317606e-01,6.98510352181044958e-01
 ```
 
+### G4G map-by-map research and candidate switches (2026-11-26)
+
+Task `G4D-G4G-RESEARCH`. Mac release runs, one simulated rank, the synthetic
+fixture of the [initial investigation](#g4g-isolated-open-shell-stall-investigation-2026-11-25-initial-investigation)
+(six bands, 6 Ha, PBE, fixed up=4/down=2, threshold 5e-9 Ha, verification on)
+at two atom sites: the historical off-centre site (0.13,0.21,0.32) and the
+cell origin. No dev08 run, no real O HGH input and no QE run is involved; all
+numbers below are local observations. Three research switches were added,
+all default off and bit-identical when off:
+`refscf_real_start` (Hermitian Gamma kinetic complements, real starting Ritz
+matrix), `refscf_canonical_cluster` (deterministic basis inside a
+roundoff-degenerate Ritz cluster, at the start and after every Davidson
+Rayleigh-Ritz solve; tolerance 64 machine epsilon times the largest
+|eigenvalue|) and `refscf_spin_pulay` (per-channel real-space Pulay with the
+run's beta/history replaces the Broyden proposal; serial fixed-sector runs
+only, rejected otherwise; it resets when the common positivity fraction is
+below one).
+
+Commands (the research test reads `G4R_CENTER`, `G4R_ORACLE`, `G4R_BETA`,
+`G4R_TIGHT`, `G4R_REAL`, `G4R_CANON`, `G4R_PULAY`):
+
+```sh
+cargo test --release -p dft-engine --test refscf g4g_research -- --ignored --nocapture
+G4R_CENTER=1 G4R_PULAY=on cargo test --release -p dft-engine --test refscf g4g_research -- --ignored --nocapture
+cargo test --release -p dft-engine --test refscf g4g_centred_candidates -- --ignored --nocapture
+```
+
+**The off-centre fixture is not a valid acceptance fixture.** Away from a
+grid-symmetric site the real-space XC evaluation breaks the cubic and axial
+symmetry of the discrete problem, so its p levels are not exactly degenerate
+at self-consistency, and the minority p orientation is a soft mode. Here the
+strict oracle fails as well, so this fixture does not reproduce the dev08
+contrast (oracle converges, reference stalls):
+
+| Off-centre run (200 maps unless stated) | Converged | Final dr2 or residual | Final E (Ha) |
+| --- | --- | ---: | ---: |
+| Reference, default | no | dr2 1.08e-7 Ha (min 7.86e-8) | -22.5442064056454328 |
+| Reference, canonical cluster | no | dr2 2.57e-7 Ha (min 1.72e-7) | -22.5442089408774251 |
+| Reference, spin Pulay | no | dr2 4.95e-7 Ha (min 1.77e-7) | -22.5442557310420000 |
+| Reference, real start | no | dr2 1.52e-7 Ha (min 1.38e-7) | -22.5442058443855302 |
+| Strict oracle, beta 0.7 | no | charge 8.36e-5, spin 1.01e-4 | -22.5442395238660893 |
+| Strict oracle, beta 0.7, eigen tolerance 1e-10 | no | charge 9.29e-5, spin 1.01e-4 | -22.5442381245974346 |
+| Strict oracle, beta 0.1, 800 maps | no | charge 9.05e-5, spin 9.54e-5 | -22.5440742582790605 |
+
+The final oracle pairs are split too (up 2.1e-5, down 2.3e-5 Ha at beta 0.7).
+
+**Centred fixture (exact axial symmetry is possible).** The majority p pair
+splitting measures the non-axial part of the potential directly, because the
+majority p shell is fully occupied:
+
+| Map | Default: up-pair split (Ha) | Canonical: up-pair split | Pulay: up-pair split | Default fraction |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 (start) | 2.7e-5 (Davidson tolerance on the uniform-density start) | 2.7e-5 | 2.7e-5 | 1 |
+| 2-14 | <= 2.7e-15 | <= 1.1e-14 | <= 1.3e-15 (maps 2-9) | 1 ... 1.6e-2 |
+| 15 | 5.0e-13 | 1.3e-15 | (converged at 10) | 2.0e-2 |
+| 17 | 2.7e-11 | 1.9e-13 | | 1 |
+| 33 | 1.3e-9 | 8.4e-11 | | 1 |
+| 44 | 1.0e-7 | 1.2e-9 | | 1 |
+| final ordinary map | 3.7e-8 (map 46) | 1.1e-9 (map 46) | 1.1e-14 (map 10) | |
+
+Starting density and the first Davidson solves keep the density exactly
+axial (the minority empty pair is split up to 1e-2 Ha at maps 2-4 only because
+empty bands are converged loosely). The density first leaves exact axial
+symmetry at the Broyden steps of maps 15-17, during the plateau of maps
+19-24 where the common positivity fraction collapses to 1.4e-5 (dr2 flat at
+2.16e-5 Ha). The non-axial component then grows by six orders of magnitude.
+Canonical clusters delay the growth but do not change the trajectory class;
+Pulay never enters the plateau.
+
+| Centred run | Converged | Maps | E (Ha) | E - default (Ha) | Maps with fraction <1e-3 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Default | yes | 46 | -22.5460250254652763 | 0 | 3 |
+| Canonical cluster | yes | 46 | -22.5460250259764763 | -5.112e-10 | 5 |
+| Spin Pulay | yes | 10 | -22.5460250249565917 | +5.087e-10 | 0 |
+| Real start | no (200) | | -22.5459024545623095 (dr2 6.3e-6) | | 95 |
+| Strict oracle, beta 0.7 / 0.3 / 0.1 | no: growth limit at iteration 9 | | | | |
+
+**Mechanism supported by the data.** In both fixtures the stall coincides
+with the common positivity fraction of the spin step collapsing on Broyden
+proposals (off-centre default: 66 of 200 maps below 1e-3, minimum 4.1e-14;
+the dev08 O record has fractions 1e-16..1e-12). Per-channel Pulay proposals
+of the same driver keep the fraction at or above 2.4e-3 (off-centre) and 0.46
+(centred). The symmetry break is a consequence of the tiny limited steps and
+the soft orientation mode, not of the start or of Davidson ordering.
+
+**Decision.** `refscf_real_start` is rejected (it turns the converging centred
+case into a 200-map stall). `refscf_canonical_cluster` is kept as a default-off
+research switch; it is harmless (standard class, same map count) but does not
+fix a stall. `refscf_spin_pulay` is the only candidate that reproduces the
+oracle behaviour (exact degeneracy 1.1e-14 Ha, 10 maps, standard-class agreement
+5.1e-10 Ha with the default reference); it does not converge the off-centre
+fixture, where the oracle fails too. It stays default off and serial
+fixed-sector only. Next step: one dev08 run of the real O HGH fixed-sector case
+with `BAANDI_REFSCF_SPIN_PULAY=on` against the strict oracle; adoption beyond
+that needs a distributed (MPI-reduced) Pulay and FD coverage. No bound,
+stopping rule or tolerance was changed.
+
 ### G4 continuation review and acceptance status (2026-11-25)
 
 **R6a: scalar FD, fixed collinear sectors and collinear FD moment policies are enabled by default; free-moment PBE retains the L1/G4D legacy fallback.**
@@ -5269,6 +5366,27 @@ failed `g4_si_gap`; supplying that existing external file resolves it without
 editing a test. The check script's informational `ps` probe is denied by the
 sandbox but does not prevent any gate. Changes remain uncommitted; reporting
 JSON and new README evidence types are outside this ticket's owned files.
+
+#### G4D converged oracle at smaller smearing (2026-11-26)
+
+`cargo test --release -p dft-engine --test refscf g4d_research_oracle -- --ignored --nocapture`
+scans the strict oracle on the shared no-core G4C fixture (PBE, screening on,
+free moment, seed 0.3, 12 bands, Gamma, eigen tolerance 1e-10, density 1e-10,
+energy 1e-11, 400 maps) with linear mixing:
+
+| theta (Ha) | beta 1 | beta 0.5 / 0.3 / 0.1 |
+| ---: | --- | --- |
+| 0.01 | not converged in 400 maps, F=-0.23459365980999383, M=0.9999988552855509 | run error: no feasible common step (zero common fraction) |
+| 0.005 | converged, 11 maps, F=-0.23459382746784654 Ha, M=0.999999999999342859, finite-T certificate passed | same error |
+| 0.002 | converged, 10 maps, F=-0.2345938274678526 Ha, M=1.00000000000000155, certificate passed | same error |
+
+Smaller beta is not a route: the oracle's common positivity fraction is zero
+when a channel point with zero input density receives a negative
+proposal. Smaller smearing gives a converged screened oracle; at theta 0.005
+Ha its F agrees with the historical screening-off theta 0.01 oracle
+(-0.234593827467847571 Ha) to 1e-15 Ha. Qualification of the reference
+free-moment path against this theta 0.005 oracle was not attempted in this
+task; L1/G4D_FALLBACK stays.
 
 ### G6B grid and diagnostic regression
 

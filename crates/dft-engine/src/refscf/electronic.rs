@@ -148,6 +148,8 @@ pub struct MapTrace {
     pub electron_residual: f64,
     pub moment_residual: Option<f64>,
     pub occupations: Vec<f64>,
+    /// Spin-major, then k/band order, Ha; allocated only for an external trace.
+    pub eigenvalues_ha: Vec<f64>,
     pub condition: Option<f64>,
     pub history_pair_norm2_ry: [f64; 25],
     pub history_max_cosine: f64,
@@ -214,6 +216,7 @@ impl Trace {
         self.records = (0..maps)
             .map(|_| MapTrace {
                 occupations: vec![0.; occupations],
+                eigenvalues_ha: vec![0.; occupations],
                 ..Default::default()
             })
             .collect();
@@ -376,6 +379,13 @@ impl Trace {
             .occupations
             .iter_mut()
             .zip(step.blocks.iter().flatten().flat_map(|b| &b.occupations))
+        {
+            *a = *b;
+        }
+        for (a, b) in record
+            .eigenvalues_ha
+            .iter_mut()
+            .zip(step.blocks.iter().flatten().flat_map(|b| &b.eigenvalues))
         {
             *a = *b;
         }
@@ -665,6 +675,20 @@ pub(super) async fn run_continuation<K: Collective>(
         Broyden::spin(profile, &plan.g2, &plan.smooth, volume, electrons)?
     } else {
         Broyden::new(profile, &plan.g2, &plan.smooth, volume, electrons)?
+    };
+    let mut pulay = if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SPIN_PULAY) {
+        if comm.size() != 1 || policy.finite().is_some() {
+            return Err(ScfError::InvalidInput("serial fixed research only"));
+        }
+        Some(
+            (0..policy.channels())
+                .map(|_| {
+                    dft_solvers::mixing::PulayMixer::new(profile.beta, profile.history).unwrap()
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
     };
     let spin_fd = matches!(policy, Policy::SpinFermiDirac { .. });
     let stiffness = spin_fd;
@@ -1038,6 +1062,18 @@ pub(super) async fn run_continuation<K: Collective>(
             mixing = update?;
             history_conditioning = mixer.conditioning_diagnostics();
             let mut proposal = inverse(&mut plan, comm, &next, policy.channels())?;
+            if let Some(mixers) = &mut pulay {
+                use dft_solvers::mixing::DensityMixer;
+                for s in 0..policy.channels() {
+                    proposal[s] = mixers[s]
+                        .mix(
+                            &n[s],
+                            &step.density[s],
+                            policy.fixed_count(s) as f64 / volume,
+                        )
+                        .map_err(super::numerical)?;
+                }
+            }
             if policy.channels() == 2 {
                 for (s, channel) in proposal.iter_mut().enumerate() {
                     if policy.finite().is_none() && policy.fixed_count(s) == 0 {
@@ -1064,6 +1100,12 @@ pub(super) async fn run_continuation<K: Collective>(
                     ));
                 }
                 if mixing_fraction < 1. {
+                    if let Some(mixers) = &mut pulay {
+                        use dft_solvers::mixing::DensityMixer;
+                        for mixer in mixers {
+                            mixer.reset();
+                        }
+                    }
                     for (old, new) in n.iter().zip(&mut proposal) {
                         for (&a, b) in old.iter().zip(new) {
                             *b = a + mixing_fraction * (*b - a);

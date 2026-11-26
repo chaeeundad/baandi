@@ -320,3 +320,63 @@ fn hcp_k_count_scan() {
         }
     }
 }
+
+// GS1C: an explicit FFT grid keeps the largest subgroup that permutes it.
+#[test]
+fn explicit_grid_keeps_grid_preserving_subgroup() {
+    let (cell, atoms) = hcp_six_decimals(2.714, 4.282);
+    // An odd grid along c cannot carry the 6_3 screw translation (0,0,1/2).
+    let odd = [24, 24, 25];
+    let s = symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some(odd)).unwrap();
+    assert_eq!(s.detected_operations_count, 24);
+    assert!(s.operations_count < 24 && s.operations_count > 1);
+    assert_eq!(s.dropped_for_grid, 24 - s.operations_count);
+    assert!(s.max_atom_displacement_bohr <= DEFAULT_TOLERANCE_BOHR);
+    let new_cell = Cell::from_matrix_columns_bohr(s.lattice_columns_bohr).unwrap();
+    let new_atoms: Vec<_> = s.fractional.iter().map(|p| Atom::new("Ru", *p)).collect();
+    let kept = grid_subgroup(
+        &new_cell,
+        &detect(&new_cell, &new_atoms, 1e-9).unwrap(),
+        odd,
+        1e-9,
+    );
+    assert_eq!(kept.len(), s.operations_count);
+    validate_group(&new_cell, &kept, 1e-9).unwrap();
+    assert!(preserves_fft_grid(odd, &kept));
+    assert!(
+        kept.iter()
+            .all(|o| o.translation[2].abs() < 1e-12 || (o.translation[2] - 1.).abs() < 1e-12)
+    );
+    // The subgroup still reduces a compatible k mesh.
+    let full = monkhorst_pack([6, 6, 4], [0.; 3]).unwrap();
+    let reduced = reduce_mesh(&full, &kept, true, false).unwrap();
+    println!(
+        "hcp odd grid {odd:?}: kept {} of 24 operations, 6x6x4 -> {} k",
+        kept.len(),
+        reduced.points.len()
+    );
+    // A grid that cannot carry the 3-fold axis (n1 != n2) keeps fewer still,
+    // and never less than the identity.
+    let skew =
+        symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some([24, 25, 25])).unwrap();
+    assert!(skew.operations_count >= 1 && skew.operations_count < s.operations_count);
+}
+
+#[test]
+fn compatible_grids_and_exact_inputs_are_bit_identical() {
+    for (cell, atoms) in [exact_hcp(2.714, 4.282), hcp_six_decimals(2.714, 4.282)] {
+        let free = symmetrize(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+        let gridded =
+            symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some([24, 24, 40])).unwrap();
+        assert_eq!(gridded.dropped_for_grid, 0);
+        assert_eq!(free, gridded);
+        for (a, b) in free.fractional.iter().zip(&gridded.fractional) {
+            assert_eq!(a.map(f64::to_bits), b.map(f64::to_bits));
+        }
+    }
+    // Exact input with an incompatible grid: projected onto the subgroup it is
+    // already exact, so the input bits are kept.
+    let (cell, atoms) = exact_hcp(2.714, 4.282);
+    let s = symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some([24, 24, 25])).unwrap();
+    assert!(s.dropped_for_grid > 0 && !s.positions_changed && !s.lattice_changed);
+}

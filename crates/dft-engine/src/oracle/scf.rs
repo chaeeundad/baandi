@@ -980,6 +980,25 @@ impl ScfProblem {
             PreparedSymmetry::new(&self.cell, &self.atoms, full, tolerance_bohr, time_reversal)?;
         self.enable_prepared_symmetry(&prepared)
     }
+    /// GS1C: `enable_symmetry` restricted to the subgroup permuting an
+    /// explicit FFT grid (`None`: the full detected group).
+    pub fn enable_symmetry_for_grid(
+        &mut self,
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+        grid: Option<[usize; 3]>,
+    ) -> Result<(), ScfError> {
+        let prepared = PreparedSymmetry::new_for_grid(
+            &self.cell,
+            &self.atoms,
+            full,
+            tolerance_bohr,
+            time_reversal,
+            grid,
+        )?;
+        self.enable_prepared_symmetry(&prepared)
+    }
     /// Reuse an immutable verified map, rejecting a different engine geometry.
     pub fn enable_prepared_symmetry(
         &mut self,

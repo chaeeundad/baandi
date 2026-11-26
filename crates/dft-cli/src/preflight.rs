@@ -629,6 +629,13 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         } else {
             format!("symmetry.fft_grid: automatic dimensions {:?} selected for alias-free density support {:?}, FFT-friendly factors 2/3/5, and all density translations/rotations", prepared.grid.dims(), prepared.grid.required_dims())
         });
+        if let Some(r) = config
+            .symmetrization
+            .as_ref()
+            .filter(|r| r.dropped_for_grid > 0)
+        {
+            warnings.push(format!("symmetry.fft_grid: explicit basis.fft_grid {:?} does not preserve {} of {} detected operations; using the {}-operation subgroup it preserves (omit basis.fft_grid for the full group)", prepared.grid.dims(), r.dropped_for_grid, r.detected_operations_count, r.operations_count));
+        }
         warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} mesh-preserving spatial operations; tolerance={} Bohr; magnetic spin swap/time reversal disabled without proof",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),config.symmetry.tolerance_bohr));
     }
     let mut counts = Vec::new();

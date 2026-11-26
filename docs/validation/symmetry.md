@@ -64,7 +64,8 @@ Otherwise nonlinear XC can break symmetry even when Fourier density phases are
 correct. Automatic grids choose 2/3/5-smooth dimensions satisfying these rules,
 first preserving independent axis lengths and then trying a common dimension.
 Search stops at 512 per axis and fails explicitly for incommensurate origins.
-An explicit noninvariant `basis.fft_grid` rejects. This can enlarge the automatic
+An explicit noninvariant `basis.fft_grid` keeps the largest subgroup that
+permutes it (`grid_subgroup`, GS1C; the identity is always kept). Symmetry can enlarge the automatic
 grid only with symmetry enabled. Full/reduced comparisons MUST use the same grid.
 The projector itself supports arbitrary fractional translations; the nonlinear
 SCF quadrature restriction is a separate engine requirement.

@@ -28,7 +28,10 @@ fn defaults_mesh_weights_and_invalid_models() {
         "ecutwfc_ry = 30.0",
         "ecutwfc_ry = 30.0\nfft_grid=[25,25,25]",
     ) + "\n[symmetry]\nmode='auto'\n";
-    assert!(Config::parse(&invalid).unwrap().prepare().is_err());
+    // GS1C: the 25^3 grid keeps the subgroup it preserves (no rejection).
+    let subgroup = Config::parse(&invalid).unwrap();
+    assert_eq!(subgroup.prepare().unwrap().grid.dims(), [25; 3]);
+    assert!(subgroup.symmetrization.as_ref().unwrap().dropped_for_grid > 0);
 }
 
 #[test]
@@ -171,6 +174,92 @@ fn six_decimal_hcp_full_group_matches_symmetry_off() {
         "hcp six-decimal auto vs exact off: {:.17e} {:.17e} diff {:.3e} Ha",
         energies[0],
         energies[1],
+        energies[0] - energies[1]
+    );
+    assert!((energies[0] - energies[1]).abs() <= 1e-10);
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// GS1C: an explicit basis.fft_grid that cannot carry the 6_3 screw (odd along
+/// c) no longer rejects; the grid-preserving subgroup is used, recorded and
+/// the energy agrees with symmetry off on exact coordinates on the same grid.
+#[test]
+fn explicit_incompatible_grid_runs_with_subgroup() {
+    use std::{fs, process::Command};
+    let dir = std::env::temp_dir().join(format!("gs1c-grid-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("syn.xml"),
+        common::gaussian_with(1., 1.5, false, 401).replace("element=\"Xx\"", "element=\"H\""),
+    )
+    .unwrap();
+    let (a, c) = (4.6_f64, 7.4_f64);
+    let h = a * 3f64.sqrt() / 2.;
+    let input = |p: [&str; 2], grid: &str, symmetry: &str| {
+        format!(
+            "[system]\nname='hcp'\nlattice_unit='bohr'\nlattice_vectors=[[{:?},{:?},0.0],[{:?},{:?},0.0],[0.0,0.0,{c:?}]]\n[[system.atoms]]\nspecies='H'\nfractional=[{},0.25]\n[[system.atoms]]\nspecies='H'\nfractional=[{},0.75]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=4.0\nkgrid=[3,3,2]\n{grid}\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=200\n[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\n{symmetry}",
+            a / 2.,
+            -h,
+            a / 2.,
+            h,
+            p[0],
+            p[1]
+        )
+    };
+    let six = ["0.333333,0.666667", "0.666667,0.333333"];
+    let exact = [
+        format!("{:?},{:?}", 1. / 3., 2. / 3.),
+        format!("{:?},{:?}", 2. / 3., 1. / 3.),
+    ];
+    let exact = [exact[0].as_str(), exact[1].as_str()];
+    let odd = "fft_grid=[16,16,25]";
+    let even = "fft_grid=[16,16,24]";
+    let auto = "[symmetry]\nmode='auto'\n";
+    let parsed = Config::parse(&input(six, odd, auto)).unwrap();
+    parsed.prepare().unwrap();
+    let record = parsed.symmetrization.as_ref().unwrap();
+    assert_eq!(record.detected_operations_count, 24);
+    assert_eq!(record.operations_count, 12);
+    assert_eq!(record.dropped_for_grid, 12);
+    let json = parsed.symmetry_json().unwrap().unwrap();
+    assert_eq!(json["dropped_operations"]["count"], 12);
+    assert_eq!(json["crystal_operations_count"], 12);
+    assert_eq!(parsed.density_operations().unwrap().len(), 12);
+    // A compatible explicit grid keeps the full group and records nothing.
+    let compatible = Config::parse(&input(six, even, auto)).unwrap();
+    assert_eq!(
+        compatible.symmetrization.as_ref().unwrap().dropped_for_grid,
+        0
+    );
+    assert!(compatible.symmetry_json().unwrap().unwrap()["dropped_operations"].is_null());
+    let mut energies = Vec::new();
+    for (name, text) in [
+        ("auto", input(six, odd, auto)),
+        ("off", input(exact, odd, "")),
+    ] {
+        fs::write(dir.join(format!("{name}.toml")), text).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .env("BAANDI_REFERENCE_STRICT", "on")
+            .current_dir(&dir)
+            .args(["run", &format!("{name}.toml"), "--output-dir", name])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(name).join("results.json")).unwrap())
+                .unwrap();
+        if name == "auto" {
+            assert_eq!(result["symmetry"]["dropped_operations"]["count"], 12);
+            assert!(String::from_utf8_lossy(&output.stderr).contains("does not preserve 12 of 24"));
+        }
+        energies.push(result["energies"]["total"]["ha"].as_f64().unwrap());
+    }
+    println!(
+        "hcp odd explicit grid subgroup vs off: diff {:.3e} Ha",
         energies[0] - energies[1]
     );
     assert!((energies[0] - energies[1]).abs() <= 1e-10);

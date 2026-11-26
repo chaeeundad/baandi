@@ -151,13 +151,27 @@ impl Config {
         let tr = self.basis.time_reversal();
         let mut cache = self.symmetry_cache.borrow_mut();
         if let Some(prepared) = cache.as_ref()
-            && prepared.matches(&cell, &atoms, &full, self.detection_tolerance(), tr)
+            && prepared.matches_for_grid(
+                &cell,
+                &atoms,
+                &full,
+                self.detection_tolerance(),
+                tr,
+                self.basis.fft_grid,
+            )
         {
             return Ok(Some(prepared.clone()));
         }
         let prepared = std::sync::Arc::new(
-            dft_engine::PreparedSymmetry::new(&cell, &atoms, &full, self.detection_tolerance(), tr)
-                .map_err(|e| fail(e.to_string()))?,
+            dft_engine::PreparedSymmetry::new_for_grid(
+                &cell,
+                &atoms,
+                &full,
+                self.detection_tolerance(),
+                tr,
+                self.basis.fft_grid,
+            )
+            .map_err(|e| fail(e.to_string()))?,
         );
         *cache = Some(prepared.clone());
         Ok(Some(prepared))
@@ -189,6 +203,11 @@ impl Config {
             "mode":"auto", "operations_count":m.operations.iter().filter(|o|!o.antiunitary).count(),
             "irreducible_k_count":m.points.len(),"full_k_count":m.entries.len(),"tolerance_bohr":self.symmetry.tolerance_bohr,"detection_tolerance_bohr":self.detection_tolerance(),
             "crystal_operations_count": self.symmetrization.as_ref().map(|r| r.operations_count),
+            "detected_operations_count": self.symmetrization.as_ref().map(|r| r.detected_operations_count),
+            "dropped_operations": self.symmetrization.as_ref().filter(|r| r.dropped_for_grid > 0).map(|r| serde_json::json!({
+                "count": r.dropped_for_grid,
+                "reason": format!("fractional translations/rotations do not permute the explicit basis.fft_grid {:?}; the largest grid-preserving subgroup is used (ADR 0049, GS1C)", self.basis.fft_grid.unwrap_or_default()),
+            })),
             "input_symmetrization": self.symmetrization.as_ref().map(|r| serde_json::json!({
                 "policy": "ADR 0049: lattice and positions projected onto the group detected at tolerance_bohr; refused above it",
                 "positions_changed": r.positions_changed, "lattice_changed": r.lattice_changed,
@@ -1166,7 +1185,12 @@ impl Config {
             .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
             .collect();
         let record =
-            dft_geometry::symmetry::symmetrize(&cell, &atoms, self.symmetry.tolerance_bohr)
+            dft_geometry::symmetry::symmetrize_for_grid(
+                &cell,
+                &atoms,
+                self.symmetry.tolerance_bohr,
+                self.basis.fft_grid,
+            )
                 .map_err(|e| {
                     ConfigError::Invalid(format!(
                         "symmetry.operations: {e}; cannot safely reduce; use symmetry.mode='off', a different symmetry.tolerance_bohr or correct the structure"
@@ -1452,12 +1476,15 @@ mod tests {
             "{bad}\n[symmetry]\nmode='auto'\ndensity_group='crystal'\n"
         ))
         .unwrap();
-        assert!(
-            bad.prepare()
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("fft_grid")
+        // GS1C: an explicit grid that cannot carry the diamond quarter
+        // translations keeps the grid-preserving subgroup instead of rejecting.
+        assert_eq!(bad.prepare().unwrap().grid.dims(), [25; 3]);
+        let kept = bad.density_operations().unwrap();
+        assert_eq!(kept.len(), 24); // Td: the quarter-translation half is dropped.
+        assert!(dft_geometry::symmetry::preserves_fft_grid([25; 3], &kept));
+        assert_eq!(
+            bad.symmetrization.as_ref().unwrap().dropped_for_grid,
+            48 - kept.len()
         );
     }
 

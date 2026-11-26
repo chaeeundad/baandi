@@ -20,6 +20,10 @@ pub struct PreparedSymmetry {
     pub(crate) time_reversal: bool,
     map: dft_geometry::symmetry::KOrbitMap,
     crystal_operations: Vec<dft_geometry::symmetry::SymmetryOperation>,
+    /// Explicit FFT grid the group was restricted to (GS1C), if any.
+    grid: Option<[usize; 3]>,
+    /// Detected operations dropped because they do not permute `grid`.
+    dropped_for_grid: usize,
 }
 impl PreparedSymmetry {
     pub fn new(
@@ -29,8 +33,27 @@ impl PreparedSymmetry {
         tolerance_bohr: f64,
         time_reversal: bool,
     ) -> Result<Self, ScfError> {
-        let crystal_operations = dft_geometry::symmetry::detect(cell, atoms, tolerance_bohr)
+        Self::new_for_grid(cell, atoms, full, tolerance_bohr, time_reversal, None)
+    }
+    /// GS1C: with an explicit FFT grid keep only the largest subgroup whose
+    /// operations permute that grid (QE-like), instead of rejecting the grid.
+    pub fn new_for_grid(
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+        grid: Option<[usize; 3]>,
+    ) -> Result<Self, ScfError> {
+        let detected = dft_geometry::symmetry::detect(cell, atoms, tolerance_bohr)
             .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let crystal_operations = match grid {
+            None => detected.clone(),
+            Some(dims) => {
+                dft_geometry::symmetry::grid_subgroup(cell, &detected, dims, tolerance_bohr)
+            }
+        };
+        let dropped_for_grid = detected.len() - crystal_operations.len();
         let map =
             dft_geometry::symmetry::reduce_mesh(full, &crystal_operations, time_reversal, false)
                 .map_err(|e| ScfError::Numerical(e.to_string()))?;
@@ -42,11 +65,41 @@ impl PreparedSymmetry {
             time_reversal,
             map,
             crystal_operations,
+            grid,
+            dropped_for_grid,
         })
+    }
+    /// Detected operations dropped for the explicit FFT grid (GS1C).
+    pub fn dropped_for_grid(&self) -> usize {
+        self.dropped_for_grid
+    }
+    /// Same as `matches`, for a preparation restricted to an explicit grid.
+    pub fn matches_for_grid(
+        &self,
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+        grid: Option<[usize; 3]>,
+    ) -> bool {
+        self.grid == grid && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
     }
     /// Public configurations may change during relaxation. Reuse only for the
     /// exact geometry, mesh and detection settings that produced this record.
     pub fn matches(
+        &self,
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+    ) -> bool {
+        self.grid.is_none()
+            && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
+    }
+    /// Geometry, mesh and detection settings only (any grid restriction).
+    pub fn matches_geometry(
         &self,
         cell: &Cell,
         atoms: &[Atom],

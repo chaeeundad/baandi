@@ -5027,3 +5027,17 @@ pools on vs P = 1 on 64 rows: strict |dE| <= 2.4e-13 Ha, standard <= 4.2e-9 Ha (
 shows the same), fixed-P bit-reproducible. World collectives per map (P = 3, 8 k): 290 -> 25. Mac simulated-rank
 observation (B12-shaped, 16 k): P = 8 wall 4.43 -> 1.18 s. dev08 A/B pending (GeTe, B12, IrI3; si64 unchanged).
 Details: attempts ledger GK9-K-POOLS.
+
+## GK16-SETUP-TAIL — k-path setup tail: field tables, operator diagonal, harmonics, owned-plane potential (2026-11-27)
+
+Profile (Mac `sample`, IrI3-shaped real Ir/I, P=1, 16 k): the common start spent 5.1 s on one radial quadrature
+triple per distinct density-sphere |G|; `k_start_operator_potential` was the operator's static diagonal (row-outer,
+strided, bounds-checked loop over all channel pairs, 90 % zero couplings). Changes: (1) column-pass diagonal with
+zero couplings skipped (bit-identical); (2) `BAANDI_RADIAL_TABLE_FIELDS` (default on, rounding class): GK14-style
+tables for the atomic charge, the Coulomb-subtracted local integral and the NLCC core on the k path (G = 0 exact,
+Gamma path unchanged; worst table error 6.7e-16 of the peak on 14 PseudoDojo files; SCF |dE| <= 1.8e-12 Ha on real
+IrI3, <= 2.7e-13 Ha on the synthetic matrix, equal map counts); (3) one harmonic per distinct (l, m) per row in the
+k projector factors (bit-identical); (4) k operators keep V(r) on owned planes only and no full-grid delta
+(bit-identical; 0.43-0.46 GB per rank on B12/GeTe without pools at MPI8 on Linux). Bit-identity: 60 fingerprints
+equal to main 69107e9e with the table switch off. Mac (O): IrI3 P=1 8 k setup 8.75 -> 2.76 s, P=8 pools 24 k
+3.36 -> 1.77 s. dev08 A/B pending (GeTe, B12, IrI3; si64 unchanged). Details: attempts ledger GK16-SETUP-TAIL.

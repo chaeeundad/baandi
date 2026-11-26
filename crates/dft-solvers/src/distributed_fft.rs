@@ -762,6 +762,16 @@ impl DistributedPairFft {
             (y * self.shape[1] + x) * self.n[2]
         }
     }
+    /// Start of the z-line at (plane i, row y) in a full grid (`planes`
+    /// false, [`Self::grid_start`]) or in an owned-planes field (`planes`
+    /// true, `(i * rows() + y) * shape[2]`).
+    fn potential_start(&self, planes: bool, i: usize, y: usize) -> usize {
+        if planes {
+            (i * self.n[1] + y) * self.n[2]
+        } else {
+            self.grid_start(i, y)
+        }
+    }
     /// Extent along the second FFT axis (rows of `plane`).
     pub fn rows(&self) -> usize {
         self.n[1]
@@ -1016,6 +1026,7 @@ impl DistributedPairFft {
     fn multiply_plane_rows(
         &mut self,
         potential: &[f64],
+        planes: bool,
         t: usize,
         np: usize,
         i: usize,
@@ -1023,7 +1034,7 @@ impl DistributedPairFft {
         self.inverse_middle(t, np, i)?;
         let [_, ny, nz] = self.n;
         for y in 0..ny {
-            let start = self.grid_start(i, y);
+            let start = self.potential_start(planes, i, y);
             let row = self.fused_rows.as_mut().expect("fused row plan");
             let mark = self.profile.start();
             for (k, &z) in self.planes.iter().enumerate() {
@@ -1138,7 +1149,7 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.begin_to_real(comm, c)?;
-        self.multiply_planes(potential, 1)?;
+        self.multiply_planes(potential, false, 1)?;
         self.finish_to_reciprocal(comm, out)
     }
 
@@ -1157,7 +1168,28 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.begin_to_real_batch(comm, data, np)?;
-        self.multiply_planes(potential, np)?;
+        self.multiply_planes(potential, false, np)?;
+        self.finish_to_reciprocal_batch(comm, data, np)
+    }
+
+    /// GK16: [`Self::apply_local_batch`] with the potential given on the
+    /// owned planes only (`plane_points()` values, plane i row y at
+    /// `(i * rows() + y) * shape[2]`, the layout of the plane-local fields)
+    /// instead of a full grid. Same products in the same order: bit-identical
+    /// to `apply_local_batch` with that potential scattered into a full grid.
+    pub fn apply_local_batch_planes<K: Collective>(
+        &mut self,
+        comm: &K,
+        data: &mut [C],
+        potential: &[f64],
+        np: usize,
+    ) -> Result<(), DistFftError> {
+        let _profile_scope = self.profile.apply_scope();
+        if potential.len() != self.plane_points() {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        self.begin_to_real_batch(comm, data, np)?;
+        self.multiply_planes(potential, true, np)?;
         self.finish_to_reciprocal_batch(comm, data, np)
     }
 
@@ -1179,18 +1211,23 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.begin_to_real_batch_from(comm, np, coefficient)?;
-        self.multiply_planes(potential, np)?;
+        self.multiply_planes(potential, false, np)?;
         self.finish_to_reciprocal_batch(comm, out, np)
     }
 
-    fn multiply_planes(&mut self, potential: &[f64], np: usize) -> Result<(), DistFftError> {
+    fn multiply_planes(
+        &mut self,
+        potential: &[f64],
+        planes: bool,
+        np: usize,
+    ) -> Result<(), DistFftError> {
         for t in 0..np {
             for i in 0..self.plane_count() {
                 if self.fused_rows.is_some() {
-                    self.multiply_plane_rows(potential, t, np, i)?;
+                    self.multiply_plane_rows(potential, planes, t, np, i)?;
                 } else {
                     self.to_real_plane_in(t, np, i)?;
-                    self.multiply_slab(potential, i);
+                    self.multiply_slab(potential, planes, i);
                     self.to_reciprocal_plane_in(t, np, i)?;
                 }
             }
@@ -1199,11 +1236,11 @@ impl DistributedPairFft {
     }
 
     /// Multiply the current slab (owned plane i) by `potential` (full row-major grid).
-    fn multiply_slab(&mut self, potential: &[f64], i: usize) {
+    fn multiply_slab(&mut self, potential: &[f64], planes: bool, i: usize) {
         let mark = self.profile.start();
         let (ny, nz) = (self.n[1], self.n[2]);
         for y in 0..ny {
-            let start = self.grid_start(i, y);
+            let start = self.potential_start(planes, i, y);
             for (a, &v) in self.slab[y * nz..(y + 1) * nz]
                 .iter_mut()
                 .zip(&potential[start..start + nz])
@@ -1277,7 +1314,7 @@ impl DistributedPairFft {
                     let mark = self.profile.start();
                     self.slab.copy_from_slice(source);
                     self.profile.finish(mark, 17, line, 32 * line, None);
-                    self.multiply_slab(potential, i);
+                    self.multiply_slab(potential, false, i);
                 }
                 self.to_reciprocal_plane_in(t, np, i)?;
             }
@@ -1285,7 +1322,7 @@ impl DistributedPairFft {
         for t in 0..fresh {
             for i in 0..self.plane_count() {
                 self.to_real_plane_in(t, fresh, i)?;
-                self.multiply_slab(potential, i);
+                self.multiply_slab(potential, false, i);
                 self.to_reciprocal_plane_in(kept + t, np, i)?;
             }
         }

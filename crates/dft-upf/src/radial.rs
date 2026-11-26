@@ -405,6 +405,27 @@ impl ConventionLocalTransform<'_> {
                 * (self.short_integral(g) - self.base.z * (-g * g / 4.0).exp() / (g * g)),
         )
     }
+    /// GK16: the Coulomb-subtracted short-range integral that [`Self::at_g`]
+    /// uses at `g` (same quadrature and rule), for tabulation. Smooth and even
+    /// in `g`; [`Self::at_g_with_short`] completes it to V_loc(G).
+    pub fn short_integral_at(&self, g: f64) -> f64 {
+        if self.rule == RadialEvenRule::Simpson3_8 {
+            self.base.short_integral(g)
+        } else {
+            self.short_integral(g)
+        }
+    }
+    /// GK16: V_loc(G) from a short-range integral value `short` (exact or
+    /// interpolated), with the analytic Coulomb part and the argument checks
+    /// of [`Self::at_g`]; `at_g_with_short(g, short_integral_at(g))` equals
+    /// `at_g(g)` bit for bit.
+    pub fn at_g_with_short(&self, g: f64, short: f64) -> Result<f64, RadialError> {
+        if !g.is_finite() || g <= 0.0 || !(g * self.effective_r_max()).is_finite() {
+            return Err(RadialError::Argument("G must be finite and positive"));
+        }
+        let b = &self.base;
+        finite(4.0 * PI / b.volume * (short - b.z * (-g * g / 4.0).exp() / (g * g)))
+    }
     pub fn alpha_z(&self) -> Result<f64, RadialError> {
         if self.g0_plain {
             let b = &self.base;

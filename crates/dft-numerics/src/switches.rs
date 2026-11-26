@@ -364,6 +364,8 @@ table! {
         "GK10B: the first-iteration redo of the reference k driver starts from the coarse solve's kept X and HX (same input potential, zero change) instead of applying H to the start again; rounding class; off invalidates the kept HX before the redo";
     REFSCF_K_POOLS: Kind::Choice { allowed: &["off", "auto", "on"], default: "off" }, "off", "off, auto, on",
         "GK9 stage 1: k-point pools of size one (ADR 0041 option D) for the reference k and spin/FD drivers: each rank owns a contiguous block of whole k points (dft_mpi::block_counts), solves them with the serial collective and full-row operators, and the ranks exchange the per-k densities once per map (summed in global k order) and allgather the per-k eigenvalues, residuals and solve records; with fewer k points than ranks (or one rank, or an external trace) the distributed layout is kept; auto and on behave the same in stage 1 (stage 2 lets auto choose a pool count); rounding class across rank counts, fixed-rank reproducible; default off pending dev08";
+    RADIAL_TABLE_FIELDS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK16: the k-path common start (and the fixed-density k start) reads the atomic-charge, Coulomb-subtracted local and core-density |G| transforms of the ionic/atomic fields from one uniform radial table per species and function (step 0.005 Bohr^-1, 8-point Lagrange, nodes split over ranks) instead of a quadrature per distinct |G|; G = 0 stays exact; changes the local potential at roundoff level (rounding class, delivered energies inside the strict 1e-10 Ha class); Gamma-only path unchanged; off restores the per-shell quadrature";
 }
 
 struct Resolved {

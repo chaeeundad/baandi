@@ -645,7 +645,24 @@ fn start_inner<K: Collective>(
     drop(nl);
     setup.record("nonlocal_diagonal", clock);
     let clock = Instant::now();
-    let coeff = atomic_fields(&fields, &db, volume, &species, o);
+    // GK16: the k path's common start reads the |G| functions from radial
+    // tables (rounding class); the Gamma path keeps the exact per-shell
+    // quadrature.
+    let field_tables = if fields_only
+        && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_FIELDS)
+    {
+        let q_max = db
+            .vectors()
+            .iter()
+            .map(|g| g.norm_squared)
+            .fold(0., f64::max)
+            .sqrt();
+        Some(field_radial_tables(&species, volume, q_max, o, comm)?)
+    } else {
+        None
+    };
+    let coeff = atomic_fields(&fields, &db, volume, &species, o, field_tables.as_deref());
+    drop(field_tables);
     agree(
         comm,
         f64::from(coeff.is_err()),
@@ -995,12 +1012,129 @@ fn core_radial(s: &Species<'_>, q: f64, volume: f64, o: &ScfOptions) -> Result<f
     })
 }
 
+/// GK16 (`BAANDI_RADIAL_TABLE_FIELDS`): per species, uniform radial tables of
+/// the three |G| functions of [`atomic_fields`]: the atomic-charge integral
+/// (before the volume division), the Coulomb-subtracted short-range local
+/// integral and the core-density transform (before the volume division).
+struct FieldTables {
+    rho: Option<RadialTransformTable>,
+    local: RadialTransformTable,
+    core: Option<RadialTransformTable>,
+}
+
+/// Exact atomic-charge integral `int f(r) j0(q r) rab dr` of [`atomic_fields`]
+/// (without the volume division), shared by the direct path and the table nodes.
+fn rho_atom_integral(s: &Species<'_>, q: f64, work: &mut [f64]) -> Result<f64, ScfError> {
+    let mesh = s.potential.mesh();
+    let samples = &s.potential.raw().rhoatom.values;
+    for ((v, &r), &f) in work.iter_mut().zip(mesh.r()).zip(samples) {
+        *v = if q == 0. {
+            f
+        } else {
+            f * spherical_bessel(0, q * r).map_err(err)?
+        };
+    }
+    mesh.integrate(work).map_err(err)
+}
+
+/// Node values split round-robin over ranks and combined by one tree sum
+/// (one nonzero contribution per node, so the node bits do not depend on the
+/// rank count), as the GK14 k tables. `q_max` must be the same on every rank.
+fn field_radial_tables<K: Collective>(
+    species: &[Species<'_>],
+    volume: f64,
+    q_max: f64,
+    o: &ScfOptions,
+    comm: &K,
+) -> Result<Vec<FieldTables>, ScfError> {
+    use dft_upf::radial::{RADIAL_TABLE_POINTS as POINTS, RADIAL_TABLE_STEP as STEP};
+    let nodes = RadialTransformTable::nodes(q_max, STEP, POINTS).map_err(err)?;
+    // (species, function: 0 rho, 1 local short integral, 2 core)
+    let mut channels = Vec::new();
+    for (s, sp) in species.iter().enumerate() {
+        if has_atomic_charge(sp.potential) {
+            channels.push((s, 0u8));
+        }
+        channels.push((s, 1));
+        if sp.potential.core_density().is_some() {
+            channels.push((s, 2));
+        }
+    }
+    let locals = species
+        .iter()
+        .map(|s| {
+            s.potential
+                .local_transform_with_conventions(volume, o.local_mesh, o.radial_even_rule)
+                .map_err(err)
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let total = channels.len() * nodes;
+    let mut values = vec![0.; total + 1];
+    let (rank, size) = (comm.rank(), comm.size().max(1));
+    let mut failed = locals.is_err();
+    if let Ok(locals) = &locals {
+        let mut work = Vec::new();
+        for j in (rank..total).step_by(size) {
+            let (c, i) = (j / nodes, j % nodes);
+            let (s, function) = channels[c];
+            let sp = &species[s];
+            let q = i as f64 * STEP;
+            let value = match function {
+                0 => {
+                    work.resize(sp.potential.raw().rhoatom.values.len(), 0.);
+                    rho_atom_integral(sp, q, &mut work)
+                }
+                1 => Ok(locals[s].short_integral_at(q)),
+                _ => dft_upf::radial::spherical_density_transform_with_rule(
+                    sp.potential.mesh(),
+                    sp.potential.core_density().expect("core channel"),
+                    q,
+                    o.radial_even_rule,
+                )
+                .map_err(err),
+            };
+            match value {
+                Ok(v) if v.is_finite() => values[j] = v,
+                _ => failed = true,
+            }
+        }
+    }
+    values[total] = f64::from(u8::from(failed));
+    let values = sum(comm, &values)?;
+    if values[total] > 0. {
+        return Err(ScfError::Numerical(
+            "reference start: field radial table quadrature failed".into(),
+        ));
+    }
+    let mut out: Vec<_> = Vec::with_capacity(species.len());
+    let table = |c: usize| {
+        RadialTransformTable::from_nodes(
+            0,
+            q_max,
+            STEP,
+            POINTS,
+            values[c * nodes..(c + 1) * nodes].to_vec(),
+        )
+        .map_err(err)
+    };
+    for s in 0..species.len() {
+        let find = |f: u8| channels.iter().position(|&c| c == (s, f));
+        out.push(FieldTables {
+            rho: find(0).map(table).transpose()?,
+            local: table(find(1).expect("local channel"))?,
+            core: find(2).map(table).transpose()?,
+        });
+    }
+    Ok(out)
+}
+
 fn atomic_fields(
     fields: &StartFields,
     db: &PlaneWaveBasis,
     volume: f64,
     species: &[Species<'_>],
     o: &ScfOptions,
+    tables: Option<&[FieldTables]>,
 ) -> Result<AtomicFields, ScfError> {
     let mut core = species
         .iter()
@@ -1033,7 +1167,7 @@ fn atomic_fields(
     };
     let mut rho = vec![C::default(); fields.fft.local_len()];
     let mut ion = rho.clone();
-    for s in species {
+    for (si, s) in species.iter().enumerate() {
         let mesh = s.potential.mesh();
         let samples = &s.potential.raw().rhoatom.values;
         let atomic_charge = has_atomic_charge(s.potential);
@@ -1041,10 +1175,28 @@ fn atomic_fields(
             .potential
             .local_transform_with_conventions(volume, o.local_mesh, o.radial_even_rule)
             .map_err(err)?;
+        let table = tables.map(|t| &t[si]);
         let mut cache = BTreeMap::new();
         let mut work = vec![0.; samples.len()];
         for &(i, g) in &represented {
-            let (r, v, c) = if let Some(&v) = cache.get(&g.norm_squared.to_bits()) {
+            // GK16: interpolated |G| functions (G = 0 and any q outside the
+            // table keep the exact path below).
+            let tabulated = table.filter(|_| g.norm_squared > 0.).and_then(|t| {
+                let q = g.norm_squared.sqrt();
+                let short = t.local.eval(q)?;
+                let r = match &t.rho {
+                    Some(rho) if atomic_charge => rho.eval(q)? / volume,
+                    _ => 0.,
+                };
+                let c = match &t.core {
+                    Some(core) => core.eval(q)? / volume,
+                    None => 0.,
+                };
+                Some((q, r, short, c))
+            });
+            let (r, v, c) = if let Some((q, r, short, c)) = tabulated {
+                (r, local.at_g_with_short(q, short).map_err(err)?, c)
+            } else if let Some(&v) = cache.get(&g.norm_squared.to_bits()) {
                 v
             } else {
                 let q = g.norm_squared.sqrt();
@@ -2651,7 +2803,21 @@ pub fn start_kpoints_from_density<K: Collective>(
         .collect::<Result<Vec<_>, ScfError>>()?;
     let half = HalfSphere::new(&basis, &grid).map_err(err)?;
     let mut fields = StartFields::new(dims, comm)?;
-    let atomic = atomic_fields(&fields, &db, volume, &species, o);
+    // GK16: same field tables as the k SCF start, so a fixed-density run sees
+    // the ionic and core fields of the SCF that produced its density.
+    let field_tables = dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_FIELDS)
+        .then(|| {
+            let q_max = db
+                .vectors()
+                .iter()
+                .map(|g| g.norm_squared)
+                .fold(0., f64::max)
+                .sqrt();
+            field_radial_tables(&species, volume, q_max, o, comm)
+        })
+        .transpose()?;
+    let atomic = atomic_fields(&fields, &db, volume, &species, o, field_tables.as_deref());
+    drop(field_tables);
     agree(
         comm,
         f64::from(atomic.is_err()),

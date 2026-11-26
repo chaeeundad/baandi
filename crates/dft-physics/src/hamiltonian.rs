@@ -2614,6 +2614,26 @@ impl NonlocalOperator {
             let mut table = vec![vec![Complex64::default(); ng]; nc];
             let mut radial_cache = std::collections::HashMap::with_capacity(ng);
             let mut radial_values = vec![0.0; ng * np];
+            // GK16: one real harmonic per distinct (l, m) and row instead of
+            // one per channel (species with several projectors per l repeat
+            // the same (l, m)); prefactor and volume root hoisted. Same
+            // function, same arguments, same product order: bit-identical.
+            let keys: Vec<usize> = channels
+                .iter()
+                .map(|&(_, l, m)| (l * l + l).wrapping_add_signed(m))
+                .collect();
+            let mut distinct: Vec<(usize, usize, isize)> = Vec::new();
+            for (&key, &(_, l, m)) in keys.iter().zip(&channels) {
+                if !distinct.iter().any(|d| d.0 == key) {
+                    distinct.push((key, l, m));
+                }
+            }
+            let prefactor: Vec<Complex64> = channels
+                .iter()
+                .map(|&(_, l, _)| Complex64::new(0.0, -1.0).powu(l as u32))
+                .collect();
+            let volume_root = volume_bohr3.sqrt();
+            let mut harmonics = vec![0.0; keys.iter().max().map_or(0, |k| k + 1)];
             for ig in 0..ng {
                 let g = &basis.momenta()[factor_rows.map_or(ig, |rows| rows[ig])];
                 let next = radial_cache.len();
@@ -2651,11 +2671,11 @@ impl NonlocalOperator {
                 } else {
                     g.cartesian
                 };
-                for (c, &(i, l, m)) in channels.iter().enumerate() {
-                    table[c][ig] = Complex64::new(0.0, -1.0).powu(l as u32)
-                        * real_spherical_harmonic(l, m, direction)?
-                        * radial[i]
-                        / volume_bohr3.sqrt();
+                for &(key, l, m) in &distinct {
+                    harmonics[key] = real_spherical_harmonic(l, m, direction)?;
+                }
+                for (c, &(i, _, _)) in channels.iter().enumerate() {
+                    table[c][ig] = prefactor[c] * harmonics[keys[c]] * radial[i] / volume_root;
                 }
             }
             drop(factor_span);
@@ -3244,6 +3264,44 @@ mod phase_validation_tests {
                         }
                     }
                 }
+            }
+        }
+    }
+    /// GK16: the selected-row factors (one harmonic per distinct (l, m) per
+    /// row, hoisted prefactors) equal the eager constructor's per-channel
+    /// formula bit for bit, with repeated l among the projectors.
+    #[test]
+    fn selected_factors_match_eager_per_channel_formula() {
+        let pp = pseudo_scaled(&[0, 1, 1, 2, 3, 2], 41, 1.);
+        let pq = pseudo_scaled(&[0, 2, 0], 37, 0.7);
+        let pa = [[0.2, 0.3, 0.4], [1.2, -0.4, 0.7]];
+        let pb = [[3.1, 2.2, -0.9]];
+        let species = [
+            Species {
+                potential: &pp,
+                positions_bohr: &pa,
+            },
+            Species {
+                potential: &pq,
+                positions_bohr: &pb,
+            },
+        ];
+        let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [1., 5., 0.], [0.3, 0.2, 7.]]).unwrap();
+        for k in [[0.; 3], [0.25, 0., 0.], [0.13, -0.21, 0.07]] {
+            let basis = PlaneWaveBasis::at_k(&cell, Hartree(2.), k).unwrap();
+            let all: Vec<_> = (0..basis.momenta().len()).collect();
+            let v = cell.volume_bohr3();
+            let eager = NonlocalOperator::new(&basis, v, &species).unwrap();
+            for build in [
+                NonlocalOperator::new_owned_with_rule,
+                NonlocalOperator::new_owned_rows_only_with_rule,
+            ] {
+                let selected =
+                    build(&basis, v, &species, RadialEvenRule::Simpson3_8, &all).unwrap();
+                assert_eq!(
+                    bits(&eager.projector_rows(&all).unwrap()),
+                    bits(&selected.projector_rows(&all).unwrap())
+                );
             }
         }
     }

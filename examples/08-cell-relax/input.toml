@@ -1,0 +1,37 @@
+# Validate-only in debug tests; run numerical workflows with a release build.
+[system]
+name = "Si diamond"
+lattice_unit = "angstrom"
+lattice_vectors = [[0.0, 2.75, 2.75], [2.75, 0.0, 2.75], [2.75, 2.75, 0.0]]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.0, 0.0, 0.0]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.25, 0.25, 0.25]
+
+[pseudopotentials]
+Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"
+
+[basis]
+ecutwfc_ry = 30.0
+kpoints = [[0.0, 0.0, 0.0]]
+
+[xc]
+functional = "lda-pz"
+
+[output]
+forces = true
+stress = true
+
+[relax]
+mode = "cell"
+method = "bfgs"
+cell_dofs = "isotropic"
+pressure_ha_bohr3 = 0.0
+stress_tol_ha_bohr3 = 1e-6
+max_steps = 40
+energy_tol_ha = 1e-8
+rebuild_every = 5

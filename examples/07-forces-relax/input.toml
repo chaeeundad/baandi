@@ -1,0 +1,59 @@
+# Validate-only in debug tests; run numerical workflows with a release build.
+[system]
+name = "Displaced Si8"
+lattice_unit = "angstrom"
+lattice_vectors = [[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.002, 0, 0]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0, 0.5, 0.5]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.5, 0, 0.5]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.5, 0.5, 0]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.25, 0.25, 0.25]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.25, 0.75, 0.75]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.75, 0.25, 0.75]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.75, 0.75, 0.25]
+
+[pseudopotentials]
+Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"
+
+[basis]
+ecutwfc_ry = 30.0
+kpoints = [[0.0, 0.0, 0.0]]
+
+[xc]
+functional = "lda-pz"
+
+[output]
+forces = true
+stress = true
+
+[relax]
+mode = "ions"
+method = "bfgs"
+max_steps = 40
+force_tol_ha_bohr = 1e-3
+energy_tol_ha = 1e-8
+max_displacement_bohr = 0.1

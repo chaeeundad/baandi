@@ -71,6 +71,58 @@ BAANDI remains experimental and needs independent validation for scientific conc
 
 Build instructions, example inputs, how to run the CLI and how the Quantum ESPRESSO comparisons are reproduced are in [docs/getting-started.md](docs/getting-started.md); the full documentation map is [docs/INDEX.md](docs/INDEX.md).
 
+## Usage
+
+Build with the pinned Rust toolchain (see [prerequisites](docs/getting-started.md)):
+
+```sh
+cargo build --release -p dft-cli
+# Optional, with a configured MPI toolchain:
+# cargo build --release -p dft-cli --features mpi
+# Optional, with Intel MKL on supported Linux x86_64 hosts:
+# cargo build --release -p dft-cli --features mkl
+export PSEUDO_DIR=/absolute/path/outside/repository/pseudo
+# First obtain Si.pz-vbc.UPF as described in example 01.
+python3 examples/prepare.py 01-si-gamma-lda
+input=target/tmp/examples/01-si-gamma-lda/input.toml
+target/release/dft-cli validate "$input"
+target/release/dft-cli run "$input" --output-dir results/si
+```
+
+The smallest run writes `results.json` (energy, eigenvalues, convergence and
+provenance), `density.bin` and `density.json`. Check exit status and verification;
+exit 3 means budget exhaustion. Existing ordinary run outputs are overwritten.
+The production driver is Reference; the strict oracle is an explicit validation tool.
+
+Supply matching NC UPF v2 files from [QE's library](https://www.quantum-espresso.org/pseudopotentials/)
+or [PseudoDojo](https://www.pseudo-dojo.org/); each tutorial names its file and limits.
+No pseudopotentials are distributed. `PSEUDO_DIR` is used by the preparation
+helper, not by the CLI: TOML paths are explicit and do not expand environment variables.
+See [UPF support](docs/upf-support.md), [MPI](docs/wiki/mpi.md) and [MKL setup](docs/howto-mkl.md).
+
+| Example | Workflow |
+| --- | --- |
+| [01-si-gamma-lda](examples/01-si-gamma-lda/) | Si Gamma LDA energy and eigenvalues |
+| [02-si-kmesh](examples/02-si-kmesh/) | Si Monkhorst–Pack mesh with symmetry |
+| [03-si-pbe](examples/03-si-pbe/) | Si PBE and NLCC |
+| [04-bands-dos](examples/04-bands-dos/) | Band path and density of states |
+| [05-al-metal-fd](examples/05-al-metal-fd/) | Al metal with Fermi–Dirac occupations |
+| [06-fe-spin](examples/06-fe-spin/) | Fe collinear spin with a fixed moment |
+| [07-forces-relax](examples/07-forces-relax/) | Displaced Si8 forces, stress and ion relaxation |
+| [08-cell-relax](examples/08-cell-relax/) | Si variable-cell relaxation |
+| [09-checkpoint-restart](examples/09-checkpoint-restart/) | Map-boundary checkpoint and restart |
+| [10-observe](examples/10-observe/) | Observe the SCF event stream |
+| [11-python](examples/11-python/) | Python batch, forces and stepwise API |
+| [12-mpi](examples/12-mpi/) | MPI with the same Si input |
+| [13-strict-oracle](examples/13-strict-oracle/) | Strict oracle for validation |
+
+Each [example](examples/README.md) includes commands, output interpretation and
+an unmeasured laptop runtime estimate. Inputs are validated with synthetic UPFs
+in CI; convergence and material accuracy require separate checks.
+[Python](examples/11-python/) uses the `baandi-py` binding; [MCP](crates/baandi-mcp/README.md)
+is a host-embedded tool adapter, with no standalone input-loading executable.
+Read more in [getting started](docs/getting-started.md), [CLI](docs/cli.md) and [user guides](docs/user/).
+
 <!-- status:begin -->
 
 ## What BAANDI can do today

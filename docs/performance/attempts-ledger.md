@@ -4185,3 +4185,39 @@ copy, phase-range check, kinetic order sort). The next per-k cost at many ranks 
 column pair, latency bound; GK11). Spin runs: the second channel now costs `start_inner` plus operator construction
 only (previously the whole k start again). Lesson: an owned-row constructor that still evaluates full-sphere factors
 "for lazy full columns" pays the replicated cost every k; give the consumer that only needs owned rows its own path.
+
+## GK10-BORDER-GRAM — border-only projected S/H in the complex reference Davidson (2026-11-26; rounding class, default on, dev08 pending)
+
+Change (`crates/dft-solvers/src/ref_davidson_complex.rs`): after an append the projected overlap S = V^H V and
+Hamiltonian H = V^H HV keep their leading m x m block and only the border is computed: V^H E for S and V^H HE for H
+((m + k) x k, one distributed Gram GEMM and one element-wise tree sum each, the GK3 error flag riding along as
+before); the new rows are the adjoint of the new columns and the new k x k corner is hermitized as the full
+recompute does. Port of the real Gamma path's border design (`lean_davidson.rs` `overlap_border`), without its
+bordered Cholesky (the complex factor is still refactored in full). A repair rotates the basis and falls back to the
+full recompute (S at once, H at the next append); restarts (ideal reset or measured Gram) are unchanged. Switch
+`BAANDI_CDAV_BORDER_GRAM` (default on; off restores the full recompute after every append). Table: 68 entries.
+Work per ordinary iteration: collectives unchanged in count (2 Gram reductions); Gram GEMM flops and reduced doubles
+per projected matrix fall from (m + k)^2 to (m + k) k entries, i.e. 0.50 at the first append after a restart and
+0.2-0.3 later in a B12-shaped solve (n = 22, capacity 44: m = 22, k = 22 -> 0.50; m = 30, k = 8 -> 0.21).
+Measured on the solver fixture set (6 operators incl. restarts, repairs, a clustered spectrum, both placements):
+Gram flops per iteration 0.44-0.45 of full, reduced bytes 0.61-0.62 of full (fixture average, small dims).
+Accuracy (class b): solver fixtures at 1/3/8 simulated ranks: max |eigenvalue border - full| 4.4e-15 to 7.3e-15 Ha
+(bound 1e-12), same convergence flags, iterations, H columns, repairs and restarts; border arm across rank counts
+within 7.3e-15 Ha. At 1 rank the full arm tripped the ideal-reset guard twice (|norm^2 - 1| > 1e-12) where the
+border arm did not (only how S/H are rebuilt at a restart; same results). SCF (`dft-engine/tests/refscf_k_border_gram.rs`,
+k path = standard rule; strict arm threshold 1e-12 Ry, standard arm 1e-8 Ry): cubic, skewed, elongated cells x
+{Gamma-in-list, shifted MP 2x2x2} x {strict, standard} x P = 1/3/8: |E_on - E_off| <= 3.6e-15 Ha, occupied
+eigenvalues <= 4.7e-12 Ha, same map counts and H columns everywhere; FD (12 bands, theta 0.01 Ha) and fixed-spin k
+runs at P = 1/3: |F_on - F_off| <= 6.6e-14 Ha, same maps, H columns equal except FD strict P=3 (1780 off, 1779 on).
+Rank-count spread of the border arm equals that of the full arm (energy <= 1.5e-13 Ha; occupied eigenvalues up to
+7e-10 Ha in both arms on the skewed Gamma-in-list fixture, first order in the SCF error, pre-existing).
+Non-finite/error agreement tests pass with the border on and off (fault test extended to both arms).
+`dft-cli/tests/reference_stalls.rs` (a fixture whose 20-map stall is documented as rounding-dependent, asserted on
+macOS/aarch64 only) no longer reaches the stall with the border on; its input now pins `cdav_border_gram='off'`.
+Mac observation (O, release, one run per arm repeated twice, load 4-7; 12 atoms, 22 bands, 2 generic k, skewed
+cell): ecut 12 Ha P=1 solve 1.37/1.30 -> 1.17/1.17 s, wall 1.95/1.87 -> 1.75/1.74 s; ecut 20 Ha P=1 solve
+3.22/3.28 -> 2.85/2.83 s (-12 %), wall 4.57/4.67 -> 4.24/4.22 s; ecut 20 Ha P=4 (simulated ranks) solve
+1.05/1.06 -> 0.93/0.94 s (-11 %), wall 1.54/1.55 -> 1.40/1.43 s. Same energies within 2e-14 Ha, same maps (13),
+H columns (2151) and Davidson iterations (213). Needs dev08 MPI8 one run per arm (GeTe, B12, IrI3; si64 unchanged
+because Gamma uses the real solver). Lesson: the k solver had kept the full-recompute Gram after the Gamma path
+went border-only; check the complex twin whenever a real-path reduction-size change is adopted.

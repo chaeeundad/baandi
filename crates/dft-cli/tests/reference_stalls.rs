@@ -52,6 +52,9 @@ n_up=4
 n_down=2
 [performance]
 reference_strict='off'
+# The stall is a rounding-dependent trajectory (see the test); GK10 border
+# Gram rounding moves this fixture past it on macOS, so pin the full Gram.
+cdav_border_gram='off'
 "#
             ),
         )

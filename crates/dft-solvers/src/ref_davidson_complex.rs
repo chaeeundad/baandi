@@ -8,6 +8,12 @@
 //! reduction (or the reduced-eigenpair broadcast) instead of their own
 //! collectives; GEMM operands already known finite are not rescanned. Off
 //! restores per-call allocation, one agreement per product and full scans.
+//!
+//! GK10 (`BAANDI_CDAV_BORDER_GRAM`, default on, rounding class): after an
+//! append the projected overlap and Hamiltonian keep their leading block and
+//! only the border V^H E and V^H HE is computed (one Gram product and one
+//! reduction each, (m + k) k instead of (m + k)^2 entries). A repair rotates
+//! the basis and falls back to the full recompute; restarts are unchanged.
 use crate::ref_davidson::accounting::{Counted, clock, elapsed};
 use crate::{
     SolverError,
@@ -207,6 +213,54 @@ impl Products {
         // Agreed above: a failed product on any rank already returned.
         product?;
         r.seconds[1] += elapsed(t);
+        Ok(())
+    }
+    /// GK10 border update of a Hermitian projected matrix after an append.
+    /// `out` holds the hermitized `m x m` projection of the leading `m`
+    /// columns of `a` (compact, `m = a.cols() - b.cols()`); `b` holds the
+    /// appended columns of the right operand (E for the overlap, HE for the
+    /// Hamiltonian). One Gram product `a^H b` ((m + k) x k) and its one
+    /// reduction give the new columns; the new rows are their adjoint and the
+    /// new k x k corner is hermitized as the full recompute does. The leading
+    /// block is kept bit for bit.
+    #[allow(clippy::too_many_arguments)]
+    fn border<K: Collective>(
+        &mut self,
+        comm: &K,
+        ag: &mut Agreement,
+        a: &Matrix,
+        (b, b_finite): (&Matrix, bool),
+        out: &mut Matrix,
+        scratch: &mut Matrix,
+        r: &mut Iteration,
+    ) -> Result<(), SolverError> {
+        let total = a.cols();
+        let k = b.cols();
+        let m = total - k;
+        debug_assert_eq!((out.rows(), out.cols()), (m, m));
+        self.gram(comm, ag, (a, true), (b, b_finite), scratch, r)?;
+        out.reshape_within_capacity(total, total)?;
+        let d = out.as_mut_slice();
+        // Re-lay the kept m x m block with leading dimension `total`; moving
+        // the last column first never overwrites an unmoved column.
+        for j in (1..m).rev() {
+            d.copy_within(j * m..(j + 1) * m, j * total);
+        }
+        for jj in 0..k {
+            let j = m + jj;
+            out.column_mut(j).copy_from_slice(scratch.column(jj));
+            for i in 0..m {
+                out[(j, i)] = out[(i, j)].conj();
+            }
+        }
+        for j in m..total {
+            out[(j, j)].im = 0.;
+            for i in m..j {
+                let z = (out[(i, j)] + out[(j, i)].conj()) * 0.5;
+                out[(i, j)] = z;
+                out[(j, i)] = z.conj();
+            }
+        }
         Ok(())
     }
     /// Local rotation; its failure flag is agreed by `ag` (at once when
@@ -443,6 +497,8 @@ struct Workspace {
     hx: Matrix,
     e: Matrix,
     he: Matrix,
+    /// GK10 border product ((m + k) x k, k <= n).
+    border: Matrix,
     canonical: Vec<C>,
 }
 thread_local! {
@@ -519,6 +575,7 @@ impl Workspace {
             hx: rows_matrix(rows, cap)?,
             e: rows_matrix(rows, n)?,
             he: rows_matrix(rows, n)?,
+            border: Matrix::zeros(cap, n)?,
             canonical: if canonical_on {
                 vec![C::default(); cap * n + n * n + n]
             } else {
@@ -584,6 +641,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
     let total = clock(o.profile);
     let comm = &Counted::new(comm, o.profile);
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::CDAV_REUSE);
+    let border_gram = dft_numerics::switches::on(dft_numerics::switches::Id::CDAV_BORDER_GRAM);
     let mut ag = Agreement {
         merge: reuse,
         pending: false,
@@ -653,6 +711,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         hx,
         e,
         he,
+        border,
         canonical,
         ..
     } = &mut w;
@@ -708,6 +767,11 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         canonical,
     )?;
     record.setup.communication = comm.snapshot();
+    // GK10: leading basis columns whose projections S and H currently hold
+    // (0: stale, e.g. after a repair rotated the basis). A border update is
+    // used only when the whole previous basis is covered.
+    let mut s_valid = n;
+    let mut h_valid = n;
     let mut active: Vec<_> = (0..n).collect();
     let mut converged = vec![false; n];
     let mut changes = if o.profile {
@@ -791,14 +855,22 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         let mut accepted = false;
         if m + kept <= cap && kept > 0 {
             v.append_columns(e)?;
-            products.gram(comm, &mut ag, (v, true), (v, true), s, r)?;
-            hermitize(s);
+            if border_gram && s_valid == m {
+                products.border(comm, &mut ag, v, (e, true), s, border, r)?;
+            } else {
+                products.gram(comm, &mut ag, (v, true), (v, true), s, r)?;
+                hermitize(s);
+            }
+            s_valid = m + kept;
             accepted = factor(trial, s, r)?;
         }
         if !accepted {
             let t = clock(o.profile);
             let child_seconds = r.seconds[1] + r.seconds[2];
             r.repairs += 1;
+            // The repair rotates the old basis: H goes stale (S is recomputed
+            // in full below).
+            h_valid = 0;
             v.resize_columns(m)?;
             // Whiten the OLD basis and HV without reapplying H. Preserve the
             // physical Ritz block through a freshly measured coordinate map.
@@ -851,6 +923,7 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
             // Scanned: establishes the invariant for the repaired basis.
             products.gram(comm, &mut ag, (v, false), (v, false), s, r)?;
             hermitize(s);
+            s_valid = v.cols();
             accepted = factor(trial, s, r)?;
             if !accepted {
                 return Err(error("complex overlap remains dependent after repair"));
@@ -871,8 +944,13 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
             r.h_columns += kept;
             r.seconds[0] += elapsed(t);
             hv.append_columns(he)?;
-            products.gram(comm, &mut ag, (v, true), (hv, true), h, r)?;
-            hermitize(h);
+            if border_gram && h_valid == v.cols() - kept {
+                products.border(comm, &mut ag, v, (he, true), h, border, r)?;
+            } else {
+                products.gram(comm, &mut ag, (v, true), (hv, true), h, r)?;
+                hermitize(h);
+            }
+            h_valid = v.cols();
             eigen(
                 comm,
                 &mut ag,
@@ -965,6 +1043,8 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
                     }
                 }
             }
+            s_valid = n;
+            h_valid = n;
             if !factor(f, s, r)? {
                 return Err(error("complex restart metric is dependent"));
             }
@@ -1382,14 +1462,14 @@ mod tests {
             }
         }
         for ranks in [2, 3, 8] {
-            for arm in ["off", "on"] {
+            for (arm, border) in [("off", "on"), ("on", "on"), ("on", "off")] {
                 for placement in [ReducedPlacement::Root, ReducedPlacement::Replicated] {
                     for (fault_call, nan) in [(1, true), (3, true), (3, false), (5, true)] {
                         dft_mpi::simulate(ranks, |comm| {
-                            let config = dft_numerics::switches::RunConfig::from_pairs(&[(
-                                "cdav_reuse",
-                                arm,
-                            )])
+                            let config = dft_numerics::switches::RunConfig::from_pairs(&[
+                                ("cdav_reuse", arm),
+                                ("cdav_border_gram", border),
+                            ])
                             .unwrap();
                             let _scope = config.enter();
                             let rows: Vec<_> =
@@ -1419,7 +1499,7 @@ mod tests {
                             };
                             assert!(
                                 solve(comm, &mut op, &start, &diagonal, o).is_err(),
-                                "rank {} ranks {ranks} arm {arm} call {fault_call}",
+                                "rank {} ranks {ranks} arm {arm}/{border} call {fault_call}",
                                 comm.rank()
                             );
                             let again = solve(comm, &mut clean, &start, &diagonal, o).unwrap();
@@ -1466,6 +1546,189 @@ mod tests {
                 let mut op = Fault { rows };
                 assert!(solve(comm, &mut op, &start, &diagonal, Options::new(1, 1e-8, 1)).is_err());
             });
+        }
+    }
+
+    /// GK10 fixture set: (dim, bands, capacity) Hermitian operators with
+    /// plain growth, restarts (capacity < dim) and repairs (bands > dim / 2),
+    /// one clustered spectrum and one large sparse-gap case.
+    fn border_fixture(dim: usize, seed: usize, cluster: bool) -> Matrix {
+        let mut h = Matrix::zeros(dim, dim).unwrap();
+        for i in 0..dim {
+            let base = if cluster && (4..10).contains(&i) {
+                0.4 + 1e-3 * i as f64
+            } else {
+                i as f64 * 0.21 - 0.9 + 0.05 * seed as f64
+            };
+            h[(i, i)] = C::new(base, 0.);
+            for j in 0..i {
+                let z = C::new(
+                    0.03 / (1. + (i - j) as f64) * ((i * 3 + j + seed) as f64).sin(),
+                    0.02 / (1. + (i - j) as f64) * ((i + 5 * j + seed) as f64).cos(),
+                );
+                h[(i, j)] = z;
+                h[(j, i)] = z.conj();
+            }
+        }
+        h
+    }
+    struct BorderRun {
+        values: Vec<Vec<f64>>,
+        converged: Vec<Vec<bool>>,
+        iterations: Vec<usize>,
+        h_columns: Vec<usize>,
+        gram_flops: u64,
+        gram_calls: u64,
+        reduction_bytes: u64,
+        reductions: u64,
+        loop_iterations: usize,
+        repairs: usize,
+        restarts: usize,
+        /// [ideal, guard fallbacks, disabled (measured) refreshes].
+        resets: [usize; 3],
+    }
+    fn border_arm(comm: &dft_mpi::SimRank, border: &str) -> BorderRun {
+        let config =
+            dft_numerics::switches::RunConfig::from_pairs(&[("cdav_border_gram", border)]).unwrap();
+        let _scope = config.enter();
+        let mut out = BorderRun {
+            values: Vec::new(),
+            converged: Vec::new(),
+            iterations: Vec::new(),
+            h_columns: Vec::new(),
+            gram_flops: 0,
+            gram_calls: 0,
+            reduction_bytes: 0,
+            reductions: 0,
+            loop_iterations: 0,
+            repairs: 0,
+            restarts: 0,
+            resets: [0; 3],
+        };
+        let cases = [
+            (37, 6, 0, false, 1e-12),
+            (41, 6, 1, true, 1e-12),
+            (29, 6, 2, false, 1e-12),
+            (9, 5, 3, false, 1e-12),
+            (11, 4, 4, false, 1e-12),
+            (160, 12, 5, false, 1e-11),
+        ];
+        for &(dim, n, seed, cluster, threshold) in &cases {
+            let h = border_fixture(dim, seed, cluster);
+            let rows: Vec<_> = (0..dim)
+                .filter(|i| i % comm.size() == comm.rank())
+                .collect();
+            let mut start = Matrix::zeros(rows.len(), n).unwrap();
+            for j in 0..n {
+                for (i, &g) in rows.iter().enumerate() {
+                    start[(i, j)] = C::new(f64::from(g == j), 0.)
+                        + C::new(
+                            ((g + 1) * (j + 3)) as f64 * 0.003,
+                            ((g + 2) * (j + 1)) as f64 * -0.002,
+                        );
+                }
+            }
+            let diagonal: Vec<_> = rows.iter().map(|&i| h[(i, i)].re).collect();
+            let mut op = Dense { h, rows };
+            for placement in [ReducedPlacement::Root, ReducedPlacement::Replicated] {
+                let mut o = Options::new(n, threshold, n);
+                o.max_iterations = 60;
+                o.profile = true;
+                o.placement = placement;
+                let s = solve(comm, &mut op, &start, &diagonal, o).unwrap();
+                out.values.push(s.eigenvalues.clone());
+                out.converged.push(s.converged.clone());
+                out.iterations.push(s.record.iterations.len());
+                out.h_columns.push(s.record.h_columns);
+                for r in &s.record.iterations {
+                    for g in r.gemms.iter().filter(|g| g.stage == "complex_gram") {
+                        out.gram_flops += g.flops;
+                        out.gram_calls += 1;
+                    }
+                    out.reduction_bytes += r.communication.reduction_bytes;
+                    out.reductions += r.communication.reductions;
+                    out.repairs += r.repairs;
+                    out.restarts += r.restarts;
+                    out.resets[0] += r.resets.ideal;
+                    out.resets[1] += r.resets.guard_fallbacks;
+                    out.resets[2] += r.resets.disabled_refreshes;
+                }
+                out.loop_iterations += s.record.iterations.len();
+            }
+        }
+        out
+    }
+    /// GK10 (rounding class): border-only S/H updates give the eigenvalues of
+    /// the full recompute within 1e-12 Ha and the same convergence decisions
+    /// and work on these separated fixtures, at 1, 3 and 8 simulated ranks;
+    /// the border arm is rank-count independent within 1e-12 Ha. Reports Gram
+    /// flops and reduced bytes per Davidson iteration for both arms.
+    #[test]
+    fn border_gram_matches_full_recompute() {
+        let mut reference: Option<Vec<Vec<f64>>> = None;
+        for ranks in [1, 3, 8] {
+            let out = dft_mpi::simulate(ranks, |comm| {
+                (border_arm(comm, "off"), border_arm(comm, "on"))
+            });
+            let (off, on) = &out[0];
+            assert!(
+                on.repairs > 0 && on.restarts > 0,
+                "{} {}",
+                on.repairs,
+                on.restarts
+            );
+            let mut worst = 0_f64;
+            for (a, b) in off.values.iter().zip(&on.values) {
+                for (x, y) in a.iter().zip(b) {
+                    worst = worst.max((x - y).abs());
+                }
+            }
+            assert!(worst <= 1e-12, "ranks {ranks}: border vs full {worst:e} Ha");
+            assert_eq!(off.converged, on.converged, "ranks {ranks}");
+            assert_eq!(off.iterations, on.iterations, "ranks {ranks}");
+            assert_eq!(off.h_columns, on.h_columns, "ranks {ranks}");
+            // Every rank sees the same eigenvalues (replicated decisions).
+            for (_, other) in &out[1..] {
+                assert_eq!(other.values, on.values);
+            }
+            let mut across = 0_f64;
+            if let Some(want) = &reference {
+                for (a, b) in want.iter().zip(&on.values) {
+                    for (x, y) in a.iter().zip(b) {
+                        across = across.max((x - y).abs());
+                    }
+                }
+                assert!(across <= 1e-12, "ranks {ranks} vs 1: {across:e} Ha");
+            } else {
+                reference = Some(on.values.clone());
+            }
+            let per = |x: u64, r: &BorderRun| x as f64 / r.loop_iterations as f64;
+            eprintln!(
+                "GK10 ranks {ranks}: max |border - full| {worst:.2e} Ha, vs 1 rank {across:.2e} Ha; iterations {} (repairs {}, restarts {}); per iteration gram flops off {:.0} on {:.0} ({:.3}), gram products off {:.2} on {:.2}, reductions off {:.2} on {:.2}, reduced bytes off {:.0} on {:.0} ({:.3})",
+                on.loop_iterations,
+                on.repairs,
+                on.restarts,
+                per(off.gram_flops, off),
+                per(on.gram_flops, on),
+                on.gram_flops as f64 / off.gram_flops as f64,
+                per(off.gram_calls, off),
+                per(on.gram_calls, on),
+                per(off.reductions, off),
+                per(on.reductions, on),
+                per(off.reduction_bytes, off),
+                per(on.reduction_bytes, on),
+                on.reduction_bytes as f64 / off.reduction_bytes as f64,
+            );
+            // Restart resets [ideal, guard trips, measured]: the ideal-reset
+            // guard compares column norms with 1e-12 and may flip on rounding;
+            // a flip changes only how S/H are rebuilt at a restart.
+            eprintln!(
+                "GK10 ranks {ranks}: resets off {:?} on {:?}; gram products off {} on {}; reductions off {} on {}",
+                off.resets, on.resets, off.gram_calls, on.gram_calls, off.reductions, on.reductions
+            );
+            assert_eq!(off.repairs, on.repairs);
+            assert_eq!(off.restarts, on.restarts);
+            assert!(on.gram_flops < off.gram_flops);
         }
     }
 }

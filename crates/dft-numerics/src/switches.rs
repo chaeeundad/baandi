@@ -346,6 +346,8 @@ table! {
         "GK1B: k start builds projector radial/angular factors for the rank's owned rows only (rows-only table, outcome agreed by one collective); bit-identical; off restores the full k-sphere factor table on every rank";
     K_START_SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GK1B: collinear spin k start builds bases, grids, projector tables, atomic columns and the start Ritz once and gives every channel its own operator and a copy of the orbitals; bit-identical; off builds the whole start per channel";
+    CDAV_BORDER_GRAM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK10: complex reference Davidson keeps the projected overlap and Hamiltonian of the previous basis and computes only the border of the appended columns (one Gram product and one reduction each); rounding class; off restores the full recompute after every append";
 }
 
 struct Resolved {

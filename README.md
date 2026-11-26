@@ -115,6 +115,7 @@ See [UPF support](docs/upf-support.md), [MPI](docs/wiki/mpi.md) and [MKL setup](
 | [11-python](examples/11-python/) | Python batch, forces and stepwise API |
 | [12-mpi](examples/12-mpi/) | MPI with the same Si input |
 | [13-strict-oracle](examples/13-strict-oracle/) | Strict oracle for validation |
+| [14-structure-file](examples/14-structure-file/) | Structure file or Materials Project id to input (`baandi-convert`) |
 
 Each [example](examples/README.md) includes commands, output interpretation and
 an unmeasured laptop runtime estimate. Inputs are validated with synthetic UPFs

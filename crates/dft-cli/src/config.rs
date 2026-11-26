@@ -202,6 +202,55 @@ pub struct System {
     /// Each row is one lattice vector, transposed into internal columns.
     pub lattice_vectors: [[f64; 3]; 3],
     pub atoms: Vec<Atom>,
+    /// Optional `[system.provenance]` table written by the workstation-side
+    /// structure converter (`baandi-convert`). It never enters the physics;
+    /// it is checked for plain values and copied into results.json.
+    #[serde(default)]
+    pub provenance: Option<BTreeMap<String, toml::Value>>,
+}
+impl System {
+    /// `[system.provenance]` as JSON for results.json; `None` when absent.
+    pub fn provenance_json(&self) -> Option<serde_json::Value> {
+        self.provenance.as_ref().map(|table| {
+            serde_json::Value::Object(
+                table
+                    .iter()
+                    .map(|(k, v)| (k.clone(), provenance_value(v)))
+                    .collect(),
+            )
+        })
+    }
+    fn validate_provenance(&self) -> Result<(), ConfigError> {
+        fn plain(v: &toml::Value) -> bool {
+            match v {
+                toml::Value::String(_)
+                | toml::Value::Integer(_)
+                | toml::Value::Float(_)
+                | toml::Value::Boolean(_) => true,
+                toml::Value::Array(items) => items.iter().all(plain),
+                toml::Value::Datetime(_) | toml::Value::Table(_) => false,
+            }
+        }
+        for (key, value) in self.provenance.iter().flatten() {
+            if !plain(value) {
+                return Err(ConfigError::Invalid(format!(
+                    "system.provenance.{key}: only strings, numbers, booleans and arrays of them are allowed (write times as strings)"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+fn provenance_value(v: &toml::Value) -> serde_json::Value {
+    match v {
+        toml::Value::String(s) => serde_json::Value::from(s.as_str()),
+        toml::Value::Integer(i) => serde_json::Value::from(*i),
+        toml::Value::Float(f) => serde_json::Value::from(*f),
+        toml::Value::Boolean(b) => serde_json::Value::from(*b),
+        toml::Value::Array(items) => items.iter().map(provenance_value).collect(),
+        // Rejected by validation; kept total for unvalidated diagnostics.
+        other => serde_json::Value::from(other.to_string()),
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1099,6 +1148,7 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         crate::driver_select::preliminary(self).validate(self)?;
         self.validate_reference_scope()?;
+        self.system.validate_provenance()?;
         if let Some(s) = &self.scf {
             s.start_density()?;
             s.start_wavefunctions()?;

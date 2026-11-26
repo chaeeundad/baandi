@@ -404,6 +404,9 @@ impl Context {
         let mut metadata = json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.energy,"scf_iterations":scf.iterations,"scf_path":scf.path,"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
         "energy_reference":"maximum occupied eigenvalue over this computed sampling (VBM); not a Fermi level","hartree_to_ev":ev(1.0),"energy_reference_hartree":edges.vbm,"vbm":{"hartree":edges.vbm,"k_index":edges.vi,"fractional":result.points[edges.vi].fractional},"cbm":{"hartree":edges.cbm,"k_index":edges.ci,"fractional":result.points[edges.ci].fractional},"gap_ev":ev(edges.cbm-edges.vbm),"gap_hartree":edges.cbm-edges.vbm,"electrons":result.electrons,"nbands":result.bands(),"cutoff_hartree":self.options.cutoff_hartree,"threads":self.options.threads,"converged":true,"functional":self.options.functional.name(),"lattice_columns_bohr":self.cell.lattice_columns_bohr(),"kpoints":result.points.iter().map(|p| json!({"fractional":p.fractional,"weight":p.weight})).collect::<Vec<_>>(),"residuals_hartree":result.residuals[0]});
         self.selection.record(&mut metadata);
+        if let Some(provenance) = self.config.system.provenance_json() {
+            metadata["structure_provenance"] = provenance;
+        }
         // Both stages use the resolved selection, with no error-triggered fallback.
         metadata["nscf"] = self.selection.json();
         metadata["band_data"] = json!({"ordering":"spin_k_band", "shape":[result.eigenvalues.len(), result.points.len(), result.bands()],

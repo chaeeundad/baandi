@@ -1597,6 +1597,17 @@ pub struct KBlock {
 }
 pub struct KStartState {
     pub initial_h_columns: usize,
+    /// GK10B (`K_START_KEPT_HX`): per k, the start Ritz orbitals X of the
+    /// first channel, their H X (HQ C) and the operator potential it was
+    /// applied with; the k driver seeds its kept HX with them so map 1 does
+    /// not apply H to the start again. The kept cache hits only while the
+    /// orbitals are still bit-identical to X (a seed or ladder replaces
+    /// them). Empty otherwise.
+    pub start_hx: Vec<(
+        dft_numerics::linalg::ComplexMatrix,
+        dft_numerics::linalg::ComplexMatrix,
+        Vec<f64>,
+    )>,
     pub common: StartState,
     pub blocks: Vec<KBlock>,
     pub orbitals: KOrbitals,
@@ -1819,7 +1830,15 @@ fn start_kpoints_inner<K: Collective>(
             .or_default() += if commons.is_empty() { bases_s } else { 0. };
         commons.push(common);
     }
-    finish_kpoints(input, points, comm, bases, &db, commons)
+    finish_kpoints(
+        input,
+        points,
+        comm,
+        bases,
+        &db,
+        commons,
+        !general_occupations,
+    )
 }
 
 /// Original k atomic columns (`BAANDI_K_START_MEMO=off`): one radial
@@ -2057,6 +2076,7 @@ fn finish_kpoints<K: Collective>(
     bases: Vec<PlaneWaveBasis>,
     db: &PlaneWaveBasis,
     mut commons: Vec<StartState>,
+    keep_hx: bool,
 ) -> Result<Vec<KStartState>, ScfError> {
     use dft_numerics::linalg::{ComplexMatrix as Matrix, GemmWorkspace, MatrixOp, hermitian_eigh};
     let o = input.options;
@@ -2090,6 +2110,11 @@ fn finish_kpoints<K: Collective>(
     let mut blocks: Vec<Vec<KBlock>> = (0..channels).map(|_| Vec::new()).collect();
     let mut orbitals: Vec<Vec<Matrix>> = (0..channels).map(|_| Vec::new()).collect();
     let mut initial_h_columns = 0;
+    // Only the fixed-occupation k driver consumes it (`start_kpoints`).
+    let keep_start_hx = keep_hx
+        && channels == 1
+        && dft_numerics::switches::on(dft_numerics::switches::Id::K_START_KEPT_HX);
+    let mut start_hx = Vec::new();
     let memo = dft_numerics::switches::on(dft_numerics::switches::Id::K_START_MEMO);
     let nl_rows_only = dft_numerics::switches::on(dft_numerics::switches::Id::K_NL_TABLE_MEMO);
     let mut memo_scratch = KColumnScratch::default();
@@ -2179,6 +2204,7 @@ fn finish_kpoints<K: Collective>(
         commons[0].setup.record("k_start_nonlocal_tables", stage);
         let stage = Instant::now();
         let mut ops = Vec::with_capacity(channels);
+        let mut start_potential = Vec::new();
         for channel in commons.iter() {
             let mut op =
                 dft_physics::distributed_complex::DistributedComplexHamiltonian::new_owned(
@@ -2204,6 +2230,7 @@ fn finish_kpoints<K: Collective>(
             planes.a_to_b(comm, &channel.potential, &mut potential)?;
             op.set_owned_potential(&potential, 1).map_err(err)?;
             ops.push(op);
+            start_potential = potential;
         }
         drop(nl);
         let common = &mut commons[0];
@@ -2364,6 +2391,13 @@ fn finish_kpoints<K: Collective>(
         let mut x = Matrix::zeros(rows.len(), bands).map_err(err)?;
         gemm.multiply_into(&q, MatrixOp::Identity, &c, MatrixOp::Identity, &mut x)
             .map_err(err)?;
+        if keep_start_hx {
+            // H X = (H Q) C: one GEMM instead of an H application in map 1.
+            let mut hx = Matrix::zeros(rows.len(), bands).map_err(err)?;
+            gemm.multiply_into(&hq, MatrixOp::Identity, &c, MatrixOp::Identity, &mut hx)
+                .map_err(err)?;
+            start_hx.push((x.clone(), hx, std::mem::take(&mut start_potential)));
+        }
         common.setup.record("k_start_ritz", stage);
         let mut ops = ops.into_iter();
         let first = ops.next().expect("at least one channel");
@@ -2390,6 +2424,11 @@ fn finish_kpoints<K: Collective>(
         common.orbitals = RealMatrix::zeros(0, bands).map_err(err)?;
         out.push(KStartState {
             initial_h_columns: if c == 0 { initial_h_columns } else { 0 },
+            start_hx: if c == 0 {
+                std::mem::take(&mut start_hx)
+            } else {
+                Vec::new()
+            },
             common,
             blocks,
             orbitals: KOrbitals(orbitals),
@@ -2649,12 +2688,14 @@ pub fn start_kpoints_from_density<K: Collective>(
     };
     let mut state = KStartState {
         initial_h_columns: 0,
+        start_hx: Vec::new(),
         common,
         blocks: Vec::new(),
         orbitals: KOrbitals(Vec::new()),
     };
     let potentials = crate::refscf::nscf::potentials(&mut state, comm, cell, o.functional, &local)?;
     state.common.potential = potentials[0].clone();
-    let state = finish_kpoints(input, points, comm, bases, &db, vec![state.common])?.remove(0);
+    let state =
+        finish_kpoints(input, points, comm, bases, &db, vec![state.common], false)?.remove(0);
     Ok((state, potentials))
 }

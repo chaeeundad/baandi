@@ -4269,3 +4269,80 @@ Expected dev08 (E): GeTe `k_start_atomic_columns` 57 s + `k_start_nonlocal_table
 per arm (GeTe, B12, IrI3; si64 Gamma unchanged by construction). Lesson: the accuracy objection to radial tables
 was a property of the 4-point stencil, not of tabulation; at 8 points the table error sits at the quadrature's
 roundoff for a few thousand nodes per channel.
+
+## GK10B-CDAV-REALPATH — complex Davidson real-path ports and first k map (2026-11-27; dev08 pending)
+
+Scope: (1) bordered Cholesky of the complex overlap factor, (2) item-by-item comparison of the complex reference
+Davidson with the real (Gamma) reference Davidson after P3/P4/GK3/GK10, porting what applies, (3) analysis of the
+first k map (GeTe dev08: map 1 = 2740 Davidson iterations against about 530 per later map).
+
+Comparison result (real = `ref_davidson.rs` + `ref_davidson/workspace.rs` + `stream.rs` + the `lean_davidson.rs`
+helpers; neither reference path uses B5 `bordered.rs`). Per ordinary iteration both paths do 4 row GEMMs (2 Ritz
+rotations, 2 border Grams); the complex path already has fewer collectives (4 against 5 Replicated, 4 against 7 Root).
+Items and decision:
+- Bordered factor (real `extend_factor`): PORTED, `BAANDI_CDAV_BORDER_FACTOR` (default on, rounding class);
+  `ComplexOverlapFactor::extend` (L21 = (L11^-1 S12)^H, L22 = chol(S22 - L21 L21^H), same pivot-ratio test, factor
+  of the old basis kept on rejection so the repair path is unchanged). O(cap^3) work only; no measurable time alone.
+- Fused correction kernel (real `stream::column`, preconditioner branch per column): PORTED as one column pass with
+  `sqrt_safe` hoisted, `BAANDI_CDAV_STREAM` (default on, bit-identical: same operands, same ascending accumulation;
+  test `border_factor_and_stream_agree` compares eigenvalue bits).
+- Normalize-into-V and fused HE append/check (real stream normalize, staged append): NOT ported; `ComplexMatrix` has no
+  uninitialized-extend API, so a fused pass needs a zero-fill pass first and saves nothing measurable.
+- MKL panel-parallel rotations / threaded Grams (real `multiply_slices_wide_into`, MKL_DGEMM): NOT ported; the target
+  lanes are one core and MPI with one thread per rank (threads lane dropped 2026-11-19), where they cannot help.
+- GEMMT corner in the border Gram (real `try_upper_border_into`): NOT ported; no complex GEMMT adapter (zgemmt) and
+  the corner is k(k-1)/2 of (m+k)k entries (about 24 % of a border Gram at m = k = 22, less later). Candidate.
+- MKL zheevd for the reduced EVD (real MKL_EVD dsyevd): NOT ported (needs a new FFI adapter); O(cap^3), about
+  0.1-0.4 ms per iteration at cap 44. Candidate if dev08 phase profiles show the reduced eigen share.
+- Decision-changing guards (T row-growth guard, correction drop 32 eps vs 1e-12): NOT ported (no cost effect).
+- Restart/ideal reset, convergence-check order, empty-band rule, workspace reuse, finite scans: already equivalent.
+
+First-map analysis. QE (notes `qe-scf-cycle.md` 5.3, `davidson-iteration-structure-gamma.md` 2.2/3): iteration 1 runs
+at ethr 1e-2 Ry with every band flagged occupied; if dr2 < ethr * N the iteration is redone at 0.1 dr2/N (empty-band
+rule then active); QE's first Davidson call is told the start vectors are already Ritz vectors. BAANDI's k driver has
+the same rules (coarse first-step solve, then the redo). Measured split (Mac, real PseudoDojo/vbc potentials, CLI,
+one run per arm): Si k333s map 1 = coarse 417 H columns (112 of them the re-application of H to the start Ritz
+vectors) + redo 233 (112 of them a second application of H to the coarse vectors on the SAME potential); ordinary
+maps 112-209. So the excess of map 1 is (a) the second full solve inherent to the redo rule (as in QE), (b) two
+avoidable H applications to vectors whose HX is already known, (c) in all-tight first-step solves, empty bands that
+converge slowly (B12-shaped synthetic: 20-iteration cap hit with 18 restarts, then an in-map retry).
+Changes:
+- `BAANDI_K_START_KEPT_HX` (default on, rounding class): the unpolarized k start keeps H X = (H Q) C of its Ritz
+  orbitals (one GEMM) with the operator potential; the k driver seeds the kept-HX cache with it before map 1, so the
+  first solve starts with HX (any potential change corrected exactly by `add_local_change`). The QE analogue is the
+  first call that trusts the start rotation. Spin/FD/NSCF starts do not keep it (`finish_kpoints(keep_hx)`).
+- `BAANDI_K_REDO_KEPT_HX` (default on, rounding class): the redo no longer invalidates the kept HX: the coarse
+  solve's X/HX on the same potential are reused; `KeptHx::prepare` skips the transforms when the potential change is
+  zero on every rank (flag carried in the existing miss-count reduction, no new collective).
+- `BAANDI_K_FIRST_EMPTY_RULE` (research, default OFF): with fixed occupations the coarse first-step solve could use
+  the empty-band threshold. It cuts map 1 by 20-35 % but changes the map-1 density when no redo follows: SCF map
+  counts moved both ways on the synthetic set (13->10 ... 11->19), total H lower on 5 of 7, real cases +-1 % except
+  Si -8 %; kept off until a dev08 A/B on redo cases (GeTe, B12) shows the sign.
+Evidence (Mac, O):
+- CLI real potentials, all GK10B off -> defaults (one run per arm): map-1 H columns Si 650 -> 426, GaAs 241 -> 161,
+  MgO 121 -> 73, GeTe (distorted) 949 -> 641, GeTe (rocksalt) 935 -> 627; total H Si 1532 -> 1308, GaAs 1049 -> 969,
+  MgO 499 -> 451, GeTe 3953 -> 3645, GeTe-rs 3451 -> 3143; maps and Davidson iterations identical; energies within
+  1.3e-13 Ha; solve seconds Si 0.240 -> 0.204, GaAs 0.227 -> 0.210, MgO 0.082 -> 0.076, GeTe 1.753 -> 1.637,
+  GeTe-rs 1.542 -> 1.398. Inputs: scratch, PseudoDojo nc-sr-04 PBE standard (Ga, As, Ge, Te, Mg, O), Si.pz-vbc.
+- Synthetic k matrix (`dft-engine/tests/refscf_k_first_map.rs`, ignored, release): map-1 H columns 233 -> 215,
+  616 -> 568, 255 -> 237, 660 -> 612, 255 -> 237, 690 -> 642, B12 shape 831 -> 787; maps identical; strict
+  |default - before| <= 7.1e-14 Ha. (These fixtures never trigger the redo.)
+- SCF classes (`refscf_k_border_gram.rs`, off = every GK10/GK10B switch off, on = defaults): 52 rows (cubic, skewed,
+  elongated x Gamma-in-list, shifted MP x strict/standard x P = 1/3/8, FD and spin at P = 1/3): |dE| <= 4.2e-14 Ha,
+  map counts equal in all 52, H columns 80949 -> 79497; occupied eigenvalues up to 3.1e-10 Ha on the skewed
+  Gamma-in-list strict fixture (first order in the SCF error; rank counts give 7e-10 there in both arms), so the
+  eigenvalue gate is now a 1e-8 sanity bound; rank spread of the energy <= 1.5e-13 Ha.
+- Solver fixtures: bordered factor vs full refactor 3.1e-15 to 5.6e-15 Ha at 1/3/8 ranks, same iterations, H
+  columns, repairs, restarts; stream bit-identical; `complex_factor_extension_matches_full` (T within 1e-12, leading
+  factor kept on a dependent border).
+- Mac timing, B12-shaped synthetic (12 atoms, 22 bands, 2 k, ecut 20 Ha, two runs per arm), all GK10+GK10B off ->
+  defaults: solve 2.66/2.62 -> 2.21/2.19 s (P=1), 0.98/0.99 -> 0.84/0.84 s (P=4 simulated); GK10-only arm 2.20/2.21
+  and 0.84/0.84 s, i.e. the GK10B increment is not visible on this synthetic (no redo, 44 of 2151 H columns).
+Needs dev08 (MPI8, one run per arm, phase profile on): GeTe, B12, IrI3 with defaults against
+`BAANDI_K_START_KEPT_HX=off BAANDI_K_REDO_KEPT_HX=off BAANDI_CDAV_BORDER_FACTOR=off`, plus one arm with
+`BAANDI_K_FIRST_EMPTY_RULE=on`; report map-1 calls split by ethr (coarse/redo) from `reference_scf.iterations[0].calls`.
+Safety: the seeded cache entry stores the start Ritz X itself, so `prepare` hits only while the orbitals are still
+those exact vectors; a first draft paired the start HX with `state.orbitals` and gave a seeded (ionic-seed) run the
+wrong HX (caught by `refscf::api::seeded_symmetry_tests::prepared_seed_preserves_stepper_delivery`).
+Lesson: map 1 recomputed H X twice for vectors whose H X was already known (start Ritz HQ C, coarse solve on the same
+potential); check every "invalidate" of a product cache against whether the operator actually changed.

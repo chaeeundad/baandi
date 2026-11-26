@@ -8,9 +8,9 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 04-bands-dos
 input=target/tmp/examples/04-bands-dos/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli bands "$input" --output-dir results/04-bands-dos/bands
-target/release/dft-cli dos "$input" --output-dir results/04-bands-dos/dos
+target/release/baandi validate "$input"
+target/release/baandi bands "$input" --output-dir results/04-bands-dos/bands
+target/release/baandi dos "$input" --output-dir results/04-bands-dos/dos
 ```
 
 The explicit Gamma–X–L–Gamma path uses fractional reciprocal coordinates of this fcc primitive cell. Each command performs its own SCF then fixed-density NSCF. Inspect `bands.svg`/`dos.svg`, CSV and JSON; energies are relative to the sampled VBM, with its absolute Ha offset in JSON. Other exports: `.dat`, `.agr`, QE-style `bands.dat.gnu`, VASP-style `EIGENVAL`/`DOSCAR`. DOS includes both spins; DOSCAR uses a documented VBM-zero placeholder, not a metallic Fermi energy. These exports do not come from QE/VASP runs. See [format limits](../../docs/howto-bands-dos.md).

@@ -8,9 +8,9 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 10-observe
 input=target/tmp/examples/10-observe/input.toml
-target/release/dft-cli validate "$input"
+target/release/baandi validate "$input"
 mkdir -p results/10-observe
-target/release/dft-cli run "$input" --observe --events - --output-dir results/10-observe > results/10-observe/events-mirror.jsonl
+target/release/baandi run "$input" --observe --events - --output-dir results/10-observe > results/10-observe/events-mirror.jsonl
 ```
 
 `--events -` mirrors JSONL to stdout; the command above saves it separately from the engine's durable `events.jsonl` and `runtime.json`. Inspect map kinds (ordinary, verification, retry), safe points and policy revisions. A map is not always a new ordinary iteration. Observe is read-only. For supervised proposals use `--agent`, the local control socket and the [CLI modes guide](../../docs/user/cli-modes.md); controls need host approval and produce an audit. [MCP](../../crates/baandi-mcp/README.md) is a host-embedded adapter, not a standalone CLI server.

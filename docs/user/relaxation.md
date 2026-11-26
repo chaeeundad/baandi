@@ -4,7 +4,7 @@ Current routing: [ADR 0047](../decisions/0047-reference-driver-single-path.md).
 Production ionic and variable-cell steps use the reference driver; strict is an
 explicit oracle. The optimizer and its restart are separate from checkpoint v2.
 
-`dft-cli relax input.toml --output-dir relaxed` uses complete P20A
+`baandi relax input.toml --output-dir relaxed` uses complete P20A
 forces from verified reference states (or strict-certified oracle states) to move atoms while retaining the input cell. This initial driver supports
 unpolarized, fixed insulating occupations, Gamma or the existing k meshes,
 LDA/PBE, NC nonlocal projectors, optional NLCC and auto symmetry.
@@ -129,7 +129,7 @@ record and is not a BAANDICP electronic checkpoint. The 512 MiB import bound
 rejects oversized artifacts. Checksums establish integrity, not authenticity.
 
 ```sh
-dft-cli relax input.toml --output-dir relaxed --resume
+baandi relax input.toml --output-dir relaxed --resume
 ```
 
 Use the same input bytes, UPFs, executable, architecture and OS. Resume rejects

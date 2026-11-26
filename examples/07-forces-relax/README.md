@@ -8,9 +8,9 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 07-forces-relax
 input=target/tmp/examples/07-forces-relax/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/07-forces-relax
-target/release/dft-cli relax "$input" --output-dir results/07-forces-relax/relaxed
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/07-forces-relax
+target/release/baandi relax "$input" --output-dir results/07-forces-relax/relaxed
 ```
 
 One of eight Si atoms is displaced by 0.002 fractional x. `run` reports forces (Ha/Bohr) and tensile-positive stress (Ha/Bohr^3); pressure is −trace(stress)/3. Verification stays on. `relax` moves ions in a fixed cell; inspect `relax.log`, `trajectory.extxyz` (eV, Angstrom), `POSCAR`, `final.toml` and the relaxation block in `results.json`. Exit 3 means the step budget was exhausted, not convergence. Only unpolarized fixed occupations are supported by the CLI optimizer. See [relaxation](../../docs/user/relaxation.md).

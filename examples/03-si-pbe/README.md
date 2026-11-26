@@ -8,8 +8,8 @@ No UPF or generated output belongs in this directory.
 ```sh
 python3 examples/prepare.py 03-si-pbe
 input=target/tmp/examples/03-si-pbe/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/03-si-pbe
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/03-si-pbe
 ```
 
 PseudoDojo files may contain nonlinear core correction (NLCC); current NC support includes it. Inspect the header rather than inferring NLCC from a filename. The core contributes to XC, not the valence electron count. Match the PBE functional; do not enable a functional override merely to silence a mismatch. Inspect energy, verification and executed atomic-start provenance. The 40 Ry cutoff needs a convergence study.

@@ -1,5 +1,7 @@
 # Command-line SCF
 
+> The command is `baandi` (`target/release/baandi`). The Cargo package is still `dft-cli` (`cargo build -p dft-cli`), and a `dft-cli` binary of the same program remains as a deprecated alias for existing scripts; it will be removed in a later release. Result files keep `"tool": {"name": "dft-cli"}` for schema stability.
+
 ```sh
 cargo run --offline -p dft-cli -- run input.toml [--output-dir DIR]
 ```
@@ -74,10 +76,10 @@ prefer the executed start record when explaining what ran.
 ## Checkpoint/restart v2
 
 ```sh
-dft-cli checkpoint input.toml boundary.cp --iteration 3 --kind exact
-dft-cli restart input.toml boundary.cp result.cp
+baandi checkpoint input.toml boundary.cp --iteration 3 --kind exact
+baandi restart input.toml boundary.cp result.cp
 dft-cli status result.cp
-dft-cli checkpoint input.toml evaluated.cp --kind result
+baandi checkpoint input.toml evaluated.cp --kind result
 ```
 
 These default to the reference stepper and v2. `restart` writes a ResultExport
@@ -536,7 +538,7 @@ dft-cli pseudo path
 dft-cli pseudo suggest SiO2
 dft-cli pseudo suggest Si O
 dft-cli pseudo fetch ID [--yes] [--offline]
-dft-cli inspect-upf /outside/file.upf --json
+baandi inspect-upf /outside/file.upf --json
 ```
 
 `pseudo --registry /outside/registry.json COMMAND` selects an explicitly trusted
@@ -583,8 +585,8 @@ periodic endpoints and the independent Python validator, and
 ## Fixed-density bands and DOS (P8A)
 
 ```sh
-dft-cli bands input.toml [--output-dir DIR]
-dft-cli dos input.toml [--output-dir DIR]
+baandi bands input.toml [--output-dir DIR]
+baandi dos input.toml [--output-dir DIR]
 python3 -I scripts/plot_bands_dos.py DIR/bands.csv DIR/dos.csv -o DIR/figure.svg
 ```
 
@@ -628,7 +630,7 @@ checks occur before computing. Exit codes are 1 input, 2 UPF, 3 SCF exhaustion,
 multi-file transaction; check exit status before using files.
 ## Full input preflight (P8G)
 
-`dft-cli validate input.toml [--json]` now opens and validates the referenced
+`baandi validate input.toml [--json]` now opens and validates the referenced
 UPF files, resolved relative to the input file. This supersedes earlier descriptions
 of `validate` as a geometry-only check. `grid` remains a geometry/grid inspection.
 `run` invokes the identical preflight before constructing an SCF problem or writing
@@ -730,7 +732,7 @@ work without weakening the final acceptance tests.
 
 ## Optional agent preflight findings (P11K, partial implementation)
 
-`dft-cli validate INPUT --json` adds `findings_schema_version: 1`, typed `findings`
+`baandi validate INPUT --json` adds `findings_schema_version: 1`, typed `findings`
 and a read-only `structure` summary to successful reports. Codes currently cover
 cutoff suggestions and explicit element/functional overrides; each carries a
 severity, TOML key path, typed evidence and fix hint. Structure vectors are rows
@@ -786,7 +788,7 @@ share sector/parity/capacity, axis, unsupported-functional and symmetry checks.
 
 ### P13C NC datasets and NLCC
 
-`dft-cli inspect-upf FILE --json [--manifest docs/data/nc-datasets.json]`
+`baandi inspect-upf FILE --json [--manifest docs/data/nc-datasets.json]`
 reports SHA-256, ordered one-based projector channels, wavefunction/mesh counts,
 original XC and relativistic labels, NLCC, and cutoff hints in Ry (absent hints
 are null). The optional manifest is matched by hash, never filename; missing or
@@ -834,7 +836,7 @@ Reproduction (all real files remain external):
 
 ```sh
 export DFT_NC_DIR=/absolute/external/pseudodojo/ex
-python3 -I scripts/check_upf_headers.py --binary target/debug/dft-cli \
+python3 -I scripts/check_upf_headers.py --binary target/debug/baandi \
   --output tests/reference/datasets/pseudodojo-headers.json
 cargo test --release -p dft-cli --test all inspect_upf::real_nc_headers -- --ignored --nocapture
 cargo test --release -p dft-engine --test all nlcc:: -- --include-ignored --nocapture
@@ -993,7 +995,7 @@ and `verification_residual_bound_ha` (ONEPATH-1). The forces are computed with
 the same formulas as on the strict path, from the converged step's own state.
 `output.forces` with `verify = "off"` is an input error.
 
-Fixed-cell relaxation (`dft-cli relax`, `relax.mode = "ions"`, the default) runs
+Fixed-cell relaxation (`baandi relax`, `relax.mode = "ions"`, the default) runs
 every ionic step on the standard path with the verification (ONEPATH-1, user
 decision 2026-11-16): a failed verification continues that step's SCF, warm
 starts and `start_extrapolation` are unchanged, and the relaxation
@@ -1199,7 +1201,7 @@ results schema version is unchanged. See [validation](validation/forces.md).
 
 ## Fixed-cell relaxation (P21A)
 
-`dft-cli relax input.toml --output-dir DIR [--resume]` accepts the optional
+`baandi relax input.toml --output-dir DIR [--resume]` accepts the optional
 `[relax]` table, forces from a verified standard SCF on every ionic step (the
 strict certificate with `BAANDI_REFERENCE_STRICT=on`; see the single SCF path
 section), capped BFGS/FIRE steps and Cartesian constraints. Exit 0 is converged, 3 is ionic step exhaustion, 4 is failure after
@@ -1237,7 +1239,7 @@ xx,yy,zz,yz,xz,xy for the existing Gamma/unpolarized adapter. See
 
 ## Variable-cell relaxation (P23A)
 
-`dft-cli relax` accepts `relax.mode="ions"|"cell"|"ions_cell"` (default ions),
+`baandi relax` accepts `relax.mode="ions"|"cell"|"ions_cell"` (default ions),
 `cell_dofs="full"|"isotropic"|"xyz_diagonal"`, Cartesian `fixed_axes`, external
 `pressure_ha_bohr3`, `stress_tol_ha_bohr3`, `rebuild_every`, and
 `pulay_warning_ha_bohr3`. Cell modes minimize E+PV on frozen Miller segments,

@@ -9,6 +9,16 @@ license.workspace = true
 [lints]
 workspace = true
 
+# The command is `baandi`; `dft-cli` remains as a deprecated alias of the same
+# program so existing scripts keep working (removal announced in docs/cli.md).
+[[bin]]
+name = "baandi"
+path = "src/main.rs"
+
+[[bin]]
+name = "dft-cli"
+path = "src/main.rs"
+
 [features]
 default = []
 # Optional Intel MKL backend (ADR 0019): enables dft-numerics/mkl for every crate in the build.

@@ -12,13 +12,13 @@ cargo build --release -p dft-cli
 export PSEUDO_DIR=/absolute/path/outside/repository/pseudo
 python3 examples/prepare.py 01-si-gamma-lda
 input=target/tmp/examples/01-si-gamma-lda/input.toml
-target/release/dft-cli validate "$input"
-target/release/dft-cli run "$input" --output-dir results/01-si-gamma-lda
+target/release/baandi validate "$input"
+target/release/baandi run "$input" --output-dir results/01-si-gamma-lda
 ```
 
 Obtain the named UPF in each tutorial first; **no UPF is committed**. Download and
 extract files outside this repository, preserve their licenses/attribution, and
-inspect each with `target/release/dft-cli inspect-upf "$PSEUDO_DIR/FILE"`.
+inspect each with `target/release/baandi inspect-upf "$PSEUDO_DIR/FILE"`.
 Use NC scalar/nonrelativistic UPF v2 with matching XC, not PAW/USPP or SOC.
 See [current UPF restrictions](../docs/upf-support.md) and the
 [pseudopotential guide](../docs/howto-pseudopotentials.md).

@@ -120,6 +120,8 @@ struct Outcome {
     bits: Vec<u64>,
     /// The layout the switch took ("pools" / "distributed"), if consulted.
     path: Option<String>,
+    /// The delivered blocks were lazy (materialized before `bits`).
+    lazy: bool,
 }
 
 fn bits_of<'a>(values: impl Iterator<Item = &'a f64>) -> Vec<u64> {
@@ -224,6 +226,7 @@ fn scalar<K: Collective>(
             .collect(),
         bits,
         path: config.path_note(Id::REFSCF_K_POOLS).map(|n| n.path),
+        lazy: false,
     }
 }
 
@@ -280,6 +283,9 @@ fn electronic_run<K: Collective>(comm: &K, spin: bool, strict: bool, pools: &str
         comm,
     )
     .unwrap();
+    let mut run = run;
+    let lazy = !run.orbitals_delivered();
+    run.materialize_orbitals().unwrap();
     let mut bits: Vec<u64> = run.density.iter().flat_map(|d| bits_of(d.iter())).collect();
     for b in run.blocks.iter().flatten() {
         bits.extend(bits_of(b.eigenvalues_ha.iter()));
@@ -316,6 +322,7 @@ fn electronic_run<K: Collective>(comm: &K, spin: bool, strict: bool, pools: &str
             .collect(),
         bits,
         path: config.path_note(Id::REFSCF_K_POOLS).map(|n| n.path),
+        lazy,
     }
 }
 
@@ -648,6 +655,42 @@ fn pooled_lazy_delivery_materializes_the_eager_bits() {
             }
         }
         println!("GK18 lazy pooled delivery P={p} npool={npool}: bits equal eager on every rank");
+    }
+}
+
+/// GK18B: the spin/FD driver delivers lazy k blocks when the caller does not
+/// read the orbitals; after `Run::materialize_orbitals` every delivered bit
+/// equals the eager delivery (FD and fixed spin; one rank per pool and pools of
+/// several ranks).
+#[test]
+fn electronic_lazy_delivery_materializes_the_eager_bits() {
+    use std::sync::Arc;
+    for spin in [false, true] {
+        for (p, arm) in [(2usize, "on"), (4, "npool=2")] {
+            let ranks = dft_mpi::simulate(p, |comm: &SimRank| {
+                let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
+                dft_engine::parallel::set_communicator(Some(shared));
+                let mut out = Vec::new();
+                for needed in [true, false] {
+                    dft_engine::refscf::lazy::set_delivered_orbitals(needed);
+                    out.push(electronic_run(comm, spin, false, arm));
+                }
+                dft_engine::refscf::lazy::set_delivered_orbitals(true);
+                dft_engine::parallel::set_communicator(None);
+                out
+            });
+            for rank in &ranks {
+                assert!(!rank[0].lazy && rank[1].lazy, "spin={spin} P={p} {arm}");
+                assert_eq!(rank[0].bits, ranks[0][0].bits);
+                assert_eq!(
+                    rank[1].bits, ranks[0][0].bits,
+                    "spin={spin} P={p} {arm}: lazy = eager"
+                );
+            }
+            println!(
+                "GK18B electronic lazy spin={spin} P={p} {arm}: bits equal eager on every rank"
+            );
+        }
     }
 }
 

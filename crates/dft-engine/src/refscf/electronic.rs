@@ -134,7 +134,10 @@ pub struct BandBlock {
     pub eigenvalues_ha: Vec<f64>,
     pub occupations: Vec<f64>,
     pub residuals_ha: Vec<f64>,
+    /// 0 x bands placeholder while `lazy` holds the block (GK18B; see
+    /// [`Run::materialize_orbitals`]).
     pub orbitals: ComplexMatrix,
+    pub(crate) lazy: Option<super::lazy::LazyOrbitals>,
 }
 pub struct Iteration {
     pub iteration: usize,
@@ -182,6 +185,21 @@ pub struct Run {
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
 }
 impl Run {
+    /// GK18B: whether every k block is held as a full complex block (false
+    /// only after `lazy::set_delivered_orbitals(false)` on a pooled run).
+    pub fn orbitals_delivered(&self) -> bool {
+        self.blocks.iter().flatten().all(|b| b.lazy.is_none())
+    }
+    /// Gather lazily delivered blocks (collective: every rank calls it at the
+    /// same point; channels then k in order); a no-op otherwise.
+    pub fn materialize_orbitals(&mut self) -> Result<(), ScfError> {
+        for b in self.blocks.iter_mut().flatten() {
+            if let Some(lazy) = b.lazy.take() {
+                b.orbitals = lazy.into_full()?;
+            }
+        }
+        Ok(())
+    }
     /// Derivatives evaluate the Mermin free energy F = E - TS for finite
     /// temperature and the internal energy for a fixed spin sector.
     pub fn quantity(&self) -> &'static str {
@@ -1007,7 +1025,7 @@ pub(super) async fn run_continuation<K: Collective>(
         let mut redo = false;
         let mut reported_columns = 0;
         let mut verification_grew = false;
-        let (step, y, f, dr2) = loop {
+        let (mut step, y, f, dr2) = loop {
             let xc_stage = dft_physics::xc::screening_scope("map", false, Some(electrons));
             let mut shortfall = map::Shortfall::default();
             let step = loop {
@@ -1425,25 +1443,61 @@ pub(super) async fn run_continuation<K: Collective>(
             boundary.publish(map_report);
             let mut densities = Vec::new();
             let mut blocks = Vec::new();
-            for (s, channel) in step.blocks.iter().enumerate() {
+            for (s, channel) in step.blocks.iter_mut().enumerate() {
                 densities.push(states[s].fields.gather(comm, &step.density[s])?);
-                // GK9 pools: the owner of each k broadcasts its full-row block.
                 let first = states[s].pool.as_ref().map_or(0, |p| p.local().start);
-                let owned: Vec<_> = channel
-                    .iter()
-                    .skip(first)
-                    .take(states[s].blocks.len())
-                    .map(|b| &b.orbitals)
-                    .collect();
-                let orbitals = super::k_pool::deliver_orbitals(&states[s], comm, &owned)?;
+                let local = states[s].blocks.len();
+                // GK18B: a pooled run whose caller does not read the orbitals
+                // keeps each k block with its owner (materialized on demand by
+                // `Run::materialize_orbitals`, same bits as the eager delivery).
+                let lazy = if states[s].pool.is_some() && super::lazy::lazy_result_allowed() {
+                    let width = channel.get(first).map_or(0, |b| b.orbitals.cols());
+                    let owned = channel
+                        .iter_mut()
+                        .skip(first)
+                        .take(local)
+                        .map(|b| {
+                            ComplexMatrix::zeros(0, 0)
+                                .map(|empty| std::mem::replace(&mut b.orbitals, empty))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(super::numerical)?;
+                    super::k_pool::lazy_orbitals(&states[s], comm, owned, width)?
+                } else {
+                    None
+                };
+                let (orbitals, lazy): (Vec<_>, Vec<_>) = match lazy {
+                    Some(handles) => handles
+                        .into_iter()
+                        .map(|h| ComplexMatrix::zeros(0, h.bands()).map(|z| (z, Some(h))))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(super::numerical)?
+                        .into_iter()
+                        .unzip(),
+                    None => {
+                        // GK9 pools: the owner of each k broadcasts its full-row block.
+                        let owned: Vec<_> = channel
+                            .iter()
+                            .skip(first)
+                            .take(local)
+                            .map(|b| &b.orbitals)
+                            .collect();
+                        super::k_pool::deliver_orbitals(&states[s], comm, &owned)?
+                            .into_iter()
+                            .map(|x| (x, None))
+                            .unzip()
+                    }
+                };
                 let mut delivered = Vec::new();
-                for (k, (b, orbitals)) in channel.iter().zip(orbitals).enumerate() {
+                for (k, ((b, orbitals), lazy)) in channel.iter().zip(orbitals).zip(lazy).enumerate()
+                {
                     delivered.push(BandBlock {
                         point: points[k],
                         eigenvalues_ha: b.eigenvalues.clone(),
                         occupations: b.occupations.clone(),
                         residuals_ha: b.residuals.clone(),
                         orbitals,
+                        lazy,
                     });
                 }
                 blocks.push(delivered);

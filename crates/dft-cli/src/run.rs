@@ -1605,6 +1605,7 @@ fn execute_mode_inner(
                 .map_err(|e| error(1, e))?
                 .is_some())
     {
+        let _delivery = DeliveryScope::enter(&config, mode, reference);
         return reference_electronic_run(
             &config,
             &prepared,
@@ -1792,22 +1793,10 @@ fn execute_mode_inner(
         || problem
             .as_ref()
             .is_some_and(|p| p.atomic_superposition_density().is_some());
-    // LAZY-RESULT: a classic run without forces, stress or orbital volumetric
-    // output never reads the delivered orbitals, so an M2 result may keep them
-    // distributed (no N x B gather on every rank). Replicated: every rank
-    // parses the same input. Reset to the engine default after the SCF.
-    let orbitals_needed = mode.observe
-        || mode.agent
-        || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
-        || volumetric_out::reads_orbitals(&config);
-    struct RestoreDelivery;
-    impl Drop for RestoreDelivery {
-        fn drop(&mut self) {
-            dft_engine::gamma_real::set_delivered_orbitals(true);
-        }
-    }
-    let _restore_delivery = RestoreDelivery;
-    dft_engine::gamma_real::set_delivered_orbitals(orbitals_needed);
+    // LAZY-RESULT: declared before the reference electronic dispatch above
+    // (`DeliveryScope`); the legacy observe/agent drivers read the delivered
+    // orbitals and keep the eager delivery.
+    let _delivery = DeliveryScope::enter(&config, mode, reference);
     let scf_clock = launch::clock();
     launch::mark("scf_entry");
     let driver_entry = Instant::now();
@@ -2963,6 +2952,38 @@ fn reference_peak_rss() -> Result<Vec<Option<u64>>, RunError> {
 
 /// I/O for the additive reference spin/k/band result. Numerical work stays in
 /// refscf::electronic; neither legacy spin nor finite-T drivers are constructed.
+/// LAZY-RESULT: whether anything after the SCF reads the delivered orbitals.
+/// Forces, stress and orbital volumetric outputs do (they materialize lazy
+/// blocks; the flag spares that collective when it is known in advance). The
+/// reference observe/agent drivers do not (events, runtime summary and control
+/// read scalars; checkpoint writers materialize); the legacy observe/agent
+/// drivers keep the delivered orbitals. Replicated: every rank parses the same
+/// input and mode.
+pub(crate) fn orbitals_needed(
+    config: &Config,
+    mode: &crate::telemetry::RunMode,
+    reference: bool,
+) -> bool {
+    (!reference && (mode.observe || mode.agent))
+        || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
+        || config.wants_stress()
+        || volumetric_out::reads_orbitals(config)
+}
+/// Sets the engine's delivery flag for one run and restores the default
+/// (`true`, eager) when dropped.
+struct DeliveryScope;
+impl DeliveryScope {
+    fn enter(config: &Config, mode: &crate::telemetry::RunMode, reference: bool) -> Self {
+        dft_engine::refscf::lazy::set_delivered_orbitals(orbitals_needed(config, mode, reference));
+        Self
+    }
+}
+impl Drop for DeliveryScope {
+    fn drop(&mut self) {
+        dft_engine::refscf::lazy::set_delivered_orbitals(true);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn reference_electronic_run(
     config: &Config,
@@ -5157,6 +5178,124 @@ mod tests {
                     assert_eq!(&meta, old_meta);
                 } else {
                     baseline = Some((science, density, meta));
+                }
+            }
+            dft_engine::parallel::set_communicator(None);
+        });
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// GK18B: an energy-only pooled k run (plain `run` and `--observe`; fixed
+    /// occupations and Fermi-Dirac) consults `M2_LAZY_RESULT`, skips the
+    /// orbital gather and delivers the science of the eager arm
+    /// (`m2_lazy_result='off'`) bit for bit; requesting forces keeps the
+    /// orbitals needed (switch not consulted).
+    #[test]
+    fn energy_only_pooled_run_delivers_orbitals_lazily() {
+        use dft_mpi::Collective;
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("gk18b-lazy-cli-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut pp = crate::test_fixtures::gaussian_with(2., 1.8, true, 161)
+            .replace("element=\"Xx\"", "element=\"He\"");
+        let parsed = dft_upf::parse_upf(&pp).unwrap();
+        let array = |f: &dyn Fn(f64) -> f64| {
+            parsed
+                .mesh()
+                .r()
+                .iter()
+                .map(|&r| format!("{:.17e}", f(r)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let start = pp.find("<PP_RHOATOM>").unwrap() + "<PP_RHOATOM>".len();
+        let end = pp.find("</PP_RHOATOM>").unwrap();
+        pp.replace_range(
+            start..end,
+            &array(&|r| {
+                8. / (std::f64::consts::PI.sqrt() * 1.8_f64.powi(3))
+                    * r
+                    * r
+                    * (-(r / 1.8).powi(2)).exp()
+            }),
+        );
+        pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>",
+            &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>", array(&|r| r * (-0.6 * r * r).exp())));
+        fs::write(dir.join("syn.xml"), pp).unwrap();
+        let base = "[system]\nname='gk18b lazy'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=2.0\nkpoints=[[0.1,0.0,0.0,0.25],[0.0,0.2,0.0,0.25],[0.1,0.1,0.3,0.25],[0.3,-0.1,0.2,0.25]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=60\ndriver='reference'\nverify='off'\n";
+        let fd = "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=5\n";
+        let mut names = Vec::new();
+        for (occ, occ_text) in [("fixed", ""), ("fd", fd)] {
+            for arm in ["off", "on"] {
+                for forces in [false, true] {
+                    if forces && (arm == "off" || occ == "fd") {
+                        continue;
+                    }
+                    let name = format!("{occ}-{arm}-{forces}");
+                    let output = if forces {
+                        "[output]\nforces=true\n"
+                    } else {
+                        ""
+                    };
+                    fs::write(
+                        dir.join(format!("{name}.toml")),
+                        format!(
+                            "{}{occ_text}{output}[performance]\nrefscf_k_pools='on'\nm2_lazy_result='{arm}'\n",
+                            if occ == "fd" { base.replace("nbands=3", "nbands=5") } else { base.to_string() }
+                        ),
+                    )
+                    .unwrap();
+                    names.push((occ, arm, forces, name));
+                }
+            }
+        }
+        dft_mpi::simulate(2, |comm| {
+            dft_engine::parallel::set_communicator(Some(Arc::new(comm.clone())));
+            let mut baseline: std::collections::BTreeMap<&str, (Value, Vec<u8>)> =
+                Default::default();
+            for observe in [false, true] {
+                for (occ, arm, forces, name) in &names {
+                    let mode = crate::telemetry::RunMode {
+                        observe,
+                        ..Default::default()
+                    };
+                    let out = dir.join(format!("{name}-{observe}-{}", comm.rank()));
+                    execute_mode(&dir.join(format!("{name}.toml")), Some(&out), &mode).unwrap();
+                    let result: Value =
+                        serde_json::from_slice(&fs::read(out.join("results.json")).unwrap())
+                            .unwrap();
+                    let switch = &result["scf"]["switches"]["BAANDI_M2_LAZY_RESULT"];
+                    let lazy = *arm == "on" && !forces;
+                    assert_eq!(
+                        switch["consulted"],
+                        json!(!forces),
+                        "{name} observe={observe}: {switch}"
+                    );
+                    if *occ == "fixed" {
+                        let phases = &result["reference_scf"]["output_s"]["engine"]["phases"];
+                        assert_eq!(phases["complex_orbital_lazy"].is_number(), lazy, "{name}");
+                        assert_eq!(
+                            phases["complex_orbital_gather"].is_number(),
+                            !lazy,
+                            "{name}"
+                        );
+                    }
+                    let science = json!({
+                        "total_energy": result["total_energy"],
+                        "eigenvalues": result["eigenvalues"],
+                        "occupations": result["occupations"],
+                        "iterations": result["convergence"]["iterations"],
+                    });
+                    let density = fs::read(out.join("density.bin")).unwrap();
+                    match baseline.get(occ) {
+                        Some((s, d)) => {
+                            assert_eq!(&science, s, "{name} observe={observe}");
+                            assert_eq!(&density, d, "{name} observe={observe}");
+                        }
+                        None => {
+                            baseline.insert(occ, (science, density));
+                        }
+                    }
                 }
             }
             dft_engine::parallel::set_communicator(None);

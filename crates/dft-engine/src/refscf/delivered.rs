@@ -135,6 +135,9 @@ pub(super) fn prepare_electronic(
             "reference derivatives require a converged delivery",
         ));
     }
+    // GK18B: lazily delivered k blocks are gathered before any derivative
+    // reads them (collective; every rank prepares at the same point).
+    run.materialize_orbitals()?;
     let dims = run
         .density
         .first()

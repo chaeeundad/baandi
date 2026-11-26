@@ -1013,7 +1013,16 @@ pub(super) async fn run_continuation<K: Collective>(
                 });
             }
             let orbitals = k_points[0].solution.eigenvectors.clone();
-            output.record("complex_orbital_gather", phase);
+            // GK18B: a lazy delivery forms handles only (no collective).
+            let lazy_delivery = k_points.iter().any(|k| k.lazy.is_some());
+            output.record(
+                if lazy_delivery {
+                    "complex_orbital_lazy"
+                } else {
+                    "complex_orbital_gather"
+                },
+                phase,
+            );
             output.collective_s = delivery_comm.seconds();
             let phase = Instant::now();
             let mut identity = crate::force_identity::ModelDescription::new(

@@ -1280,8 +1280,13 @@ operation list and complete full-to-irreducible orbit map. `off` skips spatial
 reduction, retaining the separate `basis.ktime_reversal` setting.
 
 Density is symmetrized on the full FFT grid, with fractional-translation phases.
-Explicit `basis.fft_grid` dimensions are used exactly when every selected density
-operation permutes the grid; incompatible grids reject with `symmetry.fft_grid`.
+Explicit `basis.fft_grid` dimensions are always used exactly. When some detected
+operations do not permute that grid (for example a 1/2 or 1/4 fractional
+translation on an odd dimension), the largest subgroup that does is kept, the
+input is projected onto that subgroup only, preflight prints a
+`symmetry.fft_grid` warning, and `results.json.symmetry.dropped_operations`
+records the count and reason (GS1C, ADR 0049; QE-like). Omit `basis.fft_grid`
+to get the full group on automatic compatible dimensions.
 FFT-friendly rounding applies only to automatic selection: the existing chooser
 selects the smallest compatible 2/3/5-smooth dimensions along each axis, using a
 common dimension if rotations require it. Preflight records the dimensions,
@@ -1290,7 +1295,7 @@ user-specified, including when the explicit dimensions equal the automatic choic
 it is false for automatic symmetry padding. Both CLI drivers use this preparation.
 Compare full and reduced calculations with identical FFT dimensions (Si diamond
 30 Ry uses 32^3 with auto, versus the symmetry-off 25^3 default; explicit 28^3 is
-used exactly and 25^3 rejects). Extremely skew cells or incommensurate origins
+used exactly and 25^3 keeps the 24-operation subgroup without the quarter translations). Extremely skew cells or incommensurate origins
 can reject with an actionable diagnostic; no invalid reduction is silently accepted.
 
 Unpolarized fixed occupations and Fermi–Dirac are supported. Collinear input

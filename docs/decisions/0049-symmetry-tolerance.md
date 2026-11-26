@@ -91,6 +91,30 @@ cover symmetry.
    The cell optimizer's ionic and strain projectors are built once from the
    start group (unchanged).
 
+4. **Amendment GS1C (2026-11-27): explicit FFT grids keep a subgroup.** With
+   an explicit `basis.fft_grid`, the detected operations that do not permute
+   the grid (rotation or fractional translation not commensurate with it) are
+   dropped and the largest grid-preserving subgroup is used everywhere
+   (`dft_geometry::symmetry::grid_subgroup`; `PreparedSymmetry::new_for_grid`;
+   relaxation steps). The grid-preserving affine maps are closed under
+   composition and inversion, so the kept subset of a group is a group; closure
+   is re-checked and the identity-only group, always grid-preserving, is the
+   fallback, so this never refuses. The input projection uses the kept subgroup
+   only (translations chosen as in 2, then filtered), so atoms are not moved
+   toward a symmetry that is then dropped. Preflight prints a
+   `symmetry.fft_grid` warning and `results.json.symmetry` records
+   `detected_operations_count`, `crystal_operations_count` (kept) and
+   `dropped_operations` {count, reason}. Reason: dev08 MP campaign entry 18
+   (Cl2, QE nsym 8, explicit grid copied from QE) was refused at 1e-4 Bohr
+   while QE discards incommensurate operations and continues. Without an
+   explicit grid, or with a compatible one, nothing changes (bit-identical).
+   Tests: six-decimal hcp on [24,24,25] keeps 12 of 24 operations (no 6_3
+   screw) and is a closed group; [24,25,25] keeps fewer; compatible grids give
+   the identical projection; CLI run of the six-decimal hcp on an odd explicit
+   grid against symmetry off on exact coordinates, same grid, strict path:
+   2.2e-16 Ha. Engine-level `enable_symmetry` without a grid argument (oracle
+   API) still rejects an incompatible grid.
+
 ## Alternatives considered
 
 - **Keep positions, symmetrize density, forces and stress only (QE-like).** The

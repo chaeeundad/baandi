@@ -240,8 +240,14 @@ pub struct Symmetrized {
     pub lattice_columns_bohr: [[f64; 3]; 3],
     /// Fractional positions in the input order (not wrapped).
     pub fractional: Vec<[f64; 3]>,
-    /// Number of affine operations (rotation + translation) detected.
+    /// Number of affine operations (rotation + translation) kept: the
+    /// detected group, or its explicit-FFT-grid subgroup (GS1C).
     pub operations_count: usize,
+    /// Number of affine operations detected at the tolerance.
+    pub detected_operations_count: usize,
+    /// Detected operations dropped because they do not permute the explicit
+    /// FFT grid (GS1C); zero without an explicit grid.
+    pub dropped_for_grid: usize,
     /// Largest Cartesian atom displacement, Bohr, measured in the input lattice.
     pub max_atom_displacement_bohr: f64,
     /// Largest lattice-vector change |a_i' - a_i|, Bohr.
@@ -268,60 +274,72 @@ fn snap_component(t: f64, bound: f64) -> Option<f64> {
     })
 }
 
-/// Group-averaged (Reynolds) projection of atoms and lattice onto the group
-/// detected at `tolerance_bohr`. Fractional translations are first snapped to
-/// small-denominator rationals when every snapped translation stays within the
-/// tolerance and the snapped set closes exactly; otherwise translations are the
-/// least-squares estimate from all atoms (consistent with an origin shift).
-/// The lattice metric is averaged over the rotations and the lattice vectors are
-/// updated by the symmetric stretch A' = A M^-1/2 M'^1/2 (no rigid rotation).
-/// Refuses (error) when any atom or lattice vector would move by more than the
-/// tolerance, or when the result does not carry the group at a tight tolerance.
+/// Largest subgroup of `operations` whose members each permute the FFT grid
+/// `dims` (rotation and fractional translation; GS1C, ADR 0049). The
+/// grid-preserving affine maps are closed under composition and inversion, so
+/// this subset of a group is a group; closure is re-checked and the
+/// identity-only group (always grid-preserving) is the fallback.
+pub fn grid_subgroup(
+    cell: &Cell,
+    operations: &[SymmetryOperation],
+    dims: [usize; 3],
+    tolerance_bohr: f64,
+) -> Vec<SymmetryOperation> {
+    let kept: Vec<_> = operations
+        .iter()
+        .filter(|o| preserves_fft_grid(dims, std::slice::from_ref(*o)))
+        .cloned()
+        .collect();
+    if !kept.is_empty() && validate_group(cell, &kept, tolerance_bohr).is_ok() {
+        return kept;
+    }
+    operations
+        .iter()
+        .filter(|o| {
+            o.rotation == [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+                && o.translation.iter().all(|t| wrap(*t).abs() <= 1e-12)
+        })
+        .take(1)
+        .cloned()
+        .collect()
+}
+
+/// `symmetrize_for_grid` without an explicit FFT grid (full detected group).
 pub fn symmetrize(
     cell: &Cell,
     atoms: &[Atom],
     tolerance_bohr: f64,
 ) -> Result<Symmetrized, SymmetryError> {
-    let ops = detect(cell, atoms, tolerance_bohr)?;
+    symmetrize_for_grid(cell, atoms, tolerance_bohr, None)
+}
+
+/// Group-averaged (Reynolds) projection of atoms and lattice onto the group
+/// detected at `tolerance_bohr`. Fractional translations are first snapped to
+/// small-denominator rationals when every snapped translation stays within the
+/// tolerance and the snapped set closes exactly; otherwise translations are the
+/// least-squares estimate from all atoms (consistent with an origin shift).
+/// With an explicit FFT grid (GS1C) only the operations that permute that grid
+/// (with the chosen translations) are kept, and the structure is projected onto
+/// that subgroup only. The lattice metric is averaged over the kept rotations
+/// and the lattice vectors are updated by the symmetric stretch
+/// A' = A M^-1/2 M'^1/2 (no rigid rotation). Refuses (error) when any atom or
+/// lattice vector would move by more than the tolerance, or when the result
+/// does not carry the kept group at a tight tolerance.
+pub fn symmetrize_for_grid(
+    cell: &Cell,
+    atoms: &[Atom],
+    tolerance_bohr: f64,
+    grid: Option<[usize; 3]>,
+) -> Result<Symmetrized, SymmetryError> {
+    let detected = detect(cell, atoms, tolerance_bohr)?;
     let tol = tolerance_bohr;
-    let n_ops = ops.len() as f64;
+    let a = cell.lattice;
     let x: Vec<Vector3<f64>> = atoms
         .iter()
         .map(|a| Vector3::from(a.fractional_position))
         .collect();
-    // Lattice: Reynolds average of the metric over the rotations.
-    let a = cell.lattice;
-    let metric = a.transpose() * a;
-    let averaged = ops.iter().fold(Matrix3::zeros(), |s, o| {
-        let r = matrix(o.rotation);
-        s + r.transpose() * metric * r
-    }) / n_ops;
-    let averaged = (averaged + averaged.transpose()) * 0.5;
-    let power = |m: Matrix3<f64>, p: f64| -> Option<Matrix3<f64>> {
-        let e = m.symmetric_eigen();
-        if e.eigenvalues.iter().any(|&v| v <= 0.0 || !v.is_finite()) {
-            return None;
-        }
-        let d = Matrix3::from_diagonal(&e.eigenvalues.map(|v| v.powf(p)));
-        Some(e.eigenvectors * d * e.eigenvectors.transpose())
-    };
-    let stretched = power(metric, -0.5)
-        .zip(power(averaged, 0.5))
-        .map(|(mi, ms)| a * mi * ms)
-        .ok_or(SymmetryError("lattice metric is not positive definite"))?;
-    let lattice_change = (0..3)
-        .map(|j| (stretched.column(j) - a.column(j)).norm())
-        .fold(0.0, f64::max);
-    if lattice_change > tol {
-        return Err(SymmetryError(
-            "lattice symmetrization would exceed the tolerance",
-        ));
-    }
-    let lattice_changed = lattice_change > SYMMETRIZATION_ROUNDOFF_BOHR;
-    let new_lattice = if lattice_changed { stretched } else { a };
-
     // Least-squares translations from all atoms (origin-shift consistent).
-    let estimated: Vec<Vector3<f64>> = ops
+    let estimated: Vec<Vector3<f64>> = detected
         .iter()
         .map(|o| {
             let r = matrix(o.rotation);
@@ -349,50 +367,102 @@ pub fn symmetrize(
             ((a * (s - t)).norm() <= tol).then_some(s)
         })
         .collect();
-    let closes = |taus: &[Vector3<f64>]| {
-        ops.iter().enumerate().all(|(ia, oa)| {
-            ops.iter().enumerate().all(|(ib, ob)| {
+    // Exact closure of a candidate operation set (translations included).
+    let closes = |ops: &[SymmetryOperation]| {
+        ops.iter().all(|oa| {
+            ops.iter().all(|ob| {
                 let r = matrix(oa.rotation) * matrix(ob.rotation);
-                let t = matrix(oa.rotation) * taus[ib] + taus[ia];
-                ops.iter().enumerate().any(|(ic, oc)| {
+                let t = matrix(oa.rotation) * Vector3::from(ob.translation)
+                    + Vector3::from(oa.translation);
+                ops.iter().any(|oc| {
                     matrix(oc.rotation) == r
                         && ob
                             .atom_permutation
                             .iter()
                             .enumerate()
                             .all(|(i, &j)| oa.atom_permutation[j] == oc.atom_permutation[i])
-                        && (0..3).all(|k| wrap(taus[ic][k] - t[k]).abs() <= 1e-12)
+                        && (0..3).all(|k| wrap(oc.translation[k] - t[k]).abs() <= 1e-12)
                 })
             })
         })
     };
-    let project = |taus: &[Vector3<f64>]| -> (Vec<Vector3<f64>>, f64) {
+    let with_taus = |taus: &[Vector3<f64>]| -> Vec<SymmetryOperation> {
+        detected
+            .iter()
+            .zip(taus)
+            .map(|(o, t)| SymmetryOperation {
+                translation: (*t).into(),
+                ..o.clone()
+            })
+            .collect()
+    };
+    let restrict = |ops: Vec<SymmetryOperation>| -> Vec<SymmetryOperation> {
+        match grid {
+            None => ops,
+            Some(dims) => grid_subgroup(cell, &ops, dims, tol),
+        }
+    };
+    let project = |ops: &[SymmetryOperation]| -> (Vec<Vector3<f64>>, f64) {
         let mut sums = vec![Vector3::zeros(); x.len()];
-        for (o, t) in ops.iter().zip(taus) {
+        for o in ops {
             let r = matrix(o.rotation);
+            let t = Vector3::from(o.translation);
             for (j, &i) in o.atom_permutation.iter().enumerate() {
                 sums[i] += (r * x[j] + t - x[i]).map(wrap);
             }
         }
-        let delta: Vec<_> = sums.into_iter().map(|s| s / n_ops).collect();
+        let n = ops.len() as f64;
+        let delta: Vec<_> = sums.into_iter().map(|s| s / n).collect();
         let worst = delta.iter().map(|d| (a * d).norm()).fold(0.0, f64::max);
         (delta, worst)
     };
     let mut candidates = Vec::new();
-    if let Some(s) = snapped.filter(|s| closes(s)) {
-        candidates.push((true, s));
+    if let Some(s) = snapped {
+        let ops = with_taus(&s);
+        if closes(&ops) {
+            candidates.push((true, restrict(ops)));
+        }
     }
-    candidates.push((false, estimated));
-    let (translations_snapped, delta, displacement) = candidates
+    candidates.push((false, restrict(with_taus(&estimated))));
+    let (translations_snapped, kept, delta, displacement) = candidates
         .into_iter()
-        .map(|(snap, taus)| {
-            let (d, w) = project(&taus);
-            (snap, d, w)
+        .map(|(snap, ops)| {
+            let (d, w) = project(&ops);
+            (snap, ops, d, w)
         })
-        .find(|(_, _, w)| *w <= tol)
+        .find(|(_, _, _, w)| *w <= tol)
         .ok_or(SymmetryError(
             "atom symmetrization would exceed the tolerance",
         ))?;
+    // Lattice: Reynolds average of the metric over the kept rotations.
+    let metric = a.transpose() * a;
+    let averaged = kept.iter().fold(Matrix3::zeros(), |s, o| {
+        let r = matrix(o.rotation);
+        s + r.transpose() * metric * r
+    }) / kept.len() as f64;
+    let averaged = (averaged + averaged.transpose()) * 0.5;
+    let power = |m: Matrix3<f64>, p: f64| -> Option<Matrix3<f64>> {
+        let e = m.symmetric_eigen();
+        if e.eigenvalues.iter().any(|&v| v <= 0.0 || !v.is_finite()) {
+            return None;
+        }
+        let d = Matrix3::from_diagonal(&e.eigenvalues.map(|v| v.powf(p)));
+        Some(e.eigenvectors * d * e.eigenvectors.transpose())
+    };
+    let stretched = power(metric, -0.5)
+        .zip(power(averaged, 0.5))
+        .map(|(mi, ms)| a * mi * ms)
+        .ok_or(SymmetryError("lattice metric is not positive definite"))?;
+    let lattice_change = (0..3)
+        .map(|j| (stretched.column(j) - a.column(j)).norm())
+        .fold(0.0, f64::max);
+    if lattice_change > tol {
+        return Err(SymmetryError(
+            "lattice symmetrization would exceed the tolerance",
+        ));
+    }
+    let lattice_changed = lattice_change > SYMMETRIZATION_ROUNDOFF_BOHR;
+    let new_lattice = if lattice_changed { stretched } else { a };
     let positions_changed = displacement > SYMMETRIZATION_ROUNDOFF_BOHR;
     let fractional: Vec<[f64; 3]> = if positions_changed {
         x.iter().zip(&delta).map(|(p, d)| (p + d).into()).collect()
@@ -402,7 +472,9 @@ pub fn symmetrize(
     let result = Symmetrized {
         lattice_columns_bohr: std::array::from_fn(|i| std::array::from_fn(|j| new_lattice[(i, j)])),
         fractional,
-        operations_count: ops.len(),
+        operations_count: kept.len(),
+        detected_operations_count: detected.len(),
+        dropped_for_grid: detected.len() - kept.len(),
         max_atom_displacement_bohr: displacement,
         max_lattice_change_bohr: lattice_change,
         positions_changed,
@@ -418,9 +490,13 @@ pub fn symmetrize(
             .map(|(a, p)| Atom::new(a.species.clone(), *p))
             .collect();
         let exact = detect(&new_cell, &new_atoms, SYMMETRIZATION_VERIFY_BOHR)?;
-        if exact.len() != ops.len() {
+        let exact = match grid {
+            None => exact,
+            Some(dims) => grid_subgroup(&new_cell, &exact, dims, SYMMETRIZATION_VERIFY_BOHR),
+        };
+        if exact.len() != kept.len() {
             return Err(SymmetryError(
-                "symmetrized structure does not carry the detected group exactly",
+                "symmetrized structure does not carry the kept group exactly",
             ));
         }
     }

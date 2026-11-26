@@ -29,6 +29,26 @@ impl Prepared {
         let prepared = PreparedSymmetry::new(cell, atoms, full, tolerance_bohr, time_reversal)?;
         Self::from_prepared(cell, atoms, full, tolerance_bohr, time_reversal, &prepared)
     }
+    /// GS1C: restrict to the subgroup permuting an explicit FFT grid.
+    pub fn new_for_grid(
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+        grid: Option<[usize; 3]>,
+    ) -> Result<Self, ScfError> {
+        let prepared =
+            PreparedSymmetry::new_for_grid(cell, atoms, full, tolerance_bohr, time_reversal, grid)?;
+        Self::from_prepared_unchecked_grid(
+            cell,
+            atoms,
+            full,
+            tolerance_bohr,
+            time_reversal,
+            &prepared,
+        )
+    }
     pub fn from_prepared(
         cell: &Cell,
         atoms: &[Atom],
@@ -37,7 +57,26 @@ impl Prepared {
         time_reversal: bool,
         prepared: &PreparedSymmetry,
     ) -> Result<Self, ScfError> {
-        if !prepared.matches(cell, atoms, full, tolerance_bohr, time_reversal) {
+        Self::from_prepared_unchecked_grid(
+            cell,
+            atoms,
+            full,
+            tolerance_bohr,
+            time_reversal,
+            prepared,
+        )
+    }
+    /// The prepared record may be restricted to an explicit grid (GS1C); the
+    /// grid itself is checked again when the FFT dimensions are resolved.
+    fn from_prepared_unchecked_grid(
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+        prepared: &PreparedSymmetry,
+    ) -> Result<Self, ScfError> {
+        if !prepared.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal) {
             return Err(ScfError::InvalidInput(
                 "reference symmetry: stale prepared geometry or mesh",
             ));

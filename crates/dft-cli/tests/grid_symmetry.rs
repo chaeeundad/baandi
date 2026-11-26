@@ -44,8 +44,12 @@ fn symmetry_grid_explicit_and_automatic_both_drivers() {
                 }
                 let bad = Config::parse(&input.replace("[basis]", "[basis]\nfft_grid=[25,25,25]"))
                     .unwrap();
-                assert!(bad.prepare().unwrap_err().to_string().contains(
-                    "symmetry.fft_grid: explicit grid does not preserve translations/rotations"
+                // GS1C: keep the subgroup the explicit grid preserves.
+                assert_eq!(bad.prepare().unwrap().grid.dims(), [25; 3]);
+                assert!(bad.symmetrization.as_ref().unwrap().dropped_for_grid > 0);
+                assert!(dft_geometry::symmetry::preserves_fft_grid(
+                    [25; 3],
+                    &bad.density_operations().unwrap()
                 ));
             }
         }

@@ -365,10 +365,11 @@ impl Context {
         }
         .map_err(|e| error(4, e))?;
         if self.config.symmetry.mode == crate::config::SymmetryMode::Auto {
-            p.enable_symmetry(
+            p.enable_symmetry_for_grid(
                 &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
                 self.config.detection_tolerance(),
                 self.config.basis.time_reversal(),
+                self.config.basis.fft_grid,
             )
             .map_err(|e| error(4, e))?;
         }
@@ -485,12 +486,13 @@ impl Context {
             request.seed = seed;
             if self.config.symmetry.mode == crate::config::SymmetryMode::Auto {
                 request.symmetry = Some(
-                    dft_engine::refscf::symmetry::Prepared::new(
+                    dft_engine::refscf::symmetry::Prepared::new_for_grid(
                         &self.cell,
                         &atoms,
                         &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
                         self.config.detection_tolerance(),
                         self.config.basis.time_reversal(),
+                        self.config.basis.fft_grid,
                     )
                     .map_err(|e| error(4, e))?,
                 );
@@ -684,12 +686,13 @@ impl Context {
                     && self.config.symmetry.mode == crate::config::SymmetryMode::Auto
                 {
                     Some(
-                        dft_engine::refscf::symmetry::Prepared::new(
+                        dft_engine::refscf::symmetry::Prepared::new_for_grid(
                             &self.cell,
                             &atoms,
                             &self.config.symmetry_full_mesh().map_err(|e| error(1, e))?,
                             self.config.detection_tolerance(),
                             self.config.basis.time_reversal(),
+                            self.config.basis.fft_grid,
                         )
                         .map_err(|e| error(4, e))?,
                     )

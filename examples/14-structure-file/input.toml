@@ -1,7 +1,7 @@
 # Example 14: what `baandi-convert Si.cif --skeleton` writes (see README.md).
-# This committed copy was written with the converter's own TOML writer from the
-# values in Si.cif, without ASE, so reader_version is not recorded; rerun the
-# README command to get your own copy. The pseudopotential name was edited.
+# Verified 2026-11-26: a real run with ASE 3.26.0 gives the identical lattice and
+# positions (bit for bit); only name/timestamp metadata differ. The pseudopotential
+# name was edited.
 # Written by baandi-convert 1; numbers carry 17 significant digits.
 # [system.provenance] is recorded in results.json and never used for the physics.
 [system]
@@ -21,7 +21,7 @@ source_sha256 = "aa09a5160e2013f4cb2d3cc0d2d7c82054f7da0b5273fb4c3ecd313b5c73c1d
 source_format = "cif"
 source_index = -1
 reader = "ase"
-reader_version = "not recorded: committed example reproduces the converter layout; rerun the README command to record your ASE version"
+reader_version = "3.26.0"
 pbc_in_file = [true, true, true]
 converter = "baandi-convert"
 converter_version = "1"

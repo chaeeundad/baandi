@@ -1628,3 +1628,89 @@ fn fd_band_growth_forces_stress_match_explicit_count() {
     assert!(force_error <= 1e-6);
     assert!(stress_error <= 1e-8);
 }
+
+/// FD buffer bands (2026-11-26): a standard run at a small retained count that
+/// passes coverage delivers F, mu, forces and stress of an explicit large-band
+/// run at a 1e4 times tighter threshold within the standard class, and the
+/// buffer columns are not delivered.
+#[test]
+fn fd_buffer_bands_match_large_band_tight_run() {
+    use dft_engine::refscf::{
+        api::{Derivatives, Request, solve},
+        electronic::Policy,
+    };
+    let screening = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
+    let _screen_scope = screening.enter();
+    let pp = common::potential_with_atomic_start(1., 1.5, true, 161, "SLA PZ");
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 7., 0.], [0., 0.2, 7.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.1, 0.2, 0.3]),
+        Atom::new("Xx", [0.37, 0.43, 0.49]),
+    ];
+    let points = vec![KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let theta_ha = 0.02;
+    let run = |bands: usize, threshold_ha: f64| {
+        let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+        let mut opts = options();
+        opts.cutoff_hartree = 3.;
+        opts.gamma_real = GammaReal::Off;
+        opts.bands = Some(bands);
+        opts.standard = Some(dft_engine::StandardProfile { threshold_ha });
+        let mut request = Request::new(profile, points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha,
+            band_cap: bands,
+        });
+        request.derivatives = Derivatives {
+            forces: true,
+            stress: true,
+            deferred: false,
+        };
+        let input = StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+        };
+        let d = solve(input, request).unwrap();
+        let forces = d.derivatives.forces.unwrap().values;
+        let stress = d.derivatives.stress.unwrap().values;
+        let r = d.run.into_electronic().unwrap();
+        assert!(r.converged && r.verification.as_ref().unwrap().passed());
+        assert!(r.blocks[0].iter().all(|b| b.eigenvalues_ha.len() == bands));
+        let mu = r.occupations.unwrap().roots[0].unwrap().mu_ha;
+        (r.thermodynamics.free_energy_ha, mu, forces, stress)
+    };
+    // Reference: 24 retained bands at 5e-13 Ha. Same tight threshold at 13
+    // retained bands isolates the band count and buffer; the 13-band standard
+    // run is the delivered production setting (standard class on F).
+    let (f0, mu0, force0, stress0) = run(24, 5e-13);
+    let (f1, mu1, force1, stress1) = run(13, 5e-13);
+    let (f2, mu2, force2, stress2) = run(13, 5e-9);
+    let force_error = delta(force0.iter().flatten(), force1.iter().flatten());
+    let stress_error = delta(stress0.iter().flatten(), stress1.iter().flatten());
+    println!(
+        "FD buffer: 13 vs 24 bands, both tight: |dF|={:e} Ha |dmu|={:e} Ha max|dforce|={force_error:e} Ha/Bohr max|dstress|={stress_error:e} Ha/Bohr^3",
+        (f1 - f0).abs(),
+        (mu1 - mu0).abs()
+    );
+    println!(
+        "FD buffer: 13 bands standard vs 24 bands tight: |dF|={:e} Ha |dmu|={:e} Ha max|dforce|={:e} Ha/Bohr max|dstress|={:e} Ha/Bohr^3",
+        (f2 - f0).abs(),
+        (mu2 - mu0).abs(),
+        delta(force0.iter().flatten(), force2.iter().flatten()),
+        delta(stress0.iter().flatten(), stress2.iter().flatten()),
+    );
+    assert!((f1 - f0).abs() <= 1e-10);
+    assert!((mu1 - mu0).abs() <= 1e-8);
+    assert!(force_error <= 1e-7);
+    assert!(stress_error <= 1e-9);
+    assert!((f2 - f0).abs() <= 5e-9);
+}

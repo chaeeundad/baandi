@@ -9731,3 +9731,78 @@ fn fd_band_growth_matches_explicit_count_and_reports_cap() {
     assert_eq!(BandGrowth::next(30, 40), 36);
     assert_eq!(BandGrowth::next(38, 40), 40);
 }
+
+/// FD buffer bands (2026-11-26): a cubic one-electron metal (atom at the
+/// origin, 3x3x3 mesh, theta 0.01 Ha) whose retained count 10 cuts an exact
+/// triplet at about 1.342 Ha. Without the buffer the two retained triplet
+/// members carried ~2.5e-6 Ha eigenvalue errors and F was 2.1e-11 Ha off the
+/// 14-band run; with the buffer the cut is absorbed and both agree.
+#[test]
+fn fd_buffer_absorbs_degenerate_cut() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{
+            api::{Request, solve},
+            electronic::Policy,
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.; 3])];
+    let pp = common::potential_with_atomic_start(1., 1., false, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let mut points = Vec::new();
+    for a in 0..3 {
+        for b in 0..3 {
+            for c in 0..3 {
+                points.push(KPoint {
+                    fractional: [a as f64 / 3., b as f64 / 3., c as f64 / 3.],
+                    weight: 1. / 27.,
+                });
+            }
+        }
+    }
+    let run = |bands: usize| {
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(bands),
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha: 0.01,
+            band_cap: bands,
+        });
+        let r = solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+        .unwrap();
+        assert!(r.converged);
+        r
+    };
+    let (cut, wide) = (run(10), run(14));
+    let gamma_cut = &cut.blocks[0][0].eigenvalues_ha;
+    let gamma_wide = &wide.blocks[0][0].eigenvalues_ha;
+    assert_eq!(gamma_cut.len(), 10);
+    // The cut: retained bands 8 and 9 and the first unretained band 10 of the
+    // wide run form one degenerate triplet.
+    assert!((gamma_wide[8] - gamma_wide[10]).abs() < 1e-10);
+    let eig = (0..10)
+        .map(|i| (gamma_cut[i] - gamma_wide[i]).abs())
+        .fold(0., f64::max);
+    let df = (cut.thermodynamics.free_energy_ha - wide.thermodynamics.free_energy_ha).abs();
+    eprintln!("FD buffer cut: |dF|={df:e} Ha max|d eig(Gamma)|={eig:e} Ha");
+    assert!(df <= 1e-12, "{df:e}");
+    assert!(eig <= 1e-9, "{eig:e}");
+}

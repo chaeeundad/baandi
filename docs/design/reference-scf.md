@@ -3551,7 +3551,9 @@ and k entry points retain their arithmetic and even-electron restriction.
 
 Stage 1 solves every retained band at every k before calling the existing
 `occupations::FermiDirac` number/entropy solver. Every retained FD band is
-mandatory in reference Davidson, including numerically zero tails. Density,
+mandatory in reference Davidson, including numerically zero tails; since
+2026-11-26 the solver also carries unrequired buffer columns beyond them
+([FD buffer bands](#fd-buffer-bands-2026-11-26)). Density,
 kinetic, nonlocal, band energy and the residual-square guard all use the
 same occupation times normalized k weight exactly once. An explicit FD band
 count (`scf.nbands`) is prepared before construction; without it the automatic
@@ -3652,6 +3654,88 @@ against an explicit 16-band run: |dF| 1.3e-15 Ha, max force difference
 3.2e-8 Ha/Bohr on forces up to 6.1e-2, max stress difference 9.9e-11
 Ha/Bohr^3). Forces and stress use the delivered (grown) block; the force
 identity does not include the band count, only the policy cap.
+
+### FD buffer bands (2026-11-26)
+
+Problem: FD runs on the reference driver failed with `electronic reference
+Davidson exhausted six calls` (dev08: Ti2MnIr, 4 atoms, PseudoDojo PBE,
+96 Ry, 8x8x8 mesh with 260 irreducible k, 41 bands, theta 0.005 Ha, MPI8,
+after 1174 s; QE converges in 14 iterations with the same bands, mesh and
+grid). Every retained band was a mandatory Ritz flag and the solved block had
+exactly the retained count, so the top retained Ritz pairs converge at a rate
+set by the first unretained state. When the count cuts a (near-)degenerate or
+strongly coupled cluster that rate approaches one; at the ethr floor
+(1e-13 Ry, Ritz threshold 5e-14 Ha) the six 20-iteration calls run out.
+When the count cuts an exactly degenerate set the Ritz-change test can also
+pass with real errors: the cubic fixture below delivered the two retained
+members of a triplet with 3.6e-6 Ha eigenvalue errors (F 2.1e-11 Ha off).
+
+Rule (`electronic_map::{buffer_bands, solve_width}`), FD policies only:
+
+- The reference Davidson solves `w = n + delta` columns,
+  `delta = max(4, ceil(n / 10))`, bounded by the smallest k basis. `n` is the
+  retained count (explicit `scf.nbands`, the policy cap, or the automatic
+  count). The rule depends only on `n`; it has no material constant.
+- Only the first `n` flags are required (all of them, at the occupied
+  threshold, as before). Buffer columns use the existing empty-band threshold
+  `max(5 ethr, 5e-6 Ha)` and are never required; the pending allowance
+  `max(5, w / 4)` always covers them.
+- Occupations, the coverage criterion (edge fraction <= 1e-8 and edge
+  electrons <= 1e-10 N, unchanged), density, energies, the residual guard,
+  verification comparisons and delivery use the first `n` eigenpairs.
+  **The buffer is dropped from the output**: `band_data`, `results.json`
+  blocks, forces and stress see exactly `n` bands per k.
+- The full solved block (with the buffer) is kept as the next warm start and
+  in the kept H X cache; the start appends the buffer to the `n` start
+  columns with the deterministic plane-wave complements of automatic growth
+  (the `n` start columns are unchanged). Checkpoints store the full block.
+- Automatic growth applies to `n`; the buffer follows (`fd_width(next)`),
+  including the checkpoint reshape.
+- Fixed-sector policies keep `w = n`: bit-identical.
+
+Why (b) rather than occupation-weighted tolerances (a) or cluster detection
+(c): the buffer removes the cause (the cut defines the convergence rate of the
+required pairs) instead of tolerating its symptom, keeps one tolerance for
+every retained band, needs no occupation estimate before the number solve
+(unavailable at the first map), and handles near-degenerate and strongly
+coupled clusters, which an exact-degeneracy test in (c) would miss. (a) can be
+added later as an optional refinement.
+
+Evidence (Mac, synthetic, not a QE comparison):
+
+- `ref_davidson_complex::tests::cut_cluster_converges_with_buffer_columns`
+  (dft-solvers): 400-dimensional Hermitian matrix with a coupled 16-state
+  cluster cut in the middle by n = 20, threshold 5e-14 Ha. Without buffer the
+  first 20 flags are not converged after six calls (seven are needed); with
+  `w = 24` two calls suffice and the first 20 eigenvalues match the dense
+  solver within 1e-11 Ha.
+- `refscf::fd_buffer_absorbs_degenerate_cut`: cubic one-electron metal, atom
+  at the origin, 3x3x3 mesh, theta 0.01 Ha, n = 10 cuts the triplet at
+  1.342 Ha. Before: |F(10) - F(14)| = 2.1e-11 Ha, Gamma eigenvalue error
+  3.6e-6 Ha (the test fails on the base commit). After: 8.9e-16 Ha and
+  3.8e-15 Ha.
+- `refscf_forces::fd_buffer_bands_match_large_band_tight_run`: two-atom
+  nonlocal fixture, theta 0.02 Ha. 13 against 24 retained bands, both at
+  5e-13 Ha: |dF| 1.3e-14 Ha, |dmu| 7.6e-9 Ha, forces 7.1e-9 Ha/Bohr, stress
+  7.4e-11 Ha/Bohr^3. The 13-band standard run (5e-9 Ha) against the 24-band
+  tight run: |dF| 1.9e-9 Ha (standard class), |dmu| 9.7e-7 Ha, forces
+  7.7e-6 Ha/Bohr, stress 1.9e-8 Ha/Bohr^3 (the standard threshold's own
+  SCF error, not the band count).
+- Release G4 family before/after (base `98338cc6`): every fixed-sector row of
+  G4 and G4C is byte-identical. FD rows change by at most 3.3e-12 Ha in F
+  (G4 scalar 1e-8 Ry rows; tight rows <= 3.3e-14 Ha), G4B <= 3.0e-13 Ha,
+  G4C moment rows <= 1.8e-13 Ha, G4F <= 4.1e-13 Ha, G6 spin-free FD
+  <= 2.2e-14 Ha, free-moment tight short history <= 2.0e-13 Ha. Rank-count
+  agreement in each matrix is unchanged. `g4g_atom_fd` (isolated open-shell
+  atom, known limiter stall) now takes 26 maps instead of 13 and stops at
+  dr2 3.6e-10 instead of 4.0e-9 Ha; F differs by 1.0e-9 Ha (within the
+  standard class, and within 5e-11 Ha of the earlier run's own verification
+  map). The automatic-growth force test is unchanged in outcome
+  (5 -> 13 bands; |dF| 6.3e-14 Ha, forces 1.3e-8 Ha/Bohr against the explicit
+  16-band run).
+- Cost: each FD Davidson call carries `delta` extra columns (at least 4,
+  about 10 percent for large `n`). No dev08 timing yet; the Ti2MnIr case has
+  not been rerun.
 
 ### G4G isolated open-shell stall investigation (2026-11-25; initial investigation)
 

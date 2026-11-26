@@ -256,7 +256,34 @@ pub(super) struct Block {
     pub occupations: Vec<f64>,
     pub residuals: Vec<f64>,
     pub orbitals: ComplexMatrix,
+    /// FD buffer bands: the complete solved block (retained bands followed by
+    /// the buffer), kept only as the next warm start. `None` without a buffer.
+    pub solved: Option<ComplexMatrix>,
     pub calls: Vec<SolveRecord>,
+}
+impl Block {
+    /// The orbitals that warm-start the next map (with the buffer, if any).
+    pub fn warm_start(&self) -> &ComplexMatrix {
+        self.solved.as_ref().unwrap_or(&self.orbitals)
+    }
+}
+/// FD buffer bands (2026-11-26): the reference Davidson solves `n + delta`
+/// columns, `delta = max(4, ceil(n / 10))`, but requires convergence and
+/// computes occupations, coverage, density, energies and delivery only for the
+/// leading `n`. The width is bounded by the smallest k basis. Fixed-sector
+/// policies solve exactly `n` (no buffer).
+pub(super) fn buffer_bands(bands: usize) -> usize {
+    4.max(bands.div_ceil(10))
+}
+pub(super) fn fd_width(bands: usize, basis: usize) -> usize {
+    (bands + buffer_bands(bands)).min(basis).max(bands)
+}
+pub(super) fn solve_width(policy: &Policy, bands: usize, basis: usize) -> usize {
+    if policy.finite().is_some() {
+        fd_width(bands, basis)
+    } else {
+        bands
+    }
 }
 pub(super) struct Map {
     pub density: Vec<Vec<f64>>,
@@ -484,9 +511,16 @@ pub(super) fn evaluate<K: Collective>(
     diagnostics: bool,
     response_diagnostics: bool,
     shortfall: Option<&mut Shortfall>,
+    bands: usize,
 ) -> Result<Map, ScfError> {
     let fields = fields(workspace, &mut states[0], comm, cell, functional, input)?;
-    let bands = states[0].orbitals.cols();
+    // Solved columns: the retained `bands` plus the FD buffer (`solve_width`).
+    let width = states[0].orbitals.cols();
+    if bands == 0 || bands > width {
+        return Err(ScfError::InvalidInput(
+            "electronic reference map: retained bands exceed the solved block",
+        ));
+    }
     let nk = states[0].blocks.len();
     let ns = states.len();
     let electrons = states[0].electrons;
@@ -523,10 +557,11 @@ pub(super) fn evaluate<K: Collective>(
                 .map_err(numerical)?;
             let diagonal: Vec<_> = op.diagonal_static().iter().map(|d| d + v0).collect();
             let hx = kept[s].prepare(k, comm, op, &state.orbitals.0[k], &op_potential)?;
-            // FD: all retained bands are mandatory, even underflowed tails.
+            // FD: all retained bands are mandatory, even underflowed tails;
+            // the buffer columns beyond them (`solve_width`) are not.
             // Fixed sector: first empty is mandatory as in the legacy policy.
             let strict = policy.strict_bands(s, bands);
-            let mut options = ref_davidson::Options::new(bands, ethr / 2., strict);
+            let mut options = ref_davidson::Options::new(width, ethr / 2., strict);
             options.first_step = first;
             options.return_hx = true;
             options.profile = diagnostics;
@@ -552,8 +587,10 @@ pub(super) fn evaluate<K: Collective>(
                 // buffer roots. That allowance cannot include mandatory FD
                 // roots (or the fixed sector's gap edge): any of them can
                 // change the number solve and the resulting spin density.
+                // FD buffer columns are never required: with them the pending
+                // count is at most delta <= max(5, width / 4).
                 if solution.converged[..strict].iter().all(|&v| v)
-                    && solution.converged.iter().filter(|&&v| !v).count() <= 5.max(bands / 4)
+                    && solution.converged.iter().filter(|&&v| !v).count() <= 5.max(width / 4)
                 {
                     break;
                 }
@@ -585,11 +622,23 @@ pub(super) fn evaluate<K: Collective>(
                 .collect();
             let residuals = sum(comm, &local)?.into_iter().map(f64::sqrt).collect();
             kept[s].retain(k, state, &solution.eigenvectors, hx, &op_potential);
+            let mut eigenvalues = solution.eigenvalues;
+            let (orbitals, solved) = if width > bands {
+                // Only the retained bands enter occupations, coverage,
+                // density, energies and delivery; the buffer is dropped.
+                eigenvalues.truncate(bands);
+                let mut retained = solution.eigenvectors.clone();
+                retained.resize_columns(bands).map_err(numerical)?;
+                (retained, Some(solution.eigenvectors))
+            } else {
+                (solution.eigenvectors, None)
+            };
             channel.push(Block {
-                eigenvalues: solution.eigenvalues,
+                eigenvalues,
                 occupations: vec![0.; bands],
                 residuals,
-                orbitals: solution.eigenvectors,
+                orbitals,
+                solved,
                 calls,
             });
         }
@@ -628,7 +677,7 @@ pub(super) fn evaluate<K: Collective>(
                 };
                 for (state, channel) in states.iter_mut().zip(&blocks) {
                     for (x, b) in state.orbitals.0.iter_mut().zip(channel) {
-                        x.clone_from(&b.orbitals);
+                        x.clone_from(b.warm_start());
                     }
                 }
             }

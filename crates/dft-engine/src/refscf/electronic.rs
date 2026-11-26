@@ -756,6 +756,14 @@ pub(super) async fn run_continuation<K: Collective>(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // FD buffer bands: the solved block holds `bands` plus the buffer; the
+    // start's columns are kept bit for bit and the buffer is appended.
+    let width = map::solve_width(&policy, bands, min_basis(&states[0]));
+    if width > bands {
+        for state in states.iter_mut() {
+            refstart::extend_k_orbitals(state, width, comm)?;
+        }
+    }
     let volume = input.cell.volume_bohr3();
     let dims = states[0].grid.dims();
     let dv = volume / dims.iter().product::<usize>() as f64;
@@ -912,14 +920,16 @@ pub(super) async fn run_continuation<K: Collective>(
                         return Err(super::checkpoint::invalid("band growth count"));
                     }
                     if count != bands {
-                        // Shape only: the orbital block is read next.
+                        // Shape only: the orbital block is read next. The
+                        // solved block includes the FD buffer.
+                        let width = map::fd_width(count, min_basis(&states[0]));
                         for state in states.iter_mut() {
                             for (block, x) in state.blocks.iter_mut().zip(&mut state.orbitals.0) {
-                                *x = dft_numerics::linalg::ComplexMatrix::zeros(x.rows(), count)
+                                *x = dft_numerics::linalg::ComplexMatrix::zeros(x.rows(), width)
                                     .map_err(super::numerical)?;
                                 block
                                     .operator
-                                    .ensure_capacity((2 * count).min(block.basis.vectors().len()))
+                                    .ensure_capacity((2 * width).min(block.basis.vectors().len()))
                                     .map_err(super::numerical)?;
                             }
                         }
@@ -1014,6 +1024,7 @@ pub(super) async fn run_continuation<K: Collective>(
                     diagnostic,
                     trace.is_some(),
                     growth.is_some().then_some(&mut shortfall),
+                    bands,
                 ) {
                     Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
                         grow(
@@ -1141,6 +1152,7 @@ pub(super) async fn run_continuation<K: Collective>(
                     diagnostic,
                     trace.is_some(),
                     growth.is_some().then_some(&mut shortfall),
+                    bands,
                 ) {
                     Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
                         grow(
@@ -1506,12 +1518,7 @@ fn grow<K: Collective>(
     shortfall: map::Shortfall,
     events: &mut Vec<GrowthEvent>,
 ) -> Result<(), ScfError> {
-    let basis = states[0]
-        .blocks
-        .iter()
-        .map(|b| b.basis.vectors().len())
-        .min()
-        .unwrap_or(0);
+    let basis = min_basis(&states[0]);
     let next = BandGrowth::next(*bands, cap.min(basis));
     if next <= *bands {
         // ScfError carries a static message; this terminal error is built once.
@@ -1527,8 +1534,10 @@ fn grow<K: Collective>(
         );
         return Err(ScfError::InvalidInput(Box::leak(message.into_boxed_str())));
     }
+    // Growth applies to the retained count; the FD buffer follows it.
+    let width = map::fd_width(next, basis);
     for state in states.iter_mut() {
-        refstart::extend_k_orbitals(state, next, comm)?;
+        refstart::extend_k_orbitals(state, width, comm)?;
     }
     for cache in kept.iter_mut() {
         cache.invalidate();
@@ -1557,6 +1566,15 @@ fn grow<K: Collective>(
     *bands = next;
     Ok(())
 }
+/// Smallest plane-wave basis over the k blocks of one channel.
+fn min_basis(state: &refstart::KStartState) -> usize {
+    state
+        .blocks
+        .iter()
+        .map(|b| b.basis.vectors().len())
+        .min()
+        .unwrap_or(0)
+}
 fn collect_calls(step: &Map, out: &mut Vec<(usize, usize, SolveRecord)>) {
     for (s, c) in step.blocks.iter().enumerate() {
         for (k, b) in c.iter().enumerate() {
@@ -1567,7 +1585,7 @@ fn collect_calls(step: &Map, out: &mut Vec<(usize, usize, SolveRecord)>) {
 fn warm(states: &mut [refstart::KStartState], step: &Map) {
     for (state, channel) in states.iter_mut().zip(&step.blocks) {
         for (x, b) in state.orbitals.0.iter_mut().zip(channel) {
-            x.clone_from(&b.orbitals);
+            x.clone_from(b.warm_start());
         }
     }
 }

@@ -65,21 +65,30 @@ impl KeptHx {
                 && e.potential.len() == potential.len()
                 && op.owned_epoch().is_some_and(|v| v > e.epoch)
         });
-        let mut misses = [0.];
-        comm.tree_sum_f64(&[f64::from(!hit)], &mut misses)
+        let delta: Vec<_> = match (&old, hit) {
+            (Some(e), true) => potential
+                .iter()
+                .zip(&e.potential)
+                .map(|(a, b)| a - b)
+                .collect(),
+            _ => Vec::new(),
+        };
+        // The zero-change count (GK10B redo on the same potential) rides in
+        // the same sum as the miss count.
+        let local_nonzero = f64::from(delta.iter().any(|d| *d != 0.));
+        let mut flags = [0.; 2];
+        comm.tree_sum_f64(&[f64::from(!hit), local_nonzero], &mut flags)
             .map_err(numerical)?;
-        if misses[0] != 0. {
+        if flags[0] != 0. {
             return Ok(None);
         }
         let e = old.expect("global hit");
-        let delta: Vec<_> = potential
-            .iter()
-            .zip(&e.potential)
-            .map(|(a, b)| a - b)
-            .collect();
         let mut hx = e.hx.clone();
-        op.add_local_change(comm, x, &delta, &mut hx)
-            .map_err(numerical)?;
+        // A zero change on every rank adds nothing: skip its transforms.
+        if flags[1] != 0. {
+            op.add_local_change(comm, x, &delta, &mut hx)
+                .map_err(numerical)?;
+        }
         if self.preserve {
             self.entries[k] = Some(e);
         }

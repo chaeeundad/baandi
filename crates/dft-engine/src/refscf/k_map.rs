@@ -126,7 +126,13 @@ pub(super) fn evaluate<K: Collective>(
             ethr_ry / 2.,
             occupations.iter().filter(|&&f| f > 0.).count(),
         );
-        options.first_step = first_step;
+        // GK10B research (`K_FIRST_EMPTY_RULE`, default off): this driver's
+        // occupations are fixed and known before the first solve, so the
+        // first map may keep the empty-band threshold for empty bands
+        // instead of converging every band to the occupied threshold. It
+        // changes the map-1 density when no redo follows.
+        options.first_step = first_step
+            && !dft_numerics::switches::on(dft_numerics::switches::Id::K_FIRST_EMPTY_RULE);
         options.return_hx = true;
         options.profile = diagnostics;
         let clock = Instant::now();

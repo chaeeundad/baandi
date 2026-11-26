@@ -266,6 +266,84 @@ impl ComplexOverlapFactor {
         self.order = n;
         Ok(true)
     }
+    /// Bordered Cholesky (GK10B): extend a valid factor of the leading
+    /// `self.order()` block of `s` to all of `s`. The caller guarantees that
+    /// the leading block of `s` is the matrix the current factor was built
+    /// from. L21 = (L11^-1 S12)^H, L22 = chol(S22 - L21 L21^H); the new
+    /// pivots pass the same ratio test as [`Self::factor`]. On rejection the
+    /// factor stays valid for the leading block (only rows at and beyond the
+    /// old order were written) and `Ok(false)` is returned.
+    pub fn extend(&mut self, s: &ComplexMatrix, pivot_ratio_min: f64) -> Result<bool, LinalgError> {
+        use faer::linalg::{
+            cholesky::llt::factor, triangular_solve::solve_lower_triangular_in_place,
+        };
+        let from = self.order;
+        Self::check(s)?;
+        let n = s.rows();
+        if n > self.capacity || n < from || !pivot_ratio_min.is_finite() || pivot_ratio_min <= 0. {
+            return Err(LinalgError::Dimension);
+        }
+        let k = n - from;
+        if k == 0 {
+            return Ok(true);
+        }
+        if (from..n).any(|i| s[(i, i)].re <= 0.) {
+            return Ok(false);
+        }
+        // Y = L11^-1 S12 in the work matrix (from x k), then L21 = Y^H.
+        for j in 0..k {
+            for i in 0..from {
+                self.work[(i, j)] = s[(i, from + j)];
+            }
+        }
+        if from > 0 {
+            solve_lower_triangular_in_place(
+                self.lower.as_ref().submatrix(0, 0, from, from),
+                self.work.as_mut().submatrix_mut(0, 0, from, k),
+                Par::Seq,
+            );
+        }
+        for j in 0..from {
+            for i in 0..k {
+                self.lower[(from + i, j)] = self.work[(j, i)].conj();
+            }
+        }
+        // S22 - L21 L21^H (lower triangle is what the factorization reads).
+        for j in 0..k {
+            for i in 0..k {
+                let mut z = s[(from + i, from + j)];
+                for p in 0..from {
+                    z -= self.work[(p, i)].conj() * self.work[(p, j)];
+                }
+                self.lower[(from + i, from + j)] = z;
+            }
+        }
+        let ok = factor::cholesky_in_place(
+            self.lower.as_mut().submatrix_mut(from, from, k, k),
+            Default::default(),
+            Par::Seq,
+            faer::dyn_stack::MemStack::new(&mut self.buffer),
+            Default::default(),
+        )
+        .is_ok()
+            && (from..n).all(|i| {
+                let ratio = self.lower[(i, i)].norm_sqr() / s[(i, i)].re;
+                ratio.is_finite() && ratio >= pivot_ratio_min
+            })
+            && (from..n).all(|i| {
+                (0..=i).all(|j| {
+                    let z = self.lower[(i, j)];
+                    z.re.is_finite() && z.im.is_finite()
+                })
+            });
+        if ok {
+            self.order = n;
+        }
+        Ok(ok)
+    }
+    pub fn order(&self) -> usize {
+        self.order
+    }
     /// T = L^-H, so T^H S T = I, for exceptional rank repair only.
     pub fn basis_transform_into(&self, out: &mut ComplexMatrix) -> Result<(), LinalgError> {
         use faer::linalg::triangular_solve::solve_upper_triangular_in_place;

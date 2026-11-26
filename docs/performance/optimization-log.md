@@ -4988,3 +4988,15 @@ maps. Gram flops and reduced bytes per projected matrix (m + k)^2 -> (m + k) k (
 release, 12 atoms, 22 bands, 2 k, ecut 20 Ha): solve 3.25 -> 2.84 s at P=1, 1.05 -> 0.93 s at P=4 (simulated).
 Not changed: the complex overlap factor is still a full refactor per append (the real path's bordered Cholesky
 is a separate step); repair path. dev08 A/B pending.
+
+## GK10B-CDAV-REALPATH — first k map kept HX, bordered complex factor (2026-11-27)
+
+Profile: dev08 GeTe map 1 = 2740 Davidson iterations against about 530 per later map (coarse first-step solve plus
+the first-iteration redo). Mac split on Si k333s: coarse 417 H columns (112 re-applying H to the start Ritz vectors)
++ redo 233 (112 re-applying H to the coarse vectors on the same potential). Changes: the start keeps H X = (H Q) C and
+seeds the kept-HX cache (`BAANDI_K_START_KEPT_HX`), the redo keeps the coarse X/HX (`BAANDI_K_REDO_KEPT_HX`, zero
+potential change skips the correction transforms), bordered Cholesky extension of the complex overlap factor
+(`BAANDI_CDAV_BORDER_FACTOR`), one-pass corrections (`BAANDI_CDAV_STREAM`, bit-identical); all default on. Research
+switch `BAANDI_K_FIRST_EMPTY_RULE` default off. Real-potential CLI (Mac, one run per arm): map-1 H columns -32 to -40 %,
+total H -5 to -15 %, same maps and iterations, energies within 1.3e-13 Ha; solve -4 to -15 %. SCF classes on the k set
+|dE| <= 4.2e-14 Ha with equal map counts. dev08 A/B pending (GeTe, B12, IrI3).

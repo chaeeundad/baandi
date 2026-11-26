@@ -392,6 +392,17 @@ pub(super) async fn run_continuation<K: Collective>(
                 );
             }
         }
+        if iteration == 1 {
+            // GK10B (`K_START_KEPT_HX`): seed the kept HX with the start's
+            // H X of the start Ritz orbitals; `prepare` hits only while the
+            // orbitals are still those exact vectors (not after a seed) and
+            // corrects the potential change exactly.
+            for (k, (x, hx, potential)) in
+                std::mem::take(&mut state.start_hx).into_iter().enumerate()
+            {
+                kept.retain(k, &state, &x, &hx, &potential);
+            }
+        }
         let requested = ethr;
         let mut redo = false;
         let mut reported_columns = 0;
@@ -452,7 +463,12 @@ pub(super) async fn run_continuation<K: Collective>(
                 boundary.emit(report).await;
                 ethr = next_ethr_ry(ethr, dr2, state.electrons);
                 redo = true;
-                kept.invalidate();
+                // GK10B (`K_REDO_KEPT_HX`): the redo solves the same input
+                // potential from the coarse solve's X, whose HX is kept
+                // exactly (zero potential change); off applies H again.
+                if !config.on(Id::K_REDO_KEPT_HX) {
+                    kept.invalidate();
+                }
                 state.orbitals = step.solve.eigenvectors;
                 continue;
             }

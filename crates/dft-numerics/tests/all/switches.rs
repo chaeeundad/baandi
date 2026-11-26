@@ -206,7 +206,12 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::K_NL_TABLE_MEMO), Value::Choice("on"));
     assert_eq!(value(Id::K_START_SPIN_SHARE), Value::Choice("on"));
     assert_eq!(value(Id::CDAV_BORDER_GRAM), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 68);
+    assert_eq!(value(Id::CDAV_BORDER_FACTOR), Value::Choice("on"));
+    assert_eq!(value(Id::CDAV_STREAM), Value::Choice("on"));
+    assert_eq!(value(Id::K_FIRST_EMPTY_RULE), Value::Choice("off"));
+    assert_eq!(value(Id::K_REDO_KEPT_HX), Value::Choice("on"));
+    assert_eq!(value(Id::K_START_KEPT_HX), Value::Choice("on"));
+    assert_eq!(TABLE.len(), 73);
 }
 
 #[test]

@@ -14,6 +14,12 @@
 //! only the border V^H E and V^H HE is computed (one Gram product and one
 //! reduction each, (m + k) k instead of (m + k)^2 entries). A repair rotates
 //! the basis and falls back to the full recompute; restarts are unchanged.
+//!
+//! GK10B: `BAANDI_CDAV_BORDER_FACTOR` (default on, rounding class) extends
+//! the overlap Cholesky factor over the appended columns only when S was
+//! border-updated (`ComplexOverlapFactor::extend`); `BAANDI_CDAV_STREAM`
+//! (default on, bit-identical) computes corrections in one column pass with
+//! the preconditioner branch hoisted per column.
 use crate::ref_davidson::accounting::{Counted, clock, elapsed};
 use crate::{
     SolverError,
@@ -642,6 +648,8 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
     let comm = &Counted::new(comm, o.profile);
     let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::CDAV_REUSE);
     let border_gram = dft_numerics::switches::on(dft_numerics::switches::Id::CDAV_BORDER_GRAM);
+    let border_factor = dft_numerics::switches::on(dft_numerics::switches::Id::CDAV_BORDER_FACTOR);
+    let stream = dft_numerics::switches::on(dft_numerics::switches::Id::CDAV_STREAM);
     let mut ag = Agreement {
         merge: reuse,
         pending: false,
@@ -820,16 +828,40 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         contracted = false;
         e.resize_columns(active.len())?;
         norms[..active.len()].fill(0.);
-        for (j, &b) in active.iter().enumerate() {
-            for (i, &d) in diagonal.iter().enumerate() {
-                let denominator = if ref_davidson::stream::sqrt_safe(bounds, values[b]) {
-                    ref_davidson::stream::sqrt_denominator(d, values[b])
-                } else {
-                    ref_davidson::preconditioner_denominator(d, values[b])
-                };
-                let z = (hx[(i, j)] - values[b] * x[(i, j)]) / denominator;
-                e[(i, j)] = z;
-                norms[j] += z.norm_sqr();
+        if stream {
+            // GK10B (bit-identical): the preconditioner branch depends on the
+            // column only; same operands, same ascending accumulation.
+            for (j, &b) in active.iter().enumerate() {
+                let value = values[b];
+                let safe = ref_davidson::stream::sqrt_safe(bounds, value);
+                let (xc, hc) = (x.column(j), hx.column(j));
+                let ec = e.column_mut(j);
+                let mut acc = 0.;
+                for i in 0..rows {
+                    let d = diagonal[i];
+                    let denominator = if safe {
+                        ref_davidson::stream::sqrt_denominator(d, value)
+                    } else {
+                        ref_davidson::preconditioner_denominator(d, value)
+                    };
+                    let z = (hc[i] - value * xc[i]) / denominator;
+                    ec[i] = z;
+                    acc += z.norm_sqr();
+                }
+                norms[j] = acc;
+            }
+        } else {
+            for (j, &b) in active.iter().enumerate() {
+                for (i, &d) in diagonal.iter().enumerate() {
+                    let denominator = if ref_davidson::stream::sqrt_safe(bounds, values[b]) {
+                        ref_davidson::stream::sqrt_denominator(d, values[b])
+                    } else {
+                        ref_davidson::preconditioner_denominator(d, values[b])
+                    };
+                    let z = (hx[(i, j)] - values[b] * x[(i, j)]) / denominator;
+                    e[(i, j)] = z;
+                    norms[j] += z.norm_sqr();
+                }
             }
         }
         ag.sum(comm, &mut norms, &mut sums, active.len())?;
@@ -853,16 +885,30 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
         // Try the complete normalized correction block, then repair only if
         // its metric is dependent or the full physical space has been reached.
         let mut accepted = false;
+        // GK10B: the factor `f` was extended in place (no swap with `trial`).
+        let mut extended = false;
         if m + kept <= cap && kept > 0 {
             v.append_columns(e)?;
-            if border_gram && s_valid == m {
+            let bordered = border_gram && s_valid == m;
+            if bordered {
                 products.border(comm, &mut ag, v, (e, true), s, border, r)?;
             } else {
                 products.gram(comm, &mut ag, (v, true), (v, true), s, r)?;
                 hermitize(s);
             }
             s_valid = m + kept;
-            accepted = factor(trial, s, r)?;
+            if bordered && border_factor && f.order() == m {
+                // Bordered Cholesky: the leading block of S is kept bit for
+                // bit by the border update, so the factor of the previous
+                // basis stays valid and only the new columns are factored.
+                // On rejection `f` still factors the old basis (repair).
+                let t = clock(r.profile);
+                accepted = f.extend(s, crate::real_davidson::PIVOT_RATIO_MIN)?;
+                r.seconds[2] += elapsed(t);
+                extended = accepted;
+            } else {
+                accepted = factor(trial, s, r)?;
+            }
         }
         if !accepted {
             let t = clock(o.profile);
@@ -930,7 +976,9 @@ pub fn solve_with_initial_hx<K: Collective, O: DistributedComplexOperator>(
             }
             r.seconds[5] += (elapsed(t) - (r.seconds[1] + r.seconds[2] - child_seconds)).max(0.);
         }
-        std::mem::swap(f, trial);
+        if !extended {
+            std::mem::swap(f, trial);
+        }
         old.copy_from_slice(&values);
         if kept > 0 {
             let t = clock(o.profile);
@@ -1588,8 +1636,10 @@ mod tests {
         resets: [usize; 3],
     }
     fn border_arm(comm: &dft_mpi::SimRank, border: &str) -> BorderRun {
-        let config =
-            dft_numerics::switches::RunConfig::from_pairs(&[("cdav_border_gram", border)]).unwrap();
+        border_arm_with(comm, &[("cdav_border_gram", border)])
+    }
+    fn border_arm_with(comm: &dft_mpi::SimRank, pairs: &[(&str, &str)]) -> BorderRun {
+        let config = dft_numerics::switches::RunConfig::from_pairs(pairs).unwrap();
         let _scope = config.enter();
         let mut out = BorderRun {
             values: Vec::new(),
@@ -1730,5 +1780,117 @@ mod tests {
             assert_eq!(off.restarts, on.restarts);
             assert!(on.gram_flops < off.gram_flops);
         }
+    }
+
+    /// GK10B: the bordered Cholesky extension (rounding class) agrees with
+    /// the full refactor within 1e-12 Ha with the same decisions and work;
+    /// the fused correction pass (`CDAV_STREAM`) is bit-identical.
+    #[test]
+    fn border_factor_and_stream_agree() {
+        for ranks in [1, 3, 8] {
+            let out = dft_mpi::simulate(ranks, |comm| {
+                (
+                    border_arm_with(comm, &[("cdav_border_factor", "off")]),
+                    border_arm_with(comm, &[("cdav_border_factor", "on")]),
+                    border_arm_with(comm, &[("cdav_stream", "off")]),
+                )
+            });
+            let (full, ext, unfused) = &out[0];
+            let mut worst = 0_f64;
+            for (a, b) in full.values.iter().zip(&ext.values) {
+                for (x, y) in a.iter().zip(b) {
+                    worst = worst.max((x - y).abs());
+                }
+            }
+            eprintln!(
+                "GK10B ranks {ranks}: bordered factor vs full refactor {worst:.2e} Ha; iterations {} / {}, repairs {} / {}, restarts {} / {}",
+                full.loop_iterations,
+                ext.loop_iterations,
+                full.repairs,
+                ext.repairs,
+                full.restarts,
+                ext.restarts
+            );
+            assert!(worst <= 1e-12, "ranks {ranks}: {worst:e} Ha");
+            assert_eq!(full.converged, ext.converged);
+            assert_eq!(full.iterations, ext.iterations);
+            assert_eq!(full.h_columns, ext.h_columns);
+            assert_eq!(full.repairs, ext.repairs);
+            let bits = |r: &BorderRun| -> Vec<u64> {
+                r.values.iter().flatten().map(|v| v.to_bits()).collect()
+            };
+            assert_eq!(
+                bits(unfused),
+                bits(ext),
+                "ranks {ranks}: stream must be bit-identical"
+            );
+            assert_eq!(unfused.h_columns, ext.h_columns);
+        }
+    }
+
+    /// The bordered extension equals a full factorization of the bordered
+    /// matrix within rounding, keeps the leading factor on rejection, and
+    /// rejects a dependent border.
+    #[test]
+    fn complex_factor_extension_matches_full() {
+        let n = 9;
+        let mut a = Matrix::zeros(14, n).unwrap();
+        for j in 0..n {
+            for i in 0..14 {
+                a[(i, j)] = C::new(
+                    ((i * 7 + j * 3) as f64).sin() + f64::from(i == j),
+                    ((i + 2 * j) as f64).cos() * 0.3,
+                );
+            }
+        }
+        let mut s = Matrix::zeros(n, n).unwrap();
+        for j in 0..n {
+            for i in 0..n {
+                s[(i, j)] = (0..14).map(|r| a[(r, i)].conj() * a[(r, j)]).sum();
+            }
+        }
+        hermitize(&mut s);
+        let lead = |k: usize| {
+            let mut b = Matrix::zeros(k, k).unwrap();
+            for j in 0..k {
+                for i in 0..k {
+                    b[(i, j)] = s[(i, j)];
+                }
+            }
+            b
+        };
+        let ratio = crate::real_davidson::PIVOT_RATIO_MIN;
+        let mut full = ComplexOverlapFactor::with_capacity(n).unwrap();
+        assert!(full.factor(&s, ratio).unwrap());
+        let mut ext = ComplexOverlapFactor::with_capacity(n).unwrap();
+        assert!(ext.factor(&lead(5), ratio).unwrap());
+        assert!(ext.extend(&s, ratio).unwrap());
+        assert_eq!(ext.order(), n);
+        let (tf, te) = (
+            full.basis_transform().unwrap(),
+            ext.basis_transform().unwrap(),
+        );
+        let worst = tf
+            .as_slice()
+            .iter()
+            .zip(te.as_slice())
+            .map(|(x, y)| (x - y).norm())
+            .fold(0., f64::max);
+        assert!(worst < 1e-12, "{worst:e}");
+        // A dependent border (copy of column 0) is rejected and the leading
+        // factor survives.
+        let mut d = Matrix::zeros(6, 6).unwrap();
+        for j in 0..6 {
+            for i in 0..6 {
+                let (p, q) = (if i == 5 { 0 } else { i }, if j == 5 { 0 } else { j });
+                d[(i, j)] = s[(p, q)];
+            }
+        }
+        let mut ext = ComplexOverlapFactor::with_capacity(n).unwrap();
+        assert!(ext.factor(&lead(5), ratio).unwrap());
+        let before = ext.basis_transform().unwrap();
+        assert!(!ext.extend(&d, ratio).unwrap());
+        assert_eq!(ext.order(), 5);
+        assert_eq!(ext.basis_transform().unwrap(), before);
     }
 }

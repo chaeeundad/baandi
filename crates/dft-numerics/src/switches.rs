@@ -348,6 +348,16 @@ table! {
         "GK1B: collinear spin k start builds bases, grids, projector tables, atomic columns and the start Ritz once and gives every channel its own operator and a copy of the orbitals; bit-identical; off builds the whole start per channel";
     CDAV_BORDER_GRAM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GK10: complex reference Davidson keeps the projected overlap and Hamiltonian of the previous basis and computes only the border of the appended columns (one Gram product and one reduction each); rounding class; off restores the full recompute after every append";
+    CDAV_BORDER_FACTOR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK10B: complex reference Davidson extends the overlap Cholesky factor over the appended columns only (bordered Cholesky, leading factor kept) when the overlap was border-updated; rounding class; off refactors the whole overlap after every append";
+    CDAV_STREAM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK10B: complex reference Davidson computes its preconditioned corrections in one column pass with the preconditioner branch hoisted per column (as the real path's stream kernel); bit-identical; off restores the per-element loop";
+    K_FIRST_EMPTY_RULE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "GK10B research: the first k map of the fixed-occupation reference k driver applies the empty-band Ritz threshold to empty bands (occupations are known before the first solve) instead of converging every band to the occupied threshold; changes the map-1 density when no redo follows (SCF trajectory; one synthetic fixture left the standard class), default off pending a dev08 A/B on redo cases";
+    K_START_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK10B: the unpolarized reference k start keeps H X of its Ritz orbitals (H Q C, one GEMM) and the k driver seeds its kept HX with it, so map 1 does not apply H to the start orbitals again (potential change corrected exactly); rounding class; off applies H in map 1";
+    K_REDO_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK10B: the first-iteration redo of the reference k driver starts from the coarse solve's kept X and HX (same input potential, zero change) instead of applying H to the start again; rounding class; off invalidates the kept HX before the redo";
 }
 
 struct Resolved {

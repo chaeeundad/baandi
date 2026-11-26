@@ -4939,3 +4939,16 @@ are those of the former code (unit test with the former code kept verbatim).
 After: 0.60 ms (warm), 0.25 -> 0.09 ms (cold). Bit-identical, always on.
 Rejected in the same study (ledger REL-FINDING): distributed Householder
 tridiagonalization (latency), chasing the np4 -> np8 growth as contention.
+
+## GK4 — deferred per-k energy terms and one reduction per k map (2026-11-26)
+
+Profile/premise: general-path plan section 6 item 4; the k map computed the kinetic and nonlocal band energies of
+every k on every ordinary map although under lean energy (P3q) nothing reads them before the final audit, and it
+reduced the residual norms with one tree sum per k. Change: `BAANDI_K_LEAN_ENERGY` (default on): ordinary maps keep
+band sum, double counting and residual norms only; `k_map::complete_audit` evaluates kinetic, nonlocal, local and
+zero-mode terms from the map's orbitals when the stop rule, the iteration budget or a mixer failure delivers the map;
+residual partials of all k and the energy integrals share one element-wise tree sum per map. Before/after: delivered
+results bit-identical (test `refscf_k_lean`); Mac serial wall unchanged within noise (Si8 k444s 4.07 -> 4.03 s); the
+saving is collective latency and the projector GEMM per k under MPI, to be measured on dev08. Not done (outside the
+bit-identical class, untested): taking residual norms from the solver's own last residual instead of the true
+residual of the returned block (different arithmetic, so history `max_eigen_residual` and delivered residuals move).

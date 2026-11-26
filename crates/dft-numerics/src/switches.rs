@@ -322,6 +322,8 @@ table! {
         "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; retained HX enabled";
     REFSCF_MEMORY_TRIM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-MEM: release dead start/map/delivery arrays and return band-sized Davidson storage; identical arithmetic; pending dev08";
+    K_LEAN_ENERGY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GK4: k-point reference maps defer per-k kinetic/nonlocal band energies and the local/zero-mode integrals of ordinary (lean) maps to the final audit and reduce all per-k residual norms with the energy integrals in one tree sum per map; delivered energies, density, eigenvalues and counts bit-identical; intermediate audit fields kinetic/local/local_zero_mode/nonlocal become null; off = per-k terms and one residual reduction per k every map";
 
     FORCE_BAND_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G5: one projector/derivative GEMM over all bands per k for nonlocal forces; unmeasured, default off";

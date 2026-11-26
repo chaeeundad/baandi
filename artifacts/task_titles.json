@@ -224,5 +224,6 @@
  "MPI-DERIV": "힘·응력 계산을 여러 프로세스로 나눔(MPI), 힘 계산 전에 에너지 결과 먼저 기록",
  "PULAY-OPTIN": "응력 계산 때 추가 SCF 3회(Pulay 평가)를 기본 끄고 선택 옵션으로",
  "RELAX-CELL-DEFAULT": "셀 이완이 기본 경로에서 실패하는 문제 수정, 오래된 테스트 정리",
- "CELL-FROZEN-DENSITY": "셀 이완 중 셀이 커지면 밀도 격자 한계 오류: 고정 기저(Miller) 규약을 밀도에도 적용"
+ "CELL-FROZEN-DENSITY": "셀 이완 중 셀이 커지면 밀도 격자 한계 오류: 고정 기저(Miller) 규약을 밀도에도 적용",
+ "GSPEED-PLAN": "k점·PBE·스핀·금속 일반 경로 속도 차이 분석과 개선 계획"
 }

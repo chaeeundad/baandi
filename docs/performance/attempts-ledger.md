@@ -4480,3 +4480,62 @@ also main 69107e9e/current main), plus si64 (Gamma, must be unchanged), and peak
 Lesson: a stage timer named after its first statement can hide its real cost (here the operator's static diagonal,
 not the potential); and per-k full-grid storage of a distributed field is invisible on macOS (page compression) but
 resident on Linux.
+
+## GK17-SCF-GAP — SCF gap decomposition after GK16; kept psi(r) slabs and one-rank direct sticks for k (2026-11-27; bit-identical, dev08 pending)
+
+Question: is the remaining k-path SCF gap to QE more H columns (algorithm) or a dearer H column (implementation)?
+Inputs: relayed dev08 MPI8 gen52 (pools auto, energy-only, verification inside the SCF span) and QE 7.6 clocks of
+IrI3 (R); Mac `sample` profiles of one pool rank's share run serially (O); code (C). Details and tables: plan
+`general-path-speed-plan.md` section 10.
+- Target metric (R, verification subtracted by its relayed duration): GeTe 36.4 s vs QE -nk 4 33.6 s (1.08),
+  B12 72.6 vs 86.0 (0.84), IrI3 115 vs 124 (0.93).
+- Work (IrI3, the case with QE clocks): QE about 86k H columns (E: (fftw 202000 - sum_band 51 x 42 x 14) / 2) over 14
+  iterations; BAANDI 42.7k (0.50x) over 12 maps plus the kept-HX update (2 FFTs per band per k per map), about 163k
+  FFTs against QE's 202k (0.81x). SCF core-seconds per k-iteration are equal (1.39 BAANDI, 1.36 QE). The critical pool
+  rank holds 7 of 51 k (7 / 6.375 = 1.10). At QE's unit costs (2.15 ms core per 72^3 FFT, 1.38 ms per nonlocal
+  column) BAANDI's critical rank would need about 90 s, not about 106 s. Answer: dearer work, not more work
+  (GeTe also needs fewer maps than QE, 7 vs 9).
+- Mac profiles (O, release, real PseudoDojo, explicit generic k, verify off; GeTe-shaped 33 k, 12086 samples;
+  IrI3-shaped 3 k, 15299 samples): FFT kernels 63 / 43 %, FFT data movement 15 / 12 %, GEMM 14 / 37 % (faer on the
+  Mac); by phase H apply 48 / 44 %, kept-HX update 23 / 19 %, density 15 / 10 %, Davidson rotate + Gram 10 / 20 %.
+Changes (all bit-identical; table 77 -> 80 entries):
+1. `K_KEPT_SLABS` (default off) + `K_KEPT_SLAB_MB` (default 1024): plan item GK15. The density pass of the fixed-
+   occupation k map stores psi_b(r) of the leading bands per k (`band_density_sum_keeping`); the next map's kept-HX
+   update multiplies the stored planes by (V_new - V_old) and runs only the forward transform for them
+   (`add_local_change_kept`, `DistributedPairFft::apply_local_batch_kept_planes`, the MPI-KEPT-START kept batch with
+   an owned-plane potential). Bands per k = min(bands, budget / (local k count x 16 x grid points / k-solve ranks)),
+   rank-independent so a distributed update keeps matching collectives. Not stored while verification borrows the
+   cache; not checkpointed (a restart runs both transforms, same bits); refused under `FFT_FUSED_ROWS`. Memory: one
+   full grid per kept band per local k (GeTe MPI8 pools: 33 x 19 x 1.77 MB = 1.1 GB per rank; B12 22 x 22 x 2.52 MB =
+   1.2 GB; IrI3 72^3 7 x 42 x 5.97 MB = 1.75 GB), hence default off until dev08 shows wall and peak RSS.
+2. `FFT_ONE_RANK_DIRECT` (default on): a one-rank stick FFT of a complex k operator (every pooled k, every serial k
+   run) transforms its sticks in per-vector input/output blocks and the middle stage reads/writes them directly: no
+   pack into the transpose buffer, no self-alltoall copy, no unpack. rustfft lanes only (vendor lanes keep the
+   transpose, alignment); the real Gamma operator keeps the transpose (its tests count those stages).
+3. No switch: the H application's two nonlocal GEMMs skip the finiteness scans of the projector block (checked at
+   construction, immutable) and of x (checked at the entry agreement) via `multiply_into_known_finite`.
+Evidence (Mac): `dft-solvers` test `one_rank_direct_sticks_are_bit_identical` (3 shapes + one-point and empty sets,
+sparse clears on/off, batch widths 3/1/0/5/2: batched, owned-plane, standalone inverse planes and half-kept batches
+equal bit for bit; several ranks never select it); `dft-engine` test `refscf_k_kept_slabs` (ignored matrix, release):
+skewed Gamma-in-list and elongated shifted MP222 x {P=1, P=3 pools on, P=3 pools off} x {verification off, on} x arms
+{reference, slabs whole budget, slabs 0 MiB, slabs 1 MiB (partial), direct only}: every delivered bit (energy,
+density, eigenvalues, orbitals), map count and H column count equal (60 runs). CLI real PseudoDojo runs: density
+SHA, eigenvalues and total energy identical in every arm. Mac timing (O, one run per arm, load 5-9, engine wall):
+
+| case (serial = one pool rank's share) | direct off | direct on | + slabs (budget 4096) | slab bytes | RSS change |
+|---|---|---|---|---|---|
+| GeTe-shaped, 33 k, 48^3, 19 bands, 7 maps | 15.92 s | 15.81 s | 14.13 s (-10.6 %) | 1.11 GB | n/a |
+| B12-shaped, 22 k, 54^3, 22 bands, 10 maps | 30.34 s | 29.31 s (-3.4 %) | 26.99 s (-7.9 %) | 1.22 GB | 1.85 -> 3.02 GB |
+| IrI3-shaped, 3 k, 42 bands, 16 maps | 25.87 s (main) | 24.73 s | 23.27 s (-5.9 %) | 0.65 GB | 1.42 -> 2.07 GB |
+
+Also fixed: `dft-engine/tests/k_start_memo.rs` failed on main since pools became `auto` (it applies pooled one-rank
+operators on the world communicator); it now pins `refscf_k_pools=off`. `scripts/check.sh` (CHECK_SCCACHE=0): exit 0,
+989 passed, 0 failed, 233 ignored.
+dev08 request (MPI8 socket 0, one thread per rank, phase profile on, energy-only, one run per arm, peak RSS per
+rank): GeTe, B12, IrI3 with arms A = defaults (direct on, slabs off), B = `BAANDI_FFT_ONE_RANK_DIRECT=off`,
+C = `BAANDI_K_KEPT_SLABS=on` (1024 MiB), D = C + `BAANDI_K_KEPT_SLAB_MB=4096`, E = `BAANDI_M2_FFT=mkl` (MKL lanes on
+the k operators; disables the direct sticks), optional F = `BAANDI_K_FIRST_EMPTY_RULE=on` (GeTe map 1); si64 Gamma
+default must be unchanged. Accuracy: density/energy bits A = B = C = D; E rounding class.
+Not done (next): GK9 stage 2 for IrI3's remainder k; slabs on the spin/FD path; QE-level FFT kernel speed if E wins.
+Lesson: on a pooled k path the per-k kept-HX update is as expensive as a third of the H applications and recomputes
+psi(r) that the previous density pass formed; and a one-rank plan still paid a full self-transpose per vector.

@@ -284,3 +284,14 @@ border Gram in the complex Davidson, GK11 generalized Ritz k start, GK12 time re
 symmetry for collinear spin (policy + ADR), GK13 QE-like FD empty-band threshold, GK14 fine radial tables (reopens
 B18 H-6 with the new 1e-10/5e-9 classes as premise). First step GK0: read kprof (setup split, per-map phases,
 Davidson iterations per k vs QE, IrI3 spin/Pulay/k count, QE layout) and request the QE -nk scan.
+
+## After GK16 (GK17-SCF-GAP, 2026-11-27; plan section 10)
+Gap is cost per unit of work, not H columns (IrI3: 0.50x QE's H columns, 0.81x its FFTs, same core-s per k-iteration).
+- dev08 A/B first: `K_KEPT_SLABS=on` at `K_KEPT_SLAB_MB` 1024 and 4096 (peak RSS per rank), `FFT_ONE_RANK_DIRECT=off`
+  vs on, `M2_FFT=mkl` (MKL lanes on the k operators; disables the direct sticks), `K_FIRST_EMPTY_RULE=on` (GeTe map 1).
+- GK9 stage 2: sub-communicators for the remainder k (IrI3 51 k on 8 ranks: critical rank 7 k vs mean 6.375, ~9 %).
+- Kept slabs on the spin/FD path (`electronic_map`, same mechanism; FD/spin cases only).
+- Middle-stage FFT movement (gathers/scatters/clears 12-15 % on the Mac k profiles): fuse the y-gather with the
+  z-row transform only where it keeps bits (FFT_FUSED_ROWS was rounding class and slower on Gamma, P3f).
+- If dev08 shows the rustfft kernels slower than QE's per transform: calibrated per-length kernels for private
+  (k) lanes (today `FFT_KERNEL_BY_LENGTH` acts only inside a plan-cache scope, which the k start does not open).

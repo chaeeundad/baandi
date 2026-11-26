@@ -87,7 +87,14 @@ fn run(
     ];
     dft_mpi::simulate(ranks, |comm| {
         // GK14 radial tables off: these tests compare against the quadrature bits.
-        let mut pairs = vec![("radial_table_start", "off"), ("radial_table_nl", "off")];
+        // Pools off: the operators below are applied on the world
+        // communicator (pooled operators are one-rank; the k-pools default
+        // became `auto` after these tests were written).
+        let mut pairs = vec![
+            ("radial_table_start", "off"),
+            ("radial_table_nl", "off"),
+            ("refscf_k_pools", "off"),
+        ];
         pairs.extend_from_slice(switches);
         let config = RunConfig::from_pairs(&pairs).unwrap();
         let _scope = config.enter();

@@ -3,7 +3,7 @@ use super::{kept_hx::Report, numerical};
 use crate::{model::ScfError, refstart::KStartState};
 use dft_mpi::Collective;
 use dft_numerics::linalg::ComplexMatrix;
-use dft_physics::distributed_complex::DistributedComplexHamiltonian;
+use dft_physics::{data::Complex64, distributed_complex::DistributedComplexHamiltonian};
 use std::sync::Arc;
 struct Entry {
     identity: Arc<()>,
@@ -11,6 +11,9 @@ struct Entry {
     x: ComplexMatrix,
     hx: ComplexMatrix,
     potential: Vec<f64>,
+    /// GK17: leading columns of x whose real-space planes are in `slabs[k]`
+    /// (stored by the density pass of the map that produced x); 0 = none.
+    slab_bands: usize,
 }
 pub(super) struct KeptHx {
     enabled: bool,
@@ -18,15 +21,72 @@ pub(super) struct KeptHx {
     entries: Vec<Option<Entry>>,
     hits: usize,
     columns: usize,
+    /// GK17 `K_KEPT_SLABS`: per-rank slab budget in bytes (None = off).
+    slab_budget: Option<usize>,
+    /// Per k: planes of the leading bands of the entry's x (operator layout).
+    slabs: Vec<Vec<Complex64>>,
+    slab_high: usize,
 }
 impl KeptHx {
     pub fn new(enabled: bool) -> Self {
+        use dft_numerics::switches::{Id, number, on};
+        let slab_budget = on(Id::K_KEPT_SLABS).then(|| {
+            number(Id::K_KEPT_SLAB_MB).map_or(0, |mb| (mb as usize).saturating_mul(1 << 20))
+        });
         Self {
             enabled,
             preserve: false,
             entries: Vec::new(),
             hits: 0,
             columns: 0,
+            slab_budget,
+            slabs: Vec::new(),
+            slab_high: 0,
+        }
+    }
+    /// GK17: slab sink for the density pass of k: the buffer and the number of
+    /// leading bands to keep. `band_bytes` must be the same on every rank that
+    /// shares the k solve (the caller passes 16 x grid points / ranks rounded
+    /// up), and `local_k` the k count of this rank, so the band count (which
+    /// decides the transforms, hence the collectives, of the next update) is
+    /// rank-independent. Nothing is kept while verification borrows the cache.
+    pub fn slab_sink(
+        &mut self,
+        k: usize,
+        local_k: usize,
+        bands: usize,
+        band_bytes: usize,
+        plane_points: usize,
+    ) -> (&mut [Complex64], usize) {
+        let keep = match self.slab_budget {
+            Some(budget) if self.enabled && !self.preserve && band_bytes > 0 => {
+                bands.min(budget / local_k.max(1) / band_bytes)
+            }
+            _ => 0,
+        };
+        if self.slabs.len() <= k {
+            self.slabs.resize_with(k + 1, Vec::new);
+        }
+        let store = &mut self.slabs[k];
+        store.resize(keep * plane_points, Complex64::default());
+        let held: usize = self.slabs.iter().map(|v| 16 * v.len()).sum();
+        self.slab_high = self.slab_high.max(held);
+        (&mut self.slabs[k][..], keep)
+    }
+    /// `retain` for an x whose leading `slab_bands` planes the density pass
+    /// just stored through [`Self::slab_sink`] for the same k.
+    pub fn retain_with_slabs(
+        &mut self,
+        k: usize,
+        state: &KStartState,
+        x: &ComplexMatrix,
+        hx: &ComplexMatrix,
+        potential: &[f64],
+        slab_bands: usize,
+    ) {
+        self.retain(k, state, x, hx, potential);
+        if let Some(Some(e)) = self.entries.get_mut(k) {
+            e.slab_bands = slab_bands;
         }
     }
     pub fn preserve_input(&mut self, p: bool) {
@@ -39,6 +99,7 @@ impl KeptHx {
     }
     pub fn release_storage(&mut self) {
         self.entries.clear();
+        self.slabs.clear();
     }
     pub fn prepare<K: Collective>(
         &mut self,
@@ -86,8 +147,20 @@ impl KeptHx {
         let mut hx = e.hx.clone();
         // A zero change on every rank adds nothing: skip its transforms.
         if flags[1] != 0. {
-            op.add_local_change(comm, x, &delta, &mut hx)
-                .map_err(numerical)?;
+            // GK17: the planes stored with this exact x skip the inverse
+            // transform of the leading bands (same bits; rank-independent
+            // band count, see `slab_sink`).
+            let kept = e.slab_bands;
+            if kept > 0
+                && op.kept_planes_exact()
+                && self.slabs.get(k).is_some_and(|v| !v.is_empty())
+            {
+                op.add_local_change_kept(comm, x, &delta, &mut hx, &self.slabs[k], kept)
+                    .map_err(numerical)?;
+            } else {
+                op.add_local_change(comm, x, &delta, &mut hx)
+                    .map_err(numerical)?;
+            }
         }
         if self.preserve {
             self.entries[k] = Some(e);
@@ -117,6 +190,7 @@ impl KeptHx {
             x: x.clone(),
             hx: hx.clone(),
             potential: potential.to_vec(),
+            slab_bands: 0,
         });
     }
     pub fn report<K: Collective>(&self, comm: &K) -> Result<Report, ScfError> {
@@ -124,7 +198,11 @@ impl KeptHx {
             cache_hits: self.hits,
             full_h_starting_columns_replaced: self.columns,
             delta_v_columns: self.columns,
-            retained_slab_bytes_per_rank: vec![0; comm.size()],
+            // GK17: this rank's own high-water (other ranks' slots stay 0;
+            // no collective is spent on a report field).
+            retained_slab_bytes_per_rank: (0..comm.size())
+                .map(|r| if r == comm.rank() { self.slab_high } else { 0 })
+                .collect(),
         })
     }
 }
@@ -182,6 +260,9 @@ impl KeptHx {
                     hx,
                     potential,
                     epoch,
+                    // Planes are not checkpointed: the restarted map runs
+                    // both transforms (same bits).
+                    slab_bands: 0,
                 })
             } else {
                 None

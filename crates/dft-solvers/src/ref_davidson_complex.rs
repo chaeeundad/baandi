@@ -782,6 +782,83 @@ mod tests {
             });
         }
     }
+    /// FD buffer bands (engine `electronic_map::buffer_bands`): a strongly
+    /// coupled 16-state cluster cut in the middle by the retained count n = 20.
+    /// The top retained Ritz pairs converge at the rate set by the next
+    /// unretained cluster state, so requiring them without extra columns
+    /// exhausts six 20-iteration calls at 5e-14 Ha (the reference ethr floor
+    /// 1e-13 Ry / 2). Solving n + max(4, ceil(n/10)) = 24 columns and requiring
+    /// only the first 20 converges in at most two calls to the dense answer.
+    #[test]
+    fn cut_cluster_converges_with_buffer_columns() {
+        let (dim, n, cluster) = (400, 20, 16);
+        let mut seed = 12345_u64;
+        let mut rnd = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((seed >> 11) as f64 / (1_u64 << 53) as f64) - 0.5
+        };
+        let mut h = Matrix::zeros(dim, dim).unwrap();
+        let lo = n - cluster / 2;
+        for i in 0..dim {
+            h[(i, i)] = C::new(
+                if i < lo {
+                    -1. + i as f64 / lo as f64
+                } else if i < lo + cluster {
+                    1. + 1e-2 * (i - lo) as f64 / cluster as f64
+                } else {
+                    1.5 + 50. * ((i - lo - cluster) as f64 / dim as f64).powi(2)
+                },
+                0.,
+            );
+        }
+        for i in 0..dim {
+            for j in i + 1..dim {
+                let z = C::new(rnd(), rnd()) * 0.015 / (1. + (j - i) as f64);
+                h[(i, j)] += z;
+                h[(j, i)] += z.conj();
+            }
+        }
+        let (exact, _) = dft_numerics::linalg::hermitian_eigh(&h).unwrap();
+        let width = n + 4_usize.max(n.div_ceil(10));
+        let mut start = Matrix::zeros(dim, width).unwrap();
+        for j in 0..width {
+            for i in 0..dim {
+                start[(i, j)] = C::new(f64::from(i == j), 0.) + C::new(rnd(), rnd()) * 0.2;
+            }
+        }
+        let diagonal: Vec<_> = (0..dim).map(|i| h[(i, i)].re).collect();
+        // Calls needed until the first n flags converge (None: six exhausted).
+        let calls = |columns: usize| -> Option<(usize, f64)> {
+            dft_mpi::simulate(1, |comm| {
+                let mut op = Dense {
+                    h: h.clone(),
+                    rows: (0..dim).collect(),
+                };
+                let mut block = Matrix::zeros(dim, columns).unwrap();
+                for j in 0..columns {
+                    block.column_mut(j).copy_from_slice(start.column(j));
+                }
+                let o = Options::new(columns, 5e-14, n);
+                for call in 1..=6 {
+                    let s = solve(comm, &mut op, &block, &diagonal, o).unwrap();
+                    if s.converged[..n].iter().all(|&v| v) {
+                        let error = (0..n)
+                            .map(|i| (s.eigenvalues[i] - exact[i]).abs())
+                            .fold(0., f64::max);
+                        return Some((call, error));
+                    }
+                    block = s.eigenvectors;
+                }
+                None
+            })[0]
+        };
+        assert_eq!(calls(n), None, "cut cluster without buffer");
+        let (used, error) = calls(width).expect("buffer columns converge");
+        assert!(used <= 2, "{used} calls");
+        assert!(error < 1e-11, "{error:e} Ha");
+    }
     #[test]
     fn complex_reference_agrees_nonfinite_operator_output() {
         struct Fault {

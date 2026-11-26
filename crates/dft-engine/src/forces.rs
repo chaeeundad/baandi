@@ -6,7 +6,8 @@ use crate::{
     model::finite_temperature::FiniteTResult,
 };
 use dft_basis::FftGridSpec;
-use dft_geometry::{Atom, Cell};
+use dft_geometry::{Atom, Cell, kpoints::KPoint};
+use dft_numerics::linalg::ComplexMatrix;
 use dft_physics::{
     data::*,
     ewald, forces as terms,
@@ -122,6 +123,80 @@ pub enum ElectronicState<'a> {
     Fixed(&'a ScfResult),
     Collinear(&'a CollinearResult),
     FiniteTemperature(&'a FiniteTResult),
+    /// Reference spin/Fermi-Dirac delivery (`refscf::electronic`): scalar FD,
+    /// collinear fixed sector and collinear FD. Occupations carry the channel
+    /// capacity (2 unpolarized, 1 per spin channel) and exclude k weights.
+    Reference(&'a crate::refscf::electronic::Run),
+}
+/// One occupied k block of a derivative: point (with weight), complete
+/// replicated coefficients in the `options.basis(cell, k, 1)` order, and the
+/// occupations without k weight.
+pub(crate) type DerivativeBlock<'a> = (KPoint, &'a ComplexMatrix, &'a [f64]);
+impl<'a> ElectronicState<'a> {
+    /// Channel densities (one unpolarized, up/down collinear), electrons/Bohr^3.
+    pub(crate) fn densities(&self) -> Result<Vec<&'a Array3<f64>>, ScfError> {
+        Ok(match *self {
+            Self::Fixed(r) => vec![&r.density],
+            Self::FiniteTemperature(r) => vec![&r.state.density],
+            Self::Collinear(r) => {
+                let dft_physics::spin::SpinDensity::Collinear { channels, .. } = &r.density else {
+                    return Err(ScfError::InvalidInput(
+                        "forces.spin: collinear density required",
+                    ));
+                };
+                channels.iter().collect()
+            }
+            Self::Reference(r) => r.density.iter().collect(),
+        })
+    }
+    /// Every (spin, k) block with its occupations, spin-major.
+    pub(crate) fn blocks(&self) -> Vec<DerivativeBlock<'a>> {
+        match *self {
+            Self::Fixed(r) => r
+                .k_points
+                .iter()
+                .map(|k| (k.point, &k.solution.eigenvectors, r.occupations.as_slice()))
+                .collect(),
+            Self::FiniteTemperature(r) => r
+                .state
+                .k_points
+                .iter()
+                .enumerate()
+                .map(|(k, p)| (p.point, &p.solution.eigenvectors, r.occupations.block(0, k)))
+                .collect(),
+            Self::Collinear(r) => r
+                .k_points
+                .iter()
+                .enumerate()
+                .flat_map(|(s, ks)| {
+                    ks.iter().enumerate().map(move |(k, p)| {
+                        (
+                            p.point,
+                            &p.solution.eigenvectors,
+                            r.finite_occupations
+                                .as_ref()
+                                .map_or(r.occupations[s].as_slice(), |f| f.block(s, k)),
+                        )
+                    })
+                })
+                .collect(),
+            Self::Reference(r) => r
+                .blocks
+                .iter()
+                .flatten()
+                .map(|b| (b.point, &b.orbitals, b.occupations.as_slice()))
+                .collect(),
+        }
+    }
+    /// Sampled k points of the first channel (all channels share the mesh).
+    pub(crate) fn points(&self) -> Vec<KPoint> {
+        match *self {
+            Self::Fixed(r) => r.k_points.iter().map(|k| k.point).collect(),
+            Self::FiniteTemperature(r) => r.state.k_points.iter().map(|k| k.point).collect(),
+            Self::Collinear(r) => r.k_points[0].iter().map(|k| k.point).collect(),
+            Self::Reference(r) => r.blocks[0].iter().map(|b| b.point).collect(),
+        }
+    }
 }
 pub struct ForceState<'a> {
     pub cell: &'a Cell,
@@ -145,7 +220,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     let crystal_density = match &state.electronic {
         ElectronicState::Fixed(r) => r.crystal_density_group,
         ElectronicState::FiniteTemperature(r) => r.state.crystal_density_group,
-        ElectronicState::Collinear(_) => false,
+        ElectronicState::Collinear(_) | ElectronicState::Reference(_) => false,
     };
     if state.options.crystal_density_group || crystal_density {
         return Err(ScfError::InvalidInput(
@@ -210,6 +285,27 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                 r.k_points[0].iter().map(|k| k.point).collect(),
             )
         }
+        ElectronicState::Reference(r) => {
+            if r.blocks.is_empty()
+                || r.density.is_empty()
+                || r.blocks.len() != r.density.len()
+                || r.blocks.iter().any(|c| {
+                    c.iter()
+                        .map(|b| b.point)
+                        .ne(r.blocks[0].iter().map(|b| b.point))
+                })
+            {
+                return Err(ScfError::InvalidInput(
+                    "observables.forces.model: spin k-point mismatch; rerun SCF with the requested model",
+                ));
+            }
+            (
+                &r.force_identity,
+                r.occupation_identity(),
+                &r.density[0],
+                state.electronic.points(),
+            )
+        }
     };
     let dims: [usize; 3] = density
         .shape()
@@ -249,8 +345,14 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                 && r.standard.is_some()
                 && r.verification.as_ref().is_some_and(|v| v.passed())
         }
+        // The reference electronic driver always runs the standard profile.
+        ElectronicState::Reference(r) => {
+            r.converged
+                && state.options.standard.is_some()
+                && r.verification.as_ref().is_some_and(|v| v.passed())
+        }
     };
-    let (certified, standard, densities, blocks, quantity) = match &state.electronic {
+    let (certified, standard, quantity) = match &state.electronic {
         ElectronicState::Fixed(r) => (
             verified
                 || (r.certified
@@ -259,31 +361,14 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                         .and_then(|h| h.fixed_point_certificate.as_ref())
                         .is_some()),
             r.standard.is_some() && !verified,
-            vec![&r.density],
-            r.k_points
-                .iter()
-                .map(|k| (k, r.occupations.as_slice()))
-                .collect::<Vec<_>>(),
             "E",
         ),
         ElectronicState::FiniteTemperature(r) => (
             verified || (r.converged && r.certificate.as_ref().is_some_and(|c| c.passed)),
             r.standard.is_some() && !verified,
-            vec![&r.state.density],
-            r.state
-                .k_points
-                .iter()
-                .enumerate()
-                .map(|(k, p)| (p, r.occupations.block(0, k)))
-                .collect(),
             "F",
         ),
         ElectronicState::Collinear(r) => {
-            let dft_physics::spin::SpinDensity::Collinear { channels, .. } = &r.density else {
-                return Err(ScfError::InvalidInput(
-                    "forces.spin: collinear density required",
-                ));
-            };
             let certified = verified
                 || (r.converged
                     && if r.finite_occupations.is_some() {
@@ -291,26 +376,9 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                     } else {
                         r.certificate.as_ref().is_some_and(|c| c.passed)
                     });
-            let blocks = r
-                .k_points
-                .iter()
-                .enumerate()
-                .flat_map(|(s, ks)| {
-                    ks.iter().enumerate().map(move |(k, p)| {
-                        (
-                            p,
-                            r.finite_occupations
-                                .as_ref()
-                                .map_or(r.occupations[s].as_slice(), |f| f.block(s, k)),
-                        )
-                    })
-                })
-                .collect();
             (
                 certified,
                 r.standard.is_some() && !verified,
-                vec![&channels[0], &channels[1]],
-                blocks,
                 if r.finite_occupations.is_some() {
                     "F"
                 } else {
@@ -318,12 +386,26 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                 },
             )
         }
+        // ADR 0043: the passed reference verification is the certificate.
+        ElectronicState::Reference(r) => (verified, !verified, r.quantity()),
     };
-    let unverified = matches!(&state.electronic, ElectronicState::Fixed(r)
-        if r.force_identity.unverified_delivery
-            && state.options.verification == crate::Verification::Off
-            && r.standard.is_some()
-            && r.verification.is_none());
+    let densities = state.electronic.densities()?;
+    let blocks = state.electronic.blocks();
+    let unverified = match &state.electronic {
+        ElectronicState::Fixed(r) => {
+            r.force_identity.unverified_delivery
+                && state.options.verification == crate::Verification::Off
+                && r.standard.is_some()
+                && r.verification.is_none()
+        }
+        ElectronicState::Reference(r) => {
+            r.force_identity.unverified_delivery
+                && state.options.verification == crate::Verification::Off
+                && r.converged
+                && r.verification.is_none()
+        }
+        _ => false,
+    };
     if !unverified && ((state.options.standard.is_some() && !verified) || standard) {
         return Err(ScfError::InvalidInput(
             "observables.forces: strict convergence profile required, or a passed fixed-point verification on the standard path; rerun with scf.verify = fixed_point (default) or on the strict reference path (BAANDI_REFERENCE_STRICT=on)",
@@ -361,6 +443,12 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             (&r.state.energy, Some(r.thermodynamics.entropy_term_ha))
         }
         ElectronicState::Collinear(r) => (&r.energy, r.thermodynamics.map(|t| t.entropy_term_ha)),
+        ElectronicState::Reference(r) => (
+            &r.energy,
+            r.policy
+                .is_finite()
+                .then_some(r.thermodynamics.entropy_term_ha),
+        ),
     };
     // Intentionally exhaustive: adding an energy/audit field must trigger a
     // force-coverage review instead of silently retaining a partial total.
@@ -513,14 +601,14 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
     let mut band_passes = 0;
     let band_first = dft_numerics::switches::on(dft_numerics::switches::Id::FORCE_BAND_FIRST);
-    for (k, occupations) in blocks {
-        let basis = state.options.basis(state.cell, k.point.fractional, 1.0)?;
+    for (point, orbitals, occupations) in blocks {
+        let basis = state.options.basis(state.cell, point.fractional, 1.0)?;
         let operator = NonlocalOperator::new(&basis, volume, &species)?;
-        let occupations: Vec<_> = occupations.iter().map(|f| f * k.point.weight).collect();
+        let occupations: Vec<_> = occupations.iter().map(|f| f * point.weight).collect();
         let part = if band_first {
-            nonlocal_band_first(&operator, &basis, &k.solution.eigenvectors, &occupations)?
+            nonlocal_band_first(&operator, &basis, orbitals, &occupations)?
         } else {
-            terms::nonlocal(&operator, &basis, &k.solution.eigenvectors, &occupations)?
+            terms::nonlocal(&operator, &basis, orbitals, &occupations)?
         };
         band_passes += occupations.len();
         for (sum, part) in nonlocal.iter_mut().zip(part) {

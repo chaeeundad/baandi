@@ -3182,6 +3182,40 @@ fields are reconstructed from the delivered density and the original model.
 The existing spin/finite-temperature views already carry per-spin/per-k
 occupations and the E/F distinction, providing the extension boundary for G4.
 
+FD-FORCES (2026-11-26) plugs in the spin/FD delivery. Before this change
+`api::solve` rejected derivatives for a request with an electronic policy, and
+the CLI's reference spin/FD serializer never requested them. The result was
+that `output.forces`/`output.stress` were dropped without a message on the
+default driver (the strict oracle's `finite_run`/`spin_run` were unaffected).
+`refscf::electronic::Run` now records a setup-time `ForceIdentity`: the model,
+its symmetry operations, and the occupation policy (theta, constraint and band
+cap, or the fixed sector). It also records the `Policy`. `ElectronicState::Reference`
+views the run's channel densities and gathered (replicated) complex blocks with
+their occupations (channel capacity included, k weight excluded).
+`delivered::electronic_state` and `api::Observables::{prepare,evaluate_forces,
+evaluate_stress}_electronic` follow the fixed-occupation contract: converged,
+model identity checked, and a passed verification or an explicit verify=off
+marked `unverified`. Forces and frozen-Miller stress are -dF/dR and the F strain
+derivative for FD (Mermin F = E - TS, stationary in the occupations, so no
+occupation-response term), and -dE/dR for a fixed sector. Hellmann-Feynman,
+local, core and Ewald terms use the total density, and the nonlocal and kinetic
+terms sum f_nk w_k over both spin channels. The Pulay cutoff scans rerun
+`electronic::run`/`run_prepared` with the same policy and return F. They run
+sequentially, like the scalar reference scans. The scans require convergence
+and, with verification on, a passed verification.
+
+Synthetic oracles (`tests/refscf_forces.rs`, `electronic_derivatives`, two H-like
+atoms, 2 Ha cutoff, Gamma, 5e-13 Ha threshold): central differences of F
+(displacement +-0.002 Bohr, xx strain +-1e-4 at frozen Miller sets) agree with
+the analytic forces within 2.3e-8 Ha/Bohr for scalar FD (theta 0.03 Ha,
+TS = 9.9e-4 Ha). They agree within 2.3e-7 Ha/Bohr for the collinear fixed sector
+(2,0) and within 5.0e-8 Ha/Bohr for collinear FD at fixed moment 0.5 (theta
+0.02 Ha, TS = 2.8e-2 Ha). Stress agrees within
+1.7e-10 Ha/Bohr^3. Against the strict legacy oracle states (`FiniteTProblem`,
+`CollinearProblem`, legacy FD forces), F agrees within 5e-14 Ha, forces within
+7.2e-8 Ha/Bohr and stress within 4.9e-10 Ha/Bohr^3 (gates 5e-9 Ha, 1e-6). These are
+synthetic checks, not QE evidence.
+
 A passed reference verification (ADR 0043 or the opt-in ADR 0044 assessment)
 is accepted. This is a convergence precondition, not a rigorous derivative
 error bound: the energy-only rule does not establish a density/force bound.

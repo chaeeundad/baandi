@@ -119,6 +119,13 @@ fn reference_verify_off_labels_and_stop_to_verified_k_fd_spin_outputs() {
         ),
         ("spin", "[spin]\nmode='collinear'\nn_up=1\nn_down=1\n"),
     ] {
+        // FD-FORCES: scf.nbands now sets the FD band count; this fixture keeps
+        // its historical FD count, the cap (12).
+        let base = if name == "fd" {
+            base.replace("nbands=3\n", "")
+        } else {
+            base.clone()
+        };
         let text = base
             .replace(
                 "functional='lda-pz'",

@@ -321,6 +321,8 @@ impl Functional {
         }
     }
 }
+/// Fermi-Dirac band count when neither `scf.nbands` nor `occupations.band_cap` is given.
+pub const DEFAULT_FD_BAND_CAP: usize = 32;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Occupations {
@@ -355,6 +357,23 @@ impl Config {
             "fixed" => Err(ConfigError::Invalid("occupations: fixed mode cannot carry smearing or band cap; remove them".into())),
             "fermi_dirac" => Err(ConfigError::Invalid("occupations.smearing: supply exactly one of smearing_ha, smearing_ev, smearing_kelvin".into())),
             _ => Err(ConfigError::Invalid("occupations.mode: unsupported smearing scheme; select fixed or fermi_dirac".into())),
+        }
+    }
+    /// Band count of a Fermi-Dirac run (per spin channel and k point):
+    /// `scf.nbands` when given, otherwise `occupations.band_cap` (default
+    /// `DEFAULT_FD_BAND_CAP`). An explicit `band_cap` stays the documented cap:
+    /// `scf.nbands` above it is rejected instead of silently replaced.
+    pub fn fd_band_count(&self) -> Result<usize, ConfigError> {
+        let cap = self.occupations.as_ref().and_then(|o| o.band_cap);
+        match (self.scf.as_ref().and_then(|s| s.nbands), cap) {
+            (Some(0), _) => Err(ConfigError::Invalid(
+                "scf.nbands: Fermi-Dirac occupations need a positive band count".into(),
+            )),
+            (Some(n), Some(c)) if n > c => Err(ConfigError::Invalid(format!(
+                "scf.nbands = {n} exceeds occupations.band_cap = {c}; raise band_cap to at least {n} or lower scf.nbands"
+            ))),
+            (Some(n), _) => Ok(n),
+            (None, c) => Ok(c.unwrap_or(DEFAULT_FD_BAND_CAP)),
         }
     }
     pub fn finite_constraint(&self) -> dft_physics::occupations::Constraint {
@@ -1144,7 +1163,9 @@ impl Config {
                 "xc.pw92_prefactor=original requires unpolarized PBE".into(),
             ));
         }
-        self.finite_temperature()?;
+        if self.finite_temperature()?.is_some() {
+            self.fd_band_count()?;
+        }
         if let Some(relax) = &self.relax {
             relax
                 .validate(self.system.atoms.len())

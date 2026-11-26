@@ -207,22 +207,37 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     let mut kinetic = [[0.; 3]; 3];
     let mut nonlocal = [[0.; 3]; 3];
     let mut band_passes = 0;
-    for (point, orbitals, occupations) in blocks {
-        let basis = state.options.basis(state.cell, point.fractional, 1.)?;
-        let f: Vec<_> = occupations.iter().map(|v| v * point.weight).collect();
-        let c: Vec<_> = (0..orbitals.cols())
-            .map(|b| orbitals.column(b).to_vec())
-            .collect();
-        add(
-            &mut kinetic,
-            &dft_physics::kinetic::stress(&basis, &c, &f, volume)?,
-        );
-        add(
-            &mut nonlocal,
-            &terms::nonlocal(&basis, volume, &species, orbitals, &f)?,
-        );
-        band_passes += f.len();
-    }
+    // MPI-DERIV: per-k kinetic and nonlocal tensors distributed over ranks
+    // (one gather), accumulated in k order as before; symmetrization follows.
+    crate::forces::accumulate_blocks(
+        &blocks,
+        18,
+        |(point, orbitals, occupations), out| {
+            let basis = state.options.basis(state.cell, point.fractional, 1.)?;
+            let f: Vec<_> = occupations.iter().map(|v| v * point.weight).collect();
+            let c: Vec<_> = (0..orbitals.cols())
+                .map(|b| orbitals.column(b).to_vec())
+                .collect();
+            let k = dft_physics::kinetic::stress(&basis, &c, &f, volume)?;
+            let n = terms::nonlocal(&basis, volume, &species, orbitals, &f)?;
+            for (slot, value) in out
+                .iter_mut()
+                .zip(k.iter().flatten().chain(n.iter().flatten()))
+            {
+                *slot = *value;
+            }
+            Ok(())
+        },
+        |part| {
+            for (a, b) in kinetic.iter_mut().flatten().zip(&part[..9]) {
+                *a += b;
+            }
+            for (a, b) in nonlocal.iter_mut().flatten().zip(&part[9..]) {
+                *a += b;
+            }
+        },
+    )?;
+    band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
     let ions: Vec<_> = state
         .atoms
         .iter()

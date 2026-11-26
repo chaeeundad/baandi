@@ -601,3 +601,7 @@ MF10; (B) self-consistent cRPA with DFT+U from the start. Recommendation: A.
 D10 Performance. Options: (A) no speed target for R1 to R6, cost measured and
 ledgered, the 0.90x QE target unaffected; (B) a speed target against an oracle
 code. Recommendation: A (no same-model, same-algorithm QE counterpart exists).
+
+## 8. User decisions (2026-11-26)
+
+D1-D10 approved as recommended (option A for each): sum over states first; Wannier90 only as an external program through files; oracle codes (Yambo, ABINIT, Wannier90, RESPACK) built in user space on dev08 through the master session; projector-weighted exclusion by default; mapped Gauss-Legendre grids; metals deferred after R5; replicated chi0 with tree reduction, ScaLAPACK on measured need; EXX+RPA as optional R3b; cRPA from the LDA/PBE ground state with R6 after MF10; no speed target for R1-R6.

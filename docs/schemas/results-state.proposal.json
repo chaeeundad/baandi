@@ -431,6 +431,11 @@
               "type": "number",
               "minimum": 0
             },
+            "stage_seconds": {
+              "$comment": "GD1 (2026-11-27): wall seconds per stress stage of this rank, in execution order; observation only",
+              "type": "array",
+              "items": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}
+            },
             "band_passes": {
               "type": "integer",
               "minimum": 0

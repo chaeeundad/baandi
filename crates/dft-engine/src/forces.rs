@@ -114,6 +114,9 @@ pub struct ForceResult {
     pub maximum_absolute_component: f64,
     pub elapsed: std::time::Duration,
     pub band_passes: usize,
+    /// GD1: wall seconds per stage of this evaluation, in execution order
+    /// (observation only; per rank).
+    pub timings: Vec<(&'static str, f64)>,
 }
 /// Explicit borrowed stationary electronic state/model view. This API deliberately
 /// does not accept a density-only checkpoint as a stationary electronic state.
@@ -280,7 +283,489 @@ pub struct ForceState<'a> {
     pub symmetry: &'a [dft_geometry::symmetry::SymmetryOperation],
 }
 
+/// Outcome of the shared derivative preconditions ([`validate`]).
+pub(crate) struct Validated {
+    pub(crate) verification: &'static str,
+    pub(crate) ledger: Vec<DerivativeEntry>,
+    pub(crate) quantity: &'static str,
+}
+
 pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
+    let start = std::time::Instant::now();
+    let validated = validate(state)?;
+    let mut timings = vec![("validate", start.elapsed().as_secs_f64())];
+    let mut clock = std::time::Instant::now();
+    let mut lap = |name: &'static str, timings: &mut Vec<(&'static str, f64)>| {
+        timings.push((name, clock.elapsed().as_secs_f64()));
+        clock = std::time::Instant::now();
+    };
+    let Validated {
+        verification,
+        ledger,
+        quantity,
+    } = validated;
+    let densities = state.electronic.densities()?;
+    let blocks = state.electronic.blocks();
+    let mut density = densities[0].clone();
+    if densities.len() == 2 {
+        density += densities[1];
+    }
+    let volume = state.cell.volume_bohr3();
+    let density_basis = state.options.basis(state.cell, [0.; 3], 4.0)?;
+    let dims: [usize; 3] = density
+        .shape()
+        .try_into()
+        .map_err(|_| ScfError::InvalidInput("forces.density: invalid shape"))?;
+    let dg = FftGridSpec::new(&density_basis, &density_basis, Some(dims))?;
+    // One Species entry per input atom prevents grouping from permuting output.
+    let positions: Vec<_> = state
+        .atoms
+        .iter()
+        .map(|a| {
+            state
+                .cell
+                .fractional_to_cartesian_bohr(a.fractional_position.map(|x| x.rem_euclid(1.0)))
+        })
+        .collect();
+    let species: Vec<_> = state
+        .atoms
+        .iter()
+        .zip(&positions)
+        .map(|(a, p)| {
+            let potential = state
+                .potentials
+                .iter()
+                .find(|s| s.label == a.species)
+                .ok_or(ScfError::InvalidInput("forces.species: missing potential"))?
+                .potential;
+            Ok(Species {
+                potential,
+                positions_bohr: std::slice::from_ref(p),
+            })
+        })
+        .collect::<Result<_, ScfError>>()?;
+    let mut fft = FftPlan3d::new(dims)?;
+    let mut reciprocal = Array3::zeros(dims);
+    fft.to_reciprocal(&density.mapv(|x| Complex64::new(x, 0.0)), &mut reciprocal)?;
+    lap("setup", &mut timings);
+    let shells = shell_values(&species, &density_basis, volume, false)?;
+    lap("shells", &mut timings);
+    let mut local = terms::local_or_core_cached(
+        &density_basis,
+        volume,
+        &species,
+        &dg.gather(&reciprocal)?,
+        false,
+        shells.as_ref(),
+    )?;
+    lap("local", &mut timings);
+    let core_density = dft_physics::density::core_density_cached(
+        &density_basis,
+        &dg,
+        volume,
+        &species,
+        &mut fft,
+        shells.as_ref(),
+    )?;
+    let mut core = if let Some(core_density) = core_density {
+        let mut scratch = Array3::zeros(dims);
+        let potential = if densities.len() == 1 {
+            state
+                .options
+                .evaluate_xc(
+                    &density,
+                    Some(&core_density),
+                    &mut scratch,
+                    state.cell,
+                    &mut fft,
+                    state.density_floor,
+                )?
+                .potential
+        } else {
+            use dft_physics::spin::{SpinFunctional, SpinXc, SpinXcResponse};
+            if state.density_floor.is_some() {
+                return Err(ScfError::InvalidInput(
+                    "forces.spin: density floor unavailable",
+                ));
+            }
+            let kind = match state.options.functional {
+                crate::Functional::LdaPw => SpinFunctional::LdaPw,
+                crate::Functional::Pbe => SpinFunctional::Pbe,
+                _ => {
+                    return Err(ScfError::InvalidInput(
+                        "forces.spin: polarized PZ unavailable",
+                    ));
+                }
+            };
+            let mut xc = SpinXc::new(kind, state.cell, dims)?;
+            let mut out = SpinXcResponse::new(dims);
+            xc.evaluate_with_core(
+                &[densities[0].clone(), densities[1].clone()],
+                Some(&core_density),
+                &mut out,
+            )?;
+            (&out.potentials[0] + &out.potentials[1]) * 0.5
+        };
+        lap("core_xc", &mut timings);
+        fft.to_reciprocal(&potential.mapv(|x| Complex64::new(x, 0.0)), &mut reciprocal)?;
+        terms::local_or_core_cached(
+            &density_basis,
+            volume,
+            &species,
+            &dg.gather(&reciprocal)?,
+            true,
+            shells.as_ref(),
+        )?
+    } else {
+        vec![[0.0; 3]; state.atoms.len()]
+    };
+    lap("core", &mut timings);
+    let ions: Vec<_> = state
+        .atoms
+        .iter()
+        .zip(&species)
+        .map(|(a, s)| ewald::Ion {
+            charge: s.potential.z_valence(),
+            fractional_position: a.fractional_position,
+        })
+        .collect();
+    let mut ewald = ewald::forces(state.cell, &ions, ewald::EwaldOptions::default())?;
+    lap("ewald", &mut timings);
+    let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
+    let mut band_passes = 0;
+    let band_first = dft_numerics::switches::on(dft_numerics::switches::Id::FORCE_BAND_FIRST);
+    let gemm_kernel = dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_NL_GEMM);
+    let tables = if gemm_kernel {
+        projector_tables(state, &species, blocks.len(), false)?
+    } else {
+        Vec::new()
+    };
+    let per_atom = tables_per_atom(&species, &tables);
+    lap("nonlocal_tables", &mut timings);
+    // MPI-DERIV: per-k parts distributed over ranks, accumulated in k order.
+    accumulate_blocks(
+        &blocks,
+        3 * state.atoms.len(),
+        |(point, orbitals, occupations), out| {
+            let basis = state.options.basis(state.cell, point.fractional, 1.0)?;
+            let occupations: Vec<_> = occupations.iter().map(|f| f * point.weight).collect();
+            let part = if gemm_kernel {
+                dft_physics::stress::nonlocal_k_derivatives(
+                    &basis,
+                    volume,
+                    &species,
+                    &per_atom,
+                    orbitals,
+                    &occupations,
+                    false,
+                )?
+                .0
+            } else {
+                let operator = NonlocalOperator::new(&basis, volume, &species)?;
+                if band_first {
+                    nonlocal_band_first(&operator, &basis, orbitals, &occupations)?
+                } else {
+                    terms::nonlocal(&operator, &basis, orbitals, &occupations)?
+                }
+            };
+            if part.len() != out.len() / 3 {
+                return Err(ScfError::InvalidInput("nonlocal forces: atom count"));
+            }
+            for (slot, value) in out.as_chunks_mut::<3>().0.iter_mut().zip(part) {
+                slot.copy_from_slice(&value);
+            }
+            Ok(())
+        },
+        |part| {
+            for (sum, part) in nonlocal.iter_mut().zip(part.as_chunks::<3>().0) {
+                for axis in 0..3 {
+                    sum[axis] += part[axis];
+                }
+            }
+        },
+    )?;
+    band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
+    lap("nonlocal", &mut timings);
+    for term in [&mut ewald, &mut local, &mut nonlocal, &mut core] {
+        symmetrize(state.cell, term, state.symmetry)?;
+    }
+    let values: Vec<[f64; 3]> = (0..state.atoms.len())
+        .map(|i| std::array::from_fn(|a| ewald[i][a] + local[i][a] + nonlocal[i][a] + core[i][a]))
+        .collect();
+    if values.iter().flatten().any(|f| !f.is_finite()) {
+        return Err(ScfError::NonFinite);
+    }
+    let net_force: [f64; 3] = std::array::from_fn(|a| values.iter().map(|f| f[a]).sum());
+    if net_force.iter().any(|f| !f.is_finite()) {
+        return Err(ScfError::NonFinite);
+    }
+    let maximum_absolute_component = values.iter().flatten().map(|v| v.abs()).fold(0.0, f64::max);
+    lap("symmetrize", &mut timings);
+    Ok(ForceResult {
+        verification,
+        ledger,
+        units: "Ha/Bohr",
+        quantity,
+        values,
+        ewald,
+        local,
+        nonlocal,
+        core,
+        net_force,
+        maximum_absolute_component,
+        elapsed: start.elapsed(),
+        band_passes,
+        timings,
+    })
+}
+
+/// GD1: projector radial tables (values and, with `slopes`, q derivatives)
+/// per distinct potential of `species`, in first-appearance order, when the
+/// derivative pass has two or more k blocks and `DERIV_RADIAL_TABLES` is on;
+/// otherwise empty (the kernel uses the quadrature). The range covers
+/// |k+G| <= 1.1 sqrt(2 E_cut) + 0.05 Bohr^-1 (a strained frozen-Miller set
+/// may exceed it; such rows fall back to the quadrature). Node values are the
+/// quadrature itself; (channel, node) units are split into contiguous rank
+/// blocks of an active communicator and shared by one allgatherv, so the
+/// tables are bit-identical for any rank count.
+pub(crate) fn projector_tables(
+    state: &ForceState<'_>,
+    species: &[Species<'_>],
+    blocks: usize,
+    slopes: bool,
+) -> Result<Vec<(usize, dft_physics::stress::ProjectorRadialTables)>, ScfError> {
+    use dft_upf::radial::{
+        RADIAL_TABLE_POINTS as POINTS, RADIAL_TABLE_STEP as STEP, RadialTransformTable,
+    };
+    if blocks < 2 || !dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_RADIAL_TABLES) {
+        return Ok(Vec::new());
+    }
+    let q_max = 1.1 * (2.0 * state.options.cutoff_hartree).sqrt() + 0.05;
+    let nodes = RadialTransformTable::nodes(q_max, STEP, POINTS)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let mut potentials: Vec<&dft_upf::Pseudopotential> = Vec::new();
+    for s in species {
+        if !potentials.iter().any(|p| std::ptr::eq(*p, s.potential)) {
+            potentials.push(s.potential);
+        }
+    }
+    // (potential, projector, slope?)
+    let mut channels: Vec<(usize, usize, bool)> = Vec::new();
+    for (p, pp) in potentials.iter().enumerate() {
+        for i in 0..pp.projectors().len() {
+            channels.push((p, i, false));
+            if slopes {
+                channels.push((p, i, true));
+            }
+        }
+    }
+    let total = channels.len() * nodes;
+    let comm = crate::parallel::SharedComm::active();
+    let (rank, size) = comm.as_ref().map_or((0, 1), |c| {
+        (dft_mpi::Collective::rank(c), dft_mpi::Collective::size(c))
+    });
+    // Contiguous unit blocks per rank, one allgatherv: every value is the
+    // quadrature of exactly one rank, copied unchanged to all ranks.
+    let counts = dft_mpi::block_counts(total, size);
+    let first = dft_mpi::block_displacements(&counts)[rank];
+    let mut local = vec![0.0; 1 + counts[rank]];
+    for (slot, u) in local[1..].iter_mut().zip(first..first + counts[rank]) {
+        let ((p, i, slope), n) = (channels[u / nodes], u % nodes);
+        let q = n as f64 * STEP;
+        let value = if slope {
+            dft_physics::stress::projector_transform_slope(potentials[p], i, q)
+                .map_err(|e| e.to_string())
+        } else {
+            potentials[p]
+                .projector_transform(i, q)
+                .map_err(|e| e.to_string())
+        };
+        match value {
+            Ok(v) => *slot = v,
+            Err(_) => {
+                local[0] = 1.0;
+                break;
+            }
+        }
+    }
+    let values = if let Some(comm) = &comm {
+        let counts: Vec<_> = counts.iter().map(|c| 1 + c).collect();
+        let mut all = vec![0.0; counts.iter().sum()];
+        dft_mpi::Collective::allgatherv_f64(comm, &local, &counts, &mut all)
+            .map_err(|e| ScfError::Numerical(format!("derivative radial tables: {e}")))?;
+        let mut values = Vec::with_capacity(total);
+        let mut at = 0;
+        for count in counts {
+            if all[at] != 0.0 {
+                local[0] = 1.0;
+            }
+            values.extend_from_slice(&all[at + 1..at + count]);
+            at += count;
+        }
+        values
+    } else {
+        local[1..].to_vec()
+    };
+    if local[0] != 0.0 {
+        return Err(ScfError::Numerical(
+            "derivative radial tables: quadrature failed".into(),
+        ));
+    }
+    let mut out: Vec<(usize, dft_physics::stress::ProjectorRadialTables)> = potentials
+        .iter()
+        .map(|pp| {
+            (
+                *pp as *const _ as usize,
+                dft_physics::stress::ProjectorRadialTables {
+                    value: Vec::new(),
+                    slope: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    for (c, &(p, i, slope)) in channels.iter().enumerate() {
+        let l = potentials[p].projectors()[i].l();
+        // The slope of an l transform has the opposite parity.
+        let table = RadialTransformTable::from_nodes(
+            if slope { l + 1 } else { l },
+            q_max,
+            STEP,
+            POINTS,
+            values[c * nodes..(c + 1) * nodes].to_vec(),
+        )
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        if slope {
+            out[p].1.slope.push(table);
+        } else {
+            out[p].1.value.push(table);
+        }
+    }
+    Ok(out)
+}
+
+/// GD1: the local and core radial transforms (and with `slopes` their q
+/// derivatives) on every distinct nonzero |G| of the density sphere, for each
+/// distinct potential, evaluated once per derivative pass with hoisted
+/// integrands (`dft_physics::radial_shells::ShellEvaluator`, every value
+/// bit-identical to the former per-shell expression). With an active
+/// communicator the (potential, function, shell) units are split into
+/// contiguous rank blocks and combined by one allgatherv, so every rank holds
+/// the identical values for any rank count. `None` when `DERIV_SHELLS` is off.
+pub(crate) fn shell_values(
+    species: &[Species<'_>],
+    density_basis: &dft_basis::PlaneWaveBasis,
+    volume: f64,
+    slopes: bool,
+) -> Result<Option<dft_physics::radial_shells::RadialShellValues>, ScfError> {
+    use dft_mpi::Collective;
+    use dft_physics::radial_shells::{RadialShellValues, ShellEvaluator, ShellKind};
+    if !dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_SHELLS) {
+        return Ok(None);
+    }
+    let mut potentials: Vec<&dft_upf::Pseudopotential> = Vec::new();
+    for s in species {
+        if !potentials.iter().any(|p| std::ptr::eq(*p, s.potential)) {
+            potentials.push(s.potential);
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let shells: Vec<f64> = density_basis
+        .vectors()
+        .iter()
+        .filter(|g| g.miller != [0; 3])
+        .map(|g| g.norm_squared.sqrt())
+        .filter(|q| seen.insert(q.to_bits()))
+        .collect();
+    let mut units: Vec<(usize, ShellKind)> = Vec::new();
+    for (p, pp) in potentials.iter().enumerate() {
+        units.push((p, ShellKind::LocalValue));
+        if slopes {
+            units.push((p, ShellKind::LocalSlope));
+        }
+        if pp.core_density().is_some() {
+            units.push((p, ShellKind::CoreValue));
+            if slopes {
+                units.push((p, ShellKind::CoreSlope));
+            }
+        }
+    }
+    let total = units.len() * shells.len();
+    let comm = crate::parallel::SharedComm::active();
+    let (rank, size) = comm.as_ref().map_or((0, 1), |c| (c.rank(), c.size()));
+    let counts = dft_mpi::block_counts(total, size);
+    let first = dft_mpi::block_displacements(&counts)[rank];
+    let mut local = vec![0.0; 1 + counts[rank]];
+    let mut evaluators: Vec<Option<ShellEvaluator<'_>>> = potentials.iter().map(|_| None).collect();
+    for (slot, u) in local[1..].iter_mut().zip(first..first + counts[rank]) {
+        let ((p, kind), q) = (units[u / shells.len()], shells[u % shells.len()]);
+        if evaluators[p].is_none() {
+            // A failure is reported through the status value, never by an
+            // early return that would leave the other ranks in the gather.
+            match ShellEvaluator::new(potentials[p], volume) {
+                Ok(e) => evaluators[p] = Some(e),
+                Err(_) => {
+                    local[0] = 1.0;
+                    break;
+                }
+            }
+        }
+        match evaluators[p].as_mut().expect("evaluator").eval(kind, q) {
+            Ok(Some(v)) => *slot = v,
+            _ => {
+                local[0] = 1.0;
+                break;
+            }
+        }
+    }
+    let all = if let Some(comm) = &comm {
+        let counts: Vec<_> = counts.iter().map(|c| 1 + c).collect();
+        let mut all = vec![0.0; counts.iter().sum()];
+        comm.allgatherv_f64(&local, &counts, &mut all)
+            .map_err(|e| ScfError::Numerical(format!("derivative shell gather: {e}")))?;
+        let mut values = Vec::with_capacity(total);
+        let mut at = 0;
+        for count in counts {
+            if all[at] != 0.0 {
+                // A failing shell is recomputed (and reported) by the kernels.
+                return Ok(None);
+            }
+            values.extend_from_slice(&all[at + 1..at + count]);
+            at += count;
+        }
+        values
+    } else {
+        if local[0] != 0.0 {
+            return Ok(None);
+        }
+        local.split_off(1)
+    };
+    let mut out = RadialShellValues::default();
+    for (u, v) in all.into_iter().enumerate() {
+        let ((p, kind), q) = (units[u / shells.len()], shells[u % shells.len()]);
+        out.insert(potentials[p], kind, q, v);
+    }
+    Ok(Some(out))
+}
+
+/// Per-entry view of [`projector_tables`] for a species list.
+pub(crate) fn tables_per_atom<'t>(
+    species: &[Species<'_>],
+    tables: &'t [(usize, dft_physics::stress::ProjectorRadialTables)],
+) -> Vec<Option<&'t dft_physics::stress::ProjectorRadialTables>> {
+    species
+        .iter()
+        .map(|s| {
+            let id = s.potential as *const _ as usize;
+            tables.iter().find(|t| t.0 == id).map(|t| &t.1)
+        })
+        .collect()
+}
+
+/// Shared preconditions of every derivative (forces and frozen stress): the
+/// independent setup identity, the certificate or passed verification, the
+/// strict tolerance caps, complete state arrays and the complete active
+/// ledger. Computes no derivative.
+pub(crate) fn validate(state: &ForceState<'_>) -> Result<Validated, ScfError> {
     if let ElectronicState::Fixed(r) = &state.electronic
         && !r.orbitals_delivered()
     {
@@ -313,7 +798,6 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         ));
     }
 
-    let start = std::time::Instant::now();
     use crate::force_identity::{ModelDescription, OccupationIdentity};
     let (identity, policy, density, points) = match &state.electronic {
         ElectronicState::Fixed(r) => (
@@ -511,10 +995,6 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             "observables.forces: incomplete state arrays; use the complete converged electronic state",
         ));
     }
-    let mut density = densities[0].clone();
-    if densities.len() == 2 {
-        density += densities[1];
-    }
     let (energy, entropy) = match &state.electronic {
         ElectronicState::Fixed(r) => (&r.energy, None),
         ElectronicState::FiniteTemperature(r) => {
@@ -570,160 +1050,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         });
     }
     require_complete(&ledger).map_err(ScfError::Numerical)?;
-    let volume = state.cell.volume_bohr3();
-    let density_basis = state.options.basis(state.cell, [0.; 3], 4.0)?;
-    let dims: [usize; 3] = density
-        .shape()
-        .try_into()
-        .map_err(|_| ScfError::InvalidInput("forces.density: invalid shape"))?;
-    let dg = FftGridSpec::new(&density_basis, &density_basis, Some(dims))?;
-    // One Species entry per input atom prevents grouping from permuting output.
-    let positions: Vec<_> = state
-        .atoms
-        .iter()
-        .map(|a| {
-            state
-                .cell
-                .fractional_to_cartesian_bohr(a.fractional_position.map(|x| x.rem_euclid(1.0)))
-        })
-        .collect();
-    let species: Vec<_> = state
-        .atoms
-        .iter()
-        .zip(&positions)
-        .map(|(a, p)| {
-            let potential = state
-                .potentials
-                .iter()
-                .find(|s| s.label == a.species)
-                .ok_or(ScfError::InvalidInput("forces.species: missing potential"))?
-                .potential;
-            Ok(Species {
-                potential,
-                positions_bohr: std::slice::from_ref(p),
-            })
-        })
-        .collect::<Result<_, ScfError>>()?;
-    let mut fft = FftPlan3d::new(dims)?;
-    let mut reciprocal = Array3::zeros(dims);
-    fft.to_reciprocal(&density.mapv(|x| Complex64::new(x, 0.0)), &mut reciprocal)?;
-    let mut local = terms::local_or_core(
-        &density_basis,
-        volume,
-        &species,
-        &dg.gather(&reciprocal)?,
-        false,
-    )?;
-    let core_density =
-        dft_physics::density::core_density(&density_basis, &dg, volume, &species, &mut fft)?;
-    let mut core = if let Some(core_density) = core_density {
-        let mut scratch = Array3::zeros(dims);
-        let potential = if densities.len() == 1 {
-            state
-                .options
-                .evaluate_xc(
-                    &density,
-                    Some(&core_density),
-                    &mut scratch,
-                    state.cell,
-                    &mut fft,
-                    state.density_floor,
-                )?
-                .potential
-        } else {
-            use dft_physics::spin::{SpinFunctional, SpinXc, SpinXcResponse};
-            if state.density_floor.is_some() {
-                return Err(ScfError::InvalidInput(
-                    "forces.spin: density floor unavailable",
-                ));
-            }
-            let kind = match state.options.functional {
-                crate::Functional::LdaPw => SpinFunctional::LdaPw,
-                crate::Functional::Pbe => SpinFunctional::Pbe,
-                _ => {
-                    return Err(ScfError::InvalidInput(
-                        "forces.spin: polarized PZ unavailable",
-                    ));
-                }
-            };
-            let mut xc = SpinXc::new(kind, state.cell, dims)?;
-            let mut out = SpinXcResponse::new(dims);
-            xc.evaluate_with_core(
-                &[densities[0].clone(), densities[1].clone()],
-                Some(&core_density),
-                &mut out,
-            )?;
-            (&out.potentials[0] + &out.potentials[1]) * 0.5
-        };
-        fft.to_reciprocal(&potential.mapv(|x| Complex64::new(x, 0.0)), &mut reciprocal)?;
-        terms::local_or_core(
-            &density_basis,
-            volume,
-            &species,
-            &dg.gather(&reciprocal)?,
-            true,
-        )?
-    } else {
-        vec![[0.0; 3]; state.atoms.len()]
-    };
-    let ions: Vec<_> = state
-        .atoms
-        .iter()
-        .zip(&species)
-        .map(|(a, s)| ewald::Ion {
-            charge: s.potential.z_valence(),
-            fractional_position: a.fractional_position,
-        })
-        .collect();
-    let mut ewald = ewald::forces(state.cell, &ions, ewald::EwaldOptions::default())?;
-    let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
-    let mut band_passes = 0;
-    let band_first = dft_numerics::switches::on(dft_numerics::switches::Id::FORCE_BAND_FIRST);
-    // MPI-DERIV: per-k parts distributed over ranks, accumulated in k order.
-    accumulate_blocks(
-        &blocks,
-        3 * state.atoms.len(),
-        |(point, orbitals, occupations), out| {
-            let basis = state.options.basis(state.cell, point.fractional, 1.0)?;
-            let operator = NonlocalOperator::new(&basis, volume, &species)?;
-            let occupations: Vec<_> = occupations.iter().map(|f| f * point.weight).collect();
-            let part = if band_first {
-                nonlocal_band_first(&operator, &basis, orbitals, &occupations)?
-            } else {
-                terms::nonlocal(&operator, &basis, orbitals, &occupations)?
-            };
-            if part.len() != out.len() / 3 {
-                return Err(ScfError::InvalidInput("nonlocal forces: atom count"));
-            }
-            for (slot, value) in out.as_chunks_mut::<3>().0.iter_mut().zip(part) {
-                slot.copy_from_slice(&value);
-            }
-            Ok(())
-        },
-        |part| {
-            for (sum, part) in nonlocal.iter_mut().zip(part.as_chunks::<3>().0) {
-                for axis in 0..3 {
-                    sum[axis] += part[axis];
-                }
-            }
-        },
-    )?;
-    band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
-    for term in [&mut ewald, &mut local, &mut nonlocal, &mut core] {
-        symmetrize(state.cell, term, state.symmetry)?;
-    }
-    let values: Vec<[f64; 3]> = (0..state.atoms.len())
-        .map(|i| std::array::from_fn(|a| ewald[i][a] + local[i][a] + nonlocal[i][a] + core[i][a]))
-        .collect();
-    if values.iter().flatten().any(|f| !f.is_finite()) {
-        return Err(ScfError::NonFinite);
-    }
-    let net_force: [f64; 3] = std::array::from_fn(|a| values.iter().map(|f| f[a]).sum());
-    if net_force.iter().any(|f| !f.is_finite()) {
-        return Err(ScfError::NonFinite);
-    }
-    let maximum_absolute_component = values.iter().flatten().map(|v| v.abs()).fold(0.0, f64::max);
-    Ok(ForceResult {
+    Ok(Validated {
         verification: if unverified {
             "unverified"
         } else if verified {
@@ -732,17 +1059,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             "strict_certificate"
         },
         ledger,
-        units: "Ha/Bohr",
         quantity,
-        values,
-        ewald,
-        local,
-        nonlocal,
-        core,
-        net_force,
-        maximum_absolute_component,
-        elapsed: start.elapsed(),
-        band_passes,
     })
 }
 

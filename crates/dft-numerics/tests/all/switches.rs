@@ -221,7 +221,11 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::K_KEPT_SLAB_MB), Value::Number(Some(1024.)));
     assert_eq!(value(Id::SPIN_FD_START_KEPT_HX), Value::Choice("on"));
     assert_eq!(value(Id::SPIN_FD_REDO_KEPT_HX), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 83);
+    assert_eq!(value(Id::STRESS_FORCE_PASS), Value::Choice("off"));
+    assert_eq!(value(Id::DERIV_NL_GEMM), Value::Choice("on"));
+    assert_eq!(value(Id::DERIV_RADIAL_TABLES), Value::Choice("on"));
+    assert_eq!(value(Id::DERIV_SHELLS), Value::Choice("on"));
+    assert_eq!(TABLE.len(), 87);
 }
 
 #[test]

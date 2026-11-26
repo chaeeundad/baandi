@@ -378,6 +378,14 @@ table! {
         "GF1 (port of GK10B K_START_KEPT_HX to the spin/FD driver): the reference spin/FD k start keeps H X of its Ritz orbitals (H Q C, one GEMM; the FD buffer columns appended after the start get one H application each) and the driver seeds every channel's kept HX with it, so map 1 does not apply H to the start orbitals again (potential change corrected exactly); rounding class; off applies H in map 1";
     SPIN_FD_REDO_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GF1 (port of GK10B K_REDO_KEPT_HX to the spin/FD driver): the first-iteration redo starts from the coarse solve's kept X and HX (same input potential, zero change, no transforms) instead of applying H again; rounding class; off invalidates the kept HX before the redo";
+    STRESS_FORCE_PASS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "GD1: on = the frozen-Miller stress re-runs the complete force pass as its precondition check (former behaviour); off = it runs only the shared precondition checks (identity, certificate/verification, tolerances, ledger) without computing forces; stress bit-identical; precondition_force_band_passes reports 0 when off";
+    DERIV_NL_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GD1: nonlocal forces and nonlocal stress per k from one projector/gradient GEMM per atom (A = [beta | d beta/dq], B = [psi | q psi]) instead of the NonlocalOperator build plus per-G scalar loops; rounding class (reduction order); off restores the former per-k operator and scalar loops";
+    DERIV_RADIAL_TABLES: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GD1: with two or more k blocks the derivative pass reads the projector transforms and their q derivatives from uniform radial tables (step 0.005 Bohr^-1, 8-point Lagrange, nodes split over ranks, node values equal to the quadrature) instead of one quadrature per distinct |k+G|; rounding class; off restores the quadrature";
+    DERIV_SHELLS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GD1: the local and core |G|-shell transforms of the derivative pass (local/core forces and stress, the rebuilt core density) are evaluated once per pass with the G-independent integrand (including erf) hoisted, split over the ranks in contiguous blocks and shared by one allgatherv, instead of per shell on every rank (and per atom for the core density); bit-identical; off restores the per-shell evaluation";
 }
 
 struct Resolved {

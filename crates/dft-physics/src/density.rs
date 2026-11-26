@@ -72,6 +72,19 @@ pub fn core_density(
     species: &[crate::hamiltonian::Species<'_>],
     fft: &mut impl Fft3d,
 ) -> Result<Option<Array3<f64>>, crate::hamiltonian::HamiltonianError> {
+    core_density_cached(density_basis, grid, volume_bohr3, species, fft, None)
+}
+/// GD1: [`core_density`] reading the shell transforms from `shells` when
+/// present (`ShellKind::CoreValue`, the identical quadrature computed
+/// elsewhere); a missing shell is computed here. Bit-identical.
+pub fn core_density_cached(
+    density_basis: &dft_basis::PlaneWaveBasis,
+    grid: &FftGridSpec,
+    volume_bohr3: f64,
+    species: &[crate::hamiltonian::Species<'_>],
+    fft: &mut impl Fft3d,
+    cached: Option<&crate::radial_shells::RadialShellValues>,
+) -> Result<Option<Array3<f64>>, crate::hamiltonian::HamiltonianError> {
     use crate::hamiltonian::{HamiltonianError, structure_factor};
     use dft_upf::radial::spherical_density_transform;
     if !species.iter().any(|s| s.potential.core_density().is_some()) {
@@ -86,6 +99,15 @@ pub fn core_density(
             let mut shells = std::collections::BTreeMap::new();
             for (out, g) in coefficients.iter_mut().zip(density_basis.vectors()) {
                 let radial = if let Some(&v) = shells.get(&g.norm_squared.to_bits()) {
+                    v
+                } else if let Some(v) = cached.and_then(|c| {
+                    c.get(
+                        s.potential,
+                        crate::radial_shells::ShellKind::CoreValue,
+                        g.norm_squared.sqrt(),
+                    )
+                }) {
+                    shells.insert(g.norm_squared.to_bits(), v);
                     v
                 } else {
                     let v = spherical_density_transform(

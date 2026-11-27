@@ -331,3 +331,6 @@ Gap is cost per unit of work, not H columns (IrI3: 0.50x QE's H columns, 0.81x i
   r = HX - eps X free before any H application: skip a column whose predicted Ritz change from its residual is far
   below its threshold, keep the Ritz-change exit test) would cut this for every path; it changes what the first
   iteration does, so it needs a safety argument (no stale buffer columns, no missed states) and the class matrix.
+
+### GS1D-B (2026-11-27): reciprocal-space density symmetrization for grid-incompatible rotations
+QE keeps rotations that do not map a non-cubic explicit FFT grid onto itself (Cl2 on [40,36,80]: QE 8 ops / 42 k, BAANDI 4 ops / 68 k). BAANDI requires grid-mapping rotations because XC is evaluated on the real-space grid. Option: a switch that keeps such rotations and symmetrizes the density in reciprocal space; adopt only if reduced-vs-full-mesh energies stay within strict 1e-10 / standard 5e-9 Ha on several cells. Deferred: affects explicit non-cubic grids only.

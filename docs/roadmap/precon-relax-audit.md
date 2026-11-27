@@ -6,6 +6,11 @@ Line numbers refer to that commit. Mac timings are observations, not acceptance
 numbers. Specification: [precon-relax-spec.md](precon-relax-spec.md); design:
 [precon-relax-design.md](precon-relax-design.md).
 
+Status 2026-11-27: bottlenecks 1 (stop rule) and 3 (native FIRE units) are
+addressed by RELAX-STOP-RULE / ADR 0056 (max atomic force norm, energy test
+optional, default 0.02 eV/A, FIRE in ASE units); native frames now record
+`max_force_norm_ha_bohr`. Line numbers below still refer to `2efb09be`.
+
 ## 1. Code map
 
 | item | where | behaviour |

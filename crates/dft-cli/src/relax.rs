@@ -193,6 +193,24 @@ pub fn default_force_tol_ha_bohr() -> f64 {
     // eV/A -> Ha/Bohr: energy to Ha, then per Bohr = per A times (A per Bohr).
     to_hartree(DEFAULT_FORCE_TOL_EV_ANGSTROM, EnergyUnit::ElectronVolt) * Angstrom::from(Bohr(1.)).0
 }
+/// Force-tied SCF threshold coefficient, Bohr^2/Ha (RELAX-FORCE-NOISE, ADR
+/// 0057). The force error of a verified standard SCF state is first order in
+/// the residual of its delivered density: measured |dF| <= C sqrt(2 eps) with
+/// eps the verification's Coulomb residual (Ha) and C (Ha^1/2/Bohr) between
+/// 0.2 (Si, LDA and PBE) and 4 (MgO PBE, O at 120 Ry) on the generality set;
+/// a warm-started ionic SCF delivers eps close to the threshold. Requiring
+/// C_ref sqrt(2 threshold) <= 0.1 force_tol with C_ref = 4 gives
+/// threshold = (0.1 / C_ref)^2 / 2 force_tol^2 = force_tol^2 / 3200.
+pub const FORCE_THRESHOLD_COEFFICIENT_BOHR2_PER_HA: f64 = 1. / 3200.;
+/// Default SCF threshold, Ha, of a relaxation that moves atoms and does not
+/// set `scf.standard_threshold_ha` (ADR 0057): force_tol^2 / 3200, never
+/// below the standard floor. Callers take the minimum with the class (5e-9
+/// Ha) or stress default, so it only ever tightens. 4.73e-11 Ha at the
+/// default 0.02 eV/A.
+pub fn force_default_threshold_ha(force_tol_ha_bohr: f64) -> f64 {
+    (FORCE_THRESHOLD_COEFFICIENT_BOHR2_PER_HA * force_tol_ha_bohr * force_tol_ha_bohr)
+        .max(dft_engine::StandardProfile::FLOOR_HA)
+}
 impl Default for Settings {
     fn default() -> Self {
         Self {

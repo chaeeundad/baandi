@@ -64,7 +64,18 @@ error. The strict path with its certificate remains as a reference tool
 from its verified state, and the stress cutoff scans are verified standard runs
 (see [cell relaxation](cell-relaxation.md)); without an explicit
 `scf.standard_threshold_ha` they default to 5e-11 Ha (stress default,
-provisional), while the ions mode keeps 5e-9 Ha. Tighten `standard_threshold_ha` to resolve a
+provisional), while the ions mode starts from the class default 5e-9 Ha. **Force-tied default
+([ADR 0057](../decisions/0057-relax-force-tied-scf-threshold.md), 2026-11-28):**
+when `scf.standard_threshold_ha` is not set, `ions` and `ions_cell` relaxations
+run at min(5e-9 Ha or the stress default, `force_tol_ha_bohr`^2 / 3200), floor
+5e-14 Ha: 4.73e-11 Ha at the default 0.02 eV/A. Reason: warm-started ionic SCFs
+stop with a delivered density residual close to the threshold, and at 5e-9 Ha
+that gave force errors up to 2.3e-4 (MgO) and 2.8e-4 Ha/Bohr (ZnO), more than
+half the default tolerance; under the rule the measured errors were at most
+2.6e-5 Ha/Bohr (0.07 of the tolerance) on Si8, Si8-AlP, NaCl, ZnO and MgO, for
+9 to 21 percent more H applications per relaxation.
+`single_path.threshold_source = "relax_force_default"` records it; an explicit
+threshold always wins. Tighten `standard_threshold_ha` to resolve a
 small ionic energy threshold or tight force tolerance (for example 5e-11 Ha, or
 5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically. A warning (stderr and `progress.jsonl`) is printed when `energy_tol_ha` is below twice the SCF threshold, where the energy test and the forces near convergence are limited by SCF noise (RELAX-GATE-FIXES: MgO PBE at 5e-9 Ha scattered forces by about 2e-4 Ha/Bohr in 1-iteration warm SCFs).
 Legacy `spectral_guard` and `xc.density_floor` input keys were removed in R10c.
@@ -78,8 +89,8 @@ secant pairs update it; unresolved/nonpositive curvature pairs are skipped.
 A nonfinite or uphill search direction resets the spring model. Uniform scaling
 limits the largest **per-atom Euclidean displacement** by both the current trust
 radius and `max_displacement_bohr`. The trust radius halves after an energy rise
-larger than `energy_tol_ha` (when unset: twice `scf.standard_threshold_ha`,
-1e-8 Ha at the default) or a failed-SCF retry; otherwise it
+larger than `energy_tol_ha` (when unset: twice the effective SCF threshold,
+9.5e-11 Ha with the force-tied default of ADR 0057, 1e-8 Ha at 5e-9 Ha) or a failed-SCF retry; otherwise it
 grows by 1.1 up to its input value. There is no energy line search or global
 minimum guarantee. This is a capped, safeguarded BFGS step, not a solution of an
 exact quadratic trust-region subproblem. Energy monotonicity is measured on the

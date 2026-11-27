@@ -11,14 +11,15 @@ use dft_engine::{
     parallel::SharedComm,
     refscf::nscf::BandSolver,
     refstart::StartInput,
-    response::{DielectricOptions, dielectric},
+    response::{DielectricOptions, DipoleDump, dielectric},
 };
 use dft_geometry::kpoints::KPoint;
 use serde_json::json;
 use std::{fmt::Write as _, path::Path};
 
-const OUTPUTS: [&str; 5] = [
+const OUTPUTS: [&str; 6] = [
     "epsilon.json",
+    "dipoles.csv",
     "epsilon_M.csv",
     "epsilon_M.dat",
     "chi0_head.dat",
@@ -59,6 +60,47 @@ fn components(t: &[[f64; 3]; 3]) -> [f64; 7] {
         t[1][2],
         (t[0][0] + t[1][1] + t[2][2]) / 3.,
     ]
+}
+
+/// R2-VEL-CHECK dipole record (format: tests/reference/response/r2/README.md).
+fn dipole_csv(records: &[dft_engine::response::KDipoles]) -> String {
+    let mut out = String::from(
+        "# baandi dielectric dipoles (R2-VEL-CHECK diagnostic): gauge-invariant q -> 0 dipole sums per pair of degenerate groups (V occupied, C empty; a group = consecutive bands with eigenvalue spacing < 1e-5 Ha); bands 1-based inclusive in ascending energy per k; k1..k3 fractional (reciprocal-lattice basis), kx..kz Cartesian Bohr^-1 (input lattice frame); e_v_ha, e_c_ha group mean eigenvalues (Ha); orbitals cell-normalized, spin-unpolarized, one spin channel (no factor 2); p_a = <u_v| dH_k/dk_a |u_c> (Hartree atomic units, Ha Bohr = a.u. of velocity) = <v| -i[r_a, H] |c>, including the nonlocal commutator; s_a = sum_{v,c} |p_a|^2 (a.u.^2); r_a = sum_{v,c} |p_a|^2 / (e_c - e_v)^2 = sum |<v| r_a |c>|^2 (Bohr^2, per-band energies); *_local the same with the kinetic velocity k + G only (no [V_NL, r]); c_at_band_limit = 1 when C ends at the last computed band (possibly incomplete group)\nk_index,k1,k2,k3,kx,ky,kz,v_first,v_last,c_first,c_last,e_v_ha,e_c_ha,c_at_band_limit,s_x,s_y,s_z,r_x,r_y,r_z,s_local_x,s_local_y,s_local_z,r_local_x,r_local_y,r_local_z\n",
+    );
+    for k in records {
+        for p in &k.pairs {
+            write!(
+                out,
+                "{},{:.12e},{:.12e},{:.12e},{:.12e},{:.12e},{:.12e},{},{},{},{},{:.12e},{:.12e},{}",
+                k.k_index,
+                k.k_fractional[0],
+                k.k_fractional[1],
+                k.k_fractional[2],
+                k.k_cartesian[0],
+                k.k_cartesian[1],
+                k.k_cartesian[2],
+                p.v.0 + 1,
+                p.v.1 + 1,
+                p.c.0 + 1,
+                p.c.1 + 1,
+                p.e_v,
+                p.e_c,
+                u8::from(p.c_at_band_limit)
+            )
+            .unwrap();
+            for v in p
+                .velocity
+                .iter()
+                .chain(&p.position)
+                .chain(&p.velocity_local)
+                .chain(&p.position_local)
+            {
+                write!(out, ",{v:.12e}").unwrap();
+            }
+            out.push('\n');
+        }
+    }
+    out
 }
 
 pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
@@ -144,6 +186,14 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
             }
         };
     }
+    // R2-VEL-CHECK diagnostic (switch RESPONSE_DIPOLE_DUMP, default off).
+    let dipole_dump =
+        dft_numerics::switches::choice(dft_numerics::switches::Id::RESPONSE_DIPOLE_DUMP);
+    options.dipole_dump = match dipole_dump {
+        "gamma" => DipoleDump::GammaAndFirst,
+        "all" => DipoleDump::All,
+        _ => DipoleDump::Off,
+    };
     let headline_lf = section.local_fields.unwrap_or(true);
     let points = gamma_mesh(section.k_mesh)?;
     let scf = ctx.scf()?;
@@ -261,6 +311,7 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
             "omega0_hartree": result.omega0,
             "omega0_rule": if options.omega0_hartree.is_some() { "explicit" } else { "auto = mean(lowest direct transition, largest transition)" },
             "band_block": options.band_block,
+            "dipole_dump": dipole_dump,
         },
         "spectrum": {
             "electrons": result.electrons,
@@ -295,6 +346,9 @@ pub fn execute(input: &Path, output: Option<&Path>) -> Result<(), RunError> {
         "limitations": "insulators only (metals reject, D6); spin-unpolarized; q -> 0 only; no symmetry reduction; no checkpoint; RPA overestimates experiment (LDA gap), never compare to experiment as a gate",
     });
     ctx.selection.record(&mut meta);
+    if !result.dipoles.is_empty() {
+        ctx.write("dipoles.csv", &dipole_csv(&result.dipoles))?;
+    }
     ctx.write("epsilon_M.csv", &csv)?;
     ctx.write("epsilon_M.dat", &dat)?;
     ctx.write("chi0_head.dat", &head_dat)?;

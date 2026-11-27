@@ -651,6 +651,8 @@ tests updated: `dft-numerics` `TABLE.len()` and the CLI `scf.switches` count).
 | `VERIFY_FEED` | keep: (d) GV1 research | dev08 evaluation | ledger GV1-VERIFY-COST |
 | `VERIFY_SKIPS` | keep: (d) GV1 research | dev08 evaluation | ledger GV1-VERIFY-COST |
 | `VERIFY_RESPONSE_PREDICTOR` | keep: (d) GV1 research | dev08 evaluation | ledger GV1-VERIFY-COST |
+| `RESPONSE_VELOCITY` | keep: diagnostic | R2-VEL-CHECK: q -> 0 dipoles with full / local-only / l <= 1 nonlocal velocity; default full; results of the default unchanged | tests/reference/response/r2/README.md |
+| `RESPONSE_DIPOLE_DUMP` | keep: diagnostic | R2-VEL-CHECK: dipoles.csv of baandi dielectric for external dipole comparison; default off; results unchanged | tests/reference/response/r2/README.md |
 
 ### Removed code
 

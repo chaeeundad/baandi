@@ -876,7 +876,7 @@ impl Finding {
 pub fn inspect(input: &Path) -> serde_json::Value {
     let result = std::fs::read_to_string(input)
         .map_err(|e| ConfigError::Invalid(format!("{}: {e}", input.display())))
-        .and_then(|text| Config::parse_unvalidated(&text))
+        .and_then(|text| Config::parse_unvalidated_at(&text, input))
         .and_then(|config| check(&config, input));
     match result {
         Ok(report) => serde_json::to_value(report).expect("finite preflight report"),
@@ -902,7 +902,7 @@ pub fn cli_check(
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else if report["valid"] == true {
         let text = std::fs::read_to_string(input)?;
-        let config = Config::parse(&text)?;
+        let config = Config::parse_at(&text, input)?;
         for record in &config.input_expressions {
             println!("{}: {:?} = {}", record.key_path, record.text, record.value);
         }
@@ -1346,7 +1346,7 @@ pub mod proposal {
     /// proposal may contain a candidate that still fails deterministic preflight.
     pub fn validate(input: &Path, proposal: &Proposal) -> Result<(String, Value)> {
         let source = fs::read_to_string(input)?;
-        let config = Config::parse_unvalidated(&source)?;
+        let config = Config::parse_unvalidated_at(&source, input)?;
         if proposal.schema_version != 1
             || !nonempty(&proposal.advisory)
             || !nonempty(&proposal.agent)
@@ -1371,7 +1371,7 @@ pub mod proposal {
         if digest(text.as_bytes()) != proposal.candidate_input_sha256 {
             return Err("candidate digest mismatch".into());
         }
-        let candidate_config = Config::parse_unvalidated(&text)?;
+        let candidate_config = Config::parse_unvalidated_at(&text, input)?;
         if potential_hashes(&candidate_config, input)? != proposal.candidate_pseudopotentials {
             return Err("candidate pseudopotential hashes mismatch".into());
         }

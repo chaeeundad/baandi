@@ -55,6 +55,14 @@ fn every_workflow_passes_preflight_with_synthetic_potentials() {
             fs::write(dir.join(&filename), xml).unwrap();
             *entry = toml::Value::String(filename);
         }
+        // Structure files (`[structure] file`) resolve against the input file.
+        for extra in fs::read_dir(input.parent().unwrap()).unwrap() {
+            let extra = extra.unwrap().path();
+            let name = extra.file_name().unwrap();
+            if extra.is_file() && name != "input.toml" && name != "README.md" {
+                fs::copy(&extra, dir.join(name)).unwrap();
+            }
+        }
         let prepared = dir.join("input.toml");
         fs::write(&prepared, toml::to_string(&config).unwrap()).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))

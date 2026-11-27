@@ -29,6 +29,7 @@ n_down = 2
 axis = "z"             # x, y, z; default z
 # Alternatively: axis_cartesian = [0.0, 0.0, 1.0] (unit vector)
 initial_moment_seed = 1.0  # does not change the fixed electron sector
+# or per atom in [structure]: `Fe 0 0 0 magmom=1.0` (the sum becomes the seed)
 
 [basis]
 # Existing cutoff/mesh entries go here.

@@ -137,3 +137,32 @@ fn provenance_rejects_nested_tables() {
             .is_err()
     );
 }
+
+/// SI1: `baandi-convert --compact` writes the `[structure]` form of the same
+/// record (committed fixture); it parses to the same bits as the `[system]`
+/// output and keeps the provenance table.
+#[test]
+fn compact_converter_output_matches_system_form_bits() {
+    const COMPACT: &str = include_str!("../fixtures/structure_convert/si_mp0_compact.toml");
+    let rest = REST.replace("synthetic.xml", "/nonexistent.xml");
+    let compact = dft_cli::config::Config::parse(&format!("{COMPACT}{rest}")).unwrap();
+    let system = dft_cli::config::Config::parse(&format!("{CONVERTED}{rest}")).unwrap();
+    assert_eq!(
+        compact.cell().unwrap().lattice_columns_bohr(),
+        system.cell().unwrap().lattice_columns_bohr()
+    );
+    assert_eq!(compact.system.name, system.system.name);
+    for (a, b) in compact.system.atoms.iter().zip(&system.system.atoms) {
+        assert_eq!(a.species, b.species);
+        assert_eq!(
+            a.fractional.map(f64::to_bits),
+            b.fractional.map(f64::to_bits)
+        );
+    }
+    let (p, q) = (
+        compact.system.provenance_json().unwrap(),
+        system.system.provenance_json().unwrap(),
+    );
+    assert_eq!(p, q);
+    assert_eq!(compact.structure_source.kind, "compact");
+}

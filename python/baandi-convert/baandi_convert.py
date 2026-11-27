@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""baandi-convert: write a BAANDI ``[system]`` block from a structure file or a
-Materials Project id (workstation-side tool, Python 3.9+).
+"""baandi-convert: write a BAANDI ``[system]`` block (or, with ``--compact``, a
+``[structure]`` block) from a structure file or a Materials Project id
+(workstation-side tool, Python 3.9+).
 
-The BAANDI engine and CLI never read structure files or contact a database:
+The BAANDI CLI reads only POSCAR and extended XYZ files natively
+(``[structure] file``, Rust readers, no Python) and never contacts a database:
 compute nodes may have no Python, ASE or network. This tool runs where those
-exist and writes the explicit TOML form (lattice rows plus fractional
+exist (CIF with symmetry expansion, Materials Project, any ASE format) and
+writes the explicit TOML form (lattice rows plus fractional
 positions, 17 significant digits) with a ``[system.provenance]`` table that the
 CLI copies into results.json without using it for the physics.
 
@@ -52,11 +55,15 @@ class ConversionError(Exception):
 class Structure:
     """Periodic structure: lattice rows (Angstrom), symbols, fractional positions."""
 
-    def __init__(self, lattice, symbols, fractional, provenance):
+    def __init__(self, lattice, symbols, fractional, provenance, fixed=None, magmoms=None):
         self.lattice = [[float(x) for x in row] for row in lattice]
         self.symbols = [str(s) for s in symbols]
         self.fractional = [[float(x) for x in p] for p in fractional]
         self.provenance = dict(provenance)
+        # Per-atom Cartesian freeze masks (None = free) and initial moments
+        # (mu_B); written only in the compact form (--compact).
+        self.fixed = fixed
+        self.magmoms = magmoms
 
     def formula(self):
         counts = {}
@@ -258,6 +265,15 @@ def read_file(path, fmt=None, index=-1, reader="ase", assume_periodic=False):
             "vacuum and pass --assume-periodic to accept it as a periodic box"
         )
     lattice = [[float(x) for x in row] for row in atoms.cell[:]]
+    try:
+        fixed = _ase_fixed(atoms)
+    except ConversionError as e:  # raised only if the compact form is written
+        fixed = e
+    magmoms = None
+    if atoms.has("initial_magmoms"):
+        magmoms = [float(m) for m in atoms.get_initial_magnetic_moments()]
+        if not any(magmoms):
+            magmoms = None
     provenance = {
         "source_kind": "file",
         "source": str(path),
@@ -274,9 +290,61 @@ def read_file(path, fmt=None, index=-1, reader="ase", assume_periodic=False):
         atoms.get_chemical_symbols(),
         atoms.get_scaled_positions(wrap=False).tolist(),
         provenance,
+        fixed,
+        magmoms,
     )
     check_structure(s)
     return s
+
+
+def _reciprocal_axis(cell, i):
+    """Cartesian axis parallel to a_j x a_k (the direction frozen with fractional i), or None."""
+    a, b = cell[(i + 1) % 3], cell[(i + 2) % 3]
+    r = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    norm = math.sqrt(sum(x * x for x in r))
+    for c in range(3):
+        if all(o == c or abs(r[o]) <= 1e-12 * norm for o in range(3)):
+            return c
+    return None
+
+
+def _ase_fixed(atoms):
+    """Per-atom Cartesian freeze masks from ASE FixAtoms/FixCartesian/FixScaled; None if unconstrained."""
+    constraints = getattr(atoms, "constraints", None) or []
+    if not constraints:
+        return None
+    from ase.constraints import FixAtoms, FixCartesian, FixScaled
+
+    cell = [[float(x) for x in row] for row in atoms.cell[:]]
+    masks = [[False] * 3 for _ in range(len(atoms))]
+    for c in constraints:
+        if isinstance(c, FixAtoms):
+            for i in c.index:
+                masks[int(i)] = [True] * 3
+        elif isinstance(c, FixCartesian):
+            for i in c.index:
+                masks[int(i)] = [m or bool(x) for m, x in zip(masks[int(i)], c.mask)]
+        elif isinstance(c, FixScaled):
+            for i in c.index:
+                frozen = [bool(x) for x in c.mask]
+                if all(frozen):
+                    masks[int(i)] = [True] * 3
+                    continue
+                for d in range(3):
+                    if not frozen[d]:
+                        continue
+                    axis = _reciprocal_axis(cell, d)
+                    if axis is None:
+                        raise ConversionError(
+                            f"atom {int(i) + 1}: a constraint along lattice direction {d + 1} is not a "
+                            "Cartesian axis in this cell; BAANDI constraints are Cartesian components"
+                        )
+                    masks[int(i)][axis] = True
+        else:
+            raise ConversionError(
+                f"constraint {type(c).__name__} cannot be written as BAANDI fixed flags; remove it"
+            )
+    return [m if any(m) else None for m in masks]
 
 
 def _read_pymatgen(path, fmt):
@@ -508,8 +576,66 @@ functional = "lda-pz"
 """
 
 
-def to_toml(structure, units="angstrom", skeleton=False, name=None):
-    """BAANDI TOML text: [system] (+ provenance and atoms), optionally a full skeleton."""
+def _fixed_flag(mask):
+    return "".join(a for a, m in zip("xyz", mask) if m)
+
+
+def to_compact_toml(structure, units, skeleton, name, provenance):
+    """BAANDI TOML text in the compact form: [structure] with one atom per line."""
+    if isinstance(structure.fixed, ConversionError):
+        raise structure.fixed
+    scale = 1.0 if units == "angstrom" else 1.0 / BOHR_IN_ANGSTROM
+    lines = [
+        f"# Written by {CONVERTER} {CONVERTER_VERSION}; numbers carry 17 significant digits.",
+        "# [structure.provenance] is recorded in results.json and never used for the physics.",
+    ]
+    if units == "bohr":
+        lines.append(f"# Lattice converted with 1 Bohr = {BOHR_IN_ANGSTROM} Angstrom (CODATA 2018).")
+    lines += [
+        "[structure]",
+        f"name = {toml_string(name or structure.formula())}",
+        f'lattice_unit = "{units}"',
+        "# Each row is one lattice vector.",
+        "lattice = [",
+    ]
+    for row in structure.lattice:
+        lines.append("  [" + ", ".join(toml_float(x * scale) for x in row) + "],")
+    lines += [
+        "]",
+        'coordinates = "fractional"',
+        "# species, three fractional coordinates, optional fixed=<Cartesian components> magmom=<mu_B>",
+        "atoms = '''",
+    ]
+    for i, (sym, f) in enumerate(zip(structure.symbols, structure.fractional)):
+        line = f"{sym} " + " ".join(toml_float(x) for x in f)
+        if structure.fixed and structure.fixed[i]:
+            line += f" fixed={_fixed_flag(structure.fixed[i])}"
+        if structure.magmoms and structure.magmoms[i] != 0.0:
+            line += f" magmom={toml_float(structure.magmoms[i])}"
+        lines.append(line)
+    lines += ["'''", "", "[structure.provenance]"]
+    for k, v in provenance.items():
+        lines.append(f"{k} = {toml_value(v)}")
+    text = "\n".join(lines) + "\n"
+    if structure.magmoms:
+        text += (
+            "\n# Nonzero magmom flags need [spin] mode = \"collinear\" with an electron sector;\n"
+            "# their sum becomes spin.initial_moment_seed (docs/cli.md, Structure input).\n"
+        )
+    if skeleton:
+        species = list(dict.fromkeys(structure.symbols))
+        pseudos = "\n".join(f'{s} = "/absolute/path/to/pseudo/{s}.UPF"' for s in species)
+        text += SKELETON.format(pseudos=pseudos)
+    return text
+
+
+def to_toml(structure, units="angstrom", skeleton=False, name=None, compact=False):
+    """BAANDI TOML text: [system] (+ provenance and atoms), optionally a full skeleton.
+
+    With ``compact`` the [structure] form is written instead, with per-atom
+    fixed and magmom flags when the source carries constraints or moments
+    (the [system] form never writes them).
+    """
     if units not in ("angstrom", "bohr"):
         raise ConversionError(f"unknown units {units!r}; expected angstrom or bohr")
     scale = 1.0 if units == "angstrom" else 1.0 / BOHR_IN_ANGSTROM
@@ -522,6 +648,8 @@ def to_toml(structure, units="angstrom", skeleton=False, name=None):
             "units_written": units,
         }
     )
+    if compact:
+        return to_compact_toml(structure, units, skeleton, name, p)
     lines = [
         f"# Written by {CONVERTER} {CONVERTER_VERSION}; numbers carry 17 significant digits.",
         "# [system.provenance] is recorded in results.json and never used for the physics.",
@@ -572,6 +700,11 @@ def main(argv=None):
     parser.add_argument("--reader", choices=("ase", "pymatgen"), default="ase")
     parser.add_argument("--skeleton", action="store_true", help="add [pseudopotentials]/[basis]/[xc]/[scf] placeholders")
     parser.add_argument("--units", choices=("angstrom", "bohr"), default="angstrom")
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="write the compact [structure] block (one atom per line, fixed/magmom flags) instead of [system]",
+    )
     parser.add_argument("--name", help="system.name (default: formula)")
     parser.add_argument("--assume-periodic", action="store_true", help="accept a non-periodic file with a full cell as a periodic box")
     parser.add_argument("--refresh", action="store_true", help="refetch a cached Materials Project record")
@@ -588,7 +721,7 @@ def main(argv=None):
             structure = read_file(
                 args.source, args.format, args.index, args.reader, args.assume_periodic
             )
-        text = to_toml(structure, args.units, args.skeleton, args.name)
+        text = to_toml(structure, args.units, args.skeleton, args.name, args.compact)
         if args.output:
             out = Path(args.output)
             if out.exists() and not args.force:

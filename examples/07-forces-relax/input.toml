@@ -1,40 +1,20 @@
 # Validate-only in debug tests; run numerical workflows with a release build.
-[system]
+# Compact structure form (docs/cli.md, "Structure input").
+[structure]
 name = "Displaced Si8"
 lattice_unit = "angstrom"
-lattice_vectors = [[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.002, 0, 0]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0, 0.5, 0.5]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.5, 0, 0.5]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.5, 0.5, 0]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.25, 0.25, 0.25]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.25, 0.75, 0.75]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.75, 0.25, 0.75]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.75, 0.75, 0.25]
+lattice = [[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]
+coordinates = "fractional"
+atoms = """
+Si  0.002  0     0
+Si  0      0.5   0.5
+Si  0.5    0     0.5
+Si  0.5    0.5   0
+Si  0.25   0.25  0.25
+Si  0.25   0.75  0.75
+Si  0.75   0.25  0.75
+Si  0.75   0.75  0.25
+"""
 
 [pseudopotentials]
 Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"

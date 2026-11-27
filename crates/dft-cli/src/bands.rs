@@ -95,7 +95,7 @@ impl Context {
         names: &[&str],
     ) -> Result<Self, RunError> {
         let bytes = fs::read(input)?;
-        let config = Config::parse(std::str::from_utf8(&bytes).map_err(|e| err(1, e))?)
+        let config = Config::parse_at(std::str::from_utf8(&bytes).map_err(|e| err(1, e))?, input)
             .map_err(|e| err(1, e))?;
         if config
             .finite_temperature()
@@ -407,6 +407,7 @@ impl Context {
         if let Some(provenance) = self.config.system.provenance_json() {
             metadata["structure_provenance"] = provenance;
         }
+        self.config.annotate_structure(&mut metadata);
         // Both stages use the resolved selection, with no error-triggered fallback.
         metadata["nscf"] = self.selection.json();
         metadata["band_data"] = json!({"ordering":"spin_k_band", "shape":[result.eigenvalues.len(), result.points.len(), result.bands()],

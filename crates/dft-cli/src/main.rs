@@ -317,7 +317,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     };
     let text = std::fs::read_to_string(input)
         .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", input.display())))?;
-    let config = Config::parse(&text)?;
+    let config = Config::parse_at(&text, input)?;
     let prepared = config.prepare()?;
     match cli.command {
         Command::Validate { .. } => unreachable!(),

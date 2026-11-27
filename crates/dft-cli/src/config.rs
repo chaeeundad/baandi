@@ -1,6 +1,8 @@
 //! Strict TOML input; conversion to atomic units happens only at this boundary.
 #[path = "preflight.rs"]
 pub mod preflight;
+#[path = "structure_input.rs"]
+pub mod structure_input;
 use dft_basis::{BasisError, FftGridSpec, PlaneWaveBasis};
 use dft_geometry::{Cell, CellError};
 use dft_units::{Angstrom, Bohr, Hartree, Rydberg};
@@ -38,6 +40,17 @@ pub struct Config {
     pub species_identity: BTreeMap<String, preflight::Identity>,
     #[serde(skip)]
     pub input_expressions: Vec<InputExpression>,
+    /// SI1: where the structure came from (`[system]`, compact `[structure]`
+    /// or a structure file) with the per-atom flags as given.
+    #[serde(skip)]
+    pub structure_source: structure_input::Source,
+    /// SI1: relax constraints from per-atom `fixed` flags or POSCAR selective
+    /// dynamics (Cartesian components, merged into `relax.fixed` by `relax`).
+    #[serde(skip)]
+    pub structure_fixed: Vec<crate::relax::Fixed>,
+    /// SI1: record of the `[pseudopotentials] dir` lookup, when used.
+    #[serde(skip)]
+    pub pseudo_lookup: Option<structure_input::PseudoLookup>,
     pub system: System,
     pub pseudopotentials: BTreeMap<String, PathBuf>,
     pub basis: Basis,
@@ -1266,10 +1279,35 @@ impl Config {
         self.symmetrization = Some(record);
         Ok(())
     }
+    /// `parse` for the text of the input file `input`: relative structure
+    /// files and `[pseudopotentials] dir` resolve against its directory (SI1).
+    pub fn parse_at(text: &str, input: &std::path::Path) -> Result<Self, ConfigError> {
+        let mut config = Self::parse_unvalidated_at(text, input)?;
+        config.symmetrize_input()?;
+        config.validate()?;
+        Ok(config)
+    }
+    /// `parse_unvalidated` for the text of the input file `input` (SI1).
+    pub fn parse_unvalidated_at(text: &str, input: &std::path::Path) -> Result<Self, ConfigError> {
+        Self::parse_unvalidated_in(
+            text,
+            Some(input.parent().unwrap_or(std::path::Path::new("."))),
+        )
+    }
     /// Parse for diagnostic reporting before geometry validation. Never run unchecked.
+    /// Relative structure files and pseudopotential directories resolve
+    /// against the working directory; use `parse_unvalidated_at` for a file.
     pub fn parse_unvalidated(text: &str) -> Result<Self, ConfigError> {
+        Self::parse_unvalidated_in(text, None)
+    }
+    fn parse_unvalidated_in(
+        text: &str,
+        base: Option<&std::path::Path>,
+    ) -> Result<Self, ConfigError> {
         let mut value: toml::Value = toml::from_str(text)?;
         let mut records = Vec::new();
+        let expanded = structure_input::expand(&mut value, base, &mut records)?;
+        let pseudo_lookup = structure_input::resolve_pseudo_dir(&mut value, base)?;
         normalize(&mut value, &mut records)?;
         let identities = preflight::normalize(&mut value)?;
         let explicit_density_group = value
@@ -1341,6 +1379,9 @@ impl Config {
         }
         config.input_expressions = records;
         config.species_identity = identities;
+        config.structure_source = expanded.source;
+        config.structure_fixed = expanded.fixed;
+        config.pseudo_lookup = pseudo_lookup;
         Ok(config)
     }
     fn validate_reference_scope(&self) -> Result<(), ConfigError> {
@@ -1447,6 +1488,42 @@ impl Config {
             v.validate()?;
         }
         Ok(())
+    }
+    /// SI1: add `structure` (the structure the run used, after any symmetry
+    /// projection, with its source and per-atom flags; `[structure]` inputs
+    /// only) and, when
+    /// `[pseudopotentials] dir` was used, `pseudopotential_lookup` to a
+    /// results document.
+    /// Inputs with an explicit `[system]` table keep their results schema
+    /// unchanged (no `structure` key): the table itself is the record.
+    pub fn annotate_structure(&self, result: &mut serde_json::Value) {
+        if let Some(lookup) = &self.pseudo_lookup {
+            result["pseudopotential_lookup"] = serde_json::json!(lookup);
+        }
+        if self.structure_source.kind == "system" {
+            return;
+        }
+        let Ok(cell) = self.cell() else { return };
+        let columns = cell.lattice_columns_bohr();
+        let rows: [[f64; 3]; 3] = std::array::from_fn(|v| std::array::from_fn(|c| columns[c][v]));
+        let mut fixed = vec![None; self.system.atoms.len()];
+        for f in &self.structure_fixed {
+            if let Some(slot) = fixed.get_mut(f.atom) {
+                *slot = Some(f.components);
+            }
+        }
+        let mut record = serde_json::json!({
+            "schema": "baandi-structure-1",
+            "conventions": "lattice_rows_bohr: each row one lattice vector in Bohr; fractional: positions in the lattice basis as used by the run (after any symmetry projection), not wrapped; fixed: Cartesian components frozen by relax (true = frozen) from per-atom flags or selective dynamics; magmoms only enter as their sum, spin.initial_moment_seed",
+            "lattice_rows_bohr": rows,
+            "species": self.system.atoms.iter().map(|a| a.species.as_str()).collect::<Vec<_>>(),
+            "fractional": self.system.atoms.iter().map(|a| a.fractional).collect::<Vec<_>>(),
+            "source": self.structure_source,
+        });
+        if !self.structure_fixed.is_empty() {
+            record["fixed"] = serde_json::json!(fixed);
+        }
+        result["structure"] = record;
     }
     pub fn cell(&self) -> Result<Cell, ConfigError> {
         let rows = self

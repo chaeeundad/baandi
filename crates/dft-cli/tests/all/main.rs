@@ -28,5 +28,6 @@ mod run_config;
 mod self_healing;
 mod stress;
 mod structure_convert;
+mod structure_input;
 mod symmetry;
 mod volumetric;

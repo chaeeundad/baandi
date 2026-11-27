@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 
 
 def main():
@@ -28,6 +29,11 @@ def main():
     destination = examples.parent / "target/tmp/examples" / args.workflow / "input.toml"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(prepared)
+    # Structure files named by `[structure] file` resolve against the input
+    # file, so the other files of the workflow are copied next to it.
+    for extra in sorted((examples / args.workflow).iterdir()):
+        if extra.is_file() and extra.name not in ("input.toml", "README.md"):
+            shutil.copyfile(extra, destination.parent / extra.name)
     print(destination)
 
 

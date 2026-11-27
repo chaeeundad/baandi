@@ -1,0 +1,37 @@
+BAANDI results  [NOT_CONVERGED (exit 3)]  elapsed 0.3 s
+Task: relax   Input: input.toml
+System: H2 (relaxation oracle) | 2 atoms | 1 k point | 4 bands | 3 Ry | 1 rank(s)
+Phase: finished: not_converged
+
+SCF 4 of 4  stop: dr2 < 1.00e-8 Ry
+   map  kind                  energy (Ha)    dE (Ha)   dr2 (Ry) time (s)
+     1  ordinary                        -          -    1.96e-3    0.001
+     1  retry                           -          -    1.97e-3    0.000
+     2  ordinary                        -          -    4.40e-5    0.000
+     3  ordinary                        -          -    3.35e-7    0.000
+     4  ordinary          -0.709536273709          -    2.96e-9    0.000
+     4  verification      -0.709536273887  -1.78e-10   1.01e-10    0.000
+  log10 dr2: ██▆▄▂▁  (threshold -8.0)
+  SCF 4 ended after 6 maps, converged
+
+Relaxation  force tol 1.00e-3 Ha/Bohr, energy tol 1.00e-8 Ha, max steps 3
+  step           energy (Ha)  max|F| Ha/B  step Bohr  maps time (s)  provenance
+     0       -0.689280293088      2.64e-2     0.00e0     6    0.071  fresh
+     1       -0.692254494562      2.37e-2    3.96e-2     4    0.052  warm_transfer
+     2       -0.703249498991      1.36e-2    2.00e-1     4    0.054  warm_transfer
+     3       -0.709536273709      7.56e-3    2.00e-1     4    0.052  warm_transfer
+  log10 max|F|: █▇▄▁
+
+Events (latest 10):
+       0.12 s  relax step 1: E -0.6922544946 Ha, max|F| 2.37e-2 Ha/Bohr
+       0.17 s  retry map 1: dr2 2.09e-3 Ry
+       0.17 s  verification map 4: dr2 9.10e-11 Ry
+       0.17 s  SCF 3 finished in 6 maps
+       0.18 s  relax step 2: E -0.7032494990 Ha, max|F| 1.36e-2 Ha/Bohr
+       0.22 s  retry map 1: dr2 1.97e-3 Ry
+       0.22 s  verification map 4: dr2 1.01e-10 Ry
+       0.22 s  SCF 4 finished in 6 maps
+       0.23 s  relax step 3: E -0.7095362737 Ha, max|F| 7.56e-3 Ha/Bohr
+       0.27 s  end: not_converged (relax unconverged: max_steps reached)
+
+Final: not_converged (exit 3) after 0.3 s

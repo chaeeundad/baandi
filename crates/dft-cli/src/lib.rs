@@ -60,6 +60,10 @@ pub mod run;
 pub mod run_config;
 
 pub mod inspect;
+/// UX1 (ADR 0053): single-entry task selection, progress stream and monitor.
+pub mod monitor;
+pub mod progress;
+pub mod task;
 pub mod telemetry;
 
 mod checkpoint_inspect;

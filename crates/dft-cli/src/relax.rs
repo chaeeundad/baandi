@@ -499,7 +499,7 @@ impl Context {
             }
             request.derivatives.forces = true;
             request.derivatives.deferred = true;
-            let mut delivery = dft_engine::refscf::api::solve(
+            let mut delivery = crate::progress::solve(
                 dft_engine::refstart::StartInput {
                     cell: &self.cell,
                     atoms: &atoms,
@@ -1209,6 +1209,20 @@ fn outputs(
     state: &Restart,
     out: &Path,
 ) -> Result<(), RunError> {
+    // UX1 progress stream (ADR 0053): one record per new frame or failure.
+    if let Some(f) = state.frames.last() {
+        crate::progress::relax_frame(
+            state.frames.len(),
+            f.energy_ha,
+            f.max_force_ha_bohr,
+            f.step_length_bohr,
+            f.scf_iterations,
+            &f.provenance,
+            f.stress_ha_bohr3,
+            &state.status,
+            &state.failures,
+        );
+    }
     use dft_units::{Angstrom, Bohr, EnergyUnit, from_hartree};
     use std::fmt::Write as _;
     let ang = Angstrom::from(Bohr(1.)).0;

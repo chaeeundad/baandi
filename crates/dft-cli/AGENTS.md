@@ -162,3 +162,15 @@ their arithmetic; results gain `structure` (and `pseudopotential_lookup`).
 Readers are checked against ASE 3.26 readings in
 `tests/fixtures/structure_input/` (`make_fixtures.py`, test-only);
 `cargo test -p dft-cli --test all structure_input`.
+
+## Single entry, progress stream, monitor (UX1, ADR 0053)
+
+A bare `baandi` resolves `[task]` (`task.rs`) into the alias subcommand before
+RUN-CONFIG, so jobs run the alias code unchanged; keep that translation the
+only difference. Job commands hold `baandi.lock` and write `progress.jsonl`
+(`progress.rs`, rank 0, thread-local sink) at boundaries only. Reference SCF
+call sites use `progress::solve`, which must stay the exact call sequence of
+`Stepper::run_to_end`; add per-map records there, never inside a map. The
+monitor (`monitor.rs`, `monitor/tui.rs`) only reads files. When the stream
+format changes, update ADR 0053 and regenerate the plain-view snapshot with
+`UPDATE_SNAPSHOTS=1 cargo test -p dft-cli --lib monitor::` (then rerun).

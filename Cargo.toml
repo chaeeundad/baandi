@@ -50,6 +50,8 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 clap = { version = "4", features = ["derive"] }
+# UX1 (ADR 0053): `baandi watch` terminal UI; crossterm comes through ratatui-crossterm.
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 
 # Debug/test builds only (the release profile is unchanged). Optimizing the dev
 # profile cut the debug test run of scripts/check.sh from 379 s to 104 s (cold

@@ -127,7 +127,7 @@ impl Prepared {
         }
         let ops = self.operations(input.options.crystal_density_group);
         if input.options.grid_override.is_some() {
-            if !dft_geometry::symmetry::preserves_fft_grid(dims, ops) {
+            if !crate::model::grid_supports(dims, ops) {
                 return Err(ScfError::InvalidInput(
                     "reference symmetry: incompatible explicit FFT grid",
                 ));
@@ -161,6 +161,9 @@ pub struct Report {
 }
 pub(super) struct Workspace {
     projector: DistributedDensitySymmetrizer,
+    /// GS1D-B: a second projector for the local potential when some operation
+    /// does not permute the FFT grid; handed to the start state once.
+    potential: Option<DistributedDensitySymmetrizer>,
     pub report: Report,
     pub iteration: usize,
     pub verification: bool,
@@ -188,8 +191,21 @@ impl Workspace {
         }
         let invariance_scratch =
             vec![vec![Complex64::default(); projector.local_indices().len()]; channels];
+        let potential = if crate::model::needs_potential_projection(dims, ops) {
+            Some(DistributedDensitySymmetrizer::new(
+                &db,
+                dims,
+                ops,
+                comm.rank(),
+                comm.size(),
+                1,
+            )?)
+        } else {
+            None
+        };
         Ok(Self {
             projector,
+            potential,
             invariance_scratch,
             report: Report {
                 group_order: ops.len(),
@@ -201,6 +217,11 @@ impl Workspace {
             verification: false,
             volume: input.cell.volume_bohr3(),
         })
+    }
+    /// GS1D-B: the potential projector for `StartState::potential_symmetry`
+    /// (None when every operation permutes the grid).
+    pub fn take_potential_projector(&mut self) -> Option<PotentialProjector> {
+        self.potential.take().map(PotentialProjector)
     }
     pub fn apply<K: Collective>(
         &mut self,
@@ -261,6 +282,27 @@ impl Workspace {
                 "symmetry.density: input breaks the selected symmetry; use full mesh",
             ));
         }
+        Ok(())
+    }
+}
+
+/// GS1D-B (ADR 0049): G-space projection of a local potential onto the crystal
+/// group, used when some operation does not permute the real-space grid (the
+/// XC quadrature is then not invariant). Components outside the density sphere
+/// are zeroed; they do not enter Hamiltonian matrix elements on an alias-free
+/// grid. The double-counting integral is unchanged because the density is
+/// invariant and confined to the sphere.
+pub struct PotentialProjector(DistributedDensitySymmetrizer);
+impl PotentialProjector {
+    pub(super) fn apply<K: Collective>(
+        &mut self,
+        fields: &mut crate::refstart::StartFields,
+        comm: &K,
+        potential: &mut Vec<f64>,
+    ) -> Result<(), ScfError> {
+        let mut coefficients = vec![fields.forward(comm, potential)?];
+        self.0.apply(comm, &mut coefficients)?;
+        *potential = fields.inverse(comm, &coefficients[0])?;
         Ok(())
     }
 }

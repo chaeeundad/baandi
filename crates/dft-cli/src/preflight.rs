@@ -628,7 +628,15 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             prepared.grid.dims()
         ));
         warnings.push(if prepared.grid.overridden() {
-            format!("symmetry.fft_grid: using explicit dimensions {:?} exactly; every density operation permutes this grid", prepared.grid.dims())
+            {
+                let ops = config.density_operations()?;
+                let kept = ops.iter().filter(|o| !dft_geometry::symmetry::grid_rotation_compatible(prepared.grid.dims(), o)).count();
+                if kept > 0 {
+                    format!("symmetry.fft_grid: using explicit dimensions {:?} exactly; {kept} of {} density operations rotate this grid off itself and are kept (GRID_INCOMPATIBLE_OPS=reciprocal, ADR 0049 GS1D-B): density and local potential are projected onto the whole group in G space", prepared.grid.dims(), ops.len())
+                } else {
+                    format!("symmetry.fft_grid: using explicit dimensions {:?} exactly; every density operation permutes this grid", prepared.grid.dims())
+                }
+            }
         } else {
             format!("symmetry.fft_grid: automatic dimensions {:?} selected for alias-free density support {:?}, FFT-friendly factors 2/3/5, and all density translations/rotations", prepared.grid.dims(), prepared.grid.required_dims())
         });
@@ -637,7 +645,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             .as_ref()
             .filter(|r| r.dropped_for_grid > 0)
         {
-            warnings.push(format!("symmetry.fft_grid: explicit basis.fft_grid {:?} does not preserve {} of {} detected operations ({} by rotation, {} by translation); using the {}-operation subgroup it preserves (omit basis.fft_grid for the full group)", prepared.grid.dims(), r.dropped_for_grid, r.detected_operations_count, r.dropped_for_grid_rotation, r.dropped_for_grid_translation, r.operations_count));
+            warnings.push(format!("symmetry.fft_grid: explicit basis.fft_grid {:?} does not preserve {} of {} detected operations ({} by rotation, {} by translation); using the {}-operation subgroup it preserves (omit basis.fft_grid for the full group{})", prepared.grid.dims(), r.dropped_for_grid, r.detected_operations_count, r.dropped_for_grid_rotation, r.dropped_for_grid_translation, r.operations_count, if r.dropped_for_grid_rotation > 0 { ", or set GRID_INCOMPATIBLE_OPS=reciprocal to keep the rotations (ADR 0049 GS1D-B)" } else { "" }));
         }
         // GT1: state what the reduction actually used (the former text said
         // "time reversal disabled" even when the k ~ -k partners were applied).

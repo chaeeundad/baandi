@@ -27,6 +27,38 @@ pub struct PreparedSymmetry {
     /// Requested k reduction policy (GT2, `K_REDUCTION`); `map().reduction`
     /// records the one applied.
     requested: dft_geometry::symmetry::KReduction,
+    /// GS1D-B (`GRID_INCOMPATIBLE_OPS=reciprocal`): operations whose rotation
+    /// does not map `grid` were kept.
+    rotations_free: bool,
+}
+/// GS1D-B: `GRID_INCOMPATIBLE_OPS=reciprocal` in the calling thread's
+/// configuration (ADR 0049).
+pub fn grid_rotations_free() -> bool {
+    dft_numerics::switches::choice(dft_numerics::switches::Id::GRID_INCOMPATIBLE_OPS)
+        == "reciprocal"
+}
+/// Whether a symmetrized run on `dims` must project its local potential onto
+/// `operations` in G space (GS1D-B): some operation does not permute the
+/// real-space grid, so the XC quadrature is not invariant.
+pub fn needs_potential_projection(
+    dims: [usize; 3],
+    operations: &[dft_geometry::symmetry::SymmetryOperation],
+) -> bool {
+    !operations.is_empty()
+        && grid_rotations_free()
+        && !dft_geometry::symmetry::preserves_fft_grid(dims, operations)
+}
+/// The grid check of a symmetrized run: every operation permutes `dims`, or
+/// (GS1D-B) every translation is commensurate and the potential is projected.
+pub fn grid_supports(
+    dims: [usize; 3],
+    operations: &[dft_geometry::symmetry::SymmetryOperation],
+) -> bool {
+    let free = grid_rotations_free();
+    !dims.contains(&0)
+        && operations
+            .iter()
+            .all(|o| dft_geometry::symmetry::grid_keeps(dims, o, free))
 }
 /// The `K_REDUCTION` switch of the calling thread's configuration (GT2,
 /// ADR 0051).
@@ -60,11 +92,16 @@ impl PreparedSymmetry {
     ) -> Result<Self, ScfError> {
         let detected = dft_geometry::symmetry::detect(cell, atoms, tolerance_bohr)
             .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let rotations_free = grid_rotations_free();
         let crystal_operations = match grid {
             None => detected.clone(),
-            Some(dims) => {
-                dft_geometry::symmetry::grid_subgroup(cell, &detected, dims, tolerance_bohr)
-            }
+            Some(dims) => dft_geometry::symmetry::grid_subgroup_with(
+                cell,
+                &detected,
+                dims,
+                tolerance_bohr,
+                rotations_free,
+            ),
         };
         let dropped_for_grid = detected.len() - crystal_operations.len();
         let requested = requested_k_reduction();
@@ -86,6 +123,7 @@ impl PreparedSymmetry {
             grid,
             dropped_for_grid,
             requested,
+            rotations_free,
         })
     }
     /// Detected operations dropped for the explicit FFT grid (GS1C).
@@ -104,6 +142,7 @@ impl PreparedSymmetry {
     ) -> bool {
         self.grid == grid
             && self.requested == requested_k_reduction()
+            && self.rotations_free == grid_rotations_free()
             && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
     }
     /// Public configurations may change during relaxation. Reuse only for the
@@ -118,6 +157,7 @@ impl PreparedSymmetry {
     ) -> bool {
         self.grid.is_none()
             && self.requested == requested_k_reduction()
+            && self.rotations_free == grid_rotations_free()
             && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
     }
     /// Geometry, mesh and detection settings only (any grid restriction).

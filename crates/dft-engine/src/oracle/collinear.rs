@@ -266,6 +266,7 @@ impl CollinearProblem {
             {
                 *v = ion + h + x;
             }
+            p.project_potential(&mut self.effective)?;
             channel_output.fill(0.0);
             for (k, (state, work)) in p.states.iter_mut().zip(&mut self.blocks[s]).enumerate() {
                 state.hamiltonian.copy_local_potential(&self.effective)?;
@@ -1014,6 +1015,7 @@ impl CollinearProblem {
             {
                 *v = ion + h + x;
             }
+            p.project_potential(&mut self.effective)?;
             let bands = p.occupations.len();
             let solver = Davidson {
                 bands,

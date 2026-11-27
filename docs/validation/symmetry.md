@@ -80,7 +80,11 @@ correct. Automatic grids choose 2/3/5-smooth dimensions satisfying these rules,
 first preserving independent axis lengths and then trying a common dimension.
 Search stops at 512 per axis and fails explicitly for incommensurate origins.
 An explicit noninvariant `basis.fft_grid` keeps the largest subgroup that
-permutes it (`grid_subgroup`, GS1C; the identity is always kept). Symmetry can enlarge the automatic
+permutes it (`grid_subgroup`, GS1C; the identity is always kept) with
+`GRID_INCOMPATIBLE_OPS=drop`; the default `reciprocal` (ADR 0049 GS1D-B) keeps
+rotations that do not permute it and projects the local potential onto the
+group in G space, so the Hamiltonian stays invariant (evidence
+`tests/reference/symmetry/gs1db-grid-incompatible-ops.txt`). Symmetry can enlarge the automatic
 grid only with symmetry enabled. Full/reduced comparisons MUST use the same grid.
 The projector itself supports arbitrary fractional translations; the nonlinear
 SCF quadrature restriction is a separate engine requirement.

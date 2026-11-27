@@ -146,6 +146,66 @@ cover symmetry.
    a measured reduced-versus-full energy difference against the accuracy
    classes. It is not made here.
 
+6. **Amendment GS1D-B (2026-11-27, ticket GT2B-GRID-OPS): rotations that do
+   not map an explicit grid are kept (switch `GRID_INCOMPATIBLE_OPS`, default
+   `reciprocal`; `drop` restores item 5).** Cause: dev08 gen64 Ta6Zn7
+   (explicit [60,60,108]) kept 4 of 12 operations and Hg ([60,60,54]) 2 of 8,
+   while QE keeps 12 and 8 on the same grids. A hand check (every grid point
+   mapped through x -> R x + tau, also with R^T) confirmed that the dropped
+   rotations really move grid points off the grid: Ta6Zn7 rotations with
+   R_13 = -1 send (0,0,1/108) to (-1/108,0,1/108), -0.56 steps along a1; the
+   Hg body-centred rotations mix all three axes with 54 not dividing 60. All
+   their translations are exact after the input projection (Ta6Zn7: 0; Hg:
+   (3/4,1/4,1/2), N tau = (45,15,27)); the 1e-8 translation tolerance is not
+   involved. Decision with `reciprocal`:
+   - an operation is kept when its fractional translation is commensurate
+     with the grid (translation-incompatible operations are dropped as
+     before, as in QE); its rotation need not permute the grid;
+   - the density is projected onto the whole group in G space on the density
+     sphere (the existing projector; it never needed the grid to be permuted,
+     only the guard required it);
+   - the local potential (ionic + Hartree + XC, each collinear channel) is
+     projected onto the group in G space after every evaluation
+     (reference maps: `refscf::map::fields` and the spin fields; strict
+     oracle: `input_fields`, collinear channels), so the Kohn-Sham Hamiltonian
+     is exactly invariant although the real-space XC quadrature is not.
+     Components outside the density sphere are zeroed; on an alias-free grid
+     they do not enter Hamiltonian matrix elements, and the double-counting
+     integral is unchanged because the density is invariant and confined to
+     the sphere. Only runs where some kept operation does not permute the grid
+     project the potential (`needs_potential_projection`); all other runs are
+     bit-identical;
+   - k reduction (point-wise, ADR 0051), forces, stress and relaxation use
+     the whole group (they read the same operation list);
+   - record: `results.json.symmetry.grid_incompatible_ops` {policy,
+     explicit_fft_grid, rotations_not_permuting_grid_kept,
+     potential_projection, rule}; preflight names the kept operations.
+   Validation (`crates/dft-cli/tests/spin.rs
+   grid_incompatible_rotations_reciprocal_matches_projected_full_mesh`,
+   release; raw output `tests/reference/symmetry/gs1db-grid-incompatible-ops.txt`):
+   synthetic Z = 1 nonlocal potentials, 4 Ry, Fermi-Dirac 0.02 Ha, forces and
+   stress; arms full (symmetry off, raw full mesh), unreduced (full mesh with
+   density and potential projected: the exact oracle), reciprocal, drop.
+
+   | cell, grid, k | ops kept drop / reciprocal | nk drop / reciprocal / full | (b) reciprocal - unreduced: dE, dF, dsigma | (a) reciprocal - full: dE, dF, dsigma |
+   |---|---|---|---|---|
+   | Ta6Zn7 [60,60,108], 2x2x2 | 4 / 12 | 6 / 4 / 8 | 2.6e-13 Ha, 5.2e-12 Ha/Bohr, 2.0e-14 Ha/Bohr^3 | 2.7e-11, 1.4e-6, 6.8e-10 |
+   | Ta6Zn7 [20,20,36], 2x2x2 | 4 / 12 | 6 / 4 / 8 | 7.6e-14, 5.6e-12, 1.8e-14 | 3.1e-11, 1.4e-6, 7.0e-10 |
+   | Hg [60,60,54], 2x2x2 | 2 / 8 | 6 / 4 / 8 | 1.1e-14, 2.4e-16, 3.4e-17 | 3.1e-14, 1.2e-11, 6.9e-14 |
+   | Hg [20,20,18], 2x2x2 | 2 / 8 | 6 / 4 / 8 | 2.2e-14, 8.4e-16, 6.6e-17 | 0, 9.9e-10, 4.8e-11 |
+   | Cl2-like [40,36,80], 2x2x1 | 4 / 8 | 4 / 3 / 4 | 7.0e-14, 1.3e-14, 2.3e-16 | 1.1e-13, 5.2e-11, 5.2e-16 |
+   | Cl2-like [20,18,40], 2x2x1 | 4 / 8 | 4 / 3 / 4 | 1.1e-13, 1.3e-13, 7.7e-16 | 1.4e-13, 4.2e-11, 1.0e-13 |
+
+   All meshes here are invariant under the group, so (a) isolates the cost of
+   the non-invariant XC quadrature (largest on Ta6Zn7: 3e-11 Ha, 1.4e-6
+   Ha/Bohr). The standard reference driver (threshold 1e-12 Ha) on the scaled
+   grids gives (b) <= 7.1e-13 Ha, 1.5e-8 Ha/Bohr, 2.6e-11 Ha/Bohr^3. Default
+   `reciprocal` because (b) holds within the strict class and the force and
+   stress bounds on every fixture and path. With a non-invariant mesh the
+   (a) difference also contains the ADR 0051 quadrature change (Ta6Zn7 at
+   2x2x1, first Mac run, not in the stored log: 1.4e-5 Ha, 4.4e-3 Ha/Bohr,
+   while (b) stayed at 1.6e-13 Ha).
+
 ## Alternatives considered
 
 - **Keep positions, symmetrize density, forces and stress only (QE-like).** The

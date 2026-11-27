@@ -647,3 +647,228 @@ fn pointwise_case(
         }
     }
 }
+
+/// GS1D-B (ADR 0049): explicit FFT grids that some crystal rotations do not
+/// map onto themselves, with `GRID_INCOMPATIBLE_OPS=reciprocal` (operations
+/// kept; density and local potential projected onto the whole group in G
+/// space). Fixtures: the Materials Project Ta6Zn7 cell (12 operations; the
+/// gen64 grid [60,60,108] keeps 4 by rotation), the Hg body-centred cell
+/// (8; [60,60,54] keeps 2) and a Cl2-like base-centred cell (8; [40,36,80]
+/// keeps 4), with synthetic Z = 1 nonlocal potentials, Fermi-Dirac 0.02 Ha,
+/// 4 Ry, forces and stress. Grids are the real ones scaled down with the same
+/// divisibility failure ([20,20,36], [20,20,18], [20,18,40]). Arms: `full`
+/// (symmetry off, no time reversal: raw full mesh), `unreduced` (full mesh,
+/// density and potential projected: the exact oracle), `reciprocal`
+/// (point-wise reduction with the whole group) and `drop` (grid subgroup).
+/// Gate: reciprocal = unreduced within 1e-10 Ha, 1e-6 Ha/Bohr, 1e-8
+/// Ha/Bohr^3; reciprocal - full is printed. Strict oracle by default;
+/// GS1DB_STANDARD=1 runs the standard reference driver at 1e-12 Ha;
+/// GS1DB_REAL_GRIDS=1 uses the real grids (about 15 min).
+#[test]
+#[ignore = "about 50 s in release; cargo test --release -p dft-cli --test spin grid_incompatible -- --ignored --nocapture"]
+fn grid_incompatible_rotations_reciprocal_matches_projected_full_mesh() {
+    let atoms = |sites: &[(&str, [f64; 3])]| -> String {
+        sites
+            .iter()
+            .map(|(s, p)| format!("[[system.atoms]]\nspecies='{s}'\nfractional={p:?}\n"))
+            .collect()
+    };
+    let ta6zn7 = atoms(&[
+        ("Ta", [0.16470429, 0.16470429, 0.50588812]),
+        ("Ta", [0.83529571, 0.83529571, 0.49411188]),
+        ("Ta", [0.35067452, 0.35067452, 0.94797944]),
+        ("Ta", [0.64932548, 0.64932548, 0.05202056]),
+        ("Ta", [0.45447874, 0.45447874, 0.63656577]),
+        ("Ta", [0.54552126, 0.54552126, 0.36343423]),
+        ("Zn", [0.0, 0.0, 0.0]),
+        ("Zn", [0.58629293, 0.09410151, 0.22550305]),
+        ("Zn", [0.09410151, 0.09410151, 0.22550305]),
+        ("Zn", [0.09410151, 0.58629293, 0.22550305]),
+        ("Zn", [0.41370707, 0.90589849, 0.77449695]),
+        ("Zn", [0.90589849, 0.90589849, 0.77449695]),
+        ("Zn", [0.90589849, 0.41370707, 0.77449695]),
+    ]);
+    let hg = atoms(&[
+        ("Hg", [0.875, 0.37550581, 0.00050581]),
+        ("Hg", [0.375, 0.87449419, -0.00050581]),
+        ("Hg", [0.62449419, 0.625, 0.49949419]),
+        ("Hg", [0.12550581, 0.125, 0.50050581]),
+    ]);
+    let (y, z) = (0.1015, 0.0464);
+    let cl2 = atoms(&[
+        ("Cl", [y, 0., z]),
+        ("Cl", [0.5 - y, 0., z + 0.5]),
+        ("Cl", [y + 0.5, 0., 0.5 - z]),
+        ("Cl", [1. - y, 0., 1. - z]),
+    ]);
+    let grid = std::env::var("GS1DB_REAL_GRIDS").is_ok();
+    let cases = [
+        (
+            "Ta6Zn7",
+            "lattice_unit='bohr'\nlattice_vectors=[[-4.745669651409705,-8.219736886585833,0.0],[4.745669651409705,-8.219736886585833,0.0],[0.0,-5.4798258697719,17.22086864710133]]",
+            ta6zn7,
+            if grid { "[60,60,108]" } else { "[20,20,36]" },
+            "[2,2,2]",
+            (12, 4),
+        ),
+        (
+            "Hg",
+            "lattice_unit='bohr'\nlattice_vectors=[[-5.015533672493139,5.015533672493139,-7.244623598695992],[5.015533672493139,-5.015533672493139,-7.244623598695992],[-5.015533672493139,-5.015533672493139,7.244623598695992]]",
+            hg,
+            if grid { "[60,60,54]" } else { "[20,20,18]" },
+            "[2,2,2]",
+            (8, 2),
+        ),
+        (
+            "Cl2",
+            "lattice_unit='angstrom'\nlattice_vectors=[[0.0,4.395,0.0],[3.0725,2.1975,0.0],[0.0,0.0,8.154]]",
+            cl2,
+            if grid { "[40,36,80]" } else { "[20,18,40]" },
+            "[2,2,1]",
+            (8, 4),
+        ),
+    ];
+    let standard = std::env::var("GS1DB_STANDARD").is_ok();
+    for (name, lattice, atoms, grid, kgrid, (ops, kept)) in cases {
+        grid_incompatible_case(name, lattice, &atoms, grid, kgrid, ops, kept, standard);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn grid_incompatible_case(
+    name: &str,
+    lattice: &str,
+    atoms: &str,
+    grid: &str,
+    kgrid: &str,
+    ops: u64,
+    kept: u64,
+    standard: bool,
+) {
+    // GS1DB_STANDARD=1: the default (standard) reference driver with the
+    // threshold tightened to 1e-12 Ha instead of the strict oracle.
+    let (strict, threshold) = if standard {
+        ("off", "standard_threshold_ha=1e-12\n")
+    } else {
+        ("on", "")
+    };
+    let c = Case::new();
+    let species: std::collections::BTreeSet<_> = atoms
+        .lines()
+        .filter_map(|l| l.strip_prefix("species='"))
+        .map(|s| s.trim_end_matches('\'').to_string())
+        .collect();
+    for s in &species {
+        fs::write(
+            c.dir.join(format!("{s}.xml")),
+            common::gaussian_with(1.0, 1.0, true, 401)
+                .replace("SLA PZ", "SLA PW")
+                .replace("element=\"Xx\"", &format!("element=\"{s}\"")),
+        )
+        .unwrap();
+    }
+    let pseudos: String = species.iter().map(|s| format!("{s}='{s}.xml'\n")).collect();
+    let electrons = atoms.matches("[[system.atoms]]").count();
+    let cap = 2 * electrons + 16;
+    let read = |r: &serde_json::Value, key: &str| -> Vec<f64> {
+        r[key]["values"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: no {key}"))
+            .iter()
+            .flat_map(|v| v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()))
+            .collect()
+    };
+    let max_diff = |a: &[f64], b: &[f64]| {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max)
+    };
+    let mut results = Vec::new();
+    for (arm, symmetry, tr, mut env) in [
+        ("full", "off", false, vec![]),
+        (
+            "unreduced",
+            "auto",
+            true,
+            vec![
+                ("BAANDI_K_REDUCTION", "unreduced"),
+                ("BAANDI_GRID_INCOMPATIBLE_OPS", "reciprocal"),
+            ],
+        ),
+        (
+            "reciprocal",
+            "auto",
+            true,
+            vec![("BAANDI_GRID_INCOMPATIBLE_OPS", "reciprocal")],
+        ),
+        (
+            "drop",
+            "auto",
+            true,
+            vec![("BAANDI_GRID_INCOMPATIBLE_OPS", "drop")],
+        ),
+    ] {
+        let text = format!(
+            "[system]\nname='gs1db {name} {arm}'\n{lattice}\n{atoms}[pseudopotentials]\n{pseudos}[basis]\necutwfc_ry=4.0\nkgrid={kgrid}\nktime_reversal={tr}\nfft_grid={grid}\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands={cap}\n{threshold}[spin]\nmode='unpolarized'\n[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.02\nband_cap={cap}\n[symmetry]\nmode='{symmetry}'\n[output]\nforces=true\nstress=true\n"
+        );
+        let clock = std::time::Instant::now();
+        env.push(("BAANDI_REFERENCE_STRICT", strict));
+        let out = c.run_env(&text, "run", &env);
+        assert!(
+            out.status.success(),
+            "{name}/{arm}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let r: serde_json::Value =
+            serde_json::from_slice(&fs::read(c.dir.join("results/results.json")).unwrap()).unwrap();
+        let e = r["thermodynamics"]["free_energy_ha"]
+            .as_f64()
+            .or_else(|| r["total_energy"]["ha"].as_f64())
+            .unwrap();
+        let (f, s) = (read(&r, "forces"), read(&r, "stress"));
+        if symmetry == "auto" {
+            let sym = &r["symmetry"];
+            println!(
+                "GS1DB {name}/{arm}: nks={} crystal={} density_ops={} grid_ops={} wall={:.1}s",
+                sym["irreducible_k_count"],
+                sym["crystal_operations_count"],
+                sym["density_operations_count"],
+                sym["grid_incompatible_ops"],
+                clock.elapsed().as_secs_f64()
+            );
+            assert_eq!(sym["detected_operations_count"], ops, "{name}/{arm}");
+            let expected = if arm == "drop" { kept } else { ops };
+            assert_eq!(sym["density_operations_count"], expected, "{name}/{arm}");
+            assert_eq!(
+                sym["grid_incompatible_ops"]["potential_projection"],
+                arm != "drop",
+                "{name}/{arm}"
+            );
+        } else {
+            println!(
+                "GS1DB {name}/{arm}: wall={:.1}s",
+                clock.elapsed().as_secs_f64()
+            );
+        }
+        results.push((e, f, s));
+    }
+    for (a, b, label) in [
+        (2, 1, "reciprocal-unreduced"),
+        (2, 0, "reciprocal-full"),
+        (1, 0, "unreduced-full"),
+        (3, 0, "drop-full"),
+    ] {
+        let de = results[a].0 - results[b].0;
+        let df = max_diff(&results[a].1, &results[b].1);
+        let ds = max_diff(&results[a].2, &results[b].2);
+        println!(
+            "GS1DB strict={strict} {name} {grid} {label}: dE={de:e} Ha max|dF|={df:e} Ha/Bohr max|dsigma|={ds:e} Ha/Bohr^3"
+        );
+        if label == "reciprocal-unreduced" {
+            assert!(de.abs() <= 1e-10, "{name} {label}: dE={de:e}");
+            assert!(df <= 1e-6, "{name} {label}: dF={df:e}");
+            assert!(ds <= 1e-8, "{name} {label}: dsigma={ds:e}");
+        }
+    }
+}

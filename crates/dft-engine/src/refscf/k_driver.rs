@@ -187,6 +187,7 @@ pub(super) async fn run_continuation<K: Collective>(
     if let Some(s) = &mut symmetry {
         let initial = [state.density.clone()];
         s.check_start(&mut state.fields, comm, &initial)?;
+        state.potential_symmetry = s.take_potential_projector();
     }
     let mut setup = std::mem::take(&mut state.setup);
     let prep_comm = refstart::TimedCollective::new(comm);

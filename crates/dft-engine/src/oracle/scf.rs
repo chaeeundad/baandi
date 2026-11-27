@@ -41,7 +41,10 @@ use dft_solvers::{
 use session::{CompletionMode, ScfSession, StepStatus};
 use std::time::{Duration, Instant};
 
-pub use crate::model::{PreparedSymmetry, ScfError, SpeciesPotential};
+pub use crate::model::{
+    PreparedSymmetry, ScfError, SpeciesPotential, grid_rotations_free, grid_supports,
+    needs_potential_projection,
+};
 
 pub use crate::model::{CompatMode, Mixing, ScfOptions, bands_fit_subspace};
 
@@ -70,6 +73,9 @@ pub struct ScfProblem {
     pub(crate) sw: session::SessionSwitches,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
+    /// GS1D-B (ADR 0049): G-space projector of the local potential when some
+    /// operation does not permute the FFT grid.
+    pub(crate) potential_symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
     /// `BAANDI_M2_GRID=on` (ticket M2-GRID, default off): slab plan of the
     /// distributed full-grid stages, built at the first eligible map.
     grid_dist: Option<crate::grid_dist::GridPlan>,
@@ -946,6 +952,7 @@ impl ScfProblem {
             density_floor: None,
             atoms: atoms.to_vec(),
             symmetry: None,
+            potential_symmetry: None,
             fft,
             worker_ffts,
             pool,
@@ -1022,7 +1029,7 @@ impl ScfProblem {
             ));
         }
         let ops = prepared.density_operations(self.options.crystal_density_group);
-        if !dft_geometry::symmetry::preserves_fft_grid(self.grid.dims(), &ops) {
+        if !crate::model::grid_supports(self.grid.dims(), &ops) {
             return Err(ScfError::InvalidInput(
                 "symmetry.fft_grid: rotations/translations must preserve nonlinear XC quadrature; use compatible_fft_grid at setup",
             ));
@@ -1032,6 +1039,14 @@ impl ScfProblem {
         self.symmetry = Some(dft_physics::symmetry::DensitySymmetrizer::new(
             &basis, &self.grid, &ops,
         )?);
+        self.potential_symmetry =
+            if crate::model::needs_potential_projection(self.grid.dims(), &ops) {
+                Some(dft_physics::symmetry::DensitySymmetrizer::new(
+                    &basis, &self.grid, &ops,
+                )?)
+            } else {
+                None
+            };
         Ok(())
     }
 
@@ -1178,7 +1193,17 @@ impl ScfProblem {
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
         }
+        self.project_potential(&mut effective)?;
         Ok((h, x, effective))
+    }
+
+    /// GS1D-B: project a local potential onto the group (no-op unless some
+    /// operation does not permute the grid).
+    pub(crate) fn project_potential(&mut self, v: &mut Array3<f64>) -> Result<(), ScfError> {
+        if let Some(p) = &mut self.potential_symmetry {
+            p.apply(v, &mut self.fft)?;
+        }
+        Ok(())
     }
 
     /// The pointwise LDA flavour when the distributed grid stages apply to this

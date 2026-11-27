@@ -443,11 +443,16 @@ pub(super) fn fields<K: Collective>(
                 dv * core.map_or(0., |c| c.iter().sum::<f64>()),
             ],
         )?;
-        let potentials = out
+        let mut potentials: Vec<Vec<f64>> = out
             .potentials
             .iter()
             .map(|v| v.iter().zip(&scalar.vh).map(|(x, h)| x + h).collect())
             .collect();
+        if let Some(p) = &mut state.common.potential_symmetry {
+            for v in &mut potentials {
+                p.apply(&mut state.common.fields, comm, v)?;
+            }
+        }
         return Ok(Fields {
             hxc: potentials,
             vh: scalar.vh,
@@ -508,6 +513,11 @@ pub(super) fn fields<K: Collective>(
     for potential in &mut potentials {
         for (v, h) in potential.iter_mut().zip(&scalar.vh) {
             *v += h;
+        }
+    }
+    if let Some(p) = &mut state.common.potential_symmetry {
+        for v in &mut potentials {
+            p.apply(&mut state.common.fields, comm, v)?;
         }
     }
     Ok(Fields {

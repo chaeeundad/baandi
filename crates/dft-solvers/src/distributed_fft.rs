@@ -35,11 +35,6 @@
 //! 1D kernels (MPI entry cost, `BAANDI_M2_FFT`): rustfft by default; `mkl` selects
 //! MKL DFTI batch lanes (one descriptor per lane buffer, as `PairFusedPlan<MklLanes>`)
 //! on MKL builds, a rounding change; pure builds always use rustfft.
-//! `BAANDI_FFT_FUSED_ROWS=on`: ordinary local-potential applications stream
-//! the last-axis inverse/multiply/forward through two reusable rows. Immutable
-//! inverse input retains zero holes; the standalone plane and kept-plane APIs
-//! retain the slab route. RustFFT only (vendor lanes fall back), conservatively
-//! rounding class; off retains the original transforms and data movement.
 //! No allocation after batch warmup; no unsafe; no logging.
 //! `BAANDI_FFT_A2A_BALANCE=on` caps sticks per rank (mirror units stay intact)
 //! only when it reduces the equal alltoall block. Transform arithmetic stays
@@ -489,42 +484,6 @@ impl HoleClear {
     }
 }
 
-/// Last-axis streaming workspace. The spectral input is immutable during the
-/// inverse FFT: inactive z entries stay zero for the lifetime of the plan.
-/// Only one row is materialized, multiplied and transformed back at a time.
-/// RustFFT's immutable interface may choose different arithmetic from its
-/// in-place interface, so this experiment is conservatively rounding class.
-struct FusedRows {
-    spectral: Vec<C>,
-    real: Vec<C>,
-    scratch: Vec<C>,
-    inverse: std::sync::Arc<dyn rustfft::Fft<f64>>,
-    forward: std::sync::Arc<dyn rustfft::Fft<f64>>,
-}
-impl FusedRows {
-    fn new(nz: usize) -> Self {
-        let cache = PLAN_CACHE.with(|c| c.borrow().clone());
-        let [forward, inverse] = if let Some(cache) = cache {
-            cache.rust_pair(nz)
-        } else {
-            let mut planner = rustfft::FftPlanner::new();
-            let inverse = planner.plan_fft_inverse(nz);
-            let forward = planner.plan_fft_forward(nz);
-            [forward, inverse]
-        };
-        let scratch = inverse
-            .get_immutable_scratch_len()
-            .max(forward.get_inplace_scratch_len());
-        Self {
-            spectral: vec![C::default(); nz],
-            real: vec![C::default(); nz],
-            scratch: vec![C::default(); scratch],
-            inverse,
-            forward,
-        }
-    }
-}
-
 pub struct DistributedPairFft {
     shape: [usize; 3],
     first: usize,
@@ -554,8 +513,7 @@ pub struct DistributedPairFft {
     profile: dft_numerics::real::fft_profile::Probe,
     kept_fuse: bool,
     holes: Option<[HoleClear; 3]>,
-    fused_rows: Option<FusedRows>,
-    /// GK17 `FFT_ONE_RANK_DIRECT`: one-rank plans with rustfft lanes keep the
+    /// GK17: one-rank plans with rustfft lanes keep the
     /// stick domain of every batch vector in `input` (inverse direction) and
     /// `output` (forward direction), `block` complex values per vector in the
     /// layout of a one-rank transpose block ([stick][first-axis index]). The
@@ -586,7 +544,7 @@ impl DistributedPairFft {
     }
 
     /// GK17: [`Self::new`] for a consumer that accepts the one-rank direct
-    /// stick buffers (`FFT_ONE_RANK_DIRECT`; the complex k operators). Same
+    /// stick buffers (the complex k operators). Same
     /// bits as `new`; with one rank and rustfft lanes the transpose stages
     /// (profile stages 2, 3, 13, 14) do not run.
     pub fn new_direct(
@@ -682,29 +640,9 @@ impl DistributedPairFft {
                     ),
                 ]
             });
-        let config = dft_numerics::switches::RunConfig::current();
-        let fused_rows = if config.on(dft_numerics::switches::Id::FFT_FUSED_ROWS) {
-            if lanes.is_vendor() {
-                config.note_path(
-                    dft_numerics::switches::Id::FFT_FUSED_ROWS,
-                    "slab",
-                    Some("immutable row FFT requires rustfft lanes"),
-                );
-                None
-            } else {
-                config.note_path(dft_numerics::switches::Id::FFT_FUSED_ROWS, "rows", None);
-                Some(FusedRows::new(n[2]))
-            }
-        } else {
-            None
-        };
         // GK17: one rank, rustfft lanes (vendor lanes may depend on buffer
         // placement, so they keep the transpose path).
-        let direct = (allow_direct
-            && ranks == 1
-            && !lanes.is_vendor()
-            && config.on(dft_numerics::switches::Id::FFT_ONE_RANK_DIRECT))
-        .then(|| DirectSticks {
+        let direct = (allow_direct && ranks == 1 && !lanes.is_vendor()).then(|| DirectSticks {
             input: vec![C::default(); block],
             output: vec![C::default(); block],
         });
@@ -715,7 +653,6 @@ impl DistributedPairFft {
         };
         Ok(Self {
             direct,
-            fused_rows,
             holes,
             shape,
             first,
@@ -777,13 +714,6 @@ impl DistributedPairFft {
             profile: dft_numerics::real::fft_profile::Probe::new(self.n),
             kept_fuse: self.kept_fuse,
             holes: self.holes.clone(),
-            fused_rows: self.fused_rows.as_ref().map(|r| FusedRows {
-                spectral: vec![C::default(); r.spectral.len()],
-                real: vec![C::default(); r.real.len()],
-                scratch: vec![C::default(); r.scratch.len()],
-                inverse: r.inverse.clone(),
-                forward: r.forward.clone(),
-            }),
         })
     }
 
@@ -1149,54 +1079,6 @@ impl DistributedPairFft {
         Ok(())
     }
 
-    /// Fused last-axis round trip for an ordinary local-potential application.
-    /// Middle entries at row y are dead after the inverse gather and can be
-    /// overwritten by the forward scatter without affecting any later row.
-    fn multiply_plane_rows(
-        &mut self,
-        potential: &[f64],
-        planes: bool,
-        t: usize,
-        np: usize,
-        i: usize,
-    ) -> Result<(), DistFftError> {
-        self.inverse_middle(t, np, i)?;
-        let [_, ny, nz] = self.n;
-        for y in 0..ny {
-            let start = self.potential_start(planes, i, y);
-            let row = self.fused_rows.as_mut().expect("fused row plan");
-            let mark = self.profile.start();
-            for (k, &z) in self.planes.iter().enumerate() {
-                row.spectral[z] = self.middle[k * ny + y];
-            }
-            self.profile
-                .finish(mark, 6, self.planes.len(), 32 * self.planes.len(), None);
-            let mark = self.profile.start();
-            row.inverse.process_immutable_with_scratch(
-                &row.spectral,
-                &mut row.real,
-                &mut row.scratch,
-            );
-            self.profile.finish(mark, 7, nz, 32 * nz, Some(2));
-            let mark = self.profile.start();
-            for (a, &v) in row.real.iter_mut().zip(&potential[start..start + nz]) {
-                *a *= v;
-            }
-            self.profile.finish(mark, 8, nz, 40 * nz, None);
-            let mark = self.profile.start();
-            row.forward
-                .process_with_scratch(&mut row.real, &mut row.scratch);
-            self.profile.finish(mark, 9, nz, 32 * nz, Some(2));
-            let mark = self.profile.start();
-            for (k, &z) in self.planes.iter().enumerate() {
-                self.middle[k * ny + y] = row.real[z];
-            }
-            self.profile
-                .finish(mark, 10, self.planes.len(), 32 * self.planes.len(), None);
-        }
-        self.forward_middle(t, np, i)
-    }
-
     /// Transpose back, 1D transforms on local sticks, 1/N scaling; writes local coefficients.
     pub fn finish_to_reciprocal<K: Collective>(
         &mut self,
@@ -1380,13 +1262,9 @@ impl DistributedPairFft {
     ) -> Result<(), DistFftError> {
         for t in 0..np {
             for i in 0..self.plane_count() {
-                if self.fused_rows.is_some() {
-                    self.multiply_plane_rows(potential, planes, t, np, i)?;
-                } else {
-                    self.to_real_plane_in(t, np, i)?;
-                    self.multiply_slab(potential, planes, i);
-                    self.to_reciprocal_plane_in(t, np, i)?;
-                }
+                self.to_real_plane_in(t, np, i)?;
+                self.multiply_slab(potential, planes, i);
+                self.to_reciprocal_plane_in(t, np, i)?;
             }
         }
         Ok(())
@@ -1455,12 +1333,6 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.kept_batch(comm, data, potential, true, np, kept, planes)
-    }
-
-    /// True when ordinary applications stream the last axis through rows
-    /// (`FFT_FUSED_ROWS`); kept planes then do not reproduce their bits.
-    pub fn fused_rows_active(&self) -> bool {
-        self.fused_rows.is_some()
     }
 
     #[allow(clippy::too_many_arguments)] // batch, potential layout and kept planes
@@ -1649,6 +1521,8 @@ mod tests {
     /// inverse planes, partially and fully kept batches and a reciprocal-only
     /// round trip, with and without sparse clears, over growing and
     /// shrinking batch widths; more than one rank never selects the mode.
+    /// The transpose path is the plain `new` plan (the former
+    /// `FFT_ONE_RANK_DIRECT=off` arm, retired in CL1).
     #[test]
     fn one_rank_direct_sticks_are_bit_identical() {
         use dft_numerics::switches::RunConfig;
@@ -1664,22 +1538,16 @@ mod tests {
             let total: usize = shape.iter().product();
             let potential: Vec<_> = (0..total).map(|i| 0.5 + (i as f64).sin()).collect();
             for holes in ["off", "on"] {
-                let run = |direct: &str| {
+                let run = |direct: bool| {
                     simulate(1, |comm| {
-                        let config = RunConfig::from_pairs(&[
-                            ("fft_one_rank_direct", direct),
-                            ("fft_sparse_clear", holes),
-                        ])
-                        .unwrap();
+                        let config = RunConfig::from_pairs(&[("fft_sparse_clear", holes)]).unwrap();
                         let _scope = config.enter();
-                        let mut p = DistributedPairFft::new_direct(shape, &idx, 0, 1).unwrap();
-                        assert_eq!(p.direct.is_some(), direct == "on");
-                        assert!(
-                            DistributedPairFft::new(shape, &idx, 0, 1)
-                                .unwrap()
-                                .direct
-                                .is_none()
-                        );
+                        let mut p = if direct {
+                            DistributedPairFft::new_direct(shape, &idx, 0, 1).unwrap()
+                        } else {
+                            DistributedPairFft::new(shape, &idx, 0, 1).unwrap()
+                        };
+                        assert_eq!(p.direct.is_some(), direct);
                         let pp = p.plane_points();
                         let mut planar = Vec::with_capacity(pp);
                         for i in 0..p.plane_count() {
@@ -1718,7 +1586,7 @@ mod tests {
                     .pop()
                     .unwrap()
                 };
-                let (on, off) = (run("on"), run("off"));
+                let (on, off) = (run(true), run(false));
                 for ((a, pa), (b, pb)) in on.iter().zip(&off) {
                     assert_eq!(bits(a), bits(b), "{shape:?} holes {holes}");
                     assert_eq!(bits(pa), bits(pb), "{shape:?} holes {holes}");
@@ -1728,8 +1596,6 @@ mod tests {
         // Several ranks keep the transpose path.
         let (shape, idx) = cases().remove(0);
         simulate(2, |comm| {
-            let config = RunConfig::from_pairs(&[("fft_one_rank_direct", "on")]).unwrap();
-            let _scope = config.enter();
             let p = DistributedPairFft::new_direct(shape, &idx, comm.rank(), 2).unwrap();
             assert!(p.direct.is_none());
         });
@@ -1765,8 +1631,6 @@ mod tests {
                             let config = RunConfig::from_pairs(&[
                                 ("fft_a2a_balance", arm),
                                 ("m2_sticks", mirror),
-                                // Counts the transpose stages, also at one rank.
-                                ("fft_one_rank_direct", "off"),
                                 ("fft_profile", "on"),
                                 ("phase_profile", "on"),
                                 ("stage_timers", "off"),
@@ -1927,11 +1791,7 @@ mod tests {
                 simulate(ranks, |comm| {
                     let mut reference = Vec::new();
                     for arm in ["off", "on"] {
-                        let cfg = RunConfig::from_pairs(&[
-                            ("fft_kernel_by_length", arm),
-                            ("fft_fused_rows", "off"),
-                        ])
-                        .unwrap();
+                        let cfg = RunConfig::from_pairs(&[("fft_kernel_by_length", arm)]).unwrap();
                         let _scope = cfg.enter();
                         let mut p =
                             DistributedPairFft::with_lanes(shape, &idx, comm.rank(), ranks, false)
@@ -1969,214 +1829,6 @@ mod tests {
                 });
             }
         }
-    }
-
-    #[test]
-    fn fused_rows_respects_backend_selection() {
-        use dft_numerics::switches::{Id, RunConfig};
-        let config = RunConfig::from_pairs(&[]).unwrap();
-        assert!(!config.on(Id::FFT_FUSED_ROWS));
-        let config = RunConfig::from_pairs(&[("fft_fused_rows", "on")]).unwrap();
-        let _guard = config.enter();
-        let shape = [3, 5, 7];
-        let idx = sphere(shape, 4., [0.; 3]);
-        simulate(2, |comm| {
-            let _guard = config.enter();
-            let mut plan =
-                DistributedPairFft::with_lanes(shape, &idx, comm.rank(), 2, true).unwrap();
-            assert_eq!(plan.fused_rows.is_none(), plan.vendor_lanes());
-            let local = random_c(plan.local_len(), 135);
-            let mut result = local.clone();
-            plan.apply_local_batch(comm, &mut result, &[1.; 105], 1)
-                .unwrap();
-            assert!(rel(&result, &local) < 2e-14);
-        });
-    }
-
-    #[test]
-    fn fused_rows_preserve_transforms_and_remove_slab_passes() {
-        use dft_numerics::{real::fft_profile, switches::RunConfig};
-        let mut fixtures = vec![
-            ([6, 6, 6], sphere([6, 6, 6], 4., [0.; 3])),
-            ([5, 7, 15], sphere([5, 7, 15], 4., [0.; 3])),
-            ([5, 7, 11], sphere([5, 7, 11], 5., [0.5, 0.3, 0.])),
-            ([3, 5, 7], vec![[0, 0, 0], [0, 1, 0], [0, 3, 0]]),
-            ([1, 2, 3], vec![]),
-            ([3, 3, 17], sphere([3, 3, 17], 2., [0.; 3])),
-            ([3, 3, 36], sphere([3, 3, 36], 2., [0.; 3])),
-            ([3, 3, 72], sphere([3, 3, 72], 2., [0.; 3])),
-        ];
-        fixtures.push((
-            [3, 3, 3],
-            (0..3)
-                .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| [x, y, z])))
-                .collect(),
-        ));
-        let bits = |a: &[C]| {
-            a.iter()
-                .map(|v| (v.re.to_bits(), v.im.to_bits()))
-                .collect::<Vec<_>>()
-        };
-        let rel = |a: &[C], b: &[C]| {
-            assert_eq!(a.len(), b.len());
-            let numerator = a
-                .iter()
-                .zip(b)
-                .map(|(x, y)| (x - y).norm())
-                .fold(0_f64, f64::max);
-            let denominator = b.iter().map(|x| x.norm()).fold(0_f64, f64::max);
-            if denominator == 0. {
-                numerator
-            } else {
-                numerator / denominator
-            }
-        };
-        let mut max_relative = 0_f64;
-        let mut changed_bits = 0;
-        let mut comparisons = 0;
-        for (shape, idx) in fixtures {
-            for ranks in [1, 2, 3, 8] {
-                for sparse in ["off", "on"] {
-                    let results = simulate(ranks, |comm| {
-                        let make = |on| {
-                            let config = RunConfig::from_pairs(&[
-                                ("fft_fused_rows", on),
-                                ("fft_sparse_clear", sparse),
-                                ("fft_profile", "on"),
-                                ("phase_profile", "on"),
-                                ("stage_timers", "off"),
-                            ])
-                            .unwrap();
-                            let _guard = config.enter();
-                            DistributedPairFft::with_lanes(shape, &idx, comm.rank(), ranks, false)
-                                .unwrap()
-                        };
-                        let (mut old, mut new) = (make("off"), make("on"));
-                        let ll = old.local_len();
-                        let mut error = 0_f64;
-                        let mut changed = 0;
-                        // Independent inverse-only check against the public plane API.
-                        let c = random_c(ll, 473);
-                        old.begin_to_real(comm, &c).unwrap();
-                        new.begin_to_real(comm, &c).unwrap();
-                        for i in 0..old.plane_count() {
-                            old.to_real_plane(i).unwrap();
-                            new.inverse_middle(0, 1, i).unwrap();
-                            let [_, ny, nz] = new.n;
-                            let row = new.fused_rows.as_mut().unwrap();
-                            for y in 0..ny {
-                                for (k, &z) in new.planes.iter().enumerate() {
-                                    row.spectral[z] = new.middle[k * ny + y];
-                                }
-                                row.inverse.process_immutable_with_scratch(
-                                    &row.spectral,
-                                    &mut row.real,
-                                    &mut row.scratch,
-                                );
-                                let want = &old.plane()[y * nz..(y + 1) * nz];
-                                error = error.max(rel(&row.real, want));
-                                changed += usize::from(bits(&row.real) != bits(want));
-                            }
-                        }
-                        // Dirty reuse, growing/shrinking batches, direct callback and
-                        // zero width; V=1 also checks the paired transform round trip.
-                        for (iteration, np) in [3, 1, 5, 0, 2].into_iter().enumerate() {
-                            let potential: Vec<_> = (0..shape.iter().product())
-                                .map(|j| {
-                                    if iteration == 0 {
-                                        1.
-                                    } else if j % 5 == 0 {
-                                        -0.0
-                                    } else {
-                                        (j as f64).cos()
-                                    }
-                                })
-                                .collect();
-                            let input = random_c(ll * np, 321 + np as u64);
-                            let mut expected = input.clone();
-                            let before = fft_profile::snapshot();
-                            old.apply_local_batch(comm, &mut expected, &potential, np)
-                                .unwrap();
-                            let old_counts = fft_profile::snapshot().since(before);
-                            let row = new.fused_rows.as_ref().unwrap();
-                            let pointers = (
-                                row.spectral.as_ptr(),
-                                row.real.as_ptr(),
-                                row.scratch.as_ptr(),
-                                new.middle.as_ptr(),
-                            );
-                            new.slab.fill(C::new(123., -456.));
-                            let mut actual = input.clone();
-                            let before = fft_profile::snapshot();
-                            new.apply_local_batch_from(
-                                comm,
-                                |t, g| input[t * ll + g],
-                                &mut actual,
-                                &potential,
-                                np,
-                            )
-                            .unwrap();
-                            let counts = fft_profile::snapshot().since(before);
-                            error = error.max(rel(&actual, &expected));
-                            changed += usize::from(bits(&actual) != bits(&expected));
-                            if iteration == 0 {
-                                assert!(rel(&actual, &input) < 2e-14, "round trip {shape:?}");
-                            }
-                            assert!(
-                                new.slab.iter().all(|&v| v == C::new(123., -456.)),
-                                "no slab materialization"
-                            );
-                            let row = new.fused_rows.as_ref().unwrap();
-                            assert_eq!(
-                                pointers,
-                                (
-                                    row.spectral.as_ptr(),
-                                    row.real.as_ptr(),
-                                    row.scratch.as_ptr(),
-                                    new.middle.as_ptr()
-                                )
-                            );
-                            for z in 0..shape[2] {
-                                if !new.planes.contains(&z) {
-                                    assert_eq!(row.spectral[z], C::default(), "immutable holes");
-                                }
-                            }
-                            let clear = if sparse == "on" {
-                                new.slab.len() - new.middle.len()
-                            } else {
-                                new.slab.len()
-                            };
-                            assert_eq!(
-                                old_counts.0[6][3] - counts.0[6][3],
-                                (16 * np * new.plane_count() * clear) as u64
-                            );
-                            for stage in 0..fft_profile::STAGES {
-                                assert_eq!(
-                                    old_counts.0[stage][2], counts.0[stage][2],
-                                    "point count stage {stage}"
-                                );
-                                if stage != 6 {
-                                    assert_eq!(
-                                        old_counts.0[stage][3], counts.0[stage][3],
-                                        "bytes stage {stage}"
-                                    );
-                                }
-                            }
-                        }
-                        assert!(error < 2e-14, "{shape:?} ranks {ranks}: {error:e}");
-                        (error, changed)
-                    });
-                    for (error, changed) in results {
-                        max_relative = max_relative.max(error);
-                        changed_bits += changed;
-                        comparisons += 5;
-                    }
-                }
-            }
-        }
-        eprintln!(
-            "P3-FFT2: {comparisons} rank-local paired transforms, max relative difference {max_relative:e}, {changed_bits} non-bitwise arrays/rows; slab untouched, zero-hole stores eliminated"
-        );
     }
 
     #[test]

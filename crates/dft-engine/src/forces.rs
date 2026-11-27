@@ -8,11 +8,7 @@ use crate::{
 use dft_basis::FftGridSpec;
 use dft_geometry::{Atom, Cell, kpoints::KPoint};
 use dft_numerics::linalg::ComplexMatrix;
-use dft_physics::{
-    data::*,
-    ewald, forces as terms,
-    hamiltonian::{NonlocalOperator, Species},
-};
+use dft_physics::{data::*, ewald, forces as terms, hamiltonian::Species};
 
 #[derive(Clone, Debug)]
 pub struct DerivativeEntry {
@@ -435,13 +431,10 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     lap("ewald", &mut timings);
     let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
     let mut band_passes = 0;
-    let band_first = dft_numerics::switches::on(dft_numerics::switches::Id::FORCE_BAND_FIRST);
-    let gemm_kernel = dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_NL_GEMM);
-    let tables = if gemm_kernel {
-        projector_tables(state, &species, blocks.len(), false)?
-    } else {
-        Vec::new()
-    };
+    // GD1: one projector/gradient GEMM per atom and k (the per-k operator
+    // build with scalar loops, `DERIV_NL_GEMM=off`, and the unmeasured
+    // band-first variant `FORCE_BAND_FIRST` were retired in CL1).
+    let tables = projector_tables(state, &species, blocks.len(), false)?;
     let per_atom = tables_per_atom(&species, &tables);
     lap("nonlocal_tables", &mut timings);
     // MPI-DERIV: per-k parts distributed over ranks, accumulated in k order.
@@ -451,25 +444,16 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         |(point, orbitals, occupations), out| {
             let basis = state.options.basis(state.cell, point.fractional, 1.0)?;
             let occupations: Vec<_> = occupations.iter().map(|f| f * point.weight).collect();
-            let part = if gemm_kernel {
-                dft_physics::stress::nonlocal_k_derivatives(
-                    &basis,
-                    volume,
-                    &species,
-                    &per_atom,
-                    orbitals,
-                    &occupations,
-                    false,
-                )?
-                .0
-            } else {
-                let operator = NonlocalOperator::new(&basis, volume, &species)?;
-                if band_first {
-                    nonlocal_band_first(&operator, &basis, orbitals, &occupations)?
-                } else {
-                    terms::nonlocal(&operator, &basis, orbitals, &occupations)?
-                }
-            };
+            let part = dft_physics::stress::nonlocal_k_derivatives(
+                &basis,
+                volume,
+                &species,
+                &per_atom,
+                orbitals,
+                &occupations,
+                false,
+            )?
+            .0;
             if part.len() != out.len() / 3 {
                 return Err(ScfError::InvalidInput("nonlocal forces: atom count"));
             }
@@ -560,8 +544,7 @@ pub(crate) fn assemble(
 
 /// GD1: projector radial tables (values and, with `slopes`, q derivatives)
 /// per distinct potential of `species`, in first-appearance order, when the
-/// derivative pass has two or more k blocks and `DERIV_RADIAL_TABLES` is on;
-/// otherwise empty (the kernel uses the quadrature). The range covers
+/// derivative pass has two or more k blocks; otherwise empty (the kernel uses the quadrature). The range covers
 /// |k+G| <= 1.1 sqrt(2 E_cut) + 0.05 Bohr^-1 (a strained frozen-Miller set
 /// may exceed it; such rows fall back to the quadrature). Node values are the
 /// quadrature itself; (channel, node) units are split into contiguous rank
@@ -576,7 +559,7 @@ pub(crate) fn projector_tables(
     use dft_upf::radial::{
         RADIAL_TABLE_POINTS as POINTS, RADIAL_TABLE_STEP as STEP, RadialTransformTable,
     };
-    if blocks < 2 || !dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_RADIAL_TABLES) {
+    if blocks < 2 {
         return Ok(Vec::new());
     }
     let q_max = 1.1 * (2.0 * state.options.cutoff_hartree).sqrt() + 0.05;
@@ -689,7 +672,9 @@ pub(crate) fn projector_tables(
 /// bit-identical to the former per-shell expression). With an active
 /// communicator the (potential, function, shell) units are split into
 /// contiguous rank blocks and combined by one allgatherv, so every rank holds
-/// the identical values for any rank count. `None` when `DERIV_SHELLS` is off.
+/// the identical values for any rank count. Always `Some` since CL1 (the
+/// per-shell rollback `DERIV_SHELLS=off` was retired); the `Option` matches
+/// the kernels' interface, where `None` evaluates every shell in place.
 #[doc(hidden)]
 pub fn shell_values(
     species: &[Species<'_>],
@@ -699,9 +684,6 @@ pub fn shell_values(
 ) -> Result<Option<dft_physics::radial_shells::RadialShellValues>, ScfError> {
     use dft_mpi::Collective;
     use dft_physics::radial_shells::{RadialShellValues, ShellEvaluator, ShellKind};
-    if !dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_SHELLS) {
-        return Ok(None);
-    }
     let mut potentials: Vec<&dft_upf::Pseudopotential> = Vec::new();
     for s in species {
         if !potentials.iter().any(|p| std::ptr::eq(*p, s.potential)) {
@@ -1234,74 +1216,6 @@ pub(crate) fn validate(state: &ForceState<'_>) -> Result<Validated, ScfError> {
         ledger,
         quantity,
     })
-}
-
-/// Stack beta and its three position derivatives into one projector matrix.
-/// One adjoint GEMM per k evaluates all overlaps for every band and atom.
-/// This changes reduction order only; occupations already include k weights.
-pub fn nonlocal_band_first(
-    operator: &NonlocalOperator,
-    basis: &dft_basis::PlaneWaveBasis,
-    orbitals: &ComplexMatrix,
-    occupations: &[f64],
-) -> Result<Vec<[f64; 3]>, ScfError> {
-    use dft_numerics::linalg::{MatrixOp, gemm};
-    let ng = basis.momenta().len();
-    if orbitals.rows() != ng || orbitals.cols() != occupations.len() {
-        return Err(ScfError::InvalidInput("nonlocal forces: orbital shape"));
-    }
-    if occupations.iter().any(|f| !f.is_finite() || *f < 0.) {
-        return Err(ScfError::NonFinite);
-    }
-    let count: usize = operator.atoms().iter().map(|a| a.columns().len()).sum();
-    let mut forces = vec![[0.; 3]; operator.atoms().len()];
-    if count == 0 {
-        return Ok(forces);
-    }
-    let mut projectors =
-        ComplexMatrix::zeros(ng, 4 * count).map_err(|e| ScfError::Numerical(e.to_string()))?;
-    let mut index = 0;
-    for atom in operator.atoms() {
-        for column in atom.columns() {
-            if column.len() != ng {
-                return Err(ScfError::InvalidInput("nonlocal forces: projector shape"));
-            }
-            for (g, (&beta, momentum)) in column.iter().zip(basis.momenta()).enumerate() {
-                projectors[(g, index)] = beta;
-                for axis in 0..3 {
-                    projectors[(g, (axis + 1) * count + index)] =
-                        Complex64::new(0., -momentum.cartesian[axis]) * beta;
-                }
-            }
-            index += 1;
-        }
-    }
-    let overlaps = gemm(&projectors, MatrixOp::Adjoint, orbitals, MatrixOp::Identity)
-        .map_err(|e| ScfError::Numerical(e.to_string()))?;
-    let mut offset = 0;
-    for (atom, force) in operator.atoms().iter().zip(&mut forces) {
-        let n = atom.columns().len();
-        for (band, &occupation) in occupations.iter().enumerate() {
-            if occupation == 0. {
-                continue;
-            }
-            for p in 0..n {
-                let weighted: Complex64 = (0..n)
-                    .map(|q| atom.coupling_hartree()[p * n + q] * overlaps[(offset + q, band)])
-                    .sum();
-                for (axis, component) in force.iter_mut().enumerate() {
-                    *component -= 2.
-                        * occupation
-                        * (overlaps[((axis + 1) * count + offset + p, band)].conj() * weighted).re;
-                }
-            }
-        }
-        offset += n;
-    }
-    if forces.iter().flatten().any(|f| !f.is_finite()) {
-        return Err(ScfError::NonFinite);
-    }
-    Ok(forces)
 }
 
 /// Polar-vector transformation A R A^-1 and the SCF atom permutation. No

@@ -154,14 +154,10 @@ pub struct DistributedRealHamiltonian {
     count: usize,
     projections: RealMatrix,
     reduced: RealMatrix,
-    weights: RealMatrix,
     image: RealMatrix,
     gemm: RealGemmWorkspace,
     /// `BAANDI_M2_DGEMM=on`: projector products through the per-panel dgemm route.
     dgemm: bool,
-    single_projection: bool,
-    fuse_coupling: bool,
-    back_accum: bool,
     reference_profile: bool,
     apply_times: Option<[f64; 9]>,
     lane: lane_profile::Profile,
@@ -430,24 +426,9 @@ impl DistributedRealHamiltonian {
             hrecv: vec![0.; ranks * max_items * 2 * pairs],
             projections: RealMatrix::zeros(count, capacity)?,
             reduced: RealMatrix::zeros(count, capacity)?,
-            weights: RealMatrix::zeros(
-                if dft_numerics::switches::on(dft_numerics::switches::Id::NONLOCAL_FUSE_COUPLING) {
-                    0
-                } else {
-                    count
-                },
-                capacity,
-            )?,
             image: RealMatrix::zeros(n_loc, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
             dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
-            single_projection: dft_numerics::switches::on(
-                dft_numerics::switches::Id::NONLOCAL_SINGLE_GEMM,
-            ),
-            fuse_coupling: dft_numerics::switches::on(
-                dft_numerics::switches::Id::NONLOCAL_FUSE_COUPLING,
-            ),
-            back_accum: dft_numerics::switches::on(dft_numerics::switches::Id::NONLOCAL_BACK_ACCUM),
             reference_profile: dft_numerics::switches::on(
                 dft_numerics::switches::Id::DAVIDSON_STAGES,
             ),
@@ -986,15 +967,11 @@ impl DistributedRealHamiltonian {
         let apply_clock = self.apply_clock();
         let arrival_start = dft_numerics::stage_clock::arrival::clock();
         if n_loc > 0 && self.dgemm {
-            // Both entries fit p*b <= max(p, capacity)^2. The single entry
-            // removes repeated reduction-panel BLAS calls/packing on MKL;
-            // pure builds retain the same deterministic panel arithmetic.
-            let multiply = if self.single_projection {
-                RealGemmWorkspace::multiply_slices_single_into
-            } else {
-                RealGemmWorkspace::multiply_slices_wide_into
-            };
-            multiply(
+            // P3-NL (adopted 2026-11-25; switch NONLOCAL_SINGLE_GEMM retired
+            // in CL1): one entry removes repeated reduction-panel BLAS
+            // calls/packing on MKL; pure builds retain the same deterministic
+            // panel arithmetic.
+            RealGemmWorkspace::multiply_slices_single_into(
                 &mut self.gemm,
                 GemmSite::Other,
                 self.projectors.as_slice(),
@@ -1202,11 +1179,8 @@ impl DistributedRealHamiltonian {
             // The local projection is dead after tree_sum. Fuse the coupling
             // result into that storage, retaining the global Q and the exact
             // atom/band/j/k arithmetic. No copy of W or in-place DQ hazard.
-            let weights = if self.fuse_coupling {
-                &mut self.projections
-            } else {
-                &mut self.weights
-            };
+            // (P3-ADDV, adopted 2026-11-25; switch retired in CL1.)
+            let weights = &mut self.projections;
             for atom in &self.coupling {
                 for band in 0..m {
                     for j in 0..atom.count {
@@ -1223,14 +1197,9 @@ impl DistributedRealHamiltonian {
             drop(span);
             let apply_clock = self.apply_clock();
             let span = self.lane.start(lane_profile::Stage::Back, n_loc, count, m);
-            let weights = if self.fuse_coupling {
-                &self.projections
-            } else {
-                &self.weights
-            };
+            let weights = &self.projections;
             let accumulated = n_loc > 0
                 && self.dgemm
-                && self.back_accum
                 && self.gemm.try_multiply_slices_single_add(
                     GemmSite::Other,
                     self.projectors.as_slice(),
@@ -1871,7 +1840,7 @@ mod lane_identity_tests {
     use dft_units::Hartree;
 
     #[test]
-    fn nonlocal_single_projection_matches_panel_route() {
+    fn nonlocal_projection_route_is_worker_independent() {
         let mut worst = 0.0_f64;
         let mut comparisons = 0;
         for lattice in [
@@ -1927,24 +1896,18 @@ mod lane_identity_tests {
                     .unwrap();
                     let mut worst = 0.0_f64;
                     for width in [0, 1, 2, 5, 17] {
-                        let mut baseline: Option<RealMatrix> = None;
-                        let mut unfused: Option<RealMatrix> = None;
-                        let mut unfused_energies = Vec::new();
-                        for (single, fuse, back) in [
-                            ("off", "off", "off"),
-                            ("on", "off", "off"),
-                            ("on", "on", "off"),
-                            ("on", "off", "on"),
-                            ("on", "on", "on"),
-                        ] {
-                            let cfg = RunConfig::from_pairs(&[
-                                ("nonlocal_single_gemm", single),
-                                ("nonlocal_fuse_coupling", fuse),
-                                ("nonlocal_back_accum", back),
-                                ("m2_dgemm", "on"),
-                                ("mkl_dgemm", "on"),
-                            ])
-                            .unwrap();
+                        // P3-NL/P3-ADDV are the only route since CL1 (the
+                        // panel/unfused/separate-add arms and their bit and
+                        // 1e-13 agreement are recorded in the attempts
+                        // ledger, P3l/P3m). Here: worker-count independence,
+                        // no image buffer with back accumulation (MKL), and
+                        // a repeat after an energy audit that overwrites the
+                        // recycled local projection.
+                        let mut baseline: Option<(RealMatrix, Vec<f64>)> = None;
+                        for threads in [1, 3] {
+                            let cfg =
+                                RunConfig::from_pairs(&[("m2_dgemm", "on"), ("mkl_dgemm", "on")])
+                                    .unwrap();
                             let _scope = cfg.enter();
                             let mut op = DistributedRealHamiltonian::new(
                                 &source,
@@ -1952,7 +1915,7 @@ mod lane_identity_tests {
                                 17,
                                 comm.rank(),
                                 ranks,
-                                WorkerPool::new(if fuse == "on" { 3 } else { 1 }).unwrap(),
+                                WorkerPool::new(threads).unwrap(),
                             )
                             .unwrap();
                             let mut x = RealMatrix::zeros(op.local_len(), width).unwrap();
@@ -1964,44 +1927,24 @@ mod lane_identity_tests {
                             let mut y = RealMatrix::zeros(op.local_len(), width).unwrap();
                             op.image.as_mut_slice().fill(f64::NAN);
                             op.apply_block(comm, &x, &mut y).unwrap();
-                            if back == "on" && dft_numerics::MKL_BACKEND {
+                            if dft_numerics::MKL_BACKEND {
                                 assert!(op.image.as_slice().iter().all(|v| v.is_nan()));
                             }
                             let mut energies = vec![0.; width];
                             op.nonlocal_band_energies(comm, &x, &mut energies).unwrap();
-                            if fuse == "on" {
-                                assert!(op.weights.as_slice().is_empty());
-                                for (&a, &b) in unfused
-                                    .as_ref()
-                                    .unwrap()
-                                    .as_slice()
-                                    .iter()
-                                    .zip(y.as_slice())
-                                {
-                                    assert_eq!(a.to_bits(), b.to_bits());
-                                }
-                                assert_eq!(energies, unfused_energies);
-                                // An energy audit overwrites the recycled local
-                                // projection. A subsequent H must still rebuild W.
-                                let mut again = RealMatrix::zeros(op.local_len(), width).unwrap();
-                                op.apply_block(comm, &x, &mut again).unwrap();
-                                for (&a, &b) in y.as_slice().iter().zip(again.as_slice()) {
-                                    assert_eq!(a.to_bits(), b.to_bits());
-                                }
-                            } else if single == "on" {
-                                unfused = Some(y.clone());
-                                unfused_energies = energies;
+                            let mut again = RealMatrix::zeros(op.local_len(), width).unwrap();
+                            op.apply_block(comm, &x, &mut again).unwrap();
+                            for (&a, &b) in y.as_slice().iter().zip(again.as_slice()) {
+                                assert_eq!(a.to_bits(), b.to_bits());
                             }
-                            if let Some(base) = &baseline {
+                            if let Some((base, base_energies)) = &baseline {
                                 for (&a, &b) in base.as_slice().iter().zip(y.as_slice()) {
                                     worst = worst.max((a - b).abs());
-                                    assert!((a - b).abs() < 1e-13 * a.abs().max(1.));
-                                    if !dft_numerics::MKL_BACKEND {
-                                        assert_eq!(a.to_bits(), b.to_bits());
-                                    }
+                                    assert_eq!(a.to_bits(), b.to_bits());
                                 }
+                                assert_eq!(&energies, base_energies);
                             } else {
-                                baseline = Some(y);
+                                baseline = Some((y, energies));
                             }
                         }
                     }
@@ -2014,7 +1957,7 @@ mod lane_identity_tests {
             }
         }
         eprintln!(
-            "P3-ADDV: {comparisons} rank/block fixtures, projection and coupling arms, max H component delta {worst:e} Ha"
+            "P3-ADDV: {comparisons} rank/block fixtures, 1 vs 3 workers, max H component delta {worst:e} Ha"
         );
     }
 
@@ -2191,18 +2134,12 @@ mod lane_identity_tests {
                         let source = Hamiltonian::new(&cell, &basis, potential, nl).unwrap();
                         let pool = WorkerPool::new(1).unwrap();
                         let mut reference = Vec::new();
-                        for (direct, sparse, rows) in [
-                            ("off", "off", "off"),
-                            ("on", "off", "off"),
-                            ("off", "on", "off"),
-                            ("on", "on", "off"),
-                            ("off", "off", "on"),
-                            ("on", "on", "on"),
-                        ] {
+                        for (direct, sparse) in
+                            [("off", "off"), ("on", "off"), ("off", "on"), ("on", "on")]
+                        {
                             let config = RunConfig::from_pairs(&[
                                 ("fft_direct_pack", direct),
                                 ("fft_sparse_clear", sparse),
-                                ("fft_fused_rows", rows),
                                 ("m2_sticks", mirror),
                             ])
                             .unwrap();
@@ -2240,14 +2177,14 @@ mod lane_identity_tests {
                                     bits.extend(y.as_slice().iter().map(|v| v.to_bits()));
                                 }
                             }
-                            if direct == "off" && sparse == "off" && rows == "off" {
+                            if direct == "off" && sparse == "off" {
                                 reference = bits;
                             } else {
                                 assert_eq!(bits, reference, "ranks {ranks} mirror {mirror}");
                             }
                         }
                     });
-                    comparisons += ranks * 5 * 2 * 5;
+                    comparisons += ranks * 3 * 2 * 5;
                 }
             }
         }

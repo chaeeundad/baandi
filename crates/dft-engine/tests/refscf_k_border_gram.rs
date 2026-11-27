@@ -1,11 +1,15 @@
-//! GK10: border-only projected S/H in the complex reference Davidson
-//! (`BAANDI_CDAV_BORDER_GRAM`, default on) is a rounding-class change. Whole k
-//! SCF runs with the border on and off agree within the strict accuracy class
-//! (1e-10 Ha) and the standard class (5e-9 Ha) on cubic, skewed and elongated
-//! cells with a Gamma-in-list set and a shifted mesh, on Fermi-Dirac and
-//! collinear-spin k runs, at 1 and 3 simulated ranks (8 in the ignored
-//! matrix). Map counts and H columns are printed. Synthetic data, never QE
-//! evidence.
+//! GK10 / GK10B: the complex reference Davidson with border-only projected
+//! S/H, bordered overlap factor, streamed corrections and the kept start and
+//! redo HX of the k first map is the only path since CL1 (2026-11-27). The
+//! former A/B against the full-recompute arms (`CDAV_BORDER_GRAM`,
+//! `CDAV_BORDER_FACTOR`, `CDAV_STREAM`, `K_START_KEPT_HX`, `K_REDO_KEPT_HX`
+//! off: agreement within the strict 1e-10 Ha and standard 5e-9 Ha classes) is
+//! recorded in docs/performance/attempts-ledger.md (GK10, GK10B) and
+//! docs/performance/switch-retirement.md. These tests keep whole k SCF runs
+//! on cubic, skewed and elongated cells (Gamma-in-list and a shifted mesh),
+//! Fermi-Dirac and collinear-spin k runs converged and rank-count independent
+//! within the class at 1 and 3 simulated ranks (8 in the ignored matrix).
+//! Synthetic data, never QE evidence.
 //! Full matrix: cargo test --release -p dft-engine --test refscf_k_border_gram -- --include-ignored --nocapture
 #[allow(dead_code)]
 mod common;
@@ -23,27 +27,9 @@ use dft_geometry::{
     Atom, Cell,
     kpoints::{KPoint, monkhorst_pack},
 };
-use dft_mpi::Collective;
-use dft_numerics::switches::{Id, RunConfig};
 
 const STRICT_HA: f64 = 1e-10;
 
-/// "off": the full-recompute solver and the pre-GK10B first map (GK10
-/// border Gram, GK10B bordered factor, fused corrections and the kept start
-/// and redo HX all off); "on": the defaults.
-fn arm(border: &str) -> Vec<(&'static str, &str)> {
-    if border == "off" {
-        vec![
-            ("cdav_border_gram", "off"),
-            ("cdav_border_factor", "off"),
-            ("cdav_stream", "off"),
-            ("k_start_kept_hx", "off"),
-            ("k_redo_kept_hx", "off"),
-        ]
-    } else {
-        Vec::new()
-    }
-}
 const STANDARD_HA: f64 = 5e-9;
 
 fn cells() -> [(&'static str, Cell); 3] {
@@ -135,13 +121,7 @@ fn diff(a: &Outcome, b: &Outcome) -> (f64, f64, f64) {
     ((a.energy - b.energy).abs(), occupied, all)
 }
 
-fn scalar(
-    comm: &dft_mpi::SimRank,
-    cell: &Cell,
-    points: &[KPoint],
-    strict: bool,
-    border: &str,
-) -> Outcome {
+fn scalar(comm: &dft_mpi::SimRank, cell: &Cell, points: &[KPoint], strict: bool) -> Outcome {
     let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
     let atoms = [
         Atom::new("Xx", [0.13, 0.21, 0.32]),
@@ -152,8 +132,6 @@ fn scalar(
         potential: &pp,
     }];
     let options = options();
-    let config = RunConfig::from_pairs(&arm(border)).unwrap();
-    let _scope = config.enter();
     let run = k_driver::run_with(
         StartInput {
             cell,
@@ -166,7 +144,6 @@ fn scalar(
         comm,
     )
     .unwrap();
-    assert!(config.consulted(Id::CDAV_BORDER_GRAM));
     let r = &run.outcome.result;
     Outcome {
         energy: r.energy.total_hartree(),
@@ -182,7 +159,7 @@ fn scalar(
     }
 }
 
-fn electronic_run(comm: &dft_mpi::SimRank, spin: bool, strict: bool, border: &str) -> Outcome {
+fn electronic_run(comm: &dft_mpi::SimRank, spin: bool, strict: bool) -> Outcome {
     let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
     let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
     let pp = common::potential_with_atomic_start(
@@ -222,8 +199,6 @@ fn electronic_run(comm: &dft_mpi::SimRank, spin: bool, strict: bool, border: &st
         }
     };
     let points = monkhorst_pack([2; 3], [0.5; 3]).unwrap();
-    let config = RunConfig::from_pairs(&arm(border)).unwrap();
-    let _scope = config.enter();
     let run = electronic::run_with(
         StartInput {
             cell: &cell,
@@ -262,22 +237,19 @@ fn electronic_run(comm: &dft_mpi::SimRank, spin: bool, strict: bool, border: &st
     }
 }
 
-fn check(label: &str, strict: bool, comm: &dft_mpi::SimRank, off: &Outcome, on: &Outcome) {
+/// Rank-count independence: P ranks against one rank. Delivered energies
+/// within the class; occupied eigenvalues are first order in the
+/// self-consistency error (rank counts give up to 7e-10 Ha on the skewed
+/// Gamma-in-list fixture), gated at 1e-8 Ha as a sanity bound only.
+fn check(label: &str, strict: bool, one: &Outcome, many: &Outcome) {
     let bound = if strict { STRICT_HA } else { STANDARD_HA };
-    let (energy, occupied, all) = diff(off, on);
-    assert!(off.converged && on.converged, "{label}");
-    if comm.rank() == 0 {
-        println!(
-            "GK10 {label}: E_on={:.15e} Ha |on-off| energy {energy:.2e} occupied eigenvalues {occupied:.2e} all bands {all:.2e} Ha; maps off {} on {}; H columns off {} on {}",
-            on.energy, off.maps, on.maps, off.h_columns, on.h_columns
-        );
-    }
+    let (energy, occupied, all) = diff(one, many);
+    assert!(one.converged && many.converged, "{label}");
+    println!(
+        "GK10 {label}: E={:.15e} Ha |P - 1| energy {energy:.2e} occupied eigenvalues {occupied:.2e} all bands {all:.2e} Ha; maps {} / {}; H columns {} / {}",
+        many.energy, one.maps, many.maps, one.h_columns, many.h_columns
+    );
     assert!(energy <= bound, "{label}: energy {energy:e} Ha > {bound:e}");
-    // Occupied eigenvalues are first order in the self-consistency error
-    // (the energy is second order): GK10B's kept start HX changes the
-    // rounding of the first map, and the delivered eigenvalues then differ
-    // by up to the same 7e-10 Ha that rank counts already give on the skewed
-    // Gamma-in-list fixture. Gated at 1e-8 Ha as a sanity bound only.
     assert!(
         occupied <= 1e-8,
         "{label}: occupied eigenvalues {occupied:e} Ha > 1e-8"
@@ -294,35 +266,20 @@ fn scalar_matrix(ranks: &[usize], cell_names: &[&str]) {
             ("mp222-shifted", monkhorst_pack([2; 3], [0.5; 3]).unwrap()),
         ] {
             for strict in [true, false] {
-                let mut one_rank: Option<(Outcome, Outcome)> = None;
+                let mut one_rank: Option<Outcome> = None;
                 for &p in ranks {
-                    let (off, on) = dft_mpi::simulate(p, |comm| {
-                        let off = scalar(comm, &cell, &points, strict, "off");
-                        let on = scalar(comm, &cell, &points, strict, "on");
-                        let label = format!(
-                            "{name} {set} {} P={p}",
-                            if strict { "strict" } else { "standard" }
-                        );
-                        check(&label, strict, comm, &off, &on);
-                        (off, on)
-                    })
-                    .swap_remove(0);
-                    // Rank-count independence: delivered energies within the
-                    // class; occupied eigenvalues are first order in the
-                    // self-consistency error, so their rank spread is
-                    // reported for both arms (the full-recompute arm has the
-                    // same spread) instead of gated at the energy class.
-                    if let Some((first_off, first_on)) = &one_rank {
-                        let bound = if strict { STRICT_HA } else { STANDARD_HA };
-                        let (e_on, occ_on, _) = diff(first_on, &on);
-                        let (e_off, occ_off, _) = diff(first_off, &off);
-                        println!(
-                            "GK10 {name} {set} {} P={p} vs P=1: energy on {e_on:.2e} off {e_off:.2e}, occupied eigenvalues on {occ_on:.2e} off {occ_off:.2e} Ha",
-                            if strict { "strict" } else { "standard" }
-                        );
-                        assert!(e_on <= bound, "{name} {set} P={p} vs P=1: {e_on:e} Ha");
-                    } else {
-                        one_rank = Some((off, on));
+                    let out = dft_mpi::simulate(p, |comm| scalar(comm, &cell, &points, strict))
+                        .swap_remove(0);
+                    let label = format!(
+                        "{name} {set} {} P={p}",
+                        if strict { "strict" } else { "standard" }
+                    );
+                    match &one_rank {
+                        Some(first) => check(&label, strict, first, &out),
+                        None => {
+                            check(&label, strict, &out, &out);
+                            one_rank = Some(out);
+                        }
                     }
                 }
             }
@@ -331,32 +288,30 @@ fn scalar_matrix(ranks: &[usize], cell_names: &[&str]) {
 }
 
 #[test]
-fn border_gram_scf_agrees_on_skewed_k_cell() {
+fn border_gram_scf_converges_on_skewed_k_cell() {
     scalar_matrix(&[1, 3], &["skewed"]);
 }
 
 #[test]
 #[ignore = "full GK10 matrix; run in release"]
-fn border_gram_scf_agrees_on_k_generality_set() {
+fn border_gram_scf_converges_on_k_generality_set() {
     scalar_matrix(&[1, 3, 8], &["cubic", "skewed", "elongated"]);
 }
 
 #[test]
-fn border_gram_fd_and_spin_k_runs_agree() {
+fn border_gram_fd_and_spin_k_runs_converge() {
     for spin in [false, true] {
         for strict in [true, false] {
-            for p in [1, 3] {
-                dft_mpi::simulate(p, |comm| {
-                    let off = electronic_run(comm, spin, strict, "off");
-                    let on = electronic_run(comm, spin, strict, "on");
-                    let label = format!(
-                        "{} {} P={p}",
-                        if spin { "spin" } else { "fd" },
-                        if strict { "strict" } else { "standard" }
-                    );
-                    check(&label, strict, comm, &off, &on);
-                });
-            }
+            let one =
+                dft_mpi::simulate(1, |comm| electronic_run(comm, spin, strict)).swap_remove(0);
+            let three =
+                dft_mpi::simulate(3, |comm| electronic_run(comm, spin, strict)).swap_remove(0);
+            let label = format!(
+                "{} {} P=3",
+                if spin { "spin" } else { "fd" },
+                if strict { "strict" } else { "standard" }
+            );
+            check(&label, strict, &one, &three);
         }
     }
 }
@@ -405,10 +360,8 @@ fn timing() {
         ..options()
     };
     let mut energies = Vec::new();
-    for border in ["off", "on", "off", "on"] {
+    for repeat in 0..2 {
         let out = dft_mpi::simulate(ranks, |comm| {
-            let config = RunConfig::from_pairs(&arm(border)).unwrap();
-            let _scope = config.enter();
             let t = std::time::Instant::now();
             let run = k_driver::run_with(
                 StartInput {
@@ -437,7 +390,7 @@ fn timing() {
         });
         let (e, wall, solve, maps, columns, iterations) = out[0];
         println!(
-            "GK10 timing ecut={ecut} k={nk} P={ranks} border={border}: E={e:.15e} Ha wall {wall:.3} s solve {solve:.3} s maps {maps} H columns {columns} Davidson iterations {iterations}"
+            "GK10 timing ecut={ecut} k={nk} P={ranks} run={repeat}: E={e:.15e} Ha wall {wall:.3} s solve {solve:.3} s maps {maps} H columns {columns} Davidson iterations {iterations}"
         );
         energies.push(e);
     }

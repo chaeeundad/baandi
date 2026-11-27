@@ -655,9 +655,7 @@ fn start_inner<K: Collective>(
     // GK16: the k path's common start reads the |G| functions from radial
     // tables (rounding class); the Gamma path keeps the exact per-shell
     // quadrature.
-    let field_tables = if fields_only
-        && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_FIELDS)
-    {
+    let field_tables = if fields_only {
         let q_max = db
             .vectors()
             .iter()
@@ -1020,7 +1018,7 @@ fn core_radial(s: &Species<'_>, q: f64, volume: f64, o: &ScfOptions) -> Result<f
     })
 }
 
-/// GK16 (`BAANDI_RADIAL_TABLE_FIELDS`): per species, uniform radial tables of
+/// GK16 (always on for the k path since CL1): per species, uniform radial tables of
 /// the three |G| functions of [`atomic_fields`]: the atomic-charge integral
 /// (before the volume division), the Coulomb-subtracted short-range local
 /// integral and the core-density transform (before the volume division).
@@ -1764,7 +1762,7 @@ pub struct KBlock {
 }
 pub struct KStartState {
     pub initial_h_columns: usize,
-    /// GK10B (`K_START_KEPT_HX`; GF1 `SPIN_FD_START_KEPT_HX` for the spin/FD
+    /// GK10B (fixed occupations; GF1 for the spin/FD
     /// start, every channel whose start potential equals the first's, FD
     /// buffer columns appended by `extend_k_orbitals`): per k, the start Ritz
     /// orbitals X, their H X (HQ C) and the operator potential it was
@@ -1838,13 +1836,12 @@ pub(crate) fn start_electronic<K: Collective>(
 ) -> Result<KStartState, ScfError> {
     Ok(start_kpoints_inner(input, points, comm, true, 1, pools)?.remove(0))
 }
-/// Collinear spin/FD entry for `channels` identical channel starts. With
-/// `BAANDI_K_START_SPIN_SHARE=on` (default) the channel-independent work
-/// (bases, grids, projector tables, atomic columns, orthonormalization, start
-/// H and Ritz) runs once and each channel gets its own operator and a copy of
-/// the orbitals; every channel equals `start_electronic` bit for bit. `off`
-/// calls `start_electronic` once per channel. `pools`: the caller supports
-/// GK9 k-point pools (used when the switch and the rank/k counts allow).
+/// Collinear spin/FD entry for `channels` identical channel starts (GK1B
+/// share): the channel-independent work (bases, grids, projector tables,
+/// atomic columns, orthonormalization, start H and Ritz) runs once and each
+/// channel gets its own operator and a copy of the orbitals; every channel
+/// equals `start_electronic` bit for bit. `pools`: the caller supports GK9
+/// k-point pools (used when the switch and the rank/k counts allow).
 pub(crate) fn start_electronic_channels<K: Collective>(
     input: StartInput<'_>,
     points: &[dft_geometry::kpoints::KPoint],
@@ -1852,7 +1849,7 @@ pub(crate) fn start_electronic_channels<K: Collective>(
     channels: usize,
     pools: bool,
 ) -> Result<Vec<KStartState>, ScfError> {
-    if channels > 1 && dft_numerics::switches::on(dft_numerics::switches::Id::K_START_SPIN_SHARE) {
+    if channels > 1 {
         start_kpoints_inner(input, points, comm, true, channels, pools)
     } else {
         (0..channels)
@@ -1898,7 +1895,7 @@ pub(crate) fn extend_k_orbitals<K: Collective>(
         if bands <= have {
             continue;
         }
-        // GF1 (`SPIN_FD_START_KEPT_HX`): a start H X kept for exactly these
+        // GF1: a start H X kept for exactly these
         // columns is extended by H applied to the appended columns, with the
         // operator still holding the start potential it was formed with.
         let extend_hx = state.start_hx.get(k).is_some_and(|(sx, shx, v)| {
@@ -2134,71 +2131,10 @@ fn start_kpoints_inner<K: Collective>(
             .or_default() += clock.elapsed().as_secs_f64();
     }
     finish_kpoints(
-        input,
-        points,
-        comm,
-        bases,
-        q_max,
-        &db,
-        commons,
+        input, points, comm, bases, q_max, &db, commons,
         // GK10B (fixed occupations) / GF1 (spin/FD): keep the start H X.
-        dft_numerics::switches::on(if general_occupations {
-            dft_numerics::switches::Id::SPIN_FD_START_KEPT_HX
-        } else {
-            dft_numerics::switches::Id::K_START_KEPT_HX
-        }),
-        pool,
+        true, pool,
     )
-}
-
-/// Original k atomic columns (`BAANDI_K_START_MEMO=off`): one radial
-/// quadrature per (owned row, atom, m). Kept as the bit reference of the memo.
-fn atomic_k_columns_direct(
-    species: &[Species<'_>],
-    basis: &PlaneWaveBasis,
-    rows: &[usize],
-    volume: f64,
-    rule: crate::RadialEvenRule,
-    columns: &mut Vec<Vec<C>>,
-) -> Result<(), ScfError> {
-    for sp in species {
-        for channel in atomic_orbitals(sp.potential) {
-            for pos in sp.positions_bohr {
-                for m in -(channel.l as isize)..=channel.l as isize {
-                    let mut col = Vec::with_capacity(rows.len());
-                    for &g in rows {
-                        let q = &basis.momenta()[g];
-                        let radial = projector_transform_with_rule(
-                            sp.potential.mesh(),
-                            channel.l,
-                            &channel.radial_times_r,
-                            q.norm_squared.sqrt(),
-                            rule,
-                        )
-                        .map_err(err)?
-                            / volume.sqrt();
-                        let y = if q.norm_squared == 0. {
-                            if channel.l == 0 {
-                                1. / (4. * PI).sqrt()
-                            } else {
-                                0.
-                            }
-                        } else {
-                            real_spherical_harmonic(channel.l, m, q.cartesian).map_err(err)?
-                        };
-                        let angle: f64 = q.cartesian.iter().zip(pos).map(|(q, r)| q * r).sum();
-                        col.push(
-                            C::new(0., -1.).powu(channel.l as u32)
-                                * C::from_polar(1., -angle)
-                                * (radial * y),
-                        );
-                    }
-                    columns.push(col);
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Reused buffers of the memoized k column build (GK1).
@@ -2215,7 +2151,8 @@ struct KColumnScratch {
     harmonics: Vec<f64>,
 }
 
-/// GK1: bit-identical to `atomic_k_columns_direct`. The radial transform
+/// GK1: bit-identical to the former direct build (one radial quadrature per
+/// owned row, atom and m; retired in CL1 with `K_START_MEMO`). The radial transform
 /// depends only on (species channel, |k+G|), so it is evaluated once per
 /// distinct |k+G|^2 bit pattern (the argument is `norm_squared.sqrt()`, so equal
 /// bits give equal arguments); `radial * y` is formed once per (m, row) and the
@@ -2469,35 +2406,19 @@ fn finish_kpoints<K: Collective>(
     let mut blocks: Vec<Vec<KBlock>> = (0..channels).map(|_| Vec::new()).collect();
     let mut orbitals: Vec<Vec<Matrix>> = (0..channels).map(|_| Vec::new()).collect();
     let mut initial_h_columns = 0;
-    // The caller decided (switch K_START_KEPT_HX or SPIN_FD_START_KEPT_HX).
+    // The caller decided (the SCF starts keep it; the fixed-density start not).
     let keep_start_hx = keep_hx;
     let mut same_start_potential = vec![true; channels];
     let mut start_hx = Vec::new();
-    let memo = dft_numerics::switches::on(dft_numerics::switches::Id::K_START_MEMO);
-    let nl_rows_only = dft_numerics::switches::on(dft_numerics::switches::Id::K_NL_TABLE_MEMO);
     let mut memo_scratch = KColumnScratch::default();
     let clock = Instant::now();
-    // GK14: radial tables once per start (per cell), covering every k sphere.
-    // NL tables act on the rows-only projector path, start tables on the memo
-    // columns; the off arms of those switches keep the quadrature reference.
-    let nl_table =
-        nl_rows_only && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_NL);
-    let start_table =
-        memo && dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_START);
-    let (nl_tables, start_tables) = if nl_table || start_table {
+    // GK14: radial tables once per start (per cell), covering every k sphere,
+    // for the rows-only projector factors and the memoized start columns.
+    let (nl_tables, start_tables) = {
         let stage = Instant::now();
-        let (n, s) = k_radial_tables(
-            &species,
-            q_max,
-            o.radial_even_rule,
-            comm,
-            nl_table,
-            start_table,
-        )?;
+        let (n, s) = k_radial_tables(&species, q_max, o.radial_even_rule, comm, true, true)?;
         commons[0].setup.record("k_radial_tables", stage);
-        (nl_table.then_some(n), start_table.then_some(s))
-    } else {
-        (None, None)
+        (n, s)
     };
     // GK9 pools: the potentials are gathered once per channel (collective,
     // every rank) and each rank builds only its own whole k points with the
@@ -2556,26 +2477,17 @@ fn finish_kpoints<K: Collective>(
                     .collect();
             common.setup.record("k_start_grid_layout", stage);
             let stage = Instant::now();
-            let nl = if nl_rows_only {
+            let nl = {
                 // GK1B: owned-row factors only. Failures are now rank-local, so
                 // the ranks agree on the outcome before any further collective.
-                let local = match &nl_tables {
-                    Some(tables) => NonlocalOperator::new_owned_rows_only_tabulated(
-                        &basis,
-                        cell.volume_bohr3(),
-                        &species,
-                        o.radial_even_rule,
-                        &rows,
-                        tables,
-                    ),
-                    None => NonlocalOperator::new_owned_rows_only_with_rule(
-                        &basis,
-                        cell.volume_bohr3(),
-                        &species,
-                        o.radial_even_rule,
-                        &rows,
-                    ),
-                };
+                let local = NonlocalOperator::new_owned_rows_only_tabulated(
+                    &basis,
+                    cell.volume_bohr3(),
+                    &species,
+                    o.radial_even_rule,
+                    &rows,
+                    &nl_tables,
+                );
                 let failed = sum(kc, &[f64::from(u8::from(local.is_err()))])?[0];
                 let nl = local?;
                 if failed > 0. {
@@ -2584,14 +2496,6 @@ fn finish_kpoints<K: Collective>(
                     ));
                 }
                 nl
-            } else {
-                NonlocalOperator::new_owned_with_rule(
-                    &basis,
-                    cell.volume_bohr3(),
-                    &species,
-                    o.radial_even_rule,
-                    &rows,
-                )?
             };
             commons[0].setup.record("k_start_nonlocal_tables", stage);
             let stage = Instant::now();
@@ -2650,27 +2554,16 @@ fn finish_kpoints<K: Collective>(
             common.setup.record("k_start_operator_potential", stage);
             let stage = Instant::now();
             let mut columns = Vec::new();
-            if memo {
-                atomic_k_columns_memo(
-                    &species,
-                    &basis,
-                    &rows,
-                    cell.volume_bohr3(),
-                    o.radial_even_rule,
-                    start_tables.as_deref(),
-                    &mut memo_scratch,
-                    &mut columns,
-                )?;
-            } else {
-                atomic_k_columns_direct(
-                    &species,
-                    &basis,
-                    &rows,
-                    cell.volume_bohr3(),
-                    o.radial_even_rule,
-                    &mut columns,
-                )?;
-            }
+            atomic_k_columns_memo(
+                &species,
+                &basis,
+                &rows,
+                cell.volume_bohr3(),
+                o.radial_even_rule,
+                Some(&start_tables),
+                &mut memo_scratch,
+                &mut columns,
+            )?;
             common.setup.record("k_start_atomic_columns", stage);
             let stage = Instant::now();
             // Two-pass owned-row MGS, then lowest kinetic coordinate complements.
@@ -2682,45 +2575,15 @@ fn finish_kpoints<K: Collective>(
                     .total_cmp(&basis.momenta()[b].norm_squared)
                     .then(a.cmp(&b))
             });
-            let real_start = point.fractional == [0.; 3]
-                && dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_REAL_START);
-            let half = real_start
-                .then(|| HalfSphere::new(&basis, &grid))
-                .transpose()
-                .map_err(err)?;
             let target = columns.len().max(bands).min(basis.vectors().len());
             let mut q = Matrix::zeros(rows.len(), 0).map_err(err)?;
             q.reserve_columns(target).map_err(err)?;
             let rows_ref = &rows;
-            let complements = order.into_iter().flat_map(|g| {
-                let mirror = half.as_ref().map(|h| h.mirror()[g] as usize);
-                let count = match mirror {
-                    Some(m) if g > m => 0,
-                    Some(m) if g != m => 2,
-                    _ => 1,
-                };
-                (0..count).map(move |imaginary| {
-                    rows_ref
-                        .iter()
-                        .map(|&r| {
-                            let Some(m) = mirror.filter(|&m| m != g) else {
-                                return C::new(f64::from(r == g), 0.);
-                            };
-                            let v = if imaginary == 0 {
-                                C::new(std::f64::consts::FRAC_1_SQRT_2, 0.)
-                            } else {
-                                C::new(0., std::f64::consts::FRAC_1_SQRT_2)
-                            };
-                            if r == g {
-                                v
-                            } else if r == m {
-                                v.conj()
-                            } else {
-                                C::default()
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                })
+            let complements = order.into_iter().map(|g| {
+                rows_ref
+                    .iter()
+                    .map(|&r| C::new(f64::from(r == g), 0.))
+                    .collect::<Vec<_>>()
             });
             for mut col in columns.into_iter().chain(complements) {
                 for _ in 0..2 {
@@ -2784,14 +2647,6 @@ fn finish_kpoints<K: Collective>(
                     let z = (h[(i, j)] + h[(j, i)].conj()) * 0.5;
                     h[(i, j)] = z;
                     h[(j, i)] = z.conj();
-                }
-            }
-            if real_start {
-                for z in h.as_mut_slice() {
-                    if z.im.abs() > 1e-12 {
-                        return Err(err("Gamma start Hamiltonian is not real"));
-                    }
-                    z.im = 0.;
                 }
             }
             let (values, mut c) = hermitian_eigh(&h).map_err(err)?;
@@ -3022,17 +2877,15 @@ pub fn start_kpoints_from_density<K: Collective>(
     let mut fields = StartFields::new(dims, comm)?;
     // GK16: same field tables as the k SCF start, so a fixed-density run sees
     // the ionic and core fields of the SCF that produced its density.
-    let field_tables = dft_numerics::switches::on(dft_numerics::switches::Id::RADIAL_TABLE_FIELDS)
-        .then(|| {
-            let q_max = db
-                .vectors()
-                .iter()
-                .map(|g| g.norm_squared)
-                .fold(0., f64::max)
-                .sqrt();
-            field_radial_tables(&species, volume, q_max, o, comm)
-        })
-        .transpose()?;
+    let field_tables = Some({
+        let q_max = db
+            .vectors()
+            .iter()
+            .map(|g| g.norm_squared)
+            .fold(0., f64::max)
+            .sqrt();
+        field_radial_tables(&species, volume, q_max, o, comm)?
+    });
     let atomic = atomic_fields(&fields, &db, volume, &species, o, field_tables.as_deref());
     drop(field_tables);
     agree(

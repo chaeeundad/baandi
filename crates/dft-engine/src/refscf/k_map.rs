@@ -106,9 +106,9 @@ pub(super) fn evaluate<K: Collective>(
     // GK4: ordinary (lean) maps consume only the band sum, the double counting
     // and the residual norms; kinetic, nonlocal, local and zero-mode terms are
     // filled by `complete_audit`. All per-k residual partials and the energy
-    // integrals share one element-wise tree sum per map.
-    let deferred = dft_numerics::switches::on(dft_numerics::switches::Id::K_LEAN_ENERGY);
-    let band_terms = !(deferred && lean);
+    // integrals share one element-wise tree sum per map (always on since
+    // CL1; the former per-k reduction arm `K_LEAN_ENERGY=off` was retired).
+    let band_terms = !lean;
     // GK9 pools: this rank's pool solves its own whole k points on the pool
     // collective (`kc`: serial for one-rank pools); the potential is gathered
     // once, the per-k records are allgathered and the densities exchanged
@@ -224,14 +224,7 @@ pub(super) fn evaluate<K: Collective>(
                         .sum()
                 })
                 .collect();
-            let (rs, r2) = if deferred {
-                (Vec::new(), local)
-            } else {
-                (
-                    sum(&kc, &local)?.into_iter().map(f64::sqrt).collect(),
-                    Vec::new(),
-                )
-            };
+            let (rs, r2) = (Vec::new(), local);
             let kinetic: Vec<_> = if band_terms {
                 (0..bands)
                     .map(|j| band_kinetic(op, &solve.eigenvectors, j, weights[j]))
@@ -331,38 +324,30 @@ pub(super) fn evaluate<K: Collective>(
     // pools; with pools the flags of every rank's k).
     let warm_start = terms.iter().any(|t| t.warm);
     let k_weights = k_weights(state);
-    let mut residual_local = Vec::with_capacity(if deferred && !pooled {
-        terms.len() * bands
-    } else {
-        0
-    });
+    let mut residual_local = Vec::with_capacity(if pooled { 0 } else { terms.len() * bands });
     let mut per_k = Vec::with_capacity(terms.len());
     // The one-rank loop's accumulation, replayed in global k order.
     for (t, &weight) in terms.into_iter().zip(&k_weights) {
         let weights: Vec<_> = occupations.iter().map(|f| f * weight).collect();
         let mut info = t.per_k;
-        for j in 0..bands {
-            if !deferred {
-                residuals[j] = residuals[j].max(info.residuals[j]);
-            }
-            band_sum += weights[j] * info.eigenvalues[j];
-            if !deferred {
-                residual_bound += weights[j] * info.residuals[j];
-            }
-            if band_terms {
-                kinetic += t.kinetic[j];
+        // Two independent accumulators: the same order per accumulator as
+        // the former interleaved loop.
+        for (w, e) in weights.iter().zip(&info.eigenvalues[..bands]) {
+            band_sum += w * e;
+        }
+        if band_terms {
+            for v in &t.kinetic[..bands] {
+                kinetic += v;
             }
         }
         if let Some(v) = t.nonlocal {
             nonlocal += v;
         }
-        if deferred {
-            if pooled {
-                // Full-row norms of a one-rank operator: no reduction.
-                info.residuals = t.r2.iter().map(|v| v.sqrt()).collect();
-            } else {
-                residual_local.extend(t.r2);
-            }
+        if pooled {
+            // Full-row norms of a one-rank operator: no reduction.
+            info.residuals = t.r2.iter().map(|v| v.sqrt()).collect();
+        } else {
+            residual_local.extend(t.r2);
         }
         per_k.push(info);
     }
@@ -379,7 +364,7 @@ pub(super) fn evaluate<K: Collective>(
     }
     let clock = Instant::now();
     let dv = cell.volume_bohr3() / points as f64;
-    let integrals = if deferred {
+    let integrals = {
         let mut packed = residual_local;
         let r = packed.len();
         if lean {
@@ -449,19 +434,6 @@ pub(super) fn evaluate<K: Collective>(
         }
         total.drain(..r);
         total
-    } else {
-        sum(
-            comm,
-            &integral_locals(
-                kinetic,
-                dv,
-                &density,
-                input,
-                &state.ionic,
-                points,
-                &input_fields,
-            ),
-        )?
     };
     let output_fields = if lean {
         None

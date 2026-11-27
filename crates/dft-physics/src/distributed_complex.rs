@@ -469,9 +469,11 @@ impl DistributedComplexHamiltonian {
     }
 
     /// True when stored density planes reproduce the bits of the local
-    /// application's inverse transform (false under `FFT_FUSED_ROWS`).
+    /// application's inverse transform (always since the fused-row
+    /// experiment `FFT_FUSED_ROWS` was retired in CL1; kept as the contract
+    /// the kept-slab consumer checks).
     pub fn kept_planes_exact(&self) -> bool {
-        !self.fft.fused_rows_active()
+        true
     }
 
     /// Sum f_b |u_b(r)|² / volume in band order on owned planes. The driver

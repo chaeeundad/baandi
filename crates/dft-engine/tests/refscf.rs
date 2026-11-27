@@ -2414,11 +2414,7 @@ fn setup4_fft_plan_cache_and_workspace_identity() {
         for ranks in [1, 8] {
             dft_mpi::simulate(ranks, |comm| {
                 for vendor in [false, true] {
-                    let config = RunConfig::from_pairs(&[
-                        ("fft_fused_rows", "on"),
-                        ("fft_sparse_clear", "on"),
-                    ])
-                    .unwrap();
+                    let config = RunConfig::from_pairs(&[("fft_sparse_clear", "on")]).unwrap();
                     let _config = config.enter();
                     let cache = PlanCache::default();
                     for sparse in [false, true] {
@@ -2968,7 +2964,6 @@ fn reference_scf_records_calibrated_fft_choices() {
                     let config = RunConfig::from_pairs(&[
                         ("fft_kernel_by_length", adaptive),
                         ("m2_fft", "rust"),
-                        ("fft_fused_rows", "off"),
                     ])
                     .unwrap();
                     let _scope = config.enter();
@@ -3051,12 +3046,9 @@ fn calibrated_shared_fft_keeps_choices_and_workspace_reuse() {
     for shape in [[4, 4, 4], [5, 7, 11], [3, 5, 24]] {
         for ranks in [1, 3, 8] {
             dft_mpi::simulate(ranks, |comm| {
-                let config = RunConfig::from_pairs(&[
-                    ("fft_kernel_by_length", "on"),
-                    ("m2_fft", "rust"),
-                    ("fft_fused_rows", "on"),
-                ])
-                .unwrap();
+                let config =
+                    RunConfig::from_pairs(&[("fft_kernel_by_length", "on"), ("m2_fft", "rust")])
+                        .unwrap();
                 let _config = config.enter();
                 let cache = PlanCache::default();
                 let _plans = cache.enter();
@@ -9643,11 +9635,9 @@ fn g4g_research() {
             history: 8,
         };
     }
-    let real = std::env::var("G4R_REAL").unwrap_or_else(|_| "off".into());
     let pulay = std::env::var("G4R_PULAY").unwrap_or_else(|_| "off".into());
     let canon = std::env::var("G4R_CANON").unwrap_or_else(|_| "off".into());
     let config = dft_numerics::switches::RunConfig::from_pairs(&[
-        ("refscf_real_start", &real),
         ("refscf_canonical_cluster", &canon),
         ("refscf_spin_pulay", &pulay),
     ])
@@ -9702,7 +9692,7 @@ fn g4g_research() {
         );
         for t in trace.records() {
             eprintln!(
-                "G4R real={real} map={} redo={} verify={} E={:.17e} dr2={:.10e} fraction={:.10e} spectrum={:?}",
+                "G4R canon={canon} pulay={pulay} map={} redo={} verify={} E={:.17e} dr2={:.10e} fraction={:.10e} spectrum={:?}",
                 t.iteration,
                 t.redo,
                 t.verification,

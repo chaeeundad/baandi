@@ -288,19 +288,8 @@ table! {
         "P3-FFT: clear only holes before coefficient/middle/slab scatter using cached contiguous ranges; same FFT order, default off pending dev08";
     FFT_DIRECT_PACK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-FFT: pack distributed real H input ORC rows directly into FFT sticks, avoiding the intermediate coefficient write/read; default off pending dev08";
-    FFT_FUSED_ROWS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "P3-FFT2: stream distributed local-potential last-axis inverse/multiply/forward through reusable rows with immutable zero-hole input; rustfft lanes only, rounding class, default off pending dev08";
     FFT_A2A_BALANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-A2A: cap rank stick counts to reduce padded FFT alltoall payload, preserving mirror units; use only if the block shrinks, row-reduction rounding class, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3l: si128 35.67 -> 34.60 s; setup -0.35 s, output -0.66 s).
-    NONLOCAL_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-NL: one MKL projection over all local rows instead of 256-row reduction panels; requires M2_DGEMM, rounding class, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
-    NONLOCAL_FUSE_COUPLING: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-ADDV: store DQ in the dead local projection buffer after rank reduction, omitting separate W storage; bit-identical, default off pending dev08";
-    // Adopted 2026-11-25 (dev08 one-run P3m: si128 border -0.97 s, back_and_add -0.40 s; counts identical).
-    NONLOCAL_BACK_ACCUM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "P3-ADDV: one sequential MKL P W directly into HX with beta=1; requires M2_DGEMM and MKL_DGEMM, rounding class, default off pending dev08";
 
     REFSCF_RMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-RMM: bounded RMM-DIIS sweeps between Davidson SCF iterations 1, 2 and multiples of five; verification always Davidson";
@@ -322,72 +311,28 @@ table! {
         "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; retained HX enabled";
     REFSCF_MEMORY_TRIM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-MEM: release dead start/map/delivery arrays and return band-sized Davidson storage; identical arithmetic; pending dev08";
-    K_LEAN_ENERGY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK4: k-point reference maps defer per-k kinetic/nonlocal band energies and the local/zero-mode integrals of ordinary (lean) maps to the final audit and reduce all per-k residual norms with the energy integrals in one tree sum per map; delivered energies, density, eigenvalues and counts bit-identical; intermediate audit fields kinetic/local/local_zero_mode/nonlocal become null; off = per-k terms and one residual reduction per k every map";
 
-    FORCE_BAND_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G5: one projector/derivative GEMM over all bands per k for nonlocal forces; unmeasured, default off";
     REFSCF_SPIN_FD_MOMENT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "R6a: reference collinear FD moment policies enabled by default; G4B 48/48 and dev08 gen15 fixed-moment Fe VERIFIED in 75.8 s; free-moment PBE remains G4D";
 
     XC_SCREEN_NEGATIVE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "G4E: screen XC-only small/signed vacuum densities with a screened-charge budget; accepted ADR 0046";
-    REFSCF_REAL_START: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "G4G research: Hermitian Gamma kinetic complements and real starting Ritz matrix; rejected (centred fixture stops converging), default off";
     REFSCF_CANONICAL_CLUSTER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4G research: canonical coordinates within roundoff-degenerate Ritz clusters; default off";
-    CDAV_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK3: complex reference Davidson keeps its workspace across calls, merges error-flag agreements into its numerical collectives and skips finite scans of known-finite GEMM operands; bit-identical; off restores per-call allocation and per-product agreements";
     REFSCF_SPIN_PULAY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G4G research: per-channel real-space Pulay replaces the Broyden proposal (serial fixed-sector only); default off pending dev08 O run";
-    K_START_MEMO: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK1: k atomic start computes each orbital radial transform once per (species channel, exact |k+G|) and reuses it over atoms and m; bit-identical; off restores the per-(row, atom, m) quadrature";
-    K_NL_TABLE_MEMO: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK1B: k start builds projector radial/angular factors for the rank's owned rows only (rows-only table, outcome agreed by one collective); bit-identical; off restores the full k-sphere factor table on every rank";
-    K_START_SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK1B: collinear spin k start builds bases, grids, projector tables, atomic columns and the start Ritz once and gives every channel its own operator and a copy of the orbitals; bit-identical; off builds the whole start per channel";
-    CDAV_BORDER_GRAM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK10: complex reference Davidson keeps the projected overlap and Hamiltonian of the previous basis and computes only the border of the appended columns (one Gram product and one reduction each); rounding class; off restores the full recompute after every append";
-    RADIAL_TABLE_START: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK14: k atomic start orbitals read their radial transforms from one uniform table per run and species channel (step 0.005 Bohr^-1, 8-point Lagrange) instead of a quadrature per |k+G|; start only (not bit-identical to the quadrature, delivered results inside the strict class); off restores the GK1 quadrature memo";
-    RADIAL_TABLE_NL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK14: k-point projector factors read their radial transforms from one uniform table per run and species projector (step 0.005 Bohr^-1, 8-point Lagrange, measured relative error <= 7.4e-15) instead of a quadrature per |k+G|; changes the k Hamiltonian at roundoff level (delivered energies inside the strict 1e-10 Ha class); Gamma-only path unchanged; off restores the quadrature";
-    CDAV_BORDER_FACTOR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK10B: complex reference Davidson extends the overlap Cholesky factor over the appended columns only (bordered Cholesky, leading factor kept) when the overlap was border-updated; rounding class; off refactors the whole overlap after every append";
-    CDAV_STREAM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK10B: complex reference Davidson computes its preconditioned corrections in one column pass with the preconditioner branch hoisted per column (as the real path's stream kernel); bit-identical; off restores the per-element loop";
     K_FIRST_EMPTY_RULE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "GK10B research: the first k map of the fixed-occupation reference k driver applies the empty-band Ritz threshold to empty bands (occupations are known before the first solve) instead of converging every band to the occupied threshold; changes the map-1 density when no redo follows (SCF trajectory; one synthetic fixture left the standard class), default off pending a dev08 A/B on redo cases";
-    K_START_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK10B: the unpolarized reference k start keeps H X of its Ritz orbitals (H Q C, one GEMM) and the k driver seeds its kept HX with it, so map 1 does not apply H to the start orbitals again (potential change corrected exactly); rounding class; off applies H in map 1";
-    K_REDO_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK10B: the first-iteration redo of the reference k driver starts from the coarse solve's kept X and HX (same input potential, zero change) instead of applying H to the start again; rounding class; off invalidates the kept HX before the redo";
     REFSCF_K_POOLS: Kind::Choice { allowed: &["off", "auto", "on"], default: "auto" }, "auto", "off, auto, on",
         "GK9 k-point pools (ADR 0041 option D) for the reference k and spin/FD drivers: the ranks form npool pools (contiguous rank blocks, MPI_Comm_split), each pool owns a contiguous block of whole k points and distributes each k's plane-wave rows over its ranks exactly as the distributed layout does over all ranks; per map one potential allgatherv, one record allgatherv from the pool leaders and one density alltoall summed in global k order; on = one rank per pool (stage 1; with fewer k than ranks the largest divisor of the rank count not above the k count); auto = the pool count of the GK9B cost rule (divisors of the rank count not above the k count, minimum of max over pools of sum_k (N_pw,k / p + 32 ceil(log2 p)) rows, ties to more pools); off = distributed layout; npool 1 is the distributed layout bit for bit; rounding class across rank/pool counts, fixed (ranks, npool) bit-reproducible; REFSCF_K_NPOOL forces a count";
     REFSCF_K_NPOOL: Kind::Number { default: None, valid: |v| (1. ..=65536.).contains(&v) && v.fract() == 0. }, "unset", "integer 1..65536",
         "GK9B: force this many k-point pools (clamped to the rank count and the k count; 1 = distributed layout), overriding REFSCF_K_POOLS=auto/on (not off); pool sizes and k blocks follow dft_mpi::block_counts; for A/B tests";
-    RADIAL_TABLE_FIELDS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK16: the k-path common start (and the fixed-density k start) reads the atomic-charge, Coulomb-subtracted local and core-density |G| transforms of the ionic/atomic fields from one uniform radial table per species and function (step 0.005 Bohr^-1, 8-point Lagrange, nodes split over ranks) instead of a quadrature per distinct |G|; G = 0 stays exact; changes the local potential at roundoff level (rounding class, delivered energies inside the strict 1e-10 Ha class); Gamma-only path unchanged; off restores the per-shell quadrature";
-    FFT_ONE_RANK_DIRECT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GK17: the one-rank stick FFT of a complex k operator (every pooled k operator, every serial k run; the real Gamma operator keeps the transpose path) runs its stick transforms in per-vector batch buffers and reads/writes the middle stage there directly, without packing into the transpose send buffer, the self-alltoall copy and the unpack into the stick buffer; rustfft lanes only (vendor lanes keep the transpose path); bit-identical; off restores the transpose path";
     K_KEPT_SLABS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "GK17 (plan GK15; GF1: also the spin/FD map, budget shared by its channels): the fixed-occupation reference k map keeps the real-space planes psi_b(r) that its density pass computes for the leading bands of each k (bounded by K_KEPT_SLAB_MB per rank), and the next map's kept-HX update reuses them, so (V_new - V_old) psi_b needs only the forward transform; bit-identical; costs the slab memory; off = inverse and forward transform per band";
     K_KEPT_SLAB_MB: Kind::Number { default: Some(1024.), valid: |v| (0. ..=1048576.).contains(&v) && v.fract() == 0. }, "1024", "integer MiB 0..1048576",
         "GK17: per-rank budget of K_KEPT_SLABS in MiB, split evenly over the rank's k points in k order (bands per k = min(bands, budget / (k count x plane bytes))); 0 keeps no slab";
-    SPIN_FD_START_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GF1 (port of GK10B K_START_KEPT_HX to the spin/FD driver): the reference spin/FD k start keeps H X of its Ritz orbitals (H Q C, one GEMM; the FD buffer columns appended after the start get one H application each) and the driver seeds every channel's kept HX with it, so map 1 does not apply H to the start orbitals again (potential change corrected exactly); rounding class; off applies H in map 1";
-    SPIN_FD_REDO_KEPT_HX: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GF1 (port of GK10B K_REDO_KEPT_HX to the spin/FD driver): the first-iteration redo starts from the coarse solve's kept X and HX (same input potential, zero change, no transforms) instead of applying H again; rounding class; off invalidates the kept HX before the redo";
-    STRESS_FORCE_PASS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "GD1: on = the frozen-Miller stress re-runs the complete force pass as its precondition check (former behaviour); off = it runs only the shared precondition checks (identity, certificate/verification, tolerances, ledger) without computing forces; stress bit-identical; precondition_force_band_passes reports 0 when off";
-    DERIV_NL_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GD1: nonlocal forces and nonlocal stress per k from one projector/gradient GEMM per atom (A = [beta | d beta/dq], B = [psi | q psi]) instead of the NonlocalOperator build plus per-G scalar loops; rounding class (reduction order); off restores the former per-k operator and scalar loops";
-    DERIV_RADIAL_TABLES: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GD1: with two or more k blocks the derivative pass reads the projector transforms and their q derivatives from uniform radial tables (step 0.005 Bohr^-1, 8-point Lagrange, nodes split over ranks, node values equal to the quadrature) instead of one quadrature per distinct |k+G|; rounding class; off restores the quadrature";
-    DERIV_SHELLS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GD1: the local and core |G|-shell transforms of the derivative pass (local/core forces and stress, the rebuilt core density) are evaluated once per pass with the G-independent integrand (including erf) hoisted, split over the ranks in contiguous blocks and shared by one allgatherv, instead of per shell on every rank (and per atom for the core density); bit-identical; off restores the per-shell evaluation";
     DERIV_SHELL_TABLES: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "GD2: with DERIV_SHELLS on, the local/core |G|-shell values (and q slopes) of the derivative pass are interpolated from one uniform radial table per potential and function (step 0.005 Bohr^-1, 8-point Lagrange, node values = the exact quadrature split over ranks, one allgatherv) instead of one quadrature per distinct |G|, when the table has fewer nodes than there are distinct |G| (large or low-symmetry cells; otherwise the exact per-shell values are kept); only the q-dependent radial integral is tabulated, the analytic Gaussian-Coulomb term stays exact; rounding class; off restores the per-shell quadrature";
+        "GD2: the local/core |G|-shell values (and q slopes) of the derivative pass are interpolated from one uniform radial table per potential and function (step 0.005 Bohr^-1, 8-point Lagrange, node values = the exact quadrature split over ranks, one allgatherv) instead of one quadrature per distinct |G|, when the table has fewer nodes than there are distinct |G| (large or low-symmetry cells; otherwise the exact per-shell values are kept); only the q-dependent radial integral is tabulated, the analytic Gaussian-Coulomb term stays exact; rounding class; off restores the per-shell quadrature";
     DERIV_XC_SPLIT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GD2: the unpolarized PBE evaluation of the derivative pass (NLCC core force potential, XC stress) splits its pointwise functional evaluation over the ranks (contiguous point blocks, one allgatherv of the per-point energy density, vrho and vsigma), forms the three density gradients from one forward FFT, and takes the GGA stress metric from the same evaluation instead of a second gradient + functional pass; bit-identical; off restores the replicated evaluation and the separate metric";
     DERIV_JOINT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

@@ -1,5 +1,8 @@
-//! GK4: deferred per-k energy terms (`BAANDI_K_LEAN_ENERGY`) are bit-identical
-//! to the eager per-map terms in everything delivered and in every stop input.
+//! GK4: deferred per-k energy terms are the only path since CL1 (the eager
+//! per-map arm `K_LEAN_ENERGY=off` was retired; its bit identity in
+//! everything delivered and in every stop input is recorded in the attempts
+//! ledger GK4 and docs/performance/switch-retirement.md). This test keeps the
+//! lean path bit-reproducible, converged, with null intermediate slots.
 //! Synthetic data, never QE evidence.
 #[allow(dead_code)]
 mod common;
@@ -10,7 +13,6 @@ use dft_engine::{
 };
 use dft_geometry::{Atom, Cell, kpoints::KPoint};
 use dft_mpi::Collective;
-use dft_numerics::switches::RunConfig;
 
 fn bits(v: &[f64]) -> Vec<u64> {
     v.iter().map(|x| x.to_bits()).collect()
@@ -76,11 +78,11 @@ fn assert_identical(a: &Run, b: &Run, label: &str) {
             x.energy.harris_foulkes.to_bits(),
             y.energy.harris_foulkes.to_bits()
         );
-        // Only the four deferred slots may differ, and only as null (NaN).
+        // The four deferred slots are null (NaN) together; compare the rest.
         if y.energy.kinetic.is_nan() {
             assert!(y.energy.local.is_nan() && y.energy.nonlocal.is_nan());
             assert!(y.energy.local_zero_mode.is_nan());
-            assert!(x.energy.kinetic.is_finite());
+            assert!(x.energy.kinetic.is_nan());
         } else {
             assert_eq!(energy_bits(&x.energy), energy_bits(&y.energy));
         }
@@ -107,7 +109,7 @@ fn assert_identical(a: &Run, b: &Run, label: &str) {
 }
 
 #[test]
-fn k_lean_energy_is_bit_identical() {
+fn k_lean_energy_is_bit_reproducible() {
     let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
     let atoms = [
         Atom::new("Xx", [0.13, 0.21, 0.32]),
@@ -150,9 +152,7 @@ fn k_lean_energy_is_bit_identical() {
                         verification,
                         ..Default::default()
                     };
-                    let run = |value: &str| {
-                        let config = RunConfig::from_pairs(&[("k_lean_energy", value)]).unwrap();
-                        let _scope = config.enter();
+                    let run = || {
                         k_driver::run_with(
                             StartInput {
                                 cell: &cell,
@@ -166,17 +166,16 @@ fn k_lean_energy_is_bit_identical() {
                         )
                         .unwrap()
                     };
-                    let off = run("off");
-                    let on = run("on");
+                    let off = run();
+                    let on = run();
                     let label = format!("{rows:?} {verification:?} max={max_iterations} P={ranks}");
                     assert_identical(&off, &on, &label);
                     if max_iterations == 100 {
                         assert!(on.outcome.converged, "{label}: {}", on.exit_reason);
                     }
-                    // The switch is active: ordinary intermediate maps carry null slots.
+                    // Ordinary intermediate maps carry null slots.
                     if on.records.len() > 1 {
                         assert!(on.records[0].energy.kinetic.is_nan(), "{label}");
-                        assert!(off.records[0].energy.kinetic.is_finite(), "{label}");
                     }
                     if comm.rank() == 0 {
                         println!(

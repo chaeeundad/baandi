@@ -3768,6 +3768,33 @@ preflight printed `atomic_start ... fallback_reason: Fermi-Dirac occupations`.
    (5 x 5 x 28 Bohr, two Z = 3 atoms, 2x2x1): attempts 3 -> 2, same 17 maps,
    identical F. Checkpoints carry the predictor state when the switch is on.
 
+### Verification attempt scheduling and failed-attempt use (GV1, 2026-11-27)
+
+Three switches of the Gamma, k and spin/FD reference drivers, all default off
+(dev08 decides); none changes the pass criterion, the eigen tolerance of an
+attempt, the delivered state or the recorded attempt fields.
+
+- `VERIFY_RESPONSE_PREDICTOR`: before the first attempt of a run, the
+  attempt's Coulomb error is predicted from the Broyden secant pairs
+  (`Broyden::predict_output_residual`). Linearly F(y) = K F with K the output
+  response; each pair gives dy_i = dx_i + dF_i = K dx_i, so projecting F onto
+  span(dx_i) (metric least squares, numerically dependent directions dropped)
+  predicts E_H[sum c_i dy_i]. A stop predicted at or above the threshold is
+  skipped through the existing predictor rule. Because V5 discards a failed
+  attempt's output, skipping an attempt that would have failed leaves the
+  trajectory and the delivered state bit-identical; a wrong skip costs one
+  ordinary map. The k/Gamma record `verification_cost.predicted_error_ha`
+  carries the value when used.
+- `VERIFY_FEED=feed|half`: after a failed attempt the pair (y, F(y)) enters the
+  Broyden history after the stop map's own pair (half: midpoint of the two
+  proposals). F(y) has its G = 0 entry zeroed on the closed-shell drivers.
+  Ignored by the research Pulay variant of the spin driver.
+- `VERIFY_SKIPS=run`: consecutive skips while the prediction stays at or above
+  the threshold and each skipped stop's residual is below the previous skipped
+  stop's; the last skipped residual is checkpointed in run mode only.
+
+Mac evidence and the dev08 request: ledger GV1-VERIFY-COST.
+
 ### FD buffer bands (2026-11-26)
 
 Problem: FD runs on the reference driver failed with `electronic reference

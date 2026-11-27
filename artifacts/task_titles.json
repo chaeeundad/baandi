@@ -243,5 +243,7 @@
  "GT1-TIME-REVERSAL": "비자성 계산에서 시간 반전으로 k점 줄이기(Ta6Zn7 34→26)",
  "GB1-FD-BAND-COVERAGE": "금속 빈 밴드 판정을 수렴 상태 기준으로, 홀수 전자 자동 밴드 수 수정(Cs2TcI6)",
  "GB2-FD-START-GROWTH": "금속: 원자 시작 오비탈 지원, 밴드 증가를 일시 상태가 아닌 판정으로, 검증 실패 비용 줄이기",
- "GT2-FULL-GROUP-K": "k점 격자를 보존하지 않는 대칭도 점별로 써서 k점 축소(Ta6Zn7 34→26)"
+ "GT2-FULL-GROUP-K": "k점 격자를 보존하지 않는 대칭도 점별로 써서 k점 축소(Ta6Zn7 34→26)",
+ "GM1-FD-MIXING": "금속 SCF 혼합 수렴 속도(Cs2TcI6 15회 vs QE 11회) 원인과 개선",
+ "GT2B-GRID-OPS": "격자와 맞지 않는 회전도 역공간 대칭화로 유지(QE 방식, Ta6Zn7·Cl2)"
 }

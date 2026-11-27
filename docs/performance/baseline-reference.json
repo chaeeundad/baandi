@@ -1,7 +1,7 @@
 {
- "note": "R0 identity baseline; source 181275fbad3856e0eeac60e74bfd1d34cda37939; macOS Apple Silicon; cargo build --release -p dft-cli, default features; one thread; timings are observations only, not dev08 acceptance or QE evidence.",
+ "note": "CL1B refresh of the R0 reference identity baseline; source 4c82db53d7a64ab1c6a9a7ce7937deeaf01ff2cf; macOS Apple Silicon; cargo build --release -p dft-cli, default features; one thread; timings are observations only, not dev08 acceptance or QE evidence.",
  "binary": "dft-cli",
- "binary_sha256": "13c1509a1ea52461ef2e379e3bbede46d341acb93441d9cefeb5b9c566fd0aa6",
+ "binary_sha256": "ccfbac710a19d2f26fad659f4617bfbeac39567a6350bbd3cbee2d7710c1563d",
  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
  "platform": {
   "system": "Darwin",
@@ -25,14 +25,59 @@
   "--record",
   "docs/performance/baseline-reference.json",
   "--note",
-  "R0 identity baseline; source 181275fbad3856e0eeac60e74bfd1d34cda37939; macOS Apple Silicon; cargo build --release -p dft-cli, default features; one thread; timings are observations only, not dev08 acceptance or QE evidence."
+  "CL1B refresh of the R0 reference identity baseline; source 4c82db53d7a64ab1c6a9a7ce7937deeaf01ff2cf; macOS Apple Silicon; cargo build --release -p dft-cli, default features; one thread; timings are observations only, not dev08 acceptance or QE evidence."
  ],
  "driver_environment": {
-  "BAANDI_REFERENCE_SCF": "on",
-  "BAANDI_REFERENCE_STRICT": "off"
+  "BAANDI_REFERENCE_STRICT": null
  },
- "machine_note": "Mac timings are observations only; identity is driver-specific",
+ "machine_note": "Record host/build and timing scope in the note; identity is driver-specific",
  "energy_tolerance_ha": 1e-12,
+ "refresh": {
+  "task": "CL1B-BASELINE",
+  "date": "2026-11-27",
+  "source_commit": "4c82db53d7a64ab1c6a9a7ce7937deeaf01ff2cf",
+  "previous_source_commit": "181275fbad3856e0eeac60e74bfd1d34cda37939",
+  "reason": "k cases stale on main since 84e3058c (Merge GK10-BORDER-GRAM: border-only projected S/H in the complex reference Davidson, rounding class); found by git bisect --first-parent 2fa8a091..4c82db53 with bench_scf --require-identical (first bad 84e3058c, last good d2d7a3db). Gamma unchanged. Later sprint changes (GK10B, GK14, GK16, ...) are rounding class too and are included in this refresh.",
+  "cases": {
+   "gamma": {
+    "old_total_energy_ha": -7.295530466374794,
+    "new_total_energy_ha": -7.295530466374794,
+    "delta_energy_ha": 0.0,
+    "old_density_sha256": "a0c76c8c7741125ad2cf59dee1534a0e4c29bc306002e6de22e56b92c99573e2",
+    "new_density_sha256": "a0c76c8c7741125ad2cf59dee1534a0e4c29bc306002e6de22e56b92c99573e2",
+    "density_identical": true,
+    "old_iterations": 7,
+    "new_iterations": 7,
+    "old_operator_applications": 85,
+    "new_operator_applications": 85
+   },
+   "k222s": {
+    "old_total_energy_ha": -7.919423412321121,
+    "new_total_energy_ha": -7.919423412321121,
+    "delta_energy_ha": 0.0,
+    "old_density_sha256": "67120c8ad65d1b86021aec1aa39c82e5e3dfd39f5dc758473589a9cd77c29d5c",
+    "new_density_sha256": "d049f1f68b74dc05eb6c50e3d053dd6ace50e3089c87ebe99869f66be2871dc5",
+    "density_identical": false,
+    "old_iterations": 7,
+    "new_iterations": 7,
+    "old_operator_applications": 455,
+    "new_operator_applications": 391
+   },
+   "k222": {
+    "old_total_energy_ha": -7.831230055901806,
+    "new_total_energy_ha": -7.8312300559018055,
+    "delta_energy_ha": 8.881784197001252e-16,
+    "old_density_sha256": "680dd07126157dadfe5d2cb2cf036a3a05e5778e4afa8c99357651d7c3b3cdef",
+    "new_density_sha256": "68e4e756d5617884d3b2c836965289c89e1943e806452deeef44aa8be065aab9",
+    "density_identical": false,
+    "old_iterations": 7,
+    "new_iterations": 7,
+    "old_operator_applications": 744,
+    "new_operator_applications": 680
+   }
+  },
+  "note_operator_applications": "k cases need 64 fewer operator applications (GK10B kept start/redo HX); SCF iterations unchanged"
+ },
  "cases": {
   "gamma": {
    "scf": {
@@ -40,17 +85,6 @@
     "driver_reason": null,
     "driver_source": "default",
     "reference_switches": {
-     "BAANDI_REFERENCE_SCF": {
-      "allowed": "on, off",
-      "consulted": true,
-      "default": "on",
-      "fallback_reason": null,
-      "meaning": "production driver; off = legacy standard path, deprecated, removed in R10",
-      "path": null,
-      "requested": null,
-      "source": "default",
-      "value": "on"
-     },
      "BAANDI_REFERENCE_STRICT": {
       "allowed": "on, off",
       "consulted": true,
@@ -73,26 +107,26 @@
    "certificate_iterations": 3,
    "label": "Gamma only, 30 Ry",
    "wall_s": [
-    0.46219429200000006,
-    0.04036470800000003,
-    0.04082624999999995
+    0.575868375,
+    0.12136579200000008,
+    0.10953133400000004
    ],
-   "wall_median_s": 0.04082624999999995,
-   "engine_total_s": 0.032501459,
+   "wall_median_s": 0.12136579200000008,
+   "engine_total_s": 0.046955084,
    "phases_s": {
-    "density_s": 0.002734,
-    "diagonalization_s": 0.011396792,
-    "mixing_s": 0.001287044,
-    "potential_s": 0.000803667,
-    "total_energy_s": 0.001546748
+    "density_s": 0.00395771,
+    "diagonalization_s": 0.017680792,
+    "mixing_s": 0.001998249,
+    "potential_s": 0.001315083,
+    "total_energy_s": 0.00247646
    },
-   "engine_total_median_s": 0.032501459,
+   "engine_total_median_s": 0.048550167,
    "phase_medians_s": {
-    "density_s": 0.002734,
-    "diagonalization_s": 0.011396792,
-    "mixing_s": 0.001287044,
-    "potential_s": 0.000825708,
-    "total_energy_s": 0.00178275
+    "density_s": 0.004132165,
+    "diagonalization_s": 0.017680792,
+    "mixing_s": 0.001968041,
+    "potential_s": 0.001315083,
+    "total_energy_s": 0.00247646
    },
    "iterations": 7,
    "total_energy_ha": -7.295530466374794,
@@ -131,64 +165,55 @@
   "k222s": {
    "scf": {
     "driver": "reference",
+    "driver_reason": null,
+    "driver_source": "default",
     "reference_switches": {
-     "BAANDI_REFERENCE_SCF": {
+     "BAANDI_REFERENCE_STRICT": {
       "allowed": "on, off",
       "consulted": true,
       "default": "off",
       "fallback_reason": null,
-      "meaning": "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)",
-      "path": null,
-      "requested": "on",
-      "source": "env",
-      "value": "on"
-     },
-     "BAANDI_REFERENCE_STRICT": {
-      "allowed": "on, off",
-      "consulted": false,
-      "default": "off",
-      "fallback_reason": null,
       "meaning": "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification",
       "path": null,
-      "requested": "off",
-      "source": "env",
+      "requested": null,
+      "source": "default",
       "value": "off"
      }
     }
    },
-   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [2, 2, 2]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
-   "input_sha256": "e8fc0602494f31b3a4df09e0e5c06f1f91248a0896c75403767c2bbee95779f1",
+   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [2, 2, 2]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\n",
+   "input_sha256": "f61201e75adecc2e107181708f8bdd01dc4dbaf3c0e84c1e941eb06e26fe4c41",
    "total_energy_bits_hex": "c01fad7d54bc623e",
-   "operator_applications": 455,
+   "operator_applications": 391,
    "davidson_iterations": 74,
    "certificate_applications": 40,
    "certificate_iterations": 8,
    "label": "2x2x2 shifted (4 k), 30 Ry",
    "wall_s": [
-    0.31402429200000004,
-    0.3061505419999999,
-    0.30571670800000006
+    0.36899962500000005,
+    0.2828146250000001,
+    0.334846416
    ],
-   "wall_median_s": 0.3061505419999999,
-   "engine_total_s": 0.29746675,
+   "wall_median_s": 0.334846416,
+   "engine_total_s": 0.325681917,
    "phases_s": {
-    "density_s": 0.026079085,
-    "diagonalization_s": 0.10343671,
-    "mixing_s": 0.001466084,
-    "potential_s": 0.000874501,
-    "total_energy_s": 0.001661668
+    "density_s": 0.050055169,
+    "diagonalization_s": 0.152413413,
+    "mixing_s": 0.003007624,
+    "potential_s": 0.001373584,
+    "total_energy_s": 0.00245621
    },
-   "engine_total_median_s": 0.298431875,
+   "engine_total_median_s": 0.301561542,
    "phase_medians_s": {
-    "density_s": 0.026188293,
-    "diagonalization_s": 0.105816335,
-    "mixing_s": 0.001466084,
-    "potential_s": 0.000874501,
-    "total_energy_s": 0.001509873
+    "density_s": 0.043157789,
+    "diagonalization_s": 0.138920247,
+    "mixing_s": 0.002869959,
+    "potential_s": 0.001289376,
+    "total_energy_s": 0.00245621
    },
    "iterations": 7,
    "total_energy_ha": -7.919423412321121,
-   "density_sha256": "67120c8ad65d1b86021aec1aa39c82e5e3dfd39f5dc758473589a9cd77c29d5c",
+   "density_sha256": "d049f1f68b74dc05eb6c50e3d053dd6ace50e3089c87ebe99869f66be2871dc5",
    "effective_profile": "standard",
    "execution": {
     "backend": {
@@ -201,16 +226,7 @@
     "effective_profile": "standard",
     "effective_solver": "reference_block_davidson",
     "lean_solves": 0,
-    "non_default_switches": {
-     "BAANDI_REFERENCE_SCF": {
-      "source": "env",
-      "value": "on"
-     },
-     "BAANDI_REFERENCE_STRICT": {
-      "source": "env",
-      "value": "off"
-     }
-    },
+    "non_default_switches": {},
     "parallel_model": "threads",
     "path_reason": null,
     "path_status": "applied",
@@ -227,72 +243,60 @@
     "standard_threshold_ha": 5e-09,
     "verification": "fixed_point"
    },
-   "switches_not_default": {
-    "BAANDI_REFERENCE_SCF": "on",
-    "BAANDI_REFERENCE_STRICT": "off"
-   }
+   "switches_not_default": {}
   },
   "k222": {
    "scf": {
     "driver": "reference",
+    "driver_reason": null,
+    "driver_source": "default",
     "reference_switches": {
-     "BAANDI_REFERENCE_SCF": {
+     "BAANDI_REFERENCE_STRICT": {
       "allowed": "on, off",
       "consulted": true,
       "default": "off",
       "fallback_reason": null,
-      "meaning": "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)",
-      "path": null,
-      "requested": "on",
-      "source": "env",
-      "value": "on"
-     },
-     "BAANDI_REFERENCE_STRICT": {
-      "allowed": "on, off",
-      "consulted": false,
-      "default": "off",
-      "fallback_reason": null,
       "meaning": "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification",
       "path": null,
-      "requested": "off",
-      "source": "env",
+      "requested": null,
+      "source": "default",
       "value": "off"
      }
     }
    },
-   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [2, 2, 2]\nkshift = [0.0, 0.0, 0.0]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
-   "input_sha256": "15061f5f3be45e3ff8f9fbf4d413e04ae4f4078b7424077a6ec4218b141712c2",
-   "total_energy_bits_hex": "c01f532df8c633b9",
-   "operator_applications": 744,
+   "input_toml": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [2, 2, 2]\nkshift = [0.0, 0.0, 0.0]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\n",
+   "input_sha256": "738783f297030ef71a795b2c04097beff4b0b273d68463c6797fef998f55d425",
+   "total_energy_bits_hex": "c01f532df8c633b8",
+   "operator_applications": 680,
    "davidson_iterations": 111,
    "certificate_applications": 88,
    "certificate_iterations": 16,
    "label": "2x2x2 (8 k), 30 Ry",
    "wall_s": [
-    0.5451430000000002,
-    0.5293657079999998,
-    0.5478442500000003
+    0.49751633299999964,
+    0.49572766700000015,
+    0.49130116700000004
    ],
-   "wall_median_s": 0.5451430000000002,
-   "engine_total_s": 0.539297375,
+   "wall_median_s": 0.49572766700000015,
+   "engine_total_s": 0.48116025,
    "phases_s": {
-    "density_s": 0.048640121,
-    "diagonalization_s": 0.180056706,
-    "mixing_s": 0.001545585,
-    "potential_s": 0.000896625,
-    "total_energy_s": 0.0016745
+    "density_s": 0.070024543,
+    "diagonalization_s": 0.241792837,
+    "mixing_s": 0.002259458,
+    "potential_s": 0.002907083,
+    "total_energy_s": 0.002279792
    },
-   "engine_total_median_s": 0.535868792,
+   "engine_total_median_s": 0.485524542,
    "phase_medians_s": {
-    "density_s": 0.048154082,
-    "diagonalization_s": 0.175565211,
-    "mixing_s": 0.001515499,
-    "potential_s": 0.000896625,
-    "total_energy_s": 0.001688707
+    "density_s": 0.073603546,
+    "diagonalization_s": 0.239624335,
+    "mixing_s": 0.002533166,
+    "potential_s": 0.001242416,
+    "total_energy_s": 0.002335877
    },
    "iterations": 7,
-   "total_energy_ha": -7.831230055901806,
-   "density_sha256": "680dd07126157dadfe5d2cb2cf036a3a05e5778e4afa8c99357651d7c3b3cdef",
+   "total_energy_ha": -7.8312300559018055,
+   "density_sha256": "68e4e756d5617884d3b2c836965289c89e1943e806452deeef44aa8be065aab9",
    "effective_profile": "standard",
    "execution": {
     "backend": {
@@ -305,16 +309,7 @@
     "effective_profile": "standard",
     "effective_solver": "reference_block_davidson",
     "lean_solves": 0,
-    "non_default_switches": {
-     "BAANDI_REFERENCE_SCF": {
-      "source": "env",
-      "value": "on"
-     },
-     "BAANDI_REFERENCE_STRICT": {
-      "source": "env",
-      "value": "off"
-     }
-    },
+    "non_default_switches": {},
     "parallel_model": "threads",
     "path_reason": null,
     "path_status": "applied",
@@ -331,10 +326,7 @@
     "standard_threshold_ha": 5e-09,
     "verification": "fixed_point"
    },
-   "switches_not_default": {
-    "BAANDI_REFERENCE_SCF": "on",
-    "BAANDI_REFERENCE_STRICT": "off"
-   }
+   "switches_not_default": {}
   }
  }
 }

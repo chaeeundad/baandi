@@ -29,8 +29,6 @@ const OUTPUTS: [&str; 5] = [
     "rpa_frequency.csv",
     "results.json",
 ];
-/// Ha -> meV.
-
 /// Per-q JSON records in a directory; floats stored as IEEE bits (exact
 /// resume) next to readable values. Rank 0 writes; every rank reads.
 struct RpaStore {

@@ -1714,8 +1714,9 @@ mod stop_rule_tests {
         assert_eq!(d.force_criterion, ForceCriterion::Norm);
         assert_eq!(d.energy_tol_ha, None);
         assert_eq!((d.fire_dt, d.fire_dt_max), (0.1, 1.0));
-        // 0.02 eV/A = 0.02 / (27.211386 eV / 0.52917721 A) Ha/Bohr.
-        let expected = 0.02 * 0.529_177_210_9 / 27.211_386_245_988;
+        // 0.02 eV/A in Ha/Bohr, built from the eV and Angstrom conversions.
+        let expected = dft_units::to_hartree(0.02, dft_units::EnergyUnit::ElectronVolt)
+            / dft_units::to_bohr(1.0, dft_units::LengthUnit::Angstrom);
         assert!(
             (d.force_tol_ha_bohr - expected).abs() < 1e-8 * expected,
             "{}",

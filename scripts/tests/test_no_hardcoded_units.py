@@ -15,8 +15,12 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-REFERENCE_TESTS = {"crates/dft-units/tests/all/units.rs"}
-EXCLUDED_DIRS = {"target", "vendor", ".git", ".agents", ".codex"}
+REFERENCE_TESTS = {
+    "crates/dft-units/tests/all/units.rs",
+    # Independent Angstrom literal for crystal fixtures; dft-geometry does not depend on dft-units.
+    "crates/dft-geometry/tests/symmetry.rs",
+}
+EXCLUDED_DIRS = {"target", "vendor", ".git", ".agents", ".codex", ".claude"}
 # Match decimal Rust literals, including digit separators and scientific notation.
 LITERAL = re.compile(r"(?<![\w.])(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?")
 PREFIXES = ("5291772", "2721138", "1360569", "1602176", "4359744", "2941", "2942")

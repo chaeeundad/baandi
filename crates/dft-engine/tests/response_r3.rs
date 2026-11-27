@@ -20,7 +20,9 @@ use dft_geometry::{Atom, Cell};
 use dft_physics::data::Array3;
 
 /// Ha -> meV.
-const MEV: f64 = 27_211.386_245_988;
+fn mev(ha: f64) -> f64 {
+    dft_units::from_hartree(ha, dft_units::EnergyUnit::MilliElectronVolt)
+}
 
 struct System<'a> {
     cell: Cell,
@@ -180,7 +182,7 @@ fn rpa_energy_contracts() {
                 ..options()
             });
             if let Some(prev) = last {
-                let diff = (r.energies[0] - prev) * MEV / r.atoms as f64;
+                let diff = mev(r.energies[0] - prev) / r.atoms as f64;
                 println!(
                     "N_w {points}: E_c {:.12} Ha, change {diff:.3e} meV/atom",
                     r.energies[0]
@@ -199,11 +201,11 @@ fn rpa_energy_contracts() {
         for (label, e) in sets {
             println!(
                 "q0 directions {label}: E_c(q=0) {e:.12} Ha, vs product {:.3e} meV",
-                (e - reference) * MEV
+                mev(e - reference)
             );
         }
         let lebedev26 = sets.iter().find(|s| s.0 == "lebedev-26").unwrap().1;
-        assert!((lebedev26 - reference).abs() * MEV <= 0.01);
+        assert!(mev((lebedev26 - reference).abs()) <= 0.01);
         println!(
             "q0 body only (G = 0 dropped): {:.12} Ha",
             q0.cutoffs[1].body_only_energy.unwrap()

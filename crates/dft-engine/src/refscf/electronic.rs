@@ -946,6 +946,10 @@ pub(super) async fn run_continuation<K: Collective>(
     // its attempt (one ordinary map instead) when e r / r0 >= the threshold,
     // never twice in a row. The pass criterion is unchanged.
     let use_predictor = config.on(Id::FD_VERIFY_PREDICTOR);
+    // GM1 (`SCF_ETHR_GUARD`): map accuracy relative to the SCF residual.
+    let ethr_guard = config.choice(Id::SCF_ETHR_GUARD);
+    let redo_every_map = matches!(ethr_guard, "redo" | "both");
+    let forecast_ethr = matches!(ethr_guard, "forecast" | "both");
     let mut predictor = super::driver::VerificationPredictor::default();
     macro_rules! checkpoint_state {
         () => {
@@ -1224,7 +1228,10 @@ pub(super) async fn run_continuation<K: Collective>(
                     edge_electrons: miss.edge_electrons,
                 });
             }
-            if iteration == 1 && !redo && dr2 < ethr * electrons.max(1.) {
+            // The first-map rule; with GM1 `SCF_ETHR_GUARD` redo on every
+            // ordinary map: a residual below the map's own diagonalization
+            // error estimate is not trusted for mixing.
+            if (iteration == 1 || redo_every_map) && !redo && dr2 < ethr * electrons.max(1.) {
                 let report = StepReport::new(
                     iteration,
                     StepKind::Ordinary,
@@ -1465,6 +1472,16 @@ pub(super) async fn run_continuation<K: Collective>(
             }
             mixing = update?;
             history_conditioning = mixer.conditioning_diagnostics();
+            // GM1 (`SCF_ETHR_GUARD` forecast): the next map's eigenvalue threshold
+            // follows min(dr2, |F~|^2), the residual the secant model leaves
+            // unexplained, so a map is solved finely enough for the residual
+            // it is expected to produce, not only for the previous one.
+            if forecast_ethr {
+                let reduced = metric.norm(comm, mixer.reduced_residual())?;
+                if reduced.is_finite() {
+                    previous = previous.min(reduced);
+                }
+            }
             let mut proposal = inverse(&mut plan, comm, &next, policy.channels())?;
             if let Some(mixers) = &mut pulay {
                 use dft_solvers::mixing::DensityMixer;

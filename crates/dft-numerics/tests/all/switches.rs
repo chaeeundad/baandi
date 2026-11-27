@@ -231,13 +231,13 @@ fn legacy_defaults_are_unchanged() {
         value(Id::GRID_INCOMPATIBLE_OPS),
         Value::Choice("reciprocal")
     );
-    assert_eq!(TABLE.len(), 96);
     // Default off since 2026-11-27 (FD/spin only; dev08 gen59 arm D).
     assert_eq!(
         switches::resolve(switches::switch(Id::STANDARD_RESIDUAL_GUARD), None).0,
         Value::Choice("off")
     );
-    assert_eq!(TABLE.len(), 96);
+    assert_eq!(value(Id::SCF_ETHR_GUARD), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 97);
 }
 
 #[test]

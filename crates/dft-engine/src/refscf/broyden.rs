@@ -63,6 +63,9 @@ pub struct Broyden {
     conditioning: bool,
     conditioning_diagnostics: ConditioningDiagnostics,
     retained: usize,
+    /// Scratch: the history-reduced residual F~ of the last update (before
+    /// screening), the least-squares remainder of F on the retained secants.
+    reduced: Vec<C>,
 }
 impl Broyden {
     /// ONEPATH-3 charge/magnetization history. TF must not freeze a free
@@ -136,11 +139,13 @@ impl Broyden {
             conditioning: false,
             conditioning_diagnostics: ConditioningDiagnostics::default(),
             retained: 0,
+            reduced: vec![C::default(); g2.len()],
         };
         observe(
             Mem::History,
             bytes(&mixer.previous_x)
                 + bytes(&mixer.previous_f)
+                + bytes(&mixer.reduced)
                 + mixer.df.iter().chain(&mixer.dx).map(bytes).sum::<usize>(),
         );
         observe(
@@ -194,6 +199,13 @@ impl Broyden {
     }
     pub fn gamma(&self) -> &[f64] {
         &self.gamma[..self.occupancy()]
+    }
+    /// History-reduced residual F~ = F - sum_i gamma_i dF_i of the last
+    /// accepted update, before screening (equal to F without history). Its
+    /// metric norm is the part of the residual the secant model leaves
+    /// unexplained: GM1 uses it to forecast the next map's residual.
+    pub fn reduced_residual(&self) -> &[C] {
+        &self.reduced
     }
 
     /// Call only for an accepted mixing step: neither convergence nor the
@@ -319,7 +331,10 @@ impl Broyden {
                     xx -= self.gamma[i] * self.dx[i][j];
                     ff -= self.gamma[i] * self.df[i][j];
                 }
+                self.reduced[j] = ff;
                 ff *= self.screening[j]; // TF acts on F_tilde only, never dx.
+            } else {
+                self.reduced[j] = ff;
             }
             next[j] = xx + self.profile.beta * ff;
         }

@@ -4969,3 +4969,56 @@ dev08 request: gen64 Ta6Zn7 v2 and Hg, nks (expect Ta6Zn7 26), wall and energy a
 Lesson: a G-space density projector never needed a permuted grid; only the nonlinear XC quadrature
 did, and projecting the potential restores the invariance of H at the cost of a 1e-11 Ha quadrature
 difference.
+
+### GM1-FD-MIXING (2026-11-27): why the FD Broyden contracts slower than QE on Cs2TcI6
+
+Context: dev08 Cs2TcI6 (75 e, FD 0.005 Ha, 45 bands, 8 k, 48 ops), identical inputs: BAANDI 15 maps (one failed
+verification) against QE 11; BAANDI dr2 rises at it4 (6.9e-2 -> 0.271 Ry) and contracts x4-7 per step afterwards,
+QE x10-60 (relayed). Ta6Zn7, TiGa, Au track QE within 1-30 % per iteration (relayed).
+Mac reproducer (observation only): model Cs2TcI6 (Fm-3m, a = 11.4 A, I x = 0.24, PseudoDojo ex PBE, 40 Ry, 4x4x4
+-> 8 k, 48 ops, 45 bands, FD 0.005 Ha, threshold 5e-11 Ha, verify fixed_point, 8 threads). It reproduces the
+pattern: dr2 0.312, 4.56, 3.7e-2, 4.9e-2 (rise at it4), 7.3e-4, 2.7e-3, 6.4e-7, 1.9e-5, 1.0e-6, 3.4e-10, 3.8e-10,
+3.5e-11; 13 ordinary maps + 2 verification maps (first failed), 10313 H columns, Mac wall 37-45 s.
+Findings:
+- The mixer is QE's algorithm term by term (checked against qe-density-mixing-spec.md): same Coulomb metric
+  8 pi Omega/G^2 on the half sphere without G=0, same unnormalized dF/dx secants, ring of 8, beta 0.7, normal
+  equations, same update; scalar FD has no conditioning drops (ADR 0045 is collinear-FD only) and no step
+  fraction (spin only); NC mixes the density only, as QE. Not the cause.
+- Map noise measured (re-solve of the same input at ethr 1e-12, Coulomb dr2 of y_tight - y): 1.7e-4, 7.5e-4,
+  4.5e-4, 5.0e-5, 5.4e-6, 9.3e-7 Ry at maps 1-6 with ethr 4.2e-4, 4.2e-4, 4.2e-4, 4.9e-5, 4.9e-5, 9.7e-7 Ry, i.e.
+  noise ~ (0.1-1.1) x ethr. With ethr = 0.1 dr2_prev / N a map is noise dominated only after a > ~1000x drop (maps
+  7 and 10 here). Kept HX is exact (disabled: identical dr2 sequence).
+- The rises at it4/it6/it8 are not noise: they persist with every map re-solved accurately (redo variant) and
+  with the forecast threshold. Magnitude (dr2 x3.7 to x30 right after a large drop) fits a plain beta-step on new
+  directions with a strong local (d-band) response, |1 - beta eps| ~ 2-5.
+- The trajectory is sensitive: ethr factor 0.08 / 0.1 / 0.12 / 0.03 / 0.01 / 0.001 gives 14 / 13 / 13 / 12 / 12 /
+  12 maps (H 9892 / 10313 / 10129 / 10122 / 11300 / 13894); factor 0.001 tracks QE's dev08 dr2 within 1.0-1.5x
+  through it6 (1.95e-2 / 4.4e-3 / 6.3e-4 against QE 2.0e-2 / 5.6e-3 / 9.8e-4) at +35 % H columns. The dev08
+  15 vs 11 is therefore within the spread a 2x change of the eigensolver threshold produces; no structural mixer
+  deficit was found. The it1 difference (BAANDI 0.405 vs QE 0.253 Ry, relayed) is not map noise (tight first map
+  changes Mac it1 by 1 %): start density or input difference, unresolved.
+- Beta 0.3 on the Mac model: 13 maps, verification passes first time, H 8741 (-15 %), wall 33 s; a parameter
+  change on one case, not adopted (generality rule).
+Variants (switch `SCF_ETHR_GUARD`, default off; reference spin/FD driver only), ordinary maps / H columns incl.
+verification, Mac single runs (al, au, sr, ru, alslab from GF2 at 1e-10 Ha; fe2 fixed-moment spin and tazn13 at
+1e-12 Ha; verify fixed_point, 4 threads):
+| case | off | forecast | redo |
+| Cs2TcI6 model | 13 / 10313 | 12 / 11732 | 12 / 12104 |
+| Al fcc | 5 / 5948 | 5 / 6352 | 5 / 8145 |
+| Au fcc | 7 / 3611 | 8 / 5610 (1 failed verify) | 7 / 4894 |
+| Sr fcc | 5 / 3461 | 5 / 3624 | 5 / 3862 |
+| Ru hcp | 9 / 10076 | 7 / 10511 | 7 / 11455 |
+| Al slab | 14 / 9369 | 13 / 10232 | 13 / 10987 |
+| Fe2 fixed moment | 18 / 24850 | 15 / 31237 | 16 / 28838 |
+| TaZn13 Gamma | 41 / 7078 | 42 / 8970 | 42 / 9161 |
+forecast = next ethr from min(dr2, |F~|^2), F~ = F - sum gamma_i dF_i (Broyden least-squares remainder, Coulomb
+metric); redo = QE's first-map redo (dr2 < ethr max(1, N) -> re-solve at 0.1 dr2 / N, history untouched) on every
+map. Free energies of all variants agree within 2e-11 Ha. Both reduce maps on Ru, slab, Fe2, Cs2TcI6 but raise
+H columns on every case (+4 to +55 %) and add a map on Au (forecast) or TaZn13 (both): default stays off; dev08
+wall decides (per-map overhead is larger there on small cells).
+Side finding: the model Cs2TcI6 at 30 Ry (54^3 grid) is refused at start with "symmetry.density: input breaks
+the selected symmetry" (max pointwise deviation 5.6e-3, density max 1.1); at 40 Ry the same check gives 6.7e-16.
+Likely cause: the clipped (max(0)) atomic start density has content outside the density sphere that the
+projection removes, judged with an absolute 1e-12 test. Not fixed here (backlog).
+Lesson: compare per-iteration dr2 only after measuring the trajectory's sensitivity: on a flat-band metal a 2x
+change of the eigensolver threshold moves the map count by +-1-2, as large as the gap to QE.

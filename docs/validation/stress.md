@@ -130,6 +130,12 @@ stress differences on synthetic fixtures: ledger row ONEPATH-2 and
 currently reuses the force pass; its work is included in analytic elapsed time
 and reported separately as `precondition_force_band_passes`. This conservative
 implementation has overhead; no performance optimization is claimed.
+(Update: since GD1, `STRESS_FORCE_PASS=off` by default, validation runs only the
+shared preconditions and `precondition_force_band_passes` is 0. Since GD2,
+`DERIV_JOINT=on` by default, a reference delivery that requests forces and
+stress computes both in one pass, bit-identical to the separate passes; the
+stress record then has `stage_seconds` `[["joint_with_forces", 0]]` and
+`elapsed_seconds` 0, and the joint wall is in the force record. Ledger GD1/GD2.)
 
 The raw antisymmetric Frobenius norm must be below 1e-10 Ha/Bohr^3. It is
 reported before averaging, so group averaging cannot conceal a failed check.

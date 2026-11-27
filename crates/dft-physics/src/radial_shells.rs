@@ -113,10 +113,24 @@ impl<'a> ShellEvaluator<'a> {
         })
     }
     /// The value of `kind` at `q` (> 0 for the local kinds); `None` for a core
-    /// kind of a potential without a core density.
+    /// kind of a potential without a core density. Equal bit for bit to
+    /// `finish(kind, q, integral(kind, q))`.
     pub fn eval(&mut self, kind: ShellKind, q: f64) -> Result<Option<f64>, HamiltonianError> {
+        if kind == ShellKind::LocalValue && (!q.is_finite() || q <= 0.0) {
+            return Err(RadialError::Argument("G must be finite and positive").into());
+        }
+        match self.integral(kind, q)? {
+            Some(integral) => self.finish(kind, q, integral).map(Some),
+            None => Ok(None),
+        }
+    }
+    /// GD2: the q-dependent radial quadrature of `kind` alone (the short-range
+    /// local integral without the analytic Gaussian-Coulomb term, the core
+    /// integral without 4 pi and volume factors), defined for every finite
+    /// q >= 0; even in q for the value kinds and odd for the slope kinds
+    /// (spherical Bessel j0 and j1). `None` for a core kind without a core.
+    pub fn integral(&mut self, kind: ShellKind, q: f64) -> Result<Option<f64>, HamiltonianError> {
         let mesh = self.pp.mesh();
-        let z = self.pp.z_valence();
         let fill = |scratch: &mut Vec<f64>, base: &[f64], l: usize, r: &[f64]| {
             scratch.clear();
             for (b, &r) in base.iter().zip(r) {
@@ -126,16 +140,8 @@ impl<'a> ShellEvaluator<'a> {
         };
         Ok(Some(match kind {
             ShellKind::LocalValue => {
-                if !q.is_finite() || q <= 0.0 {
-                    return Err(RadialError::Argument("G must be finite and positive").into());
-                }
                 fill(&mut self.scratch, &self.local_base, 0, self.prefix.r())?;
-                let short = self.prefix.integrate(&self.scratch)?;
-                let v = 4.0 * PI / self.volume * (short - z * (-q * q / 4.0).exp() / (q * q));
-                if !v.is_finite() {
-                    return Err(RadialError::Argument("unrepresentable result").into());
-                }
-                v
+                self.prefix.integrate(&self.scratch)?
             }
             ShellKind::LocalSlope => {
                 fill(
@@ -144,28 +150,49 @@ impl<'a> ShellEvaluator<'a> {
                     1,
                     self.prefix.r(),
                 )?;
-                4. * PI / self.volume
-                    * (self.prefix.integrate(&self.scratch)?
-                        + z * (-q * q / 4.).exp() * (0.5 / q + 2. / q.powi(3)))
+                self.prefix.integrate(&self.scratch)?
             }
             ShellKind::CoreValue => {
                 let Some(base) = &self.core_base else {
                     return Ok(None);
                 };
                 fill(&mut self.scratch, base, 0, mesh.r())?;
-                let v = 4.0 * PI * mesh.integrate(&self.scratch)?;
-                if !v.is_finite() {
-                    return Err(RadialError::Argument("unrepresentable result").into());
-                }
-                v
+                mesh.integrate(&self.scratch)?
             }
             ShellKind::CoreSlope => {
                 let Some(base) = &self.core_slope_base else {
                     return Ok(None);
                 };
                 fill(&mut self.scratch, base, 1, mesh.r())?;
-                4. * PI / self.volume * mesh.integrate(&self.scratch)?
+                mesh.integrate(&self.scratch)?
             }
         }))
+    }
+    /// GD2: the shell value of `kind` at `q` from its radial `integral`
+    /// (exact or tabulated): the same operations as the former per-shell
+    /// expression after the quadrature. The local kinds need q > 0.
+    pub fn finish(&self, kind: ShellKind, q: f64, integral: f64) -> Result<f64, HamiltonianError> {
+        let z = self.pp.z_valence();
+        Ok(match kind {
+            ShellKind::LocalValue => {
+                let v = 4.0 * PI / self.volume * (integral - z * (-q * q / 4.0).exp() / (q * q));
+                if !v.is_finite() {
+                    return Err(RadialError::Argument("unrepresentable result").into());
+                }
+                v
+            }
+            ShellKind::LocalSlope => {
+                4. * PI / self.volume
+                    * (integral + z * (-q * q / 4.).exp() * (0.5 / q + 2. / q.powi(3)))
+            }
+            ShellKind::CoreValue => {
+                let v = 4.0 * PI * integral;
+                if !v.is_finite() {
+                    return Err(RadialError::Argument("unrepresentable result").into());
+                }
+                v
+            }
+            ShellKind::CoreSlope => 4. * PI / self.volume * integral,
+        })
     }
 }

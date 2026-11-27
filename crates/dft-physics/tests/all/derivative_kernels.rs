@@ -198,9 +198,19 @@ fn gd1_nonlocal_kernel_matches_former_loops_and_finite_differences() {
             let (f, _) =
                 nonlocal_k_derivatives(&basis, volume, &species, t, &psi, &occupations, false)
                     .unwrap();
-            let (_, s) =
+            let (joint_f, s) =
                 nonlocal_k_derivatives(&basis, volume, &species, t, &psi, &occupations, true)
                     .unwrap();
+            // GD2: the stress call returns the same forces bit for bit.
+            assert_eq!(
+                joint_f
+                    .iter()
+                    .flatten()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                f.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                "{name}"
+            );
             let df = max_abs(
                 f.iter()
                     .flatten()
@@ -370,5 +380,250 @@ fn gd1_real_upf_kernel_timing() {
         );
         assert!(df <= 1e-11 * max_abs(old_f.iter().flatten()) + 1e-15);
         assert!(ds <= 1e-11 * max_abs(old_s.iter().flatten()) + 1e-15);
+    }
+}
+
+/// GD2: table of `ShellEvaluator::integral` on the uniform nodes, as the
+/// engine builds it (`forces::tabulated_shell_values`).
+fn shell_table(e: &mut ShellEvaluator<'_>, kind: ShellKind, q_max: f64) -> RadialTransformTable {
+    let nodes = RadialTransformTable::nodes(q_max, RADIAL_TABLE_STEP, RADIAL_TABLE_POINTS).unwrap();
+    let values = (0..nodes)
+        .map(|i| {
+            e.integral(kind, i as f64 * RADIAL_TABLE_STEP)
+                .unwrap()
+                .unwrap()
+        })
+        .collect();
+    let parity = match kind {
+        ShellKind::LocalValue | ShellKind::CoreValue => 0,
+        _ => 1,
+    };
+    RadialTransformTable::from_nodes(
+        parity,
+        q_max,
+        RADIAL_TABLE_STEP,
+        RADIAL_TABLE_POINTS,
+        values,
+    )
+    .unwrap()
+}
+
+/// Worst |table - quadrature| / max |quadrature| per kind over `qs`.
+fn shell_table_errors(pp: &dft_upf::Pseudopotential, volume: f64, qs: &[f64]) -> [f64; 4] {
+    let q_max = qs.iter().copied().fold(0., f64::max);
+    let mut e = ShellEvaluator::new(pp, volume).unwrap();
+    let kinds = [
+        ShellKind::LocalValue,
+        ShellKind::LocalSlope,
+        ShellKind::CoreValue,
+        ShellKind::CoreSlope,
+    ];
+    kinds.map(|kind| {
+        if pp.core_density().is_none()
+            && matches!(kind, ShellKind::CoreValue | ShellKind::CoreSlope)
+        {
+            return 0.;
+        }
+        let table = shell_table(&mut e, kind, q_max);
+        let (mut worst, mut peak) = (0f64, 0f64);
+        for &q in qs {
+            let exact = e.eval(kind, q).unwrap().unwrap();
+            // `finish` of the exact integral is the exact value bit for bit.
+            let integral = e.integral(kind, q).unwrap().unwrap();
+            assert_eq!(
+                e.finish(kind, q, integral).unwrap().to_bits(),
+                exact.to_bits()
+            );
+            // Error of the interpolated radial integral (the only tabulated
+            // part) relative to that integral's own peak.
+            worst = worst.max((table.eval(q).unwrap() - integral).abs());
+            peak = peak.max(integral.abs());
+        }
+        worst / peak
+    })
+}
+
+/// GD2: tabulated local/core shell values and slopes against the per-shell
+/// quadrature on a synthetic NLCC potential (skewed cell, every distinct |G|
+/// of a 12 Ha density sphere and off-node values).
+#[test]
+fn gd2_shell_tables_match_quadrature() {
+    let cell = Cell::from_user_rows_bohr([[8., 0.3, 0.], [1., 7., 0.2], [0.5, 1., 9.]]).unwrap();
+    let pp = synthetic(true, "PBE");
+    let volume = cell.volume_bohr3();
+    let db = PlaneWaveBasis::new(&cell, Hartree(12.)).unwrap();
+    let mut qs: Vec<f64> = db
+        .vectors()
+        .iter()
+        .filter(|g| g.miller != [0; 3])
+        .map(|g| g.norm_squared.sqrt())
+        .collect();
+    qs.sort_by(f64::total_cmp);
+    qs.dedup();
+    let errors = shell_table_errors(&pp, volume, &qs);
+    println!(
+        "GD2 synthetic shell tables ({} shells): relative errors local {:e} local slope {:e} core {:e} core slope {:e}",
+        qs.len(),
+        errors[0],
+        errors[1],
+        errors[2],
+        errors[3]
+    );
+    assert!(errors.iter().all(|e| *e < 1e-12), "{errors:?}");
+}
+
+/// GD2 table error scan on real PseudoDojo files (ignored):
+/// DFT_NC_DIR=/abs/pseudodojo/ex cargo test --release -p dft-physics --test all gd2_shell_tables_real -- --ignored --nocapture
+#[test]
+#[ignore = "requires DFT_NC_DIR; release"]
+fn gd2_shell_tables_real() {
+    let dir = std::path::PathBuf::from(std::env::var_os("DFT_NC_DIR").expect("set DFT_NC_DIR"));
+    let volume = 300.;
+    // 4000 off-node q in (0, 20] Bohr^-1.
+    let qs: Vec<f64> = (1..=4000)
+        .map(|i| 20. * (i as f64 - 0.37) / 4000.)
+        .collect();
+    let mut worst = [0f64; 4];
+    for element in [
+        "Sr", "Ta", "Zn", "Ru", "Hg", "K", "B", "Ge", "Te", "Si", "O", "Fe", "Ir", "I", "Au", "Al",
+        "Ti", "Ga", "Hf",
+    ] {
+        let path = dir.join(format!("{element}.upf"));
+        if !path.exists() {
+            continue;
+        }
+        let pp = dft_upf::from_file(&path).unwrap();
+        let e = shell_table_errors(&pp, volume, &qs);
+        println!(
+            "GD2 {element}: local {:.2e} local slope {:.2e} core {:.2e} core slope {:.2e}",
+            e[0], e[1], e[2], e[3]
+        );
+        for (w, e) in worst.iter_mut().zip(e) {
+            *w = w.max(e);
+        }
+    }
+    println!("GD2 worst: {worst:?}");
+    assert!(worst.iter().all(|e| *e < 1e-12), "{worst:?}");
+}
+
+/// GD2: `gga::PointSplit` over a simulated communicator (contiguous blocks,
+/// one allgatherv with a status value), as the engine's adapter.
+struct SimSplit<'a>(&'a dft_mpi::SimRank);
+impl dft_physics::gga::PointSplit for SimSplit<'_> {
+    fn block(&self, len: usize) -> std::ops::Range<usize> {
+        use dft_mpi::Collective;
+        let counts = dft_mpi::block_counts(len, self.0.size());
+        let first = dft_mpi::block_displacements(&counts)[self.0.rank()];
+        first..first + counts[self.0.rank()]
+    }
+    fn gather(
+        &self,
+        local: &[f64],
+        len: usize,
+        width: usize,
+        failed: bool,
+    ) -> Result<Vec<f64>, dft_physics::PhysicsError> {
+        use dft_mpi::Collective;
+        let counts = dft_mpi::block_counts(len, self.0.size());
+        let mut send = vec![f64::from(u8::from(failed))];
+        send.extend_from_slice(local);
+        send.resize(1 + counts[self.0.rank()] * width, 0.);
+        let counts: Vec<_> = counts.iter().map(|c| 1 + c * width).collect();
+        let mut all = vec![0.; counts.iter().sum()];
+        self.0.allgatherv_f64(&send, &counts, &mut all).unwrap();
+        let mut out = Vec::new();
+        let mut at = 0;
+        for c in counts {
+            if all[at] != 0. {
+                return Err(dft_physics::PhysicsError::Xc("failed".into()));
+            }
+            out.extend_from_slice(&all[at + 1..at + c]);
+            at += c;
+        }
+        Ok(out)
+    }
+}
+
+/// GD2: `gga::evaluate_for_derivatives` equals `gga::evaluate` (library
+/// correlation) and `gga::evaluate_pw92` (original PW92 prefactor) bit for
+/// bit, its metric equals `stress_metric` / `stress_metric_pw92`, for 1, 2,
+/// 3 and 7 simulated ranks, with screening off and on; with a screened point
+/// the metric is withheld (None).
+#[test]
+fn gd2_pbe_for_derivatives_bit_identical() {
+    use dft_numerics::switches::RunConfig;
+    use dft_physics::{gga, pbe_pw92::Pw92Prefactor};
+    let cell = Cell::from_user_rows_bohr([[7., 0.3, 0.], [0.6, 6.5, 0.2], [0.4, 0.5, 8.]]).unwrap();
+    let dims = [15, 16, 18];
+    let smooth = |i: usize, j: usize, k: usize| {
+        let (x, y, z) = (i as f64 / 15., j as f64 / 16., k as f64 / 18.);
+        0.02 + 0.5 * (-8. * ((x - 0.3).powi(2) + (y - 0.6).powi(2) + (z - 0.4).powi(2))).exp()
+            + 0.01 * (std::f64::consts::TAU * (x + 2. * y - z)).sin().powi(2)
+    };
+    let dense = ndarray::Array3::from_shape_fn(dims, |(i, j, k)| smooth(i, j, k));
+    let mut sparse = dense.clone();
+    sparse[[3, 4, 5]] = 1e-12;
+    let bits = |r: &dft_physics::xc::XcGrid| -> Vec<u64> {
+        r.potential
+            .iter()
+            .chain([&r.energy.0, &r.potential_integral.0])
+            .map(|v| v.to_bits())
+            .collect()
+    };
+    let mbits = |m: &[[f64; 3]; 3]| m.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>();
+    for screening in ["off", "on"] {
+        let scope = RunConfig::from_pairs(&[("xc_screen_negative", screening)]).unwrap();
+        for (name, n) in [("dense", &dense), ("sparse", &sparse)] {
+            for prefactor in [None, Some(Pw92Prefactor::Original)] {
+                let _s = scope.enter();
+                let mut fft = dft_numerics::FftPlan3d::new(dims).unwrap();
+                let (reference, metric) = match prefactor {
+                    None => (
+                        gga::evaluate(n, &cell, &mut fft).unwrap(),
+                        gga::stress_metric(n, &cell, &mut fft).unwrap(),
+                    ),
+                    Some(p) => (
+                        gga::evaluate_pw92(p, n, &cell, &mut fft).unwrap(),
+                        gga::stress_metric_pw92(p, n, &cell, &mut fft).unwrap(),
+                    ),
+                };
+                let screened = screening == "on" && name == "sparse";
+                let check = |r: gga::DerivativeXc, tag: &str| {
+                    assert_eq!(bits(&r.grid), bits(&reference), "{tag}");
+                    match r.metric {
+                        Some(m) => {
+                            assert!(!screened, "{tag}");
+                            assert_eq!(mbits(&m), mbits(&metric), "{tag}");
+                        }
+                        None => assert!(screened, "{tag}"),
+                    }
+                };
+                let tag = format!("{name} {prefactor:?} screening={screening}");
+                check(
+                    gga::evaluate_for_derivatives(prefactor, n, &cell, &mut fft, None, true)
+                        .unwrap(),
+                    &tag,
+                );
+                for ranks in [2, 3, 7] {
+                    let results = dft_mpi::simulate(ranks, |comm| {
+                        let _s = scope.enter();
+                        let mut fft = dft_numerics::FftPlan3d::new(dims).unwrap();
+                        let split = SimSplit(comm);
+                        gga::evaluate_for_derivatives(
+                            prefactor,
+                            n,
+                            &cell,
+                            &mut fft,
+                            Some(&split),
+                            true,
+                        )
+                        .unwrap()
+                    });
+                    for (rank, r) in results.into_iter().enumerate() {
+                        check(r, &format!("{tag} ranks={ranks} rank={rank}"));
+                    }
+                }
+            }
+        }
     }
 }

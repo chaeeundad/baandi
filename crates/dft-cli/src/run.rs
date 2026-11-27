@@ -3101,6 +3101,10 @@ fn reference_electronic_run(
     } else {
         dft_engine::refscf::api::solve(input, request).map_err(engine_error)?
     };
+    // GD2: launch-profile milestones of the spin/FD path (PHASE_PROFILE only;
+    // no clock reads otherwise), as on the closed-shell path.
+    launch::mark("scf_return");
+    let volumetric_clock = launch::clock();
     let mut derivatives = delivery.derivatives;
     let mut r = delivery.run.into_electronic().map_err(engine_error)?;
     let mut total = r.density[0].clone();
@@ -3150,6 +3154,7 @@ fn reference_electronic_run(
         "lattice_columns_bohr":prepared.cell.lattice_columns_bohr(),"units":"electrons/Bohr^3",
         "ordering":"C_z_fastest","dtype":"f64","endianness":"little","sha256":sha256(&bytes)}),
     )?;
+    launch::elapsed("volumetric_write", volumetric_clock);
     let calls = |calls: &[(usize, usize, dft_engine::refscf::record::SolveRecord)]| -> Vec<Value> {
         calls
             .iter()
@@ -3290,13 +3295,17 @@ fn reference_electronic_run(
             options: opts,
         };
         if r.converged {
-            write_early_record(out, &result, &tables)?;
+            launch::timed("early_record_write", || {
+                write_early_record(out, &result, &tables)
+            })?;
+            launch::mark("derivatives_entry");
             derivatives
                 .prepare_electronic(input(), &mut r)
                 .map_err(engine_error)?;
-            derivatives
-                .evaluate_forces_electronic(input(), &r)
-                .map_err(engine_error)?;
+            launch::timed("derivatives_forces", || {
+                derivatives.evaluate_forces_electronic(input(), &r)
+            })
+            .map_err(engine_error)?;
             if let Some(mut force) = derivatives.forces.take() {
                 if let Some(d) = &dispersion {
                     add_dispersion_forces(&mut force, d);
@@ -3305,9 +3314,11 @@ fn reference_electronic_run(
                 result["forces"] = force_json(&force);
                 result["forces"]["verification"] = json!(force.verification);
             }
-            derivatives
-                .evaluate_stress_electronic(input(), &r)
-                .map_err(engine_error)?;
+            launch::timed("derivatives_stress", || {
+                derivatives.evaluate_stress_electronic(input(), &r)
+            })
+            .map_err(engine_error)?;
+            launch::since("derivatives", "derivatives_entry");
             if let Some(mut stress) = derivatives.stress.take() {
                 if let Some(d) = &dispersion {
                     add_dispersion_stress(&mut stress, d);
@@ -3356,7 +3367,10 @@ fn reference_electronic_run(
     if mode.observe || mode.agent {
         crate::telemetry::annotate_reference_result(&mut result, out)?;
     }
-    write_json(&out.join("results.json"), &result)?;
+    let result_path = out.join("results.json");
+    launch::timed("results_write", || write_json(&result_path, &result))?;
+    launch::output(&result_path);
+    launch::mark("outputs_complete");
     Ok(RunReport {
         converged: r.converged,
         console: format!(

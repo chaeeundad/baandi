@@ -71,27 +71,7 @@ pub struct StressResult {
 /// Complete analytic derivative at fixed Miller set. Explicitly does not claim
 /// cutoff convergence; `stress` additionally estimates the cutoff correction.
 pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
-    if let ElectronicState::Fixed(r) = &state.electronic
-        && !r.orbitals_delivered()
-    {
-        return Err(ScfError::InvalidInput(
-            "stress needs the delivered orbitals: call ScfResult::materialize_orbitals",
-        ));
-    }
-    if let ElectronicState::Reference(r) = &state.electronic
-        && !r.orbitals_delivered()
-    {
-        return Err(ScfError::InvalidInput(
-            "stress need the delivered orbitals: call electronic::Run::materialize_orbitals",
-        ));
-    }
-    if state.options.local_mesh != crate::LocalMesh::Baandi
-        || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
-    {
-        return Err(ScfError::InvalidInput(
-            "research pseudo conventions do not support analytic derivatives",
-        ));
-    }
+    preconditions(state)?;
 
     // ADR 0043 (ONEPATH-2): a standard state is accepted exactly when forces
     // accept it, i.e. with a passed fixed-point verification; the shared force
@@ -116,6 +96,71 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         (crate::forces::validate(state)?, 0)
     };
     let (validated, precondition_band_passes) = validated;
+    frozen_pass(state, validated, precondition_band_passes, false, start).map(|r| r.0)
+}
+
+/// GD2 (`DERIV_JOINT`): forces and frozen-Miller stress of one state from one
+/// pass (shared preconditions, density transform, shells, core density, XC
+/// evaluation, core-potential transform, projector tables and k pass). Both
+/// results are bit-identical to `forces::forces` and `frozen_stress`. `None`
+/// when the joint pass does not apply (`DERIV_NL_GEMM` or `DERIV_SHELLS` off,
+/// or `STRESS_FORCE_PASS` on); the caller then runs the separate passes. The
+/// force record carries the joint stage clocks; the stress record reports a
+/// single `joint_with_forces` stage of zero seconds.
+pub fn forces_and_frozen_stress(
+    state: &StressState<'_>,
+) -> Result<Option<(crate::forces::ForceResult, StressResult)>, ScfError> {
+    use dft_numerics::switches::{Id, on};
+    if !on(Id::DERIV_JOINT)
+        || !on(Id::DERIV_NL_GEMM)
+        || !on(Id::DERIV_SHELLS)
+        || on(Id::STRESS_FORCE_PASS)
+    {
+        return Ok(None);
+    }
+    let start = std::time::Instant::now();
+    preconditions(state)?;
+    let validated = crate::forces::validate(state)?;
+    let (mut stress, forces) = frozen_pass(state, validated, 0, true, start)?;
+    stress.timings = vec![("joint_with_forces", 0.)];
+    stress.elapsed = std::time::Duration::ZERO;
+    Ok(forces.map(|f| (f, stress)))
+}
+
+fn preconditions(state: &StressState<'_>) -> Result<(), ScfError> {
+    if let ElectronicState::Fixed(r) = &state.electronic
+        && !r.orbitals_delivered()
+    {
+        return Err(ScfError::InvalidInput(
+            "stress needs the delivered orbitals: call ScfResult::materialize_orbitals",
+        ));
+    }
+    if let ElectronicState::Reference(r) = &state.electronic
+        && !r.orbitals_delivered()
+    {
+        return Err(ScfError::InvalidInput(
+            "stress need the delivered orbitals: call electronic::Run::materialize_orbitals",
+        ));
+    }
+    if state.options.local_mesh != crate::LocalMesh::Baandi
+        || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
+    {
+        return Err(ScfError::InvalidInput(
+            "research pseudo conventions do not support analytic derivatives",
+        ));
+    }
+    Ok(())
+}
+
+/// The frozen-Miller stress after its preconditions; with `with_forces` also
+/// the forces of `crate::forces::forces` from the same intermediate fields.
+fn frozen_pass(
+    state: &StressState<'_>,
+    validated: crate::forces::Validated,
+    precondition_band_passes: usize,
+    with_forces: bool,
+    start: std::time::Instant,
+) -> Result<(StressResult, Option<crate::forces::ForceResult>), ScfError> {
     let mut timings = vec![("validate", start.elapsed().as_secs_f64())];
     let mut clock = std::time::Instant::now();
     let mut lap = |name: &'static str, timings: &mut Vec<(&'static str, f64)>| {
@@ -167,14 +212,21 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     lap("setup", &mut timings);
     let shells = crate::forces::shell_values(&species, &db, volume, true)?;
     lap("shells", &mut timings);
-    let local = terms::local_or_core_cached(
-        &db,
-        volume,
-        &species,
-        &dg.gather(&reciprocal)?,
-        false,
-        shells.as_ref(),
-    )?;
+    let density_g = dg.gather(&reciprocal)?;
+    let local =
+        terms::local_or_core_cached(&db, volume, &species, &density_g, false, shells.as_ref())?;
+    let mut local_forces = if with_forces {
+        dft_physics::forces::local_or_core_cached(
+            &db,
+            volume,
+            &species,
+            &density_g,
+            false,
+            shells.as_ref(),
+        )?
+    } else {
+        Vec::new()
+    };
     lap("local", &mut timings);
     let hartree = terms::hartree(&density, state.cell, &mut fft)?;
     lap("hartree", &mut timings);
@@ -188,22 +240,26 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     )?;
     let (energy, integral, core_potential, mut xc) = if densities.len() == 1 {
         let mut scratch = Array3::zeros(dims);
-        let result = state.options.evaluate_xc(
+        let (result, metric) = state.options.evaluate_xc_for_derivatives(
             &density,
             core_density.as_ref(),
             &mut scratch,
             state.cell,
             &mut fft,
             state.density_floor,
+            true,
         )?;
-        let mut combined = density.clone();
-        if let Some(c) = &core_density {
-            combined += c;
-        }
-        if let Some(floor) = state.density_floor {
-            combined.mapv_inplace(|v| v.max(floor));
-        }
-        let metric = if state.options.functional == Functional::Pbe {
+        let metric = if let Some(metric) = metric {
+            // GD2: the metric of the same PBE evaluation (bit-identical).
+            metric
+        } else if state.options.functional == Functional::Pbe {
+            let mut combined = density.clone();
+            if let Some(c) = &core_density {
+                combined += c;
+            }
+            if let Some(floor) = state.density_floor {
+                combined.mapv_inplace(|v| v.max(floor));
+            }
             if state.options.pw92_prefactor == crate::Pw92Prefactor::Original {
                 dft_physics::gga::stress_metric_pw92(
                     state.options.pw92_prefactor,
@@ -225,6 +281,12 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         )
     } else {
         use dft_physics::spin::{SpinFunctional, SpinXc, SpinXcResponse};
+        if with_forces && core_density.is_some() && state.density_floor.is_some() {
+            // The force pass rejects this combination (`forces::forces`).
+            return Err(ScfError::InvalidInput(
+                "forces.spin: density floor unavailable",
+            ));
+        }
         let kind = match state.options.functional {
             Functional::LdaPw => SpinFunctional::LdaPw,
             Functional::Pbe => SpinFunctional::Pbe,
@@ -248,19 +310,24 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         row[a] += (energy - integral) / volume;
     }
     lap("xc", &mut timings);
+    let mut core_forces = vec![[0.0; 3]; if with_forces { state.atoms.len() } else { 0 }];
     let core = if core_density.is_some() {
         fft.to_reciprocal(
             &core_potential.mapv(|v| Complex64::new(v, 0.)),
             &mut reciprocal,
         )?;
-        terms::local_or_core_cached(
-            &db,
-            volume,
-            &species,
-            &dg.gather(&reciprocal)?,
-            true,
-            shells.as_ref(),
-        )?
+        let potential_g = dg.gather(&reciprocal)?;
+        if with_forces {
+            core_forces = dft_physics::forces::local_or_core_cached(
+                &db,
+                volume,
+                &species,
+                &potential_g,
+                true,
+                shells.as_ref(),
+            )?;
+        }
+        terms::local_or_core_cached(&db, volume, &species, &potential_g, true, shells.as_ref())?
     } else {
         [[0.; 3]; 3]
     };
@@ -278,28 +345,36 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     lap("nonlocal_tables", &mut timings);
     // MPI-DERIV: per-k kinetic and nonlocal tensors distributed over ranks
     // (one gather), accumulated in k order as before; symmetrization follows.
+    let natoms = state.atoms.len();
+    let mut nonlocal_forces = vec![[0.0; 3]; if with_forces { natoms } else { 0 }];
+    let stride = 18 + if with_forces { 3 * natoms } else { 0 };
     crate::forces::accumulate_blocks(
         &blocks,
-        18,
+        stride,
         |(point, orbitals, occupations), out| {
             let basis = state.options.basis(state.cell, point.fractional, 1.)?;
             let f: Vec<_> = occupations.iter().map(|v| v * point.weight).collect();
-            let c: Vec<_> = (0..orbitals.cols())
-                .map(|b| orbitals.column(b).to_vec())
-                .collect();
+            let c: Vec<&[Complex64]> = (0..orbitals.cols()).map(|b| orbitals.column(b)).collect();
             let k = dft_physics::kinetic::stress(&basis, &c, &f, volume)?;
-            let n = if gemm_kernel {
+            let (nf, n) = if gemm_kernel {
                 dft_physics::stress::nonlocal_k_derivatives(
                     &basis, volume, &species, &per_atom, orbitals, &f, true,
                 )?
-                .1
             } else {
-                terms::nonlocal(&basis, volume, &species, orbitals, &f)?
+                (
+                    Vec::new(),
+                    terms::nonlocal(&basis, volume, &species, orbitals, &f)?,
+                )
             };
-            for (slot, value) in out
-                .iter_mut()
-                .zip(k.iter().flatten().chain(n.iter().flatten()))
-            {
+            if with_forces && nf.len() != natoms {
+                return Err(ScfError::InvalidInput("nonlocal forces: atom count"));
+            }
+            for (slot, value) in out.iter_mut().zip(
+                k.iter()
+                    .flatten()
+                    .chain(n.iter().flatten())
+                    .chain(nf.iter().flatten().take(stride - 18)),
+            ) {
                 *slot = *value;
             }
             Ok(())
@@ -308,8 +383,16 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
             for (a, b) in kinetic.iter_mut().flatten().zip(&part[..9]) {
                 *a += b;
             }
-            for (a, b) in nonlocal.iter_mut().flatten().zip(&part[9..]) {
+            for (a, b) in nonlocal.iter_mut().flatten().zip(&part[9..18]) {
                 *a += b;
+            }
+            for (sum, part) in nonlocal_forces
+                .iter_mut()
+                .zip(part[18..].as_chunks::<3>().0)
+            {
+                for axis in 0..3 {
+                    sum[axis] += part[axis];
+                }
             }
         },
     )?;
@@ -326,6 +409,25 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         .collect();
     let ewald = dft_physics::ewald::stress(state.cell, &ions, Default::default())?;
     lap("ewald", &mut timings);
+    let forces = if with_forces {
+        let mut ewald_forces = dft_physics::ewald::forces(
+            state.cell,
+            &ions,
+            dft_physics::ewald::EwaldOptions::default(),
+        )?;
+        for term in [
+            &mut ewald_forces,
+            &mut local_forces,
+            &mut nonlocal_forces,
+            &mut core_forces,
+        ] {
+            crate::forces::symmetrize(state.cell, term, state.symmetry)?;
+        }
+        lap("forces_ewald_symmetrize", &mut timings);
+        Some((ewald_forces, local_forces, nonlocal_forces, core_forces))
+    } else {
+        None
+    };
     let mut parts = vec![
         ("kinetic", kinetic),
         ("local", local),
@@ -358,6 +460,23 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     if values.iter().flatten().any(|v| !v.is_finite()) {
         return Err(ScfError::NonFinite);
     }
+    let forces = match forces {
+        Some((ewald, local, nonlocal, core)) => Some(crate::forces::assemble(
+            crate::forces::Validated {
+                verification: validated.verification,
+                ledger: validated.ledger.clone(),
+                quantity: validated.quantity,
+            },
+            ewald,
+            local,
+            nonlocal,
+            core,
+            band_passes,
+            timings.clone(),
+            start,
+        )?),
+        None => None,
+    };
     let mut ledger = validated.ledger;
     for entry in &mut ledger {
         entry.stress_available = true;
@@ -372,26 +491,29 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
             "complete NC frozen-Miller strain derivative"
         };
     }
-    Ok(StressResult {
-        verification: validated.verification,
-        units: "Ha/Bohr^3",
-        quantity: validated.quantity,
-        basis_protocol: "frozen_miller_set",
-        cutoff_ha: state.options.cutoff_hartree,
-        strain_steps: &[],
-        values,
-        symmetric: values,
-        antisymmetric,
-        antisymmetric_norm,
-        pressure: -(0..3).map(|a| values[a][a]).sum::<f64>() / 3.,
-        terms: parts,
-        ledger,
-        pulay: None,
-        elapsed: start.elapsed(),
-        band_passes,
-        precondition_force_band_passes: precondition_band_passes,
-        timings,
-    })
+    Ok((
+        StressResult {
+            verification: validated.verification,
+            units: "Ha/Bohr^3",
+            quantity: validated.quantity,
+            basis_protocol: "frozen_miller_set",
+            cutoff_ha: state.options.cutoff_hartree,
+            strain_steps: &[],
+            values,
+            symmetric: values,
+            antisymmetric,
+            antisymmetric_norm,
+            pressure: -(0..3).map(|a| values[a][a]).sum::<f64>() / 3.,
+            terms: parts,
+            ledger,
+            pulay: None,
+            elapsed: start.elapsed(),
+            band_passes,
+            precondition_force_band_passes: precondition_band_passes,
+            timings,
+        },
+        forces,
+    ))
 }
 fn add(a: &mut Tensor, b: &Tensor) {
     for (a, b) in a.iter_mut().flatten().zip(b.iter().flatten()) {
@@ -456,6 +578,32 @@ pub fn stress_with(
         (PulayAssessmentMode::CutoffScan, None) => stress(state),
     }
 }
+/// GD2: `stress_with` given an already computed frozen-Miller stress of the
+/// same state (`frozen`, from the joint force pass), which replaces the
+/// frozen pass; `None` is `stress_with`. The Pulay assessment, when
+/// selected, runs exactly as in `stress_with`.
+pub(crate) fn stress_with_frozen(
+    state: &StressState<'_>,
+    prepared: Option<&crate::refscf::symmetry::Prepared>,
+    mode: PulayAssessmentMode,
+    frozen: Option<StressResult>,
+) -> Result<StressResult, ScfError> {
+    let Some(frozen) = frozen else {
+        return stress_with(state, prepared, mode);
+    };
+    match (mode, prepared) {
+        (PulayAssessmentMode::Off, _) => Ok(frozen),
+        (PulayAssessmentMode::CutoffScan, Some(p)) => {
+            if state.symmetry != p.operations(state.options.crystal_density_group) {
+                return Err(ScfError::InvalidInput(
+                    "reference stress: derivative and scan symmetry differ",
+                ));
+            }
+            pulay_scan(state, Some(p), frozen)
+        }
+        (PulayAssessmentMode::CutoffScan, None) => pulay_scan(state, None, frozen),
+    }
+}
 /// Stress with a separately reported isotropic cutoff-derivative Pulay estimate.
 /// No anisotropic convergence claim follows from this estimate. Always runs
 /// the assessment; see `stress_with` for the explicit switch.
@@ -478,7 +626,14 @@ fn stress_inner(
     state: &StressState<'_>,
     prepared: Option<&crate::refscf::symmetry::Prepared>,
 ) -> Result<StressResult, ScfError> {
-    let mut result = frozen_stress(state)?;
+    let result = frozen_stress(state)?;
+    pulay_scan(state, prepared, result)
+}
+fn pulay_scan(
+    state: &StressState<'_>,
+    prepared: Option<&crate::refscf::symmetry::Prepared>,
+    mut result: StressResult,
+) -> Result<StressResult, ScfError> {
     let start = std::time::Instant::now();
     let c = state.options.cutoff_hartree;
     let steps = [0.05 * c, 0.10 * c];

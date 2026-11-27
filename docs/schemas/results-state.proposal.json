@@ -432,7 +432,7 @@
               "minimum": 0
             },
             "stage_seconds": {
-              "$comment": "GD1 (2026-11-27): wall seconds per stress stage of this rank, in execution order; observation only",
+              "$comment": "GD1 (2026-11-27): wall seconds per stress stage of this rank, in execution order; observation only. GD2: [[\"joint_with_forces\", 0]] when the stress was computed in the joint force pass (its stages are in forces.stage_seconds)",
               "type": "array",
               "items": {"type": "array", "prefixItems": [{"type": "string"}, {"type": "number", "minimum": 0}], "minItems": 2, "maxItems": 2}
             },

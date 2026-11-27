@@ -312,8 +312,8 @@ pub struct ProjectorRadialTables {
 /// the per-G scalar loops (rounding class). `tables[s]` (when given) supplies
 /// the radial values and slopes of `species[s]`; otherwise, and for |q|
 /// outside a table, the quadrature. Occupations include the k weight and the
-/// spin capacity. Returns the forces in species/position order and the stress
-/// tensor; the quantity not requested is zero.
+/// spin capacity. Returns the forces in species/position order (always, GD2)
+/// and the stress tensor (zero unless `with_stress`).
 pub fn nonlocal_k_derivatives(
     basis: &PlaneWaveBasis,
     volume: f64,
@@ -556,7 +556,11 @@ pub fn nonlocal_k_derivatives(
                         *v += 2. * z.re / volume;
                     }
                 }
-            } else {
+            }
+            // GD2: the forces of the same projections (also with stress, so
+            // a joint force + stress pass needs one kernel call per k; the
+            // operands and order equal the force-only call bit for bit).
+            {
                 let mut sum = [Complex64::default(); 3];
                 for (ig, g) in basis.momenta().iter().enumerate() {
                     let s: Complex64 = (0..nc)

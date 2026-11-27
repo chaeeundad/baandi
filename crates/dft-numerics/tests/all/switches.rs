@@ -219,6 +219,9 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DERIV_NL_GEMM), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_RADIAL_TABLES), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_SHELLS), Value::Choice("on"));
+    assert_eq!(value(Id::DERIV_SHELL_TABLES), Value::Choice("on"));
+    assert_eq!(value(Id::DERIV_XC_SPLIT), Value::Choice("on"));
+    assert_eq!(value(Id::DERIV_JOINT), Value::Choice("on"));
     assert_eq!(value(Id::FD_EMPTY_THRESHOLD), Value::Choice("weighted"));
     assert_eq!(value(Id::FD_EMPTY_VERIFY), Value::Choice("on"));
     assert_eq!(value(Id::FD_BUFFER), Value::Choice("on"));
@@ -237,7 +240,7 @@ fn legacy_defaults_are_unchanged() {
         Value::Choice("off")
     );
     assert_eq!(value(Id::SCF_ETHR_GUARD), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 97);
+    assert_eq!(TABLE.len(), 100);
 }
 
 #[test]

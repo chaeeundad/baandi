@@ -61,8 +61,9 @@ pub struct StressResult {
     pub pulay: Option<PulayAssessment>,
     pub elapsed: std::time::Duration,
     pub band_passes: usize,
-    /// Band passes of the precondition force pass: 0 unless
-    /// `STRESS_FORCE_PASS=on` (GD1; the stress itself never used them).
+    /// Band passes of the precondition force pass: always 0 since GD1 (the
+    /// stress never used those forces; the rollback switch
+    /// `STRESS_FORCE_PASS` was retired in CL1). Kept for the result schema.
     pub precondition_force_band_passes: usize,
     /// GD1: wall seconds per stage of the frozen-Miller stress, in execution
     /// order (observation only; per rank).
@@ -80,42 +81,25 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     // Shared force path enforces the independent setup identity, active ledger,
     // strict tolerances and fresh certificate (or passed verification) before
     // accepting the state.
-    // GD1: the preconditions alone unless STRESS_FORCE_PASS asks for the
-    // former complete force pass (its forces were never used here).
-    let validated = if dft_numerics::switches::on(dft_numerics::switches::Id::STRESS_FORCE_PASS) {
-        let f = crate::forces::forces(state)?;
-        (
-            crate::forces::Validated {
-                verification: f.verification,
-                ledger: f.ledger,
-                quantity: f.quantity,
-            },
-            f.band_passes,
-        )
-    } else {
-        (crate::forces::validate(state)?, 0)
-    };
-    let (validated, precondition_band_passes) = validated;
-    frozen_pass(state, validated, precondition_band_passes, false, start).map(|r| r.0)
+    // GD1: the shared preconditions alone (the former complete force pass
+    // computed forces that were never used here).
+    let validated = crate::forces::validate(state)?;
+    frozen_pass(state, validated, 0, false, start).map(|r| r.0)
 }
 
 /// GD2 (`DERIV_JOINT`): forces and frozen-Miller stress of one state from one
 /// pass (shared preconditions, density transform, shells, core density, XC
 /// evaluation, core-potential transform, projector tables and k pass). Both
 /// results are bit-identical to `forces::forces` and `frozen_stress`. `None`
-/// when the joint pass does not apply (`DERIV_NL_GEMM` or `DERIV_SHELLS` off,
-/// or `STRESS_FORCE_PASS` on); the caller then runs the separate passes. The
+/// when the joint pass is switched off (`DERIV_JOINT=off`); the caller then
+/// runs the separate passes. The
 /// force record carries the joint stage clocks; the stress record reports a
 /// single `joint_with_forces` stage of zero seconds.
 pub fn forces_and_frozen_stress(
     state: &StressState<'_>,
 ) -> Result<Option<(crate::forces::ForceResult, StressResult)>, ScfError> {
     use dft_numerics::switches::{Id, on};
-    if !on(Id::DERIV_JOINT)
-        || !on(Id::DERIV_NL_GEMM)
-        || !on(Id::DERIV_SHELLS)
-        || on(Id::STRESS_FORCE_PASS)
-    {
+    if !on(Id::DERIV_JOINT) {
         return Ok(None);
     }
     let start = std::time::Instant::now();
@@ -335,12 +319,7 @@ fn frozen_pass(
     let mut kinetic = [[0.; 3]; 3];
     let mut nonlocal = [[0.; 3]; 3];
     let mut band_passes = 0;
-    let gemm_kernel = dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_NL_GEMM);
-    let tables = if gemm_kernel {
-        crate::forces::projector_tables(state, &species, blocks.len(), true)?
-    } else {
-        Vec::new()
-    };
+    let tables = crate::forces::projector_tables(state, &species, blocks.len(), true)?;
     let per_atom = crate::forces::tables_per_atom(&species, &tables);
     lap("nonlocal_tables", &mut timings);
     // MPI-DERIV: per-k kinetic and nonlocal tensors distributed over ranks
@@ -356,16 +335,9 @@ fn frozen_pass(
             let f: Vec<_> = occupations.iter().map(|v| v * point.weight).collect();
             let c: Vec<&[Complex64]> = (0..orbitals.cols()).map(|b| orbitals.column(b)).collect();
             let k = dft_physics::kinetic::stress(&basis, &c, &f, volume)?;
-            let (nf, n) = if gemm_kernel {
-                dft_physics::stress::nonlocal_k_derivatives(
-                    &basis, volume, &species, &per_atom, orbitals, &f, true,
-                )?
-            } else {
-                (
-                    Vec::new(),
-                    terms::nonlocal(&basis, volume, &species, orbitals, &f)?,
-                )
-            };
+            let (nf, n) = dft_physics::stress::nonlocal_k_derivatives(
+                &basis, volume, &species, &per_atom, orbitals, &f, true,
+            )?;
             if with_forces && nf.len() != natoms {
                 return Err(ScfError::InvalidInput("nonlocal forces: atom count"));
             }

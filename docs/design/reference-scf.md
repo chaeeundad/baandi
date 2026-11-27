@@ -4688,7 +4688,8 @@ only, rejected otherwise; it resets when the common positivity fraction is
 below one).
 
 Commands (the research test reads `G4R_CENTER`, `G4R_ORACLE`, `G4R_BETA`,
-`G4R_TIGHT`, `G4R_REAL`, `G4R_CANON`, `G4R_PULAY`):
+`G4R_TIGHT`, `G4R_CANON`, `G4R_PULAY`; `G4R_REAL` was removed with
+`REFSCF_REAL_START` in CL1, 2026-11-27):
 
 ```sh
 cargo test --release -p dft-engine --test refscf g4g_research -- --ignored --nocapture

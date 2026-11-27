@@ -3,8 +3,9 @@
 //! * `K_KEPT_SLABS` (the density pass keeps psi_b(r) of the leading bands and
 //!   the next map's kept-HX update runs only the forward transform for them):
 //!   on (whole budget, and a budget that keeps only some bands) against off;
-//! * `FFT_ONE_RANK_DIRECT` (one-rank stick FFT without the self-transpose):
-//!   on against off;
+//! * the one-rank direct stick FFT (GK17) is the only path since CL1 (the
+//!   former `FFT_ONE_RANK_DIRECT=off` transpose arm was bit-identical; the
+//!   plan-level identity test lives in `dft-solvers` distributed_fft);
 //!
 //! at P = 1 (one-rank operators), P = 3 with pools on (one-rank operators per
 //! k) and P = 3 with pools off (distributed operators: the slab band count
@@ -141,15 +142,13 @@ fn check(
     verified: bool,
     fixtures: &[(&str, Cell, Vec<KPoint>)],
 ) {
-    // Arms: reference (both off), slabs with the whole budget, slabs with a
-    // budget below one band per k (keeps none) and a mid budget, and the
-    // one-rank direct FFT alone.
-    let arms: [&[(&str, &str)]; 5] = [
-        &[("k_kept_slabs", "off"), ("fft_one_rank_direct", "off")],
-        &[("k_kept_slabs", "on"), ("fft_one_rank_direct", "off")],
+    // Arms: reference (slabs off), slabs with the whole budget, slabs with a
+    // budget below one band per k (keeps none) and a mid budget.
+    let arms: [&[(&str, &str)]; 4] = [
+        &[("k_kept_slabs", "off")],
+        &[("k_kept_slabs", "on")],
         &[("k_kept_slabs", "on"), ("k_kept_slab_mb", "0")],
         &[("k_kept_slabs", "on"), ("k_kept_slab_mb", "1")],
-        &[("k_kept_slabs", "off"), ("fft_one_rank_direct", "on")],
     ];
     for (name, cell, points) in fixtures {
         let mut reference: Option<Vec<Fingerprint>> = None;

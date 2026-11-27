@@ -4508,12 +4508,7 @@ fn reference_apply_h_json() -> Value {
         };
         // The original solver counter records two dispatching entries per H.
         // P3-NL replaces only the projection entry; keep route labels honest.
-        let single = if dft_numerics::switches::on(dft_numerics::switches::Id::NONLOCAL_SINGLE_GEMM)
-        {
-            s.wide_calls / 2
-        } else {
-            0
-        };
+        let single = s.wide_calls / 2;
         let mut row = json!({
             "stage_s": APPLY_H_STAGES.iter().zip(s.seconds).map(|(k,v)| (k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
             "fft": {

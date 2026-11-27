@@ -5177,3 +5177,24 @@ falls and no entry loses more than run-to-run noise beyond one false skip; C on 
 Lesson: with the criterion fixed, the failed first attempt is predictable from data the mixer already holds: the
 secant pairs measure the output response K on their span, and projecting the current residual onto it predicts
 E_H[F(y)] within 2x on 35 of 47 maps; the earlier rejection came from the max-amplification form, not from the idea.
+
+## CL1-SWITCH-CONSOLIDATE (2026-11-27): speed-sprint switches retired (no speed claim)
+
+User decision 2026-11-27 (sprint done, clean up before RPA), refactor R D3. 26 switches retired, 77 kept; manifest
+103 -> 77. Full table (switch, decision, reason, evidence) and the removed code paths:
+docs/performance/switch-retirement.md section "CL1". Recreate any arm from `d63fd1ac`.
+Retired (default became the only path): K_LEAN_ENERGY, CDAV_REUSE, CDAV_BORDER_GRAM, CDAV_BORDER_FACTOR, CDAV_STREAM,
+K_START_MEMO, K_NL_TABLE_MEMO, K_START_SPIN_SHARE, RADIAL_TABLE_START, RADIAL_TABLE_NL, RADIAL_TABLE_FIELDS,
+K_START_KEPT_HX, K_REDO_KEPT_HX, FFT_ONE_RANK_DIRECT, SPIN_FD_START_KEPT_HX, SPIN_FD_REDO_KEPT_HX, STRESS_FORCE_PASS
+(former default off), DERIV_NL_GEMM, DERIV_RADIAL_TABLES, DERIV_SHELLS, NONLOCAL_SINGLE_GEMM, NONLOCAL_FUSE_COUPLING,
+NONLOCAL_BACK_ACCUM. Removed experiments: FFT_FUSED_ROWS (rejected P3f), REFSCF_REAL_START (rejected G4G),
+FORCE_BAND_FIRST (never measured, unreachable since GD1). The on/off evidence of every retired switch stays in its
+own row above (GK1, GK1B, GK3/GK4, GK10, GK10B, GK14, GK16, GK17, GF1, GD1, P3l, P3m, P3f) and is not repeated by tests.
+Kept by rule: GD2 switches (dev08 pending), verification/stop switches (GV1 area), research switches named by the
+user, user options, oracle/test arms, diagnostics, backends; pre-sprint M2_* MPI Gamma switches were not reviewed
+(follow-up candidates).
+Identity: default behaviour unchanged. Mac release `k_setup_fingerprint` (60 runs: unpolarized, spin, FD; 1..3
+ranks, pools on/off) identical line for line between base `d63fd1ac` and the candidate; reference and oracle
+`bench_scf` baselines and the `reference_identity`/`oracle_identity` goldens: see switch-retirement.md CL1
+validation. Lesson: a rounding-dependent observational fixture (G4G stall record) had pinned three rollback arms;
+retiring them required an input change of the fixture, not of any tolerance.

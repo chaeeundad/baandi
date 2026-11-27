@@ -1,11 +1,13 @@
 //! GF1 (spin/FD k path): ports of the scalar k driver's kept-HX items to the
 //! electronic (spin/FD) driver. Synthetic pseudopotentials, simulated ranks,
 //! never QE evidence.
-//! * `SPIN_FD_START_KEPT_HX` (GK10B start) and `SPIN_FD_REDO_KEPT_HX` (GK10B
-//!   redo): defaults against both off, at P = 1 and pooled P = 2, 3 (8 in
-//!   the ignored matrix): delivered free energy within strict 1e-10 Ha
-//!   (strict-threshold runs) or standard 5e-9 Ha, same convergence, map count
-//!   within one, and map 1 applies H to fewer columns;
+//! * kept start HX and redo HX (GK10B ports; the only path since CL1, the
+//!   former `SPIN_FD_START_KEPT_HX` / `SPIN_FD_REDO_KEPT_HX` off arms agreed
+//!   within the strict class with fewer map-1 H columns, see the attempts
+//!   ledger GF1 and docs/performance/switch-retirement.md): at P = 1 and
+//!   pooled P = 2, 3 (8 in the ignored matrix) converged, kept HX used, and
+//!   the delivered free energy rank-count independent within strict 1e-10 Ha
+//!   (strict-threshold runs) or standard 5e-9 Ha;
 //! * `K_KEPT_SLABS` on the electronic map: bit-identical to slabs off;
 //! * automatic FD band growth with the ports on and pooled.
 //!
@@ -30,10 +32,6 @@ use dft_numerics::switches::RunConfig;
 
 const STRICT_HA: f64 = 1e-10;
 const STANDARD_HA: f64 = 5e-9;
-const PORTS_OFF: &[(&str, &str)] = &[
-    ("spin_fd_start_kept_hx", "off"),
-    ("spin_fd_redo_kept_hx", "off"),
-];
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Case {
@@ -209,30 +207,21 @@ fn ports_matrix(ranks: &[usize]) {
             let one = on_rank0(1, |c| run(c, case, strict, "off", &[], false));
             for &p in ranks {
                 let pools = pools_arm(p);
-                let off = on_rank0(p, |c| run(c, case, strict, pools, PORTS_OFF, false));
                 let on = on_rank0(p, |c| run(c, case, strict, pools, &[], false));
-                let d_ports = (on.free_energy - off.free_energy).abs();
                 let d_one = (on.free_energy - one.free_energy).abs();
                 println!(
-                    "GF1 {case:?} {} P={p} pools={pools}: F={:.15e} |on-off|={d_ports:.2e} |on-P1|={d_one:.2e} Ha; maps off {} on {}; map-1 H off {} on {} (redo {}); H total off {} on {}; kept hits off {} on {}",
+                    "GF1 {case:?} {} P={p} pools={pools}: F={:.15e} |P-P1|={d_one:.2e} Ha; maps {}; map-1 H {} (redo {}); H total {}; kept hits {}",
                     if strict { "strict" } else { "standard" },
                     on.free_energy,
-                    off.maps,
                     on.maps,
-                    off.map1_h,
                     on.map1_h,
                     on.redo,
-                    off.h_columns,
                     on.h_columns,
-                    off.hits,
                     on.hits,
                 );
-                assert!(off.converged && on.converged, "{case:?} P={p}");
-                assert!(d_ports <= bound, "{case:?} P={p}: ports {d_ports:e}");
+                assert!(on.converged, "{case:?} P={p}");
                 assert!(d_one <= bound, "{case:?} P={p}: vs P=1 {d_one:e}");
-                assert!(on.maps.abs_diff(off.maps) <= 1, "{case:?} P={p}: maps");
-                assert!(on.map1_h < off.map1_h, "{case:?} P={p}: map-1 H columns");
-                assert!(on.hits > off.hits, "{case:?} P={p}: kept hits");
+                assert!(on.hits > 0, "{case:?} P={p}: kept hits");
             }
         }
     }
@@ -283,35 +272,30 @@ fn slabs_are_bit_identical_and_runs_reproducible() {
     }
 }
 
-/// Automatic FD band growth with the ports on: serial and pooled runs grow,
-/// converge and agree with the ports-off arm within the standard class.
+/// Automatic FD band growth with the ports: serial and pooled runs grow,
+/// converge and agree with each other within the standard class.
 #[test]
 fn band_growth_with_ports_and_pools() {
+    let mut first: Option<f64> = None;
     for p in [1, 2] {
         let pools = pools_arm(p);
-        let off = on_rank0(p, |c| run(c, Case::Fd, false, pools, PORTS_OFF, true));
         let on = on_rank0(p, |c| run(c, Case::Fd, false, pools, &[], true));
         println!(
-            "GF1 growth P={p}: events off {} on {}; |dF|={:.2e} Ha; maps off {} on {}; H off {} on {}",
-            off.growth_events,
-            on.growth_events,
-            (on.free_energy - off.free_energy).abs(),
-            off.maps,
-            on.maps,
-            off.h_columns,
-            on.h_columns
+            "GF1 growth P={p}: events {}; F={:.15e} Ha; maps {}; H {}",
+            on.growth_events, on.free_energy, on.maps, on.h_columns
         );
-        assert!(on.converged && off.converged);
-        assert!(on.growth_events > 0 && off.growth_events > 0);
-        assert!((on.free_energy - off.free_energy).abs() <= STANDARD_HA);
+        assert!(on.converged);
+        assert!(on.growth_events > 0);
+        let f1 = *first.get_or_insert(on.free_energy);
+        assert!((on.free_energy - f1).abs() <= STANDARD_HA);
     }
 }
 
 /// Real metals (PseudoDojo Al and Au, `DFT_NC_DIR`; skipped without it): the
-/// atomic start is close enough that map 1 is redone, which exercises
-/// `SPIN_FD_REDO_KEPT_HX` next to the start port. FD, fcc, generic shifted
-/// 3x3x3 mesh (27 k), P = 1 and pooled P = 3: ports on against off within the
-/// strict class, map 1 redone in both arms with fewer H columns on.
+/// atomic start is close enough that map 1 is redone, which exercises the
+/// kept redo HX next to the start port. FD, fcc, generic shifted 3x3x3 mesh
+/// (27 k), P = 1 and pooled P = 3: converged, map 1 redone, P = 3 within the
+/// strict class of P = 1.
 ///
 ///   DFT_NC_DIR=/abs/pseudodojo/ex cargo test --release -p dft-engine \
 ///     --test refscf_fd_kept real_metals_redo -- --ignored --nocapture
@@ -384,31 +368,17 @@ fn real_metals_redo() {
                 )
             })
         };
+        let mut first: Option<f64> = None;
         for p in [1, 3] {
-            let off = one(p, PORTS_OFF);
             let on = one(p, &[]);
-            let start_only = one(p, &[("spin_fd_redo_kept_hx", "off")]);
             println!(
-                "GF1 real {element} P={p}: F={:.12} |on-off|={:.2e} Ha; maps {} / {}; redo {} / {}; map-1 H off {} start-only {} on {}; H total off {} on {}",
-                on.0,
-                (on.0 - off.0).abs(),
-                off.2,
-                on.2,
-                off.3,
-                on.3,
-                off.4,
-                start_only.4,
-                on.4,
-                off.5,
-                on.5
+                "GF1 real {element} P={p}: F={:.12} Ha; maps {}; redo {}; map-1 H {}; H total {}",
+                on.0, on.2, on.3, on.4, on.5
             );
-            assert!(on.1 && off.1 && start_only.1);
-            assert!((on.0 - off.0).abs() <= STRICT_HA && (start_only.0 - off.0).abs() <= STRICT_HA);
-            assert!(on.3 && off.3, "{element}: map 1 is redone");
-            assert!(
-                on.4 < start_only.4 && start_only.4 < off.4,
-                "{element}: map-1 H"
-            );
+            assert!(on.1);
+            assert!(on.3, "{element}: map 1 is redone");
+            let f1 = *first.get_or_insert(on.0);
+            assert!((on.0 - f1).abs() <= STRICT_HA);
         }
     }
 }

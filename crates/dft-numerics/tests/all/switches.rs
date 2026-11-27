@@ -191,34 +191,13 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::COLLECTIVE_TRACE), Value::Choice("off"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
     assert_eq!(value(Id::XC_SCREEN_NEGATIVE), Value::Choice("on"));
-    assert_eq!(value(Id::REFSCF_REAL_START), Value::Choice("off"));
     assert_eq!(value(Id::REFSCF_CANONICAL_CLUSTER), Value::Choice("off"));
     assert_eq!(value(Id::REFSCF_SPIN_PULAY), Value::Choice("off"));
-    assert_eq!(value(Id::K_LEAN_ENERGY), Value::Choice("on"));
-    assert_eq!(value(Id::K_START_MEMO), Value::Choice("on"));
-    assert_eq!(value(Id::CDAV_REUSE), Value::Choice("on"));
-    assert_eq!(value(Id::K_NL_TABLE_MEMO), Value::Choice("on"));
-    assert_eq!(value(Id::K_START_SPIN_SHARE), Value::Choice("on"));
-    assert_eq!(value(Id::CDAV_BORDER_GRAM), Value::Choice("on"));
-    assert_eq!(value(Id::RADIAL_TABLE_START), Value::Choice("on"));
-    assert_eq!(value(Id::RADIAL_TABLE_NL), Value::Choice("on"));
-    assert_eq!(value(Id::CDAV_BORDER_FACTOR), Value::Choice("on"));
-    assert_eq!(value(Id::CDAV_STREAM), Value::Choice("on"));
     assert_eq!(value(Id::K_FIRST_EMPTY_RULE), Value::Choice("off"));
-    assert_eq!(value(Id::K_REDO_KEPT_HX), Value::Choice("on"));
-    assert_eq!(value(Id::K_START_KEPT_HX), Value::Choice("on"));
     assert_eq!(value(Id::REFSCF_K_POOLS), Value::Choice("auto"));
     assert_eq!(value(Id::REFSCF_K_NPOOL), Value::Number(None));
-    assert_eq!(value(Id::RADIAL_TABLE_FIELDS), Value::Choice("on"));
-    assert_eq!(value(Id::FFT_ONE_RANK_DIRECT), Value::Choice("on"));
     assert_eq!(value(Id::K_KEPT_SLABS), Value::Choice("off"));
     assert_eq!(value(Id::K_KEPT_SLAB_MB), Value::Number(Some(1024.)));
-    assert_eq!(value(Id::SPIN_FD_START_KEPT_HX), Value::Choice("on"));
-    assert_eq!(value(Id::SPIN_FD_REDO_KEPT_HX), Value::Choice("on"));
-    assert_eq!(value(Id::STRESS_FORCE_PASS), Value::Choice("off"));
-    assert_eq!(value(Id::DERIV_NL_GEMM), Value::Choice("on"));
-    assert_eq!(value(Id::DERIV_RADIAL_TABLES), Value::Choice("on"));
-    assert_eq!(value(Id::DERIV_SHELLS), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_SHELL_TABLES), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_XC_SPLIT), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_JOINT), Value::Choice("on"));
@@ -243,7 +222,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::VERIFY_FEED), Value::Choice("off"));
     assert_eq!(value(Id::VERIFY_SKIPS), Value::Choice("one"));
     assert_eq!(value(Id::VERIFY_RESPONSE_PREDICTOR), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 103);
+    assert_eq!(TABLE.len(), 77);
 }
 
 #[test]

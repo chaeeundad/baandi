@@ -130,8 +130,9 @@ stress differences on synthetic fixtures: ledger row ONEPATH-2 and
 currently reuses the force pass; its work is included in analytic elapsed time
 and reported separately as `precondition_force_band_passes`. This conservative
 implementation has overhead; no performance optimization is claimed.
-(Update: since GD1, `STRESS_FORCE_PASS=off` by default, validation runs only the
-shared preconditions and `precondition_force_band_passes` is 0. Since GD2,
+(Update: since GD1 validation runs only the
+shared preconditions and `precondition_force_band_passes` is 0 (the rollback
+switch `STRESS_FORCE_PASS` was retired in CL1, 2026-11-27). Since GD2,
 `DERIV_JOINT=on` by default, a reference delivery that requests forces and
 stress computes both in one pass, bit-identical to the separate passes; the
 stress record then has `stage_seconds` `[["joint_with_forces", 0]]` and

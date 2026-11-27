@@ -527,3 +527,237 @@ artifacts remain unchanged. All changes are uncommitted for review.
 The final caller audit also removes the two physics expectation-from-cached-
 projection methods and their branch-only test; neither had a reference/default
 caller after removal of the lean projector cache.
+
+## CL1: speed-sprint switch consolidation (2026-11-27)
+
+Base: main `d63fd1ac` (table 103, after GV1-VERIFY-COST). Source/recreation
+commit for every removed switch: `d63fd1ac` (`git show d63fd1ac:<path>`
+restores the switch entry, its reader and the off arm; the readers are listed
+in the "Removed code" paragraph below). User decision 2026-11-27 (speed
+sprint done, clean up before RPA) under refactor R decision D3: remove
+rollback switches whose new default was measured and adopted on dev08 and is
+bit-identical or accepted, and rejected experiments; keep (a) user/policy
+options, (b) research switches under evaluation, (c) switches the strict
+oracle or tests need as A/B oracles, (d) anything on the verification/stop
+code of GV1. Pre-sprint MPI Gamma switches (M2_*) and shared backend
+selections were not reviewed against dev08 evidence here; they stay and are
+listed as follow-up candidates.
+
+Result: **26 removed, 77 kept**; manifest 103 -> 77 (both switch-count
+tests updated: `dft-numerics` `TABLE.len()` and the CLI `scf.switches` count).
+
+| Switch | Decision | Reason | Evidence |
+| --- | --- | --- | --- |
+| `NL_ENERGY` | keep: (c) oracle option | exact band-by-band nonlocal energy is the independent oracle of the blocked path; shared energy kernel | R11a/R11b inventory |
+| `ENERGY_IDENTITY` | keep: (b) research | default-off band-sum identity, no rejection row | ledger LANE-GLUE |
+| `STANDARD_RESIDUAL_GUARD` | keep: (d) stop rule | stop-rule guard of the spin/FD driver (GV1 area) | ledger 2026-11-27 gen59 arm D |
+| `M2_DGEMM` | keep: backend | dgemm vs pure panels (MKL/pure builds); generality/backend selection | R11a |
+| `M2_FFT` | keep: backend | rustfft vs MKL lanes; backend selection | R11a; ledger work-order screen 2026-11-26 |
+| `STAGE_TIMERS` | keep: diagnostic | measurement only | R11(e) |
+| `M2_STICKS` | keep: outside CL1 | pre-sprint MPI Gamma kernel shared with the strict oracle; not reviewed in CL1 (follow-up candidate) | R11b boundary |
+| `MPI_TREE` | keep: infrastructure | collective pattern selection | R11a |
+| `M2_SCREEN` | keep: outside CL1 | pre-sprint MPI Gamma path; follow-up candidate | R11b boundary |
+| `M2_ATOMIC` | keep: outside CL1 | pre-sprint MPI Gamma start; follow-up candidate | R11b boundary |
+| `M2_ATOMIC_BLOCK` | keep: outside CL1 | pre-sprint MPI Gamma start; follow-up candidate | R11b boundary |
+| `M2_GRID` | keep: outside CL1 | pre-sprint MPI grid stages, CLI routing reader; follow-up candidate | R11b boundary |
+| `M2_LOCAL_FIELDS` | keep: outside CL1 | pre-sprint M2-OWNED; follow-up candidate | R11b boundary |
+| `M2_LOCAL_DENSITY` | keep: outside CL1 | pre-sprint M2-OWNED; follow-up candidate | R11b boundary |
+| `DAVIDSON_STAGES` | keep: diagnostic | stage timers | R11(e) |
+| `DAVIDSON_PROFILE` | keep: diagnostic | lane trace | R11(e) |
+| `NONLOCAL_BLOCK` | keep: backend | auto/on/off block nonlocal of the complex Hamiltonian, shared with the oracle | R11b boundary |
+| `ROTATE_KERNEL` | keep: backend | shared numerics kernel | R11b boundary |
+| `PURE_GEMM` | keep: backend | pure vs MKL build default | R11b boundary |
+| `PACK_FIXED` | keep: backend | aarch64 pure kernel option | R11b boundary |
+| `MKL_DGEMM` | keep: backend | MKL builds | R11a |
+| `MKL_EVD` | keep: backend | MKL builds | R11a |
+| `PAIR_FFT` | keep: backend | MKL builds | R11a |
+| `BINARY_HASH_CACHE` | keep: infrastructure | launch I/O cache | R11a |
+| `RELAX_EXTRAPOLATION` | keep: (a) user option | overrides an input key | R11a |
+| `REFERENCE_STRICT` | keep: (c) oracle routing | selects the strict oracle | ADR 0043, R11a |
+| `DGEMM_TIMERS` | keep: diagnostic | exit-time timers | R11(e) |
+| `PSEUDO_DIR` | keep: infrastructure | cache location | R11a |
+| `FFT_KEPT_FUSE` | keep: (b) closed neutral | bit-identical, closed neutral, default off; no rejection for correctness; follow-up candidate | ledger FFT-KEPT-FUSE-NEUTRAL |
+| `COLLECTIVE_TRACE` | keep: diagnostic | - | R11(e) |
+| `FFT_PROFILE` | keep: diagnostic | - | R11(e) |
+| `GLUE_PROFILE` | keep: diagnostic | - | R11(e) |
+| `PHASE_PROFILE` | keep: diagnostic | - | R11(e) |
+| `EWALD_FAST` | keep: (c) oracle | off = reference Ewald scheme, used as the tight reference in tests | ledger INIT-EWALD-FAST |
+| `IONIC_FAST` | keep: (c) oracle | off = direct phase reference (setup_memo_identity) | ledger INIT-EWALD-FAST |
+| `INIT_PROFILE` | keep: diagnostic | - | R11(e) |
+| `PHASE_VALIDATE` | keep: (b) research | default off pending dev08 | ledger G-PHASE-VALIDATE |
+| `M2_LAZY_RESULT` | keep: (c) test oracle | off (eager delivery) is the A/B oracle of the CLI lazy-delivery tests (Gamma and pooled k) | ledger GK18/GK18B |
+| `PHASE_WAIT` | keep: diagnostic | - | R11(e) |
+| `SNAPSHOT_DIR` | keep: diagnostic | replay capture | R11(e) |
+| `FFT_SPARSE_CLEAR` | keep: (b) research | P3c inconclusive, not rejected | ledger P3c |
+| `FFT_DIRECT_PACK` | keep: (b) research | P3c inconclusive, not rejected | ledger P3c |
+| `FFT_FUSED_ROWS` | **remove** (former default off) | P3-FFT2 fused z rows: rejected (slower on si64/elongated/rskew) | ledger P3f/P3g screens (2026-11-25) |
+| `FFT_A2A_BALANCE` | keep: (b) research | default off pending dev08 | docs/performance/lanes/RSCF/a2a-dev08-request.md |
+| `NONLOCAL_SINGLE_GEMM` | **remove** (former default on) | P3-NL single projection GEMM; rounding class | ledger P3l (2026-11-25, dev08 MPI8) |
+| `NONLOCAL_FUSE_COUPLING` | **remove** (former default on) | P3-ADDV fused coupling storage; bit-identical | ledger P3m (2026-11-25, dev08 MPI8) |
+| `NONLOCAL_BACK_ACCUM` | **remove** (former default on) | P3-ADDV back-projection accumulated into HX; rounding class | ledger P3m (2026-11-25, dev08 MPI8) |
+| `REFSCF_RMM` | keep: algorithm module | Generality rule (P3r) | ledger P3r |
+| `REFSCF_RMM_STEPS` | keep: algorithm module | RMM parameter | ledger P3r |
+| `REFSCF_RMM_BLOCK` | keep: algorithm module | RMM parameter | ledger P3r |
+| `FFT_KERNEL_BY_LENGTH` | keep: (b) research | default off, no rejection row | ledger work-order screen 2026-11-26 |
+| `REFSCF_PERMAP` | keep: (b) research | no rejection row (R11a) | R11a |
+| `REFSCF_LADDER_RATIO` | keep: algorithm module | reference ladder (D3 keep) | refactor-r-plan D3 |
+| `REFSCF_LADDER` | keep: algorithm module | reference ladder (D3 keep) | refactor-r-plan D3 |
+| `REFSCF_KEPT_RECOMPUTE` | keep: (a) memory option | memory-saving option | ledger P4 screen |
+| `REFSCF_MEMORY_TRIM` | keep: (b) research | pending dev08, no rejection row | R11a |
+| `K_LEAN_ENERGY` | **remove** (former default on) | GK4 deferred per-k energy terms; bit-identical | ledger GK4; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `FORCE_BAND_FIRST` | **remove** (former default off) | G5 band-first force GEMM: never measured, unreachable since GD1's GEMM kernel became the default (superseded experiment) | docs/design/reference-scf.md (G5); ledger GD1-DERIV-SPEED |
+| `REFSCF_SPIN_FD_MOMENT` | keep: routing | CLI driver routing reader | R11a |
+| `XC_SCREEN_NEGATIVE` | keep: physics policy / (c) | ADR 0046 policy; off is the historical fixture contract of derivative tests | ADR 0046 |
+| `REFSCF_REAL_START` | **remove** (former default off) | G4G real Gamma start: rejected (centred fixture stalls 200 maps) | docs/design/reference-scf.md G4G decision (2026-11-26) |
+| `REFSCF_CANONICAL_CLUSTER` | keep: (b) research | G4G research switch kept by decision | docs/design/reference-scf.md G4G |
+| `CDAV_REUSE` | **remove** (former default on) | GK3 kept complex Davidson workspace and merged agreements; bit-identical | ledger GSPEED-PLAN/GK3 (solver test GK3); default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `REFSCF_SPIN_PULAY` | keep: (b) research | G4G candidate pending a dev08 O run | docs/design/reference-scf.md G4G |
+| `K_START_MEMO` | **remove** (former default on) | GK1 memoized k atomic columns; bit-identical | ledger GK1-START-MEMO; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `K_NL_TABLE_MEMO` | **remove** (former default on) | GK1B rows-only k projector tables; bit-identical | ledger GK1B-NL-TABLES; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `K_START_SPIN_SHARE` | **remove** (former default on) | GK1B shared collinear spin start; bit-identical | ledger GK1B-NL-TABLES; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `CDAV_BORDER_GRAM` | **remove** (former default on) | GK10 border-only projected S/H; rounding class, strict-class agreement | ledger GK10-BORDER-GRAM; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `RADIAL_TABLE_START` | **remove** (former default on) | GK14 radial tables for the k start; strict class | ledger GK14-RADIAL-TABLES; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `RADIAL_TABLE_NL` | **remove** (former default on) | GK14 radial tables for k projectors; strict class | ledger GK14-RADIAL-TABLES; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `CDAV_BORDER_FACTOR` | **remove** (former default on) | GK10B bordered Cholesky; rounding class | ledger GK10B-CDAV-REALPATH; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `CDAV_STREAM` | **remove** (former default on) | GK10B streamed correction pass; bit-identical | ledger GK10B-CDAV-REALPATH; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `K_FIRST_EMPTY_RULE` | keep: (b) research | named by the user decision | ledger GK10B |
+| `K_START_KEPT_HX` | **remove** (former default on) | GK10B kept start H X for k map 1; rounding class | ledger GK10B-CDAV-REALPATH; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `K_REDO_KEPT_HX` | **remove** (former default on) | GK10B kept HX on the first-map redo; rounding class | ledger GK10B-CDAV-REALPATH; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `REFSCF_K_POOLS` | keep: (a) user option | documented k-pool policy | docs/cli.md, ledger GK9 |
+| `REFSCF_K_NPOOL` | keep: (a) user option | documented pool count | docs/cli.md, ledger GK9B |
+| `RADIAL_TABLE_FIELDS` | **remove** (former default on) | GK16 radial tables for k-path atomic fields; strict class | ledger GK16-SETUP-TAIL; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `FFT_ONE_RANK_DIRECT` | **remove** (former default on) | GK17 one-rank direct stick FFT for k operators; bit-identical | ledger GK17-SCF-GAP; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `K_KEPT_SLABS` | keep: (b) research | named by the user decision | ledger GK17 |
+| `K_KEPT_SLAB_MB` | keep: (b) research | budget of K_KEPT_SLABS | ledger GK17 |
+| `SPIN_FD_START_KEPT_HX` | **remove** (former default on) | GF1 port of the kept start HX to the spin/FD driver; rounding class | ledger GF1-FD-PATH; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `SPIN_FD_REDO_KEPT_HX` | **remove** (former default on) | GF1 port of the kept redo HX to the spin/FD driver; rounding class | ledger GF1-FD-PATH; default since its merge; ran in the dev08 campaigns up to gen66 (final MP campaign at fb419f49, README gen66 summary) with QE-matched results |
+| `STRESS_FORCE_PASS` | **remove** (former default off) | GD1: stress no longer re-runs the force pass; stress bit-identical | ledger GD1-DERIV-SPEED; dev08 gen60/gen66 derivative stages |
+| `DERIV_NL_GEMM` | **remove** (former default on) | GD1 GEMM nonlocal derivative kernel; rounding class | ledger GD1-DERIV-SPEED; dev08 gen60/gen66 |
+| `DERIV_RADIAL_TABLES` | **remove** (former default on) | GD1 tabulated projector radials in the derivative pass; rounding class | ledger GD1-DERIV-SPEED; dev08 gen60/gen66 |
+| `DERIV_SHELLS` | **remove** (former default on) | GD1 shared local/core shell values; bit-identical | ledger GD1-DERIV-SPEED; dev08 gen60/gen66 |
+| `DERIV_SHELL_TABLES` | keep: not yet measured | GD2 merged after gen66; dev08 pending | ledger GD2-DERIV-XC |
+| `DERIV_XC_SPLIT` | keep: not yet measured | GD2 merged after gen66; dev08 pending | ledger GD2-DERIV-XC |
+| `DERIV_JOINT` | keep: not yet measured | GD2 merged after gen66; dev08 pending | ledger GD2-DERIV-XC |
+| `FD_EMPTY_THRESHOLD` | keep: (d) verification-coupled | FD_EMPTY_VERIFY depends on it; three-way policy | ledger GF2 |
+| `FD_EMPTY_VERIFY` | keep: (d) verification | verification map (GV1 area) | ledger GF2, gen63 |
+| `FD_BUFFER` | keep: (b) documented experiment | named by the user decision | ledger GF2 |
+| `COLLINEAR_TIME_REVERSAL` | keep: (c) oracle reader | read by the strict oracle (oracle/collinear.rs) and CLI config | ADR 0050 |
+| `FD_GROWTH_AT_STOP` | keep: (d) stop/verification | growth judged at stop and verification maps (GV1 area) | ledger GB2 |
+| `FD_VERIFY_PREDICTOR` | keep: (d) verification | verification predictor (GV1 area) | ledger GB2 |
+| `SPIN_FD_ATOMIC_DENSITY` | keep: (b) research | named by the user decision | ledger GB2 |
+| `K_REDUCTION` | keep: (a) user option | ADR 0051; unreduced is the oracle of pointwise | ADR 0051 |
+| `GRID_INCOMPATIBLE_OPS` | keep: (a) user option | ADR 0049 | ADR 0049 |
+| `SCF_ETHR_GUARD` | keep: (b) research | named by the user decision | ledger GM1 |
+| `VERIFY_FEED` | keep: (d) GV1 research | dev08 evaluation | ledger GV1-VERIFY-COST |
+| `VERIFY_SKIPS` | keep: (d) GV1 research | dev08 evaluation | ledger GV1-VERIFY-COST |
+| `VERIFY_RESPONSE_PREDICTOR` | keep: (d) GV1 research | dev08 evaluation | ledger GV1-VERIFY-COST |
+
+### Removed code
+
+- `dft-solvers/src/ref_davidson_complex.rs`: per-call workspace allocation,
+  separate agreements and operand rescans (CDAV_REUSE off), full S/H
+  recompute after an append (CDAV_BORDER_GRAM off), full refactor
+  (CDAV_BORDER_FACTOR off), per-element correction loop (CDAV_STREAM off).
+- `dft-engine/src/refstart.rs`: direct per-(row, atom, m) quadrature columns
+  (K_START_MEMO), full-sphere projector tables (K_NL_TABLE_MEMO), per-channel
+  spin start (K_START_SPIN_SHARE), quadrature arms of the k start, projector
+  and field tables (RADIAL_TABLE_START/NL/FIELDS, also the fixed-density
+  start), the switch selection of the kept start HX (K_START_KEPT_HX,
+  SPIN_FD_START_KEPT_HX: the SCF starts always keep it), the real Gamma start
+  with mirror complements (REFSCF_REAL_START).
+- `dft-engine/src/refscf/k_map.rs`: per-k residual reduction and eager
+  per-map energy terms (K_LEAN_ENERGY off).
+- `dft-engine/src/refscf/k_driver.rs`, `refscf/electronic.rs`: the kept-HX
+  invalidation before the first-map redo (K_REDO_KEPT_HX,
+  SPIN_FD_REDO_KEPT_HX off); no verification or stop logic touched.
+- `dft-solvers/src/distributed_fft.rs`: the transpose path selection for
+  one-rank k plans (FFT_ONE_RANK_DIRECT; plain `new` plans keep the transpose
+  path) and the whole fused-row workspace (FFT_FUSED_ROWS);
+  `dft-physics/src/distributed_complex.rs::kept_planes_exact` is now always
+  true.
+- `dft-physics/src/distributed_real_gamma.rs`: panel projection route, the
+  separate coupling buffer W and the separate back-projection add
+  (NONLOCAL_SINGLE_GEMM/FUSE_COUPLING/BACK_ACCUM off; MKL-only arithmetic,
+  pure builds unchanged); `dft-cli/src/run.rs` reports the single-GEMM route
+  unconditionally.
+- `dft-engine/src/forces.rs`, `stress.rs`: per-k operator build with scalar
+  loops (DERIV_NL_GEMM off), quadrature projector radials
+  (DERIV_RADIAL_TABLES off), per-shell evaluation (DERIV_SHELLS off; the
+  kernels' `Option` interface stays), the complete force pass inside the
+  stress (STRESS_FORCE_PASS on; `precondition_force_band_passes` stays in the
+  record as 0), `forces::nonlocal_band_first` (FORCE_BAND_FIRST).
+
+### Test migration
+
+Tests that compared a retired arm with the default keep their evidence in the
+ledger rows named in the table and now check the default path only: rank-count
+independence within the unchanged classes, bit reproducibility, worker-count
+independence, convergence, kept-HX hits. Deleted: `dft-engine/tests/k_radial_table.rs`
+(only table-vs-quadrature arms), the two GK16 strict-class A/B tests and the
+real IrI3 A/B in `k_setup_tail.rs` (the table accuracy scan stays),
+`band_first_identity_complex_k_fractional_occupations`, the solver unit tests
+`border_gram_matches_full_recompute` and `border_factor_and_stream_agree`
+(replaced by `border_path_is_rank_independent`), the plan unit test
+`fused_rows_respects_backend_selection` and
+`fused_rows_preserve_transforms_and_remove_slab_passes`. The direct-stick
+plan test now compares `new_direct` with `new` (same bits). The G4G stall
+record test (`dft-cli/tests/reference_stalls.rs`) pinned three retired arms to
+reach a rounding-dependent stall; with the adopted paths the same fixture
+reaches it at mixing beta 0.9 / history 20 (input change only, no
+tolerance changed). No tolerance or golden was relaxed.
+
+### CL1 validation (Mac, pure Rust, 2026-11-27)
+
+| Measure | Before (`d63fd1ac`) | After | Change |
+| --- | ---: | ---: | ---: |
+| Manifest switches | 103 | 77 | -26 |
+| Rust lines under `crates/` (diff) | | | +424 / -2223 |
+| Literal `#[test]` annotations | 1289 | 1277 | -12 |
+
+All commands below exited **0** (logs in the worktree's `target/cl1-evidence/`,
+local scratch, not portable evidence):
+
+```sh
+cargo clippy --workspace --all-targets -- -D warnings
+cargo check -p dft-solvers -p dft-numerics -p dft-mkl -p dft-physics --tests --features dft-numerics/mkl
+cargo check -p dft-engine --no-default-features
+cargo check -p dft-cli --features mpi
+CHECK_SCCACHE=0 CHECK_NICE=0 scripts/check.sh
+cargo build --release -p dft-cli
+BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf .../Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 1 --baseline docs/performance/baseline-oracle.json --require-identical
+cargo test --release -p dft-engine --test k_setup_fingerprint -- --ignored --nocapture   # base and candidate, diff
+cargo test --release -p dft-cli --test all relax_extrapolation -- --ignored
+DFT_SI_UPF=.../Si.pz-vbc.UPF cargo test --release -p dft-cli --test reference_gaps reference_k_relax -- --ignored
+cargo test --release -p dft-engine --test refscf_k_border_gram border_gram_scf_converges_on_k_generality_set -- --ignored
+cargo test --release -p dft-engine --test refscf_fd_kept ports_within_class_at_eight_ranks -- --ignored
+python3 -I scripts/tests/test_readme_figures.py
+git diff --check
+```
+
+Full gate: **1028 passed, 0 failed, 239 ignored, 122 binaries**; build, test,
+fmt, clippy, production-check and production-clippy PASS. (Two earlier runs
+with `BAANDI_TEST_TMP` set to a long path failed only in environment-bound
+tests: the pseudo cache tests and a Unix socket probe, "path must be shorter
+than SUN_LEN"; both pass with the default temp directory.) MKL and MPI are
+type-checked only.
+
+Identity of the default behaviour:
+
+- `k_setup_fingerprint` (release, 60 runs: unpolarized k, collinear spin and
+  Fermi-Dirac; 1 to 3 ranks; pools on and off; energy bits, map count and a
+  hash of every delivered bit): the base build at `d63fd1ac` and the candidate
+  print identical lines (diff empty).
+- Reference driver `bench_scf` (gamma, k222s, k222): the stored
+  `baseline-reference.json` is already stale on main for the k cases (the base
+  build `d63fd1ac` fails it in the same way: density differs, dE 0 and
+  8.9e-16 Ha, from the sprint's rounding-class adoptions). Base and candidate
+  agree exactly in all seven recorded fields (energy bits, density SHA-256,
+  SCF iterations, operator applications, Davidson iterations, certificate
+  applications and iterations) for all three cases.
+- Strict oracle `bench_scf`: identical to `baseline-oracle.json` (dE 0,
+  density identical) on all three cases.
+- `reference_identity`, `oracle_identity` and the other identity tests pass in
+  the full gate with unchanged goldens.
+
+No speed claim; dev08 not run (the NONLOCAL_* arms are MKL-only arithmetic and
+only type-checked here; their retirement keeps the dev08-adopted default).

@@ -44,21 +44,18 @@ functional='pbe'
 threads=1
 nbands=6
 max_iterations={max_iterations}
-mixing_beta=0.6
-mixing_history=15
+mixing_beta=0.9
+mixing_history=20
 [spin]
 mode='collinear'
 n_up=4
 n_down=2
 [performance]
 reference_strict='off'
-# The stall is a rounding-dependent trajectory (see the test); GK10 border
-# Gram rounding moves this fixture past it on macOS, so pin the full Gram.
-cdav_border_gram='off'
-# GK16 field-table rounding also moves it past the stall; pin the quadrature.
-radial_table_fields='off'
-# GF1 start kept-HX rounding (spin/FD start) also moves it; pin a fresh H.
-spin_fd_start_kept_hx='off'
+# The stall is a rounding-dependent trajectory (see the test). Until CL1 it
+# was reached with beta 0.6 / history 15 only by pinning the retired
+# full-Gram, quadrature-field and fresh-start-H arms; with the adopted paths
+# beta 0.9 / history 20 reaches it on macOS/aarch64 (2 stalls in 20 maps).
 "#
             ),
         )

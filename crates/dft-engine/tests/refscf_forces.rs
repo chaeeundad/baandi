@@ -10,38 +10,7 @@ use dft_engine::{
 };
 use dft_geometry::{Atom, Cell, kpoints::KPoint};
 use dft_numerics::switches::RunConfig;
-use dft_physics::data::{Complex64, ComplexMatrix};
 
-#[test]
-fn band_first_identity_complex_k_fractional_occupations() {
-    use dft_basis::PlaneWaveBasis;
-    use dft_physics::hamiltonian::{NonlocalOperator, Species};
-    let pp = common::potential(2., 1.8, true, 161);
-    let positions = [[0.3, 0.7, 1.1], [2.1, 3.2, 1.7]];
-    let species = [Species {
-        potential: &pp,
-        positions_bohr: &positions,
-    }];
-    for k in [[0.; 3], [0.2, -0.1, 0.3]] {
-        let cell =
-            Cell::from_user_rows_bohr([[7., 0., 0.], [0.3, 6., 0.], [0.2, 0.4, 8.]]).unwrap();
-        let basis = PlaneWaveBasis::at_k(&cell, dft_units::Hartree(2.), k).unwrap();
-        let operator = NonlocalOperator::new(&basis, cell.volume_bohr3(), &species).unwrap();
-        let mut orbitals = ComplexMatrix::zeros(basis.vectors().len(), 5).unwrap();
-        for (i, z) in orbitals.as_mut_slice().iter_mut().enumerate() {
-            *z = Complex64::new((i as f64 * 0.13).sin(), (i as f64 * 0.37).cos()) / 20.;
-        }
-        let occupations = [2., 1.3, 0.7, 0., 0.01];
-        let old =
-            dft_physics::forces::nonlocal(&operator, &basis, &orbitals, &occupations).unwrap();
-        let new =
-            dft_engine::forces::nonlocal_band_first(&operator, &basis, &orbitals, &occupations)
-                .unwrap();
-        let error = delta(old.iter().flatten(), new.iter().flatten());
-        println!("band-first k={k:?} max error={error:e} Ha/Bohr");
-        assert!(error < 1e-12);
-    }
-}
 fn delta<'a>(a: impl Iterator<Item = &'a f64>, b: impl Iterator<Item = &'a f64>) -> f64 {
     a.zip(b).map(|(a, b)| (a - b).abs()).fold(0., f64::max)
 }
@@ -132,9 +101,7 @@ fn compare(
             .unwrap();
             let force = dft_engine::forces(&view).unwrap();
             let stress = dft_engine::stress::frozen_stress(&view).unwrap();
-            let config =
-                RunConfig::from_pairs(&[("xc_screen_negative", "off"), ("force_band_first", "on")])
-                    .unwrap();
+            let config = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
             let _scope = config.enter();
             let fast = dft_engine::forces(&view).unwrap();
             assert!(delta(force.values.iter().flatten(), fast.values.iter().flatten()) < 1e-12);
@@ -942,11 +909,7 @@ mod electronic_derivatives {
             assert_eq!(f.verification, "verified");
             assert_eq!(f.quantity, if case.policy.is_finite() { "F" } else { "E" });
             let fast = {
-                let config = RunConfig::from_pairs(&[
-                    ("xc_screen_negative", "off"),
-                    ("force_band_first", "on"),
-                ])
-                .unwrap();
+                let config = RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap();
                 let _scope = config.enter();
                 dft_engine::forces(&view).unwrap()
             };

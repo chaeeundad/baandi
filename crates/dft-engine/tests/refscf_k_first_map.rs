@@ -264,56 +264,34 @@ pub fn matrix(pairs: &[(&str, &str)], tag: &str, threshold_ry: f64) -> Vec<(Stri
 #[test]
 #[ignore = "first-map work report; run in release"]
 fn first_map_report() {
-    // Arms: before (both GK10B first-map switches off), default (kept HX on
-    // the redo), empty (default plus the research empty-band rule). Strict
-    // arm 1e-12 Ry (class 1e-10 Ha) and standard arm 1e-8 Ry (class 5e-9
-    // Ha, judged against the strict run of the same fixture).
-    let off = [
-        ("k_first_empty_rule", "off"),
-        ("k_redo_kept_hx", "off"),
-        ("k_start_kept_hx", "off"),
-        ("cdav_border_factor", "off"),
-        ("cdav_stream", "off"),
-    ];
+    // Arms: default (GK10B kept start and redo HX; the pre-GK10B "before" arm
+    // was retired in CL1, its comparison is in the attempts ledger) and empty
+    // (default plus the research empty-band rule). Strict arm 1e-12 Ry
+    // (class 1e-10 Ha) and standard arm 1e-8 Ry (class 5e-9 Ha, judged
+    // against the strict default run of the same fixture).
     let empty = [("k_first_empty_rule", "on")];
-    let strict_before = matrix(&off, "strict-before", 1e-12);
     let strict_after = matrix(&[], "strict-default", 1e-12);
     let strict_empty = matrix(&empty, "strict-empty", 1e-12);
-    let before = matrix(&off, "before", 1e-8);
     let after = matrix(&[], "default", 1e-8);
     let with_empty = matrix(&empty, "empty", 1e-8);
-    for (i, (label, b)) in before.iter().enumerate() {
-        let (a, x) = (&after[i].1, &with_empty[i].1);
-        let (sb, sa, sx) = (&strict_before[i].1, &strict_after[i].1, &strict_empty[i].1);
-        let strict = (sa.energy - sb.energy).abs();
-        let strict_x = (sx.energy - sb.energy).abs();
-        let [eb, ea, ex] = [b, a, x].map(|r| (r.energy - sb.energy).abs());
+    for (i, (label, a)) in after.iter().enumerate() {
+        let x = &with_empty[i].1;
+        let (sa, sx) = (&strict_after[i].1, &strict_empty[i].1);
+        let strict_x = (sx.energy - sa.energy).abs();
+        let [ea, ex] = [a, x].map(|r| (r.energy - sa.energy).abs());
         let map1 = |r: &FirstMap| (r.coarse.0 + r.redo.0, r.coarse.1 + r.redo.1);
         println!(
-            "GK10B delta {label}: strict |default-before| {strict:.2e} |empty-before| {strict_x:.2e} Ha; standard vs strict before {eb:.2e} default {ea:.2e} empty {ex:.2e} Ha; map1 it/H before {:?} default {:?} empty {:?}; maps {}/{}/{}; total H {}/{}/{}; strict maps {}/{}/{}, total H {}/{}/{}",
-            map1(b),
+            "GK10B delta {label}: strict |empty-default| {strict_x:.2e} Ha; standard vs strict default {ea:.2e} empty {ex:.2e} Ha; map1 it/H default {:?} empty {:?}; maps {}/{}; total H {}/{}; strict maps {}/{}, total H {}/{}",
             map1(a),
             map1(x),
-            b.maps,
             a.maps,
             x.maps,
-            b.total.1,
             a.total.1,
             x.total.1,
-            sb.maps,
             sa.maps,
             sx.maps,
-            sb.total.1,
             sa.total.1,
             sx.total.1
-        );
-        assert!(strict <= 1e-10, "{label}: strict {strict:e} Ha");
-        // The standard rule does not bound the delivered error by 5e-9 Ha on
-        // these synthetic fixtures (the before arm itself reaches 8.3e-9 on
-        // the B12 shape); the default arm must not be worse than before.
-        assert!(
-            ea <= 5e-9 || ea <= eb + 1e-12,
-            "{label}: standard default {ea:e} Ha (before {eb:e})"
         );
     }
 }

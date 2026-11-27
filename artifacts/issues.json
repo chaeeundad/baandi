@@ -198,5 +198,13 @@
     "status": "open",
     "phase": "SCF diagnostics (found by PRELAX-P1 stage 1)",
     "detail": "dev08 2026-11-27, PRELAX-P1 stage 1 si8-lda-k222-a0.2 seed 9 (random 0.2 Bohr start, 20 bands, fixed occupations): dr2 drops to 1.6e-4 Ry by it 9 then oscillates 1e-4..1e-3 Ry; not_converged Exhausted at it 100 (max 100) and at it 147 with max_iterations 300 (early end not explained). Fermi-Dirac 0.01 eV: gap at Gamma 6.1 meV (bands 16/17), all other k gapped by >1 eV. Case issue, not an optimizer result; seed 9 is excluded from the PRELAX-P1 medians (fails at evaluation 1 in every arm). Wanted: (1) a clear message when HOMO/LUMO are within a few meV or swap between iterations under fixed occupations, suggesting smearing; (2) explain why the run ends at 147 with max_iterations 300. Records: dev08 /data/sig-dft/prelax-p1/diag-s9/."
+  },
+  {
+    "id": "I-SYM-START-FOLLOWUP",
+    "title": "Symmetric runs accepted at start can still fail later (singular mixing history, negative density in XC)",
+    "severity": "low",
+    "status": "open",
+    "phase": "after SYM-START-CHECK (2026-11-28)",
+    "detail": "Toy fixtures found while testing SYM-START-CHECK: cubic 5 Bohr cell, atom at (1/8,1/8,1/8), 1 Ha: symmetric run fails with singular mixing history while the same system without symmetry converges; orthorhombic 5x5.5x6 Bohr cell: XC error from negative density in the first map. Also recheck backlog lines 369-371 (GaAs PBE symmetry auto 4x4x4 shifted refused with the old false message) on dev08."
   }
 ]

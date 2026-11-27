@@ -1,0 +1,75 @@
+# GS1D-B evidence (Mac release, 2026-11-27). strict oracle, scaled grids:
+GS1DB Ta6Zn7/full: wall=13.4s
+GS1DB Ta6Zn7/unreduced: nks=8 crystal=12 density_ops=12 wall=11.7s
+GS1DB Ta6Zn7/reciprocal: nks=4 crystal=12 density_ops=12 wall=6.2s
+GS1DB Ta6Zn7/drop: nks=6 crystal=4 density_ops=4 wall=8.7s
+GS1DB Ta6Zn7 [20,20,36] reciprocal-unreduced: dE=-7.593925488436071e-14 Ha max|dF|=5.567605404488418e-12 Ha/Bohr max|dsigma|=1.7783517713976238e-14 Ha/Bohr^3
+GS1DB Ta6Zn7 [20,20,36] reciprocal-full: dE=-3.1233682307174604e-11 Ha max|dF|=1.419953960013818e-6 Ha/Bohr max|dsigma|=7.032996645869058e-10 Ha/Bohr^3
+GS1DB Ta6Zn7 [20,20,36] unreduced-full: dE=-3.115774305229024e-11 Ha max|dF|=1.4199539600142111e-6 Ha/Bohr max|dsigma|=7.032996645868636e-10 Ha/Bohr^3
+GS1DB Ta6Zn7 [20,20,36] drop-full: dE=8.881784197001252e-16 Ha max|dF|=7.212603578624077e-10 Ha/Bohr max|dsigma|=1.0112431725328719e-12 Ha/Bohr^3
+GS1DB Hg/full: wall=0.9s
+GS1DB Hg/unreduced: nks=8 crystal=8 density_ops=8 wall=0.9s
+GS1DB Hg/reciprocal: nks=4 crystal=8 density_ops=8 wall=0.5s
+GS1DB Hg/drop: nks=6 crystal=2 density_ops=2 wall=0.7s
+GS1DB Hg [20,20,18] reciprocal-unreduced: dE=-2.1760371282653068e-14 Ha max|dF|=8.351880385198962e-16 Ha/Bohr max|dsigma|=6.613633252161577e-17 Ha/Bohr^3
+GS1DB Hg [20,20,18] reciprocal-full: dE=0e0 Ha max|dF|=9.857778591743574e-10 Ha/Bohr max|dsigma|=4.765192518074212e-11 Ha/Bohr^3
+GS1DB Hg [20,20,18] unreduced-full: dE=2.1760371282653068e-14 Ha max|dF|=9.85777859179016e-10 Ha/Bohr max|dsigma|=4.7651925177777507e-11 Ha/Bohr^3
+GS1DB Hg [20,20,18] drop-full: dE=-8.348877145181177e-14 Ha max|dF|=3.5415898270249744e-16 Ha/Bohr max|dsigma|=2.1315414711065017e-16 Ha/Bohr^3
+GS1DB Cl2/full: wall=0.7s
+GS1DB Cl2/unreduced: nks=4 crystal=8 density_ops=8 wall=0.7s
+GS1DB Cl2/reciprocal: nks=3 crystal=8 density_ops=8 wall=0.5s
+GS1DB Cl2/drop: nks=4 crystal=4 density_ops=4 wall=0.7s
+GS1DB Cl2 [20,18,40] reciprocal-unreduced: dE=1.0742795542029171e-13 Ha max|dF|=1.2610745780960997e-13 Ha/Bohr max|dsigma|=7.650130529057719e-16 Ha/Bohr^3
+GS1DB Cl2 [20,18,40] reciprocal-full: dE=1.3596762604706214e-13 Ha max|dF|=4.2173851350085293e-11 Ha/Bohr max|dsigma|=1.0017651950766675e-13 Ha/Bohr^3
+GS1DB Cl2 [20,18,40] unreduced-full: dE=2.853967062677043e-14 Ha max|dF|=4.2173851350085293e-11 Ha/Bohr max|dsigma|=1.0017651950766675e-13 Ha/Bohr^3
+GS1DB Cl2 [20,18,40] drop-full: dE=1.6091294963160863e-14 Ha max|dF|=3.0432961706239325e-11 Ha/Bohr max|dsigma|=3.2699537522162814e-16 Ha/Bohr^3
+# strict oracle, real gen64 grids (GS1DB_REAL_GRIDS=1):
+GS1DB Ta6Zn7/full: wall=129.3s
+GS1DB Ta6Zn7/unreduced: nks=8 crystal=12 density_ops=12 wall=141.4s
+GS1DB Ta6Zn7/reciprocal: nks=4 crystal=12 density_ops=12 wall=77.6s
+GS1DB Ta6Zn7/drop: nks=6 crystal=4 density_ops=4 wall=111.1s
+GS1DB Ta6Zn7 [60,60,108] reciprocal-unreduced: dE=-2.55351295663786e-13 Ha max|dF|=5.207273848228944e-12 Ha/Bohr max|dsigma|=1.9821817798248986e-14 Ha/Bohr^3
+GS1DB Ta6Zn7 [60,60,108] reciprocal-full: dE=-2.7216007225661087e-11 Ha max|dF|=1.3756763814177628e-6 Ha/Bohr max|dsigma|=6.776735076756644e-10 Ha/Bohr^3
+GS1DB Ta6Zn7 [60,60,108] unreduced-full: dE=-2.69606559299973e-11 Ha max|dF|=1.3756763814178217e-6 Ha/Bohr max|dsigma|=6.776735076747064e-10 Ha/Bohr^3
+GS1DB Ta6Zn7 [60,60,108] drop-full: dE=-1.5942802633617248e-13 Ha max|dF|=2.483250901436085e-8 Ha/Bohr max|dsigma|=2.766829300393514e-12 Ha/Bohr^3
+GS1DB Hg/full: wall=14.2s
+GS1DB Hg/unreduced: nks=8 crystal=8 density_ops=8 wall=14.3s
+GS1DB Hg/reciprocal: nks=4 crystal=8 density_ops=8 wall=7.9s
+GS1DB Hg/drop: nks=6 crystal=2 density_ops=2 wall=11.3s
+GS1DB Hg [60,60,54] reciprocal-unreduced: dE=1.1379786002407855e-14 Ha max|dF|=2.4267155125656803e-16 Ha/Bohr max|dsigma|=3.426078865054194e-17 Ha/Bohr^3
+GS1DB Hg [60,60,54] reciprocal-full: dE=-3.147482274812319e-14 Ha max|dF|=1.2242068613017202e-11 Ha/Bohr max|dsigma|=6.873444014078971e-14 Ha/Bohr^3
+GS1DB Hg [60,60,54] unreduced-full: dE=-4.285460875053104e-14 Ha max|dF|=1.224206860962907e-11 Ha/Bohr max|dsigma|=6.873443992903147e-14 Ha/Bohr^3
+GS1DB Hg [60,60,54] drop-full: dE=-4.163336342344337e-14 Ha max|dF|=3.074917011883222e-16 Ha/Bohr max|dsigma|=1.1666015375944028e-16 Ha/Bohr^3
+GS1DB Cl2/full: wall=4.1s
+GS1DB Cl2/unreduced: nks=4 crystal=8 density_ops=8 wall=4.1s
+GS1DB Cl2/reciprocal: nks=3 crystal=8 density_ops=8 wall=3.1s
+GS1DB Cl2/drop: nks=4 crystal=4 density_ops=4 wall=4.1s
+GS1DB Cl2 [40,36,80] reciprocal-unreduced: dE=-7.017997294411771e-14 Ha max|dF|=1.2878587085651816e-14 Ha/Bohr max|dsigma|=2.2811613709095013e-16 Ha/Bohr^3
+GS1DB Cl2 [40,36,80] reciprocal-full: dE=-1.1194517535173532e-13 Ha max|dF|=5.1577450643769396e-11 Ha/Bohr max|dsigma|=5.22368606703516e-16 Ha/Bohr^3
+GS1DB Cl2 [40,36,80] unreduced-full: dE=-4.176520240761761e-14 Ha max|dF|=5.159032923085505e-11 Ha/Bohr max|dsigma|=4.757479132866393e-16 Ha/Bohr^3
+GS1DB Cl2 [40,36,80] drop-full: dE=-1.2852219288816968e-13 Ha max|dF|=5.153513726874337e-11 Ha/Bohr max|dsigma|=4.701100619897147e-16 Ha/Bohr^3
+# standard reference driver at 1e-12 Ha, scaled grids (GS1DB_STANDARD=1):
+GS1DB Ta6Zn7/full: wall=4.6s
+GS1DB Ta6Zn7/unreduced: nks=8 crystal=12 density_ops=12 wall=3.5s
+GS1DB Ta6Zn7/reciprocal: nks=4 crystal=12 density_ops=12 wall=1.8s
+GS1DB Ta6Zn7/drop: nks=6 crystal=4 density_ops=4 wall=2.7s
+GS1DB strict=off Ta6Zn7 [20,20,36] reciprocal-unreduced: dE=7.143174940438257e-13 Ha max|dF|=1.5335724669329753e-8 Ha/Bohr max|dsigma|=2.555841302487316e-11 Ha/Bohr^3
+GS1DB strict=off Ta6Zn7 [20,20,36] reciprocal-full: dE=-3.033373552341345e-11 Ha max|dF|=1.4203955955748796e-6 Ha/Bohr max|dsigma|=7.034994305047157e-10 Ha/Bohr^3
+GS1DB strict=off Ta6Zn7 [20,20,36] unreduced-full: dE=-3.104805301745728e-11 Ha max|dF|=1.420395595725342e-6 Ha/Bohr max|dsigma|=7.034994302407541e-10 Ha/Bohr^3
+GS1DB strict=off Ta6Zn7 [20,20,36] drop-full: dE=5.344613640545504e-13 Ha max|dF|=9.456868121926476e-9 Ha/Bohr max|dsigma|=4.144006925804744e-11 Ha/Bohr^3
+GS1DB Hg/full: wall=0.5s
+GS1DB Hg/unreduced: nks=8 crystal=8 density_ops=8 wall=0.5s
+GS1DB Hg/reciprocal: nks=4 crystal=8 density_ops=8 wall=0.3s
+GS1DB Hg/drop: nks=6 crystal=2 density_ops=2 wall=0.4s
+GS1DB strict=off Hg [20,20,18] reciprocal-unreduced: dE=6.98885394001536e-14 Ha max|dF|=4.8304953553833865e-9 Ha/Bohr max|dsigma|=2.1815769460017953e-11 Ha/Bohr^3
+GS1DB strict=off Hg [20,20,18] reciprocal-full: dE=-7.149836278586008e-14 Ha max|dF|=4.887802901080927e-9 Ha/Bohr max|dsigma|=4.1767649458072423e-11 Ha/Bohr^3
+GS1DB strict=off Hg [20,20,18] unreduced-full: dE=-1.4138690218601369e-13 Ha max|dF|=6.368158535381956e-9 Ha/Bohr max|dsigma|=4.176764945849594e-11 Ha/Bohr^3
+GS1DB strict=off Hg [20,20,18] drop-full: dE=-6.533662499919046e-14 Ha max|dF|=3.036491579282586e-9 Ha/Bohr max|dsigma|=1.5921361451454175e-12 Ha/Bohr^3
+GS1DB Cl2/full: wall=0.4s
+GS1DB Cl2/unreduced: nks=4 crystal=8 density_ops=8 wall=0.4s
+GS1DB Cl2/reciprocal: nks=3 crystal=8 density_ops=8 wall=0.3s
+GS1DB Cl2/drop: nks=4 crystal=4 density_ops=4 wall=0.4s
+GS1DB strict=off Cl2 [20,18,40] reciprocal-unreduced: dE=2.853273173286652e-14 Ha max|dF|=6.745992653378607e-14 Ha/Bohr max|dsigma|=2.5071091036554805e-15 Ha/Bohr^3
+GS1DB strict=off Cl2 [20,18,40] reciprocal-full: dE=2.5306146067549662e-14 Ha max|dF|=1.1714171230248205e-8 Ha/Bohr max|dsigma|=3.99335204660789e-11 Ha/Bohr^3
+GS1DB strict=off Cl2 [20,18,40] unreduced-full: dE=-3.226585665316861e-15 Ha max|dF|=1.1714238690174739e-8 Ha/Bohr max|dsigma|=3.9931817834987227e-11 Ha/Bohr^3
+GS1DB strict=off Cl2 [20,18,40] drop-full: dE=2.4952956367840784e-13 Ha max|dF|=2.5754064020278022e-8 Ha/Bohr max|dsigma|=7.529090155153351e-11 Ha/Bohr^3

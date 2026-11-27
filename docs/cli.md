@@ -1322,9 +1322,15 @@ input is projected onto that subgroup only, preflight prints a
 records the count, split into `rotation_count` (the rotation mixes axes whose
 dimensions do not divide each other, n_i R_ij / n_j not an integer) and
 `translation_count` (n_i tau_i not an integer), with the reason (GS1C/GS1D,
-ADR 0049). The rotation condition is stricter than QE's, which keeps such
-operations; a grid where the mixed dimensions divide each other keeps them. Omit `basis.fft_grid`
-to get the full group on automatic compatible dimensions.
+ADR 0049). Since GS1D-B (`BAANDI_GRID_INCOMPATIBLE_OPS`, default
+`reciprocal`) operations whose rotation does not map the explicit grid are
+kept, as in QE: the density and the local potential are projected onto the
+whole group in G space (the real-space XC quadrature alone would not be
+invariant), and `results.json.symmetry.grid_incompatible_ops` records the
+policy, the number of such operations and whether the potential is projected.
+`drop` restores the subgroup. Only translation-incompatible operations are
+dropped by default. Omit `basis.fft_grid` to get the full group on automatic
+compatible dimensions.
 FFT-friendly rounding applies only to automatic selection: the existing chooser
 selects the smallest compatible 2/3/5-smooth dimensions along each axis, using a
 common dimension if rotations require it. Preflight records the dimensions,

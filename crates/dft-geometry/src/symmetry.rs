@@ -290,9 +290,23 @@ pub fn grid_subgroup(
     dims: [usize; 3],
     tolerance_bohr: f64,
 ) -> Vec<SymmetryOperation> {
+    grid_subgroup_with(cell, operations, dims, tolerance_bohr, false)
+}
+/// GS1D-B: with `rotations_free` an operation is kept when its fractional
+/// translation is a multiple of the grid spacing, whatever its rotation does to
+/// the grid (the caller then projects the local potential in G space).
+/// Translation-compatible operations are closed under composition, so the kept
+/// subset is again a group.
+pub fn grid_subgroup_with(
+    cell: &Cell,
+    operations: &[SymmetryOperation],
+    dims: [usize; 3],
+    tolerance_bohr: f64,
+    rotations_free: bool,
+) -> Vec<SymmetryOperation> {
     let kept: Vec<_> = operations
         .iter()
-        .filter(|o| preserves_fft_grid(dims, std::slice::from_ref(*o)))
+        .filter(|o| grid_keeps(dims, o, rotations_free))
         .cloned()
         .collect();
     if !kept.is_empty() && validate_group(cell, &kept, tolerance_bohr).is_ok() {
@@ -335,6 +349,16 @@ pub fn symmetrize_for_grid(
     atoms: &[Atom],
     tolerance_bohr: f64,
     grid: Option<[usize; 3]>,
+) -> Result<Symmetrized, SymmetryError> {
+    symmetrize_for_grid_with(cell, atoms, tolerance_bohr, grid, false)
+}
+/// `symmetrize_for_grid` with the GS1D-B policy (`grid_subgroup_with`).
+pub fn symmetrize_for_grid_with(
+    cell: &Cell,
+    atoms: &[Atom],
+    tolerance_bohr: f64,
+    grid: Option<[usize; 3]>,
+    rotations_free: bool,
 ) -> Result<Symmetrized, SymmetryError> {
     let detected = detect(cell, atoms, tolerance_bohr)?;
     let tol = tolerance_bohr;
@@ -404,7 +428,7 @@ pub fn symmetrize_for_grid(
     let restrict = |ops: Vec<SymmetryOperation>| -> Vec<SymmetryOperation> {
         match grid {
             None => ops,
-            Some(dims) => grid_subgroup(cell, &ops, dims, tol),
+            Some(dims) => grid_subgroup_with(cell, &ops, dims, tol, rotations_free),
         }
     };
     let project = |ops: &[SymmetryOperation]| -> (Vec<Vector3<f64>>, f64) {
@@ -455,7 +479,14 @@ pub fn symmetrize_for_grid(
                     })
                 })
                 .collect();
-            grid_drop_reasons(&dropped, dims)
+            if rotations_free {
+                GridDropReasons {
+                    rotation: 0,
+                    translation: dropped.len(),
+                }
+            } else {
+                grid_drop_reasons(&dropped, dims)
+            }
         }
         _ => GridDropReasons::default(),
     };
@@ -519,7 +550,13 @@ pub fn symmetrize_for_grid(
         let exact = detect(&new_cell, &new_atoms, SYMMETRIZATION_VERIFY_BOHR)?;
         let exact = match grid {
             None => exact,
-            Some(dims) => grid_subgroup(&new_cell, &exact, dims, SYMMETRIZATION_VERIFY_BOHR),
+            Some(dims) => grid_subgroup_with(
+                &new_cell,
+                &exact,
+                dims,
+                SYMMETRIZATION_VERIFY_BOHR,
+                rotations_free,
+            ),
         };
         if exact.len() != kept.len() {
             return Err(SymmetryError(
@@ -874,6 +911,13 @@ pub fn grid_drop_reasons(operations: &[SymmetryOperation], dims: [usize; 3]) -> 
         }
     }
     r
+}
+/// Whether `o` is kept for an explicit grid: it permutes the grid, or (GS1D-B,
+/// `rotations_free`) at least its translation is a multiple of the spacing.
+pub fn grid_keeps(dims: [usize; 3], o: &SymmetryOperation, rotations_free: bool) -> bool {
+    !dims.contains(&0)
+        && (rotations_free || grid_rotation_compatible(dims, o))
+        && grid_translation_compatible(dims, o)
 }
 /// Real-space quadrature must be permuted by x -> R*x+tau. Fourier phases
 /// alone do not make a nonlinear XC quadrature invariant on an arbitrary grid.

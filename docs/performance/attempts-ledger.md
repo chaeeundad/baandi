@@ -4956,3 +4956,16 @@ nks and energy against QE with K_REDUCTION=pointwise and mesh.
 Lesson: a mesh that only a subgroup preserves has no symmetric full-mesh sum; matching QE's k count
 means adopting its quadrature (group average), and the exact oracle is the crystal-projected full
 mesh, not the unsymmetrized one.
+
+### GT2B (2026-11-27): keep grid-incompatible rotations (ADR 0049 GS1D-B)
+
+Context: dev08 gen64 Ta6Zn7 [60,60,108] kept 4 of 12 operations (34 k), Hg [60,60,54] 2 of 8; QE keeps all.
+- `GRID_INCOMPATIBLE_OPS` (default `reciprocal`; `drop` = former): rotations that do not permute the
+  explicit grid are kept; density and local potential projected onto the group in G space. Exact
+  against the projected full mesh (strict <= 2.6e-13 Ha, 5.2e-12 Ha/Bohr; standard <= 7.1e-13 Ha);
+  against the raw full mesh the non-invariant XC quadrature costs <= 3e-11 Ha, 1.4e-6 Ha/Bohr
+  (Ta6Zn7 real grid). Mac real-grid nk 2x2x2: Ta6Zn7 6 -> 4, Hg 6 -> 4, Cl2 2x2x1 4 -> 3.
+dev08 request: gen64 Ta6Zn7 v2 and Hg, nks (expect Ta6Zn7 26), wall and energy against QE.
+Lesson: a G-space density projector never needed a permuted grid; only the nonlinear XC quadrature
+did, and projecting the potential restores the invariance of H at the cost of a 1e-11 Ha quadrature
+difference.

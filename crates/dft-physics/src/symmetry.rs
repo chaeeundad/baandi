@@ -149,7 +149,18 @@ impl DistributedDensitySymmetrizer {
             || operations
                 .iter()
                 .any(|o| o.spin_action != SpinAction::Identity || o.antiunitary)
-            || !dft_geometry::symmetry::preserves_fft_grid(dims, operations)
+            // GS1D-B (ADR 0049): with GRID_INCOMPATIBLE_OPS=reciprocal a
+            // rotation need not permute the grid (the projection is in G space
+            // on the density sphere); translations must still be commensurate.
+            || !operations.iter().all(|o| {
+                dft_geometry::symmetry::grid_keeps(
+                    dims,
+                    o,
+                    dft_numerics::switches::choice(
+                        dft_numerics::switches::Id::GRID_INCOMPATIBLE_OPS,
+                    ) == "reciprocal",
+                )
+            })
         {
             return Err(PhysicsError::Shape);
         }

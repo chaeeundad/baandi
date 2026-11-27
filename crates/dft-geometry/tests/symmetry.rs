@@ -778,3 +778,108 @@ fn pointwise_smaller_than_mesh_subgroup_fixtures() {
         );
     }
 }
+
+/// GS1D-B (ADR 0049): the gen64 inputs. Ta6Zn7 (MP cell) on [60,60,108] and
+/// Hg (body-centred, MP cell) on [60,60,54]: the dropped operations fail by
+/// rotation only (an explicit point map confirms each one moves grid points
+/// off the grid, under R and under R^T), their translations are exact after
+/// the projection, and `rotations_free` keeps the whole group.
+#[test]
+fn gen64_grid_incompatible_rotations() {
+    let ta = Cell::from_user_rows_bohr([
+        [-4.745669651409705, -8.219736886585833, 0.0],
+        [4.745669651409705, -8.219736886585833, 0.0],
+        [0.0, -5.4798258697719, 17.22086864710133],
+    ])
+    .unwrap();
+    let ta_sites: [(&str, [f64; 3]); 13] = [
+        ("Ta", [0.16470429, 0.16470429, 0.50588812]),
+        ("Ta", [0.83529571, 0.83529571, 0.49411188]),
+        ("Ta", [0.35067452, 0.35067452, 0.94797944]),
+        ("Ta", [0.64932548, 0.64932548, 0.05202056]),
+        ("Ta", [0.45447874, 0.45447874, 0.63656577]),
+        ("Ta", [0.54552126, 0.54552126, 0.36343423]),
+        ("Zn", [0.0, 0.0, 0.0]),
+        ("Zn", [0.58629293, 0.09410151, 0.22550305]),
+        ("Zn", [0.09410151, 0.09410151, 0.22550305]),
+        ("Zn", [0.09410151, 0.58629293, 0.22550305]),
+        ("Zn", [0.41370707, 0.90589849, 0.77449695]),
+        ("Zn", [0.90589849, 0.90589849, 0.77449695]),
+        ("Zn", [0.90589849, 0.41370707, 0.77449695]),
+    ];
+    let hg = Cell::from_user_rows_bohr([
+        [-5.015533672493139, 5.015533672493139, -7.244623598695992],
+        [5.015533672493139, -5.015533672493139, -7.244623598695992],
+        [-5.015533672493139, -5.015533672493139, 7.244623598695992],
+    ])
+    .unwrap();
+    let hg_sites: [(&str, [f64; 3]); 4] = [
+        ("Hg", [0.875, 0.37550581, 0.00050581]),
+        ("Hg", [0.375, 0.87449419, -0.00050581]),
+        ("Hg", [0.62449419, 0.625, 0.49949419]),
+        ("Hg", [0.12550581, 0.125, 0.50050581]),
+    ];
+    for (cell, sites, dims, (all, kept)) in [
+        (ta, &ta_sites[..], [60, 60, 108], (12, 4)),
+        (hg, &hg_sites[..], [60, 60, 54], (8, 2)),
+    ] {
+        let atoms: Vec<_> = sites.iter().map(|(s, p)| Atom::new(*s, *p)).collect();
+        let dropped =
+            symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some(dims)).unwrap();
+        assert_eq!(
+            (
+                dropped.operations_count,
+                dropped.dropped_for_grid_rotation,
+                dropped.dropped_for_grid_translation
+            ),
+            (kept, all - kept, 0)
+        );
+        let free =
+            symmetrize_for_grid_with(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some(dims), true)
+                .unwrap();
+        assert_eq!((free.operations_count, free.dropped_for_grid), (all, 0));
+        let c = Cell::from_matrix_columns_bohr(free.lattice_columns_bohr).unwrap();
+        let a: Vec<_> = sites
+            .iter()
+            .zip(&free.fractional)
+            .map(|((s, _), p)| Atom::new(*s, *p))
+            .collect();
+        let ops = detect(&c, &a, 1e-9).unwrap();
+        assert_eq!(ops.len(), all);
+        assert_eq!(grid_subgroup_with(&c, &ops, dims, 1e-9, true).len(), all);
+        assert_eq!(grid_subgroup(&c, &ops, dims, 1e-9).len(), kept);
+        let on = |x: [f64; 3]| {
+            (0..3).all(|i| {
+                let t = x[i] * dims[i] as f64;
+                (t - t.round()).abs() < 1e-6
+            })
+        };
+        for o in &ops {
+            assert!(grid_translation_compatible(dims, o), "{o:?}");
+            for transpose in [false, true] {
+                let maps = (0..3).all(|j| {
+                    let mut x = [0.; 3];
+                    x[j] = 1. / dims[j] as f64;
+                    on(std::array::from_fn(|i| {
+                        (0..3)
+                            .map(|k| {
+                                let r = if transpose {
+                                    o.rotation[k][i]
+                                } else {
+                                    o.rotation[i][k]
+                                };
+                                r as f64 * x[k]
+                            })
+                            .sum::<f64>()
+                            + o.translation[i]
+                    }))
+                });
+                if !transpose {
+                    assert_eq!(maps, grid_rotation_compatible(dims, o), "{o:?}");
+                } else if !grid_rotation_compatible(dims, o) {
+                    assert!(!maps, "transposed convention would keep {o:?}");
+                }
+            }
+        }
+    }
+}

@@ -151,6 +151,10 @@ pub struct StartState {
     pub electrons: f64,
     pub ewald: ewald::EwaldEnergy,
     pub memory: StartMemory,
+    /// GS1D-B (ADR 0049): G-space projector applied to every local potential
+    /// built by the reference maps when some symmetry operation does not
+    /// permute the FFT grid. None otherwise (unchanged arithmetic).
+    pub potential_symmetry: Option<crate::refscf::symmetry::PotentialProjector>,
 }
 
 /// Owned NLCC inputs for PBE. The core coefficients are prepared once from
@@ -967,6 +971,7 @@ fn start_inner<K: Collective>(
         electrons,
         ewald,
         memory,
+        potential_symmetry: None,
     })
 }
 
@@ -3147,6 +3152,7 @@ pub fn start_kpoints_from_density<K: Collective>(
             bands,
             ..Default::default()
         },
+        potential_symmetry: None,
     };
     let mut state = KStartState {
         initial_h_columns: 0,

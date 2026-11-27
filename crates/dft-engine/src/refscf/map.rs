@@ -170,6 +170,11 @@ pub(super) fn fields<K: Collective>(
     for (h, x) in hxc.iter_mut().zip(vxc) {
         *h += x;
     }
+    // GS1D-B: the Hartree part is invariant already; XC on a grid that some
+    // operation does not permute is not, so project the sum (ADR 0049).
+    if let Some(p) = &mut state.potential_symmetry {
+        p.apply(&mut state.fields, comm, &mut hxc)?;
+    }
     // Add the core ledger to the existing energy reduction. No extra field
     // transform or collective is needed, and the no-core reduction is unchanged.
     let e = if let Some(v) = core_integrals {

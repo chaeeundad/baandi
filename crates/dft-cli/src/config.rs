@@ -200,6 +200,13 @@ impl Config {
             .prepared_symmetry()?
             .map_or(0, |p| p.density_operations(true).len());
         Ok(self.symmetry_map()?.map(|m| serde_json::json!({
+            "grid_incompatible_ops": {
+                "policy": dft_numerics::switches::choice(dft_numerics::switches::Id::GRID_INCOMPATIBLE_OPS),
+                "explicit_fft_grid": self.basis.fft_grid,
+                "rotations_not_permuting_grid_kept": self.basis.fft_grid.map_or(0, |d| density_ops.iter().filter(|o| !dft_geometry::symmetry::grid_rotation_compatible(d, o)).count()),
+                "potential_projection": self.basis.fft_grid.is_some_and(|d| dft_engine::needs_potential_projection(d, &density_ops)),
+                "rule": "ADR 0049 GS1D-B: drop = keep the grid-permuting subgroup; reciprocal = keep operations whose rotation does not map the explicit grid and project density and local potential onto the whole group in G space",
+            },
             "k_reduction": {
                 "requested": dft_numerics::switches::choice(dft_numerics::switches::Id::K_REDUCTION),
                 "applied": m.reduction.label(),
@@ -1232,11 +1239,12 @@ impl Config {
             .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
             .collect();
         let record =
-            dft_geometry::symmetry::symmetrize_for_grid(
+            dft_geometry::symmetry::symmetrize_for_grid_with(
                 &cell,
                 &atoms,
                 self.symmetry.tolerance_bohr,
                 self.basis.fft_grid,
+                dft_engine::grid_rotations_free(),
             )
                 .map_err(|e| {
                     ConfigError::Invalid(format!(
@@ -1455,9 +1463,7 @@ impl Config {
         let mut grid = FftGridSpec::new(&wavefunctions, &density, self.basis.fft_grid)?;
         if self.symmetry_map()?.is_some() {
             let ops = self.density_operations()?;
-            if self.basis.fft_grid.is_some()
-                && !dft_geometry::symmetry::preserves_fft_grid(grid.dims(), &ops)
-            {
+            if self.basis.fft_grid.is_some() && !dft_engine::grid_supports(grid.dims(), &ops) {
                 return Err(ConfigError::Invalid("symmetry.fft_grid: explicit grid does not preserve translations/rotations; omit basis.fft_grid for automatic compatible dimensions".into()));
             }
             if self.basis.fft_grid.is_none() {

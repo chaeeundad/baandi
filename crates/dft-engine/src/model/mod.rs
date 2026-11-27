@@ -8,7 +8,10 @@ pub mod spin;
 pub mod verify;
 
 pub use error::*;
-pub use input::{PreparedSymmetry, SpeciesPotential};
+pub use input::{
+    PreparedSymmetry, SpeciesPotential, grid_rotations_free, grid_supports,
+    needs_potential_projection,
+};
 pub use options::*;
 pub use result::*;
 pub use spin::{SpinSector, ThermodynamicLedger};

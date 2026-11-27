@@ -856,6 +856,7 @@ pub(super) async fn run_continuation<K: Collective>(
         .transpose()?;
     if let Some(s) = &mut symmetry {
         s.check_start(&mut states[0].fields, comm, &n)?;
+        states[0].potential_symmetry = s.take_potential_projector();
     }
     let mut plan = DensityPlan::with_fft(
         comm,

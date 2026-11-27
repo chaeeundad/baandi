@@ -237,7 +237,10 @@ fn legacy_defaults_are_unchanged() {
         Value::Choice("off")
     );
     assert_eq!(value(Id::SCF_ETHR_GUARD), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 97);
+    assert_eq!(value(Id::VERIFY_FEED), Value::Choice("off"));
+    assert_eq!(value(Id::VERIFY_SKIPS), Value::Choice("one"));
+    assert_eq!(value(Id::VERIFY_RESPONSE_PREDICTOR), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 100);
 }
 
 #[test]

@@ -34,11 +34,15 @@ use std::time::{Duration, Instant};
 pub struct VerificationPredictor {
     pub(super) observed: Option<(f64, f64)>,
     pub(super) skipped_last: bool,
+    /// GV1 (`VERIFY_SKIPS=run`): stop residual of the last skipped stop since
+    /// the last actual attempt (checkpointed only in run mode).
+    pub(super) last_skip_dr2: Option<f64>,
 }
 impl VerificationPredictor {
     pub fn observe(&mut self, dr2_ry: f64, error_ha: f64) {
         self.observed = Some((dr2_ry, error_ha));
         self.skipped_last = false;
+        self.last_skip_dr2 = None;
     }
     pub fn predict(&self, dr2_ry: f64) -> Option<f64> {
         let (previous, error) = self.observed?;
@@ -61,6 +65,89 @@ impl VerificationPredictor {
         self.skipped_last = skip;
         skip
     }
+    /// `run = false` is `skip`. GV1 run mode (`VERIFY_SKIPS=run`): skipped
+    /// stops may follow each other while the prediction (anchored at the last
+    /// actual attempt) stays at or above the threshold AND the stop residual
+    /// keeps falling below that of the previous skipped stop; a stop whose
+    /// residual did not fall is attempted (stale calibration cannot defer a
+    /// check while the SCF stagnates). No constant is involved.
+    pub fn skip_with(
+        &mut self,
+        prediction: Option<f64>,
+        threshold_ha: f64,
+        dr2_ry: f64,
+        run: bool,
+    ) -> bool {
+        if !run {
+            return self.skip(prediction, threshold_ha);
+        }
+        let skip = prediction.is_some_and(|p| p.is_finite() && p >= threshold_ha)
+            && self.last_skip_dr2.is_none_or(|d| dr2_ry < d);
+        self.skipped_last = skip;
+        self.last_skip_dr2 = skip.then_some(dr2_ry);
+        skip
+    }
+}
+
+/// GV1 (`VERIFY_SKIPS`): `run` lets the verification predictor skip
+/// consecutive stops (see `VerificationPredictor::skip_with`).
+pub fn verify_skip_run(config: dft_numerics::switches::RunConfig) -> bool {
+    config.choice(dft_numerics::switches::Id::VERIFY_SKIPS) == "run"
+}
+
+/// GV1 (`VERIFY_RESPONSE_PREDICTOR`): before the first verification attempt
+/// of a run, predict the attempt's Coulomb error from the mixer's secant
+/// output response (`Broyden::predict_output_residual`) instead of having no
+/// prediction; later stops keep the measured-ratio predictor.
+pub fn verify_response_predictor(config: dft_numerics::switches::RunConfig) -> bool {
+    config.on(dft_numerics::switches::Id::VERIFY_RESPONSE_PREDICTOR)
+}
+
+/// GV1 (`VERIFY_FEED`): what a failed verification attempt contributes to the
+/// next mixing step. The attempt evaluated the SCF map at the stop output y
+/// and measured G = F(y) = z - y; with `Feed`/`Half` that pair enters the
+/// Broyden history as an ordinary secant pair after the stop map's own pair.
+/// The pass criterion, the delivered state and every passed run are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyFeed {
+    /// ADR 0043 V5: the attempt's output is discarded.
+    Off,
+    /// The next input is the Broyden proposal from the enlarged history.
+    Feed,
+    /// The next input is the midpoint of the proposals without and with the
+    /// attempt's pair (the damped form adopted on the legacy driver, 2026-11-17).
+    Half,
+}
+impl VerifyFeed {
+    pub fn resolve(config: dft_numerics::switches::RunConfig) -> Self {
+        match config.choice(dft_numerics::switches::Id::VERIFY_FEED) {
+            "feed" => Self::Feed,
+            "half" => Self::Half,
+            _ => Self::Off,
+        }
+    }
+}
+
+/// GV1: insert the failed attempt's pair (y, F(y)) after the ordinary update
+/// that produced `next`, then recompute `next` (Feed) or average the two
+/// proposals (Half). Cold path: runs only after a failed attempt.
+pub(super) fn feed_attempt<K: Collective>(
+    mode: VerifyFeed,
+    mixer: &mut Broyden,
+    comm: &K,
+    metric: &mut Metric,
+    y: &[Complex64],
+    g: &[Complex64],
+    next: &mut [Complex64],
+) -> Result<Diagnostics, super::Error> {
+    let first = (mode == VerifyFeed::Half).then(|| next.to_vec());
+    let diagnostics = mixer.update(comm, metric, y, g, next)?;
+    if let Some(first) = first {
+        for (v, a) in next.iter_mut().zip(first) {
+            *v = (*v + a) * 0.5;
+        }
+    }
+    Ok(diagnostics)
 }
 
 pub struct Run {
@@ -397,6 +484,9 @@ async fn run_stage<K: Collective>(
     let mut first_reference_stop = None;
     let mut pending: Option<(map::Map, f64, usize)> = None;
     let mut predictor = VerificationPredictor::default();
+    let feed = VerifyFeed::resolve(config);
+    let skip_run = verify_skip_run(config);
+    let response_predictor = verify_response_predictor(config);
     let permap = config.on(Id::REFSCF_PERMAP);
     let mut field_cache = None;
 
@@ -463,6 +553,9 @@ async fn run_stage<K: Collective>(
                 io.value(&mut first_reference_stop)?;
                 io.value(&mut predictor.observed)?;
                 io.value(&mut predictor.skipped_last)?;
+                if skip_run {
+                    io.value(&mut predictor.last_skip_dr2)?;
+                }
                 io.value(&mut field_cache)?;
                 io.value(&mut pending)?;
                 super::checkpoint::cached_fields(&field_cache, n.len())?;
@@ -581,13 +674,20 @@ async fn run_stage<K: Collective>(
         let first_prediction_ha = None;
         let contraction_prediction_ha = None;
         let predicted_error_ha = if stopped && verification.is_some() {
-            predictor.predict(dr2)
+            if response_predictor && predictor.observed.is_none() {
+                // GV1: no attempt yet; the secant output-response estimate.
+                mixer
+                    .predict_output_residual(comm, &mut metric, &x, &f)?
+                    .map(|v| v / 2.)
+            } else {
+                predictor.predict(dr2)
+            }
         } else {
             None
         };
         let skipped = stopped
             && verification.is_some()
-            && predictor.skip(predicted_error_ha, profile.threshold_ry / 2.);
+            && predictor.skip_with(predicted_error_ha, profile.threshold_ry / 2., dr2, skip_run);
         if ((stopped && !skipped) || iteration == o.max_iterations) && step.energy.kinetic.is_nan()
         {
             let clock = Instant::now();
@@ -623,6 +723,7 @@ async fn run_stage<K: Collective>(
         let mut actual_error_ha = None;
         let mut verification_s = 0.;
         let (mut verification_start_s, mut verification_end_s) = (None, None);
+        let mut fed = None;
         if stopped
             && !skipped
             && let Some(report) = &mut verification
@@ -720,6 +821,11 @@ async fn run_stage<K: Collective>(
                 current_calls.iter().map(|c| c.h_columns).sum(),
             );
             map_report.stage = if coarse { "coarse" } else { "fine" };
+            if !attempt.passed && feed != VerifyFeed::Off {
+                // GV1: keep F(y) for the mixer (G = 0 carries no residual).
+                set_zero(&plan, &mut checked, 0.);
+                fed = Some(checked);
+            }
 
             report.attempts.push(attempt);
             certificate = Some(record);
@@ -748,6 +854,14 @@ async fn run_stage<K: Collective>(
             match mixer.update(comm, &mut metric, &x, &f, &mut next) {
                 Ok(d) => diagnostics = d,
                 Err(e) => failure = Some(e.to_string()),
+            }
+            if failure.is_none()
+                && let Some(g) = &fed
+            {
+                match feed_attempt(feed, &mut mixer, comm, &mut metric, &y, g, &mut next) {
+                    Ok(d) => diagnostics = d,
+                    Err(e) => failure = Some(e.to_string()),
+                }
             }
             if failure.is_none() {
                 {

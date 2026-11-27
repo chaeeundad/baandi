@@ -951,6 +951,11 @@ pub(super) async fn run_continuation<K: Collective>(
     let redo_every_map = matches!(ethr_guard, "redo" | "both");
     let forecast_ethr = matches!(ethr_guard, "forecast" | "both");
     let mut predictor = super::driver::VerificationPredictor::default();
+    // GV1 (`VERIFY_FEED`): a failed attempt's pair (y, F(y)) may enter the
+    // Broyden history (reference Broyden only; the Pulay variant ignores it).
+    let feed = super::driver::VerifyFeed::resolve(config);
+    let skip_run = super::driver::verify_skip_run(config);
+    let response_predictor = super::driver::verify_response_predictor(config);
     macro_rules! checkpoint_state {
         () => {
             |request: super::stepper::Visit<'_, '_>| -> Result<usize, ScfError> {
@@ -1064,6 +1069,9 @@ pub(super) async fn run_continuation<K: Collective>(
                 if use_predictor {
                     io.value(&mut predictor.observed)?;
                     io.value(&mut predictor.skipped_last)?;
+                    if skip_run {
+                        io.value(&mut predictor.last_skip_dr2)?;
+                    }
                 }
                 super::checkpoint::counters(
                     completed,
@@ -1279,11 +1287,19 @@ pub(super) async fn run_continuation<K: Collective>(
             ethr,
             calls.iter().map(|(_, _, c)| c.h_columns).sum::<usize>() - reported_columns,
         );
-        let skipped = stopped
-            && use_predictor
-            && verification.is_some()
-            && predictor.skip(predictor.predict(dr2), profile.threshold_ry / 2.);
+        let skipped = stopped && use_predictor && verification.is_some() && {
+            let prediction = if response_predictor && predictor.observed.is_none() {
+                // GV1: no attempt yet; the secant output-response estimate.
+                mixer
+                    .predict_output_residual(comm, &mut metric, &x, &f)?
+                    .map(|v| v / 2.)
+            } else {
+                predictor.predict(dr2)
+            };
+            predictor.skip_with(prediction, profile.threshold_ry / 2., dr2, skip_run)
+        };
         let mut passed = stopped && !skipped;
+        let mut fed = None;
         if passed && let Some(report) = &mut verification {
             boundary.emit(map_report).await;
             let start = Instant::now();
@@ -1413,6 +1429,11 @@ pub(super) async fn run_continuation<K: Collective>(
             passed = error < profile.threshold_ry / 2.
                 && (!guard || fresh.guard < profile.threshold_ry / 2.)
                 && valid_map(&fresh, &policy, electrons);
+            // GV1: a band-count change inside the attempt leaves the pair
+            // consistent (both densities are full densities), so it is kept.
+            if !passed && feed != super::driver::VerifyFeed::Off && pulay.is_none() {
+                fed = Some(residual);
+            }
             let all_calls = fresh.blocks.iter().flatten().flat_map(|b| &b.calls);
             map_report = StepReport::new(
                 iteration,
@@ -1471,6 +1492,17 @@ pub(super) async fn run_continuation<K: Collective>(
                     mixer.history_geometry();
             }
             mixing = update?;
+            if let Some(g) = &fed {
+                mixing = super::driver::feed_attempt(
+                    feed,
+                    &mut mixer,
+                    comm,
+                    &mut metric,
+                    &y,
+                    g,
+                    &mut next,
+                )?;
+            }
             history_conditioning = mixer.conditioning_diagnostics();
             // GM1 (`SCF_ETHR_GUARD` forecast): the next map's eigenvalue threshold
             // follows min(dr2, |F~|^2), the residual the secant model leaves

@@ -208,6 +208,110 @@ impl Broyden {
         &self.reduced
     }
 
+    /// GV1 (`VERIFY_RESPONSE_PREDICTOR`): estimate the fixed-point residual
+    /// E_H[F(y)] at the output y = x + F of the current map, before any
+    /// verification map exists. Linearly F(y) = F + J F = K F with K = 1 + J
+    /// the output response (dy = K dx). The secant pairs give K exactly on
+    /// their span: dy_i = dx_i + dF_i. F is projected onto span(dx_i) in the
+    /// Coulomb metric (least squares, F ~ sum c_i dx_i), and the prediction is
+    /// ||sum c_i dy_i||^2 (Ry; the caller halves it). The pairs are the
+    /// retained history plus the current pair (previous x, F -> x, F) with the
+    /// ring eviction of the next update. The part of F outside the span is
+    /// not propagated (no assumed response). An estimator, never a bound; it
+    /// reads the history only. Returns None without history, for a singular
+    /// projection or a nonfinite value. Cold path (stop maps only): it
+    /// allocates its scratch.
+    pub fn predict_output_residual<K: Collective>(
+        &self,
+        comm: &K,
+        metric: &mut Metric,
+        x: &[C],
+        f: &[C],
+    ) -> Result<Option<f64>, Error> {
+        if x.len() != self.previous_x.len() || f.len() != x.len() {
+            return Err(invalid("prediction vector shape"));
+        }
+        if self.iteration == 0 {
+            return Ok(None);
+        }
+        let current_dx: Vec<C> = self.previous_x.iter().zip(x).map(|(a, b)| a - b).collect();
+        let current_df: Vec<C> = self.previous_f.iter().zip(f).map(|(a, b)| a - b).collect();
+        // Retained pairs plus the current one; the ring (or the conditioned
+        // list) evicts its oldest pair when full, as the next update would.
+        let p = self.occupancy();
+        let evicted = if p == self.profile.history {
+            if self.conditioning {
+                Some(0)
+            } else {
+                Some((self.iteration - 1) % self.profile.history)
+            }
+        } else {
+            None
+        };
+        let mut pairs: Vec<(&[C], &[C])> = (0..p)
+            .filter(|i| Some(*i) != evicted)
+            .map(|i| (&self.dx[i][..], &self.df[i][..]))
+            .collect();
+        pairs.push((&current_dx, &current_df));
+        let m = pairs.len();
+        let mut forms_in: Vec<(&[C], &[C])> = Vec::with_capacity(m * (m + 1) / 2 + m);
+        for i in 0..m {
+            for j in 0..=i {
+                forms_in.push((pairs[i].0, pairs[j].0));
+            }
+        }
+        for pair in &pairs {
+            forms_in.push((pair.0, f));
+        }
+        let mut forms = vec![0.; forms_in.len()];
+        if !metric.prediction_batch(comm, &forms_in, &mut forms)? {
+            return Ok(None);
+        }
+        let mut a = RealMatrix::zeros(m, m).map_err(numerical)?;
+        let mut index = 0;
+        for i in 0..m {
+            for j in 0..=i {
+                a[(i, j)] = forms[index];
+                a[(j, i)] = forms[index];
+                index += 1;
+            }
+        }
+        let b = &forms[index..];
+        let mut lambda = vec![0.; m];
+        let mut q = RealMatrix::zeros(m, m).map_err(numerical)?;
+        RealEighWorkspace::new(m)
+            .map_err(numerical)?
+            .solve_into(&a, &mut lambda, &mut q)
+            .map_err(numerical)?;
+        let max = lambda[m - 1];
+        if !(max.is_finite() && max > 0.) {
+            return Ok(None);
+        }
+        // Least squares on the numerically independent part of the span
+        // (directions below the mixer's own rank floor are dropped).
+        let mut c = vec![0.; m];
+        for (j, &l) in lambda.iter().enumerate() {
+            if l <= m as f64 * f64::EPSILON * max {
+                continue;
+            }
+            let projection: f64 = (0..m).map(|i| q[(i, j)] * b[i]).sum();
+            for (i, c) in c.iter_mut().enumerate() {
+                *c += q[(i, j)] * (projection / l);
+            }
+        }
+        let mut g = vec![C::default(); f.len()];
+        for (pair, c) in pairs.iter().zip(&c) {
+            for ((g, dx), df) in g.iter_mut().zip(pair.0).zip(pair.1) {
+                *g += *c * (dx + df);
+            }
+        }
+        let mut predicted = [0.];
+        if !metric.prediction_batch(comm, &[(&g, &g)], &mut predicted)? {
+            return Ok(None);
+        }
+        Ok(Some(predicted[0]))
+    }
+
     /// Call only for an accepted mixing step: neither convergence nor the
     /// first-map redo inserts history. An error terminates this mixer instance.
     pub fn update<K: Collective>(

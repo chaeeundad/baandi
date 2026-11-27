@@ -82,6 +82,42 @@ fn reduced_residual_is_the_metric_least_squares_remainder() {
     assert!(out[1] <= f2_norm);
 }
 #[test]
+fn response_predictor_is_exact_for_a_linear_map_on_the_secant_span() {
+    // GV1: y = K x (fixed point 0), F = (K - 1) x. Once the secant pairs
+    // (history plus the current pair) span the space, the prediction of
+    // E_H[F(y)] equals ||K F||^2 in the metric; without history it is None.
+    let g2 = [1., 2., 4.];
+    let k = [-3., 0.4, 0.9];
+    let mut mix = Broyden::new(Profile::default(), &g2, &[true; 3], 1., 2.).unwrap();
+    let mut metric = metric(&g2, &[true; 3]);
+    // Real components: the metric is a real inner product, three pairs span R^3.
+    let mut x = vec![c(1.), c(-0.5), c(0.3)];
+    let residual = |x: &[C]| -> Vec<C> { x.iter().zip(k).map(|(x, k)| (k - 1.) * x).collect() };
+    let f = residual(&x);
+    assert_eq!(
+        mix.predict_output_residual(&Serial, &mut metric, &x, &f)
+            .unwrap(),
+        None
+    );
+    let mut next = x.clone();
+    for _ in 0..3 {
+        let f = residual(&x);
+        mix.update(&Serial, &mut metric, &x, &f, &mut next).unwrap();
+        x = next.clone();
+    }
+    let f = residual(&x);
+    let kf: Vec<C> = f.iter().zip(k).map(|(f, k)| k * f).collect();
+    let exact = metric.norm(&Serial, &kf).unwrap();
+    let predicted = mix
+        .predict_output_residual(&Serial, &mut metric, &x, &f)
+        .unwrap()
+        .unwrap();
+    assert!(
+        (predicted - exact).abs() <= 1e-10 * exact,
+        "{predicted} vs {exact}"
+    );
+}
+#[test]
 fn ring_eviction_keeps_only_last_two_secants() {
     let mut mix = Broyden::new(
         Profile {
@@ -852,6 +888,256 @@ fn verification_cost_predictor_fallback_and_refresh() {
     assert_eq!(p.predict(1e-9), None);
     assert!(!p.skip(Some(f64::NAN), 5e-9));
     assert!(p.skip(Some(5e-9), 5e-9)); // equality cannot pass the strict '<'
+}
+
+#[test]
+fn verification_predictor_run_mode_skips_while_residual_falls() {
+    // GV1 (`VERIFY_SKIPS=run`): consecutive skips while the anchored
+    // prediction stays at or above the threshold and the stop residual keeps
+    // falling; `run = false` is exactly `skip`.
+    use dft_engine::refscf::driver::VerificationPredictor;
+    let mut one = VerificationPredictor::default();
+    let mut run = VerificationPredictor::default();
+    for p in [&mut one, &mut run] {
+        p.observe(1e-8, 1e-6); // ratio 100
+    }
+    let thr = 5e-9;
+    // Predictions 5e-7, 2e-7, 5e-8, 6e-8 (residual rose), 4e-9.
+    let stops = [5e-9, 2e-9, 5e-10, 6e-10, 4e-11];
+    let one_skips: Vec<_> = stops
+        .iter()
+        .map(|&r| one.skip_with(one.predict(r), thr, r, false))
+        .collect();
+    let run_skips: Vec<_> = stops
+        .iter()
+        .map(|&r| run.skip_with(run.predict(r), thr, r, true))
+        .collect();
+    assert_eq!(one_skips, [true, false, true, false, false]);
+    assert_eq!(run_skips, [true, true, true, false, false]);
+    // An actual attempt re-anchors and clears the run.
+    run.observe(6e-10, 3e-8);
+    assert!(run.skip_with(run.predict(3e-10), thr, 3e-10, true));
+    assert!(run.skip_with(run.predict(2e-10), thr, 2e-10, true));
+    assert!(!run.skip_with(run.predict(2e-10), thr, 2e-10, true)); // no fall
+    assert!(!run.skip_with(None, thr, 1e-10, true));
+}
+
+/// GV1 (`VERIFY_FEED`, `VERIFY_SKIPS`): on the GB2 slab fixture (spin-less
+/// FD, 2x2x1, its first verification attempt fails) every arm converges and
+/// verifies within the standard class of the default; the trajectory is the
+/// default's bit for bit up to and including the first failed attempt.
+#[test]
+fn verify_feed_and_skips_keep_the_fixed_point_fd() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{
+            api::{Request, solve},
+            electronic::Policy,
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::monkhorst_pack};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.3, 28.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.13, 0.21, 0.32]),
+        Atom::new("Xx", [0.61, 0.58, 0.77]),
+    ];
+    let pp = common::potential_with_atomic_start(3., 1., true, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = monkhorst_pack([2, 2, 1], [0.; 3]).unwrap();
+    let run = |feed: &str, skips: &str, response: &str| {
+        let config = dft_numerics::switches::RunConfig::from_pairs(&[
+            ("verify_feed", feed),
+            ("verify_skips", skips),
+            ("verify_response_predictor", response),
+        ])
+        .unwrap();
+        let _scope = config.enter();
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(24),
+            max_iterations: 200,
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha: 0.01,
+            band_cap: 24,
+        });
+        solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+        .unwrap()
+    };
+    let attempts = |r: &dft_engine::refscf::electronic::Run| {
+        r.verification
+            .as_ref()
+            .unwrap()
+            .attempts
+            .iter()
+            .map(|a| (a.iteration, a.passed))
+            .collect::<Vec<_>>()
+    };
+    let base = run("off", "one", "off");
+    let first_fail = attempts(&base)
+        .iter()
+        .find(|a| !a.1)
+        .map(|a| a.0)
+        .expect("fixture has a failed attempt");
+    for (feed, skips, response) in [
+        ("feed", "one", "off"),
+        ("half", "one", "off"),
+        ("off", "run", "off"),
+        ("half", "run", "off"),
+        ("off", "one", "on"),
+        ("half", "run", "on"),
+    ] {
+        let r = run(feed, skips, response);
+        eprintln!(
+            "GV1 fd {feed}/{skips}/{response}: maps {} attempts {:?} (default maps {} attempts {:?}); dF {:.3e}",
+            r.history.len(),
+            attempts(&r),
+            base.history.len(),
+            attempts(&base),
+            r.thermodynamics.free_energy_ha - base.thermodynamics.free_energy_ha
+        );
+        assert!(r.converged && r.verification.as_ref().unwrap().passed());
+        assert!(
+            (r.thermodynamics.free_energy_ha - base.thermodynamics.free_energy_ha).abs() <= 5e-9
+        );
+        for (a, b) in r.history.iter().zip(&base.history).take(first_fail) {
+            assert_eq!(
+                a.dr2_ry.to_bits(),
+                b.dr2_ry.to_bits(),
+                "map {}",
+                a.iteration
+            );
+        }
+        if response == "off" {
+            assert_eq!(attempts(&r)[0], attempts(&base)[0]);
+        } else if feed == "off" {
+            // A skipped stop leaves the trajectory unchanged (V5 discards a
+            // failed attempt's output): every common map is bit-identical.
+            for (a, b) in r.history.iter().zip(&base.history) {
+                assert_eq!(
+                    a.dr2_ry.to_bits(),
+                    b.dr2_ry.to_bits(),
+                    "map {}",
+                    a.iteration
+                );
+            }
+        }
+    }
+}
+
+/// GV1: the closed-shell k driver with a failed first attempt (synthetic
+/// fixed-occupation elongated cell). Every arm converges, verifies inside the
+/// standard class of the default, and agrees bit for bit up to the failure.
+#[test]
+fn verify_feed_and_skips_keep_the_fixed_point_k() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::api::{Request, solve},
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::monkhorst_pack};
+    let cell = Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 14.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.11, 0.23, 0.21]),
+        Atom::new("Xx", [0.62, 0.57, 0.68]),
+    ];
+    let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = monkhorst_pack([2, 2, 1], [0.; 3]).unwrap();
+    let run = |feed: &str, skips: &str, response: &str| {
+        let config = dft_numerics::switches::RunConfig::from_pairs(&[
+            ("verify_feed", feed),
+            ("verify_skips", skips),
+            ("verify_response_predictor", response),
+        ])
+        .unwrap();
+        let _scope = config.enter();
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(8),
+            max_iterations: 200,
+            ..Default::default()
+        };
+        solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            Request::new(Profile::default(), points.clone()),
+        )
+        .and_then(|d| d.run.into_scalar())
+        .unwrap()
+    };
+    let attempts = |r: &dft_engine::refscf::driver::Run| {
+        r.outcome
+            .result
+            .verification
+            .as_ref()
+            .unwrap()
+            .attempts
+            .iter()
+            .map(|a| (a.iteration, a.passed))
+            .collect::<Vec<_>>()
+    };
+    let base = run("off", "one", "off");
+    let e0 = base.outcome.result.total_hartree();
+    let first_fail = attempts(&base).iter().find(|a| !a.1).map(|a| a.0);
+    for (feed, skips, response) in [
+        ("feed", "one", "off"),
+        ("half", "one", "off"),
+        ("off", "run", "off"),
+        ("half", "run", "off"),
+        ("off", "one", "on"),
+        ("half", "run", "on"),
+    ] {
+        let r = run(feed, skips, response);
+        let e = r.outcome.result.total_hartree();
+        eprintln!(
+            "GV1 k {feed}/{skips}/{response}: maps {} attempts {:?} (default maps {} attempts {:?}); dE {:.3e}",
+            r.records.len(),
+            attempts(&r),
+            base.records.len(),
+            attempts(&base),
+            e - e0
+        );
+        assert!(r.outcome.converged);
+        assert!(r.outcome.result.verification.as_ref().unwrap().passed());
+        assert!((e - e0).abs() <= 5e-9);
+        match first_fail {
+            // No failure: the switches cannot act; identical bits.
+            None => assert_eq!(e.to_bits(), e0.to_bits()),
+            Some(n) => {
+                let common = if response == "on" && feed == "off" {
+                    usize::MAX // skips alone never change the trajectory (V5)
+                } else {
+                    n
+                };
+                for (a, b) in r.records.iter().zip(&base.records).take(common) {
+                    assert_eq!(a.dr2_ry.to_bits(), b.dr2_ry.to_bits());
+                }
+            }
+        }
+    }
 }
 
 #[test]

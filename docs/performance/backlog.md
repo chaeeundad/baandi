@@ -348,3 +348,24 @@ QE keeps rotations that do not map a non-cubic explicit FFT grid onto itself (Cl
   damping (Herbst and Levitt 2022); both are research items that need the full FD and insulator class matrix.
 - Start-symmetry check with clipped atomic densities (side finding GM1): compare within the density sphere or after
   the same sphere projection, or clip after projection; the model Cs2TcI6 at 30 Ry is refused today.
+
+## After GV1 (GV1-VERIFY-COST, 2026-11-27; ledger GV1-VERIFY-COST)
+- dev08 A/B (gen66 MP 26 equal-k entries + Si32/Si64 Gamma, MPI8, verify on): default / `VERIFY_RESPONSE_PREDICTOR=on`
+  / + `VERIFY_FEED=half VERIFY_SKIPS=run`; maps, attempts, verification s, wall, |dF|. Decide the defaults.
+- Response predictor false skips (Hg 3x3x3: P1 15.7x over V at the stop): find what the projection misses there
+  (nonlinearity of the newest pair, eigensolver noise in dF at tight ethr, occupation changes of FD); a cheap
+  confidence test (remainder fraction, agreement of the last two pairs) instead of any margin constant.
+- With the response predictor available at every stop, the measured-ratio predictor after a failure could be
+  replaced or combined (both within 2x on the Mac second attempts); untested.
+- Automatic FD bands (GB2 growth at stop): on the Mac Ru (edge fraction 0.11 from map 1) and the Al slab
+  (1.2e-6 from map 1) the coverage miss is present at every map, so growth happens at the stop and the re-solve of the
+  stop map costs 4-5 ordinary maps (Ru 2760 vs ~600 H, slab 2177 vs ~400 H). A rule that grows on a miss that
+  persists over consecutive ordinary maps (not a transient one, the Cs2TcI6 case) would move it to a loose map.
+  Not verification; the MP campaign uses explicit nbands and is not affected.
+- Staged attempt (early fail): a failing attempt is decided long before its tight tolerance (failing V/thr 2-700),
+  but a cheap early read needs a density build inside the Davidson and costs the passing attempts; only worth it if
+  failures stay frequent after the predictor.
+- Side findings: GaAs zincblende PBE (PseudoDojo, 40 Ry, 3x3x3 unshifted, symmetry off, fixed occupations) stalls at
+  dr2 ~2e-4 Ry for 100 maps on the reference k driver (not converged); with symmetry auto 4x4x4 shifted it is refused
+  at start ("symmetry.density: input breaks the selected symmetry", the GM1 side finding). Si8 with +-0.05 A
+  displacements at Gamma needs 47 maps (perfect Si8 10): near-degenerate Gamma HOMO with fixed occupations.

@@ -5022,3 +5022,68 @@ Likely cause: the clipped (max(0)) atomic start density has content outside the 
 projection removes, judged with an absolute 1e-12 test. Not fixed here (backlog).
 Lesson: compare per-iteration dr2 only after measuring the trajectory's sensitivity: on a flat-band metal a 2x
 change of the eigensolver threshold moves the map count by +-1-2, as large as the gap to QE.
+
+## GV1-VERIFY-COST (2026-11-27): verification cost on the reference drivers; response predictor, failed-attempt feed, consecutive skips (Mac, dev08 pending)
+
+Trigger (relayed dev08 gen66 MP, 26 equal-k entries, MPI8): verification 179.1 s of BAANDI's 2335.2 s (QE has none);
+Cs2TcI6 failed at map 14 and passed at 15, TiGa and Au one failed attempt each, Ta6Zn7 earlier four. Criterion,
+delivered state, recorded fields and pass rule unchanged in every arm below. Mac release, 4 threads (Cs2TcI6 model
+and Ta6Zn7 small 8), PseudoDojo PBE / Si.pz-vbc, one run per arm (development protocol); H = SCF + verification H
+columns (Mac walls were taken under varying load and are not quoted).
+Fixtures (21 rows): Gamma Si8 (perfect) and Si8 displaced (47 maps, a near-degenerate Gamma HOMO, 3-4 failed
+attempts; a stress case), Si16 elongated skewed 2x2x1 k (5e-9, 1e-10), MgO 3x3x3, FD Au/Al/Sr/Ru (5e-9, 1e-10), Al(001)
+skewed 4-layer slab (5e-9, 1e-10), Fe bcc fixed-moment spin FD (5e-9, 1e-10), Hg 3x3x3 40 Ry, Cs2TcI6 model 40 Ry
+(5e-11), Ta6Zn7 (MP structure, 2x2x1, 40 Ry, 131 bands).
+What an attempt costs (C/O): one Davidson map at y at tol = next_ethr = min(ethr, 0.1 dr2/N), warm from the stop
+orbitals with the kept HX: passed attempts 0.6-1.0x an ordinary late map on FD (FD_EMPTY_VERIFY on), 1.0x MgO, 2.2x
+on the Si16 k case (tol 45x tighter than the stop map, 6 Davidson iterations per k). The 0.1/N ratchet is not
+slack: ethr is per band and the measured map noise is about ethr summed over N bands, so loosening tol weakens the
+reading; per-attempt cost was left alone. The lever is the failed attempt (V/S at failing first attempts 12.7 to
+197, at passing ones 0.2 to 2.3: the long-wavelength screened modes, V/S ~ (eps - 1)^2 per mode).
+Changes (switch table 97 -> 100, all default off, reference Gamma/k/spin-FD drivers):
+1. `VERIFY_RESPONSE_PREDICTOR` (on/off): before the FIRST attempt, predict E_H[F(y)] = E_H[K F] from the mixer's
+   secant pairs (history + current pair, ring eviction): F projected onto span(dx_i) by metric least squares,
+   prediction ||sum c_i dy_i||^2 with dy_i = dx_i + dF_i = K dx_i; skip the stop (ordinary map) when >= threshold;
+   later stops keep the measured-ratio predictor. Not the rejected I25 gate: I25 used the MAXIMUM amplification
+   ||dy_i||^2/||dx_i||^2 over the whole history times S (a worst-case bound, 50-700x over on first-pass cells); this is
+   the projection, exact for a linear map on the span (unit test). New evidence: calibration below.
+2. `VERIFY_FEED` (off/feed/half): after a FAILED attempt the pair (y, F(y)) enters the Broyden history after the
+   stop map's own update; half = midpoint of the proposals without and with it. Premise vs the retired ideas: the
+   legacy VERIFY_REUSE=half was adopted on dev08 (2026-11-17) and removed only with the legacy driver (R10BC); the
+   rejected reference V1 (I25) replaced the next input by y (a plain undamped step), which feed does not do.
+3. `VERIFY_SKIPS` (one/run): run = consecutive skips while the prediction stays >= threshold and each skipped stop's
+   residual is below the previous skipped stop's (stagnation forces an attempt; no constant).
+Calibration of (1) (probe-all experiment: a verification map evaluated and discarded at every map, trajectories
+bit-identical; 47 (map, case) pairs with S < 100 thr, 10 systems): P1/V in [0.5, 2] for 35, in [1/3, 3] for 40;
+outliers Hg map 7 15.7x over (V 0.13 thr), Au 1e-10 map 7 38x over (V 0.026 thr, P1 below thr), Al slab 1e-10 map 13
+0.09x, Cs2TcI6 map 10 0.11x. At the 21 stop maps as first attempts: correct skip 5, false skip 1 (Hg), missed
+failure 1, correct attempt 14. Ta6Zn7 first attempt V/S 197, P1/S 102.
+A/B (H; attempts/failed):
+| case | default | RESPONSE_PREDICTOR=on | + FEED=half + SKIPS=run |
+| Si16 k 5e-9 | 3980 (2/1) | 3554 (1/0) -10.7 % | 3554 (1/0) |
+| Si16 k 1e-10 | 4091 (2/1) | 3703 (1/0) -9.5 % | 3703 (1/0) |
+| Al slab 5e-9 | 8832 (2/1) | 8216 (1/0) -7.0 % | 8216 (1/0) |
+| Al slab 1e-10 | 9369 (2/1) | 9160 (2/1) -2.2 % | 9160 (2/1) |
+| Cs2TcI6 model 5e-11 | 10313 (2/1) | 9692 (1/0) -6.0 % | 9692 (1/0) |
+| Ta6Zn7 small | 10410 (2/1) | 9730 (1/0) -6.5 % | 9730 (1/0) |
+| Hg | 4274 (1/0), 7 maps | 4609 (1/0), 8 maps +7.8 %, dF 3.1e-10 | same |
+| Si8 displaced Gamma 5e-9 | 1317 (4/3) | 1323 (4/3) | 1220 (2/1) |
+| Si8 displaced Gamma 1e-10 | 1394 (5/4) | 1338 (4/3) | 1334 (3/2) |
+| 12 first-pass rows (Si8, MgO, Au, Al, Sr, Ru x2, Fe x2) | | bit-identical | bit-identical |
+| total 21 rows | 145643, 34/13, 285 maps | 142988 (-1.8 %), 28/7, 286 | 142881 (-1.9 %), 25/4, 286 |
+A correct skip leaves the trajectory and the delivered state bit-identical (V5 discards a failed attempt's output;
+dE = 0 on every such row); the false skip (Hg) costs one ordinary map and delivers the next map's state (3.1e-10 Ha,
+inside the standard class). FEED alone on the failing subset (7 rows): H 39306 -> feed 39188 (-0.3 %), half 38757
+(-1.4 %); feed adds a map on Cs2TcI6 (+3.9 %: the measured-ratio predictor, calibrated before the fed step,
+over-predicts and skips a passing stop); half never more than +0.5 %. SKIPS=run alone changes only the Si8
+displaced rows (attempts 4 -> 3, 5 -> 4). Thread identity: Si8 displaced half+run T=1 vs T=4 density.bin identical.
+Tests: `response_predictor_is_exact_for_a_linear_map_on_the_secant_span`,
+`verification_predictor_run_mode_skips_while_residual_falls`, `verify_feed_and_skips_keep_the_fixed_point_fd` (GB2
+slab: predictor + run 2 -> 1 attempts, dF 0) and `_k` (synthetic k insulator), switch count tests 100.
+dev08 request (development protocol, one run per arm, MPI8, verify on, gen66 MP 26 equal-k entries plus Si32/Si64
+Gamma): A default; B `BAANDI_VERIFY_RESPONSE_PREDICTOR=on`; C B + `BAANDI_VERIFY_FEED=half BAANDI_VERIFY_SKIPS=run`.
+Per entry: maps, attempts (passed/failed), verification s, engine wall, |dF| against A. Adopt B if the summed wall
+falls and no entry loses more than run-to-run noise beyond one false skip; C on top only if it adds.
+Lesson: with the criterion fixed, the failed first attempt is predictable from data the mixer already holds: the
+secant pairs measure the output response K on their span, and projecting the current residual onto it predicts
+E_H[F(y)] within 2x on 35 of 47 maps; the earlier rejection came from the max-amplification form, not from the idea.

@@ -23,7 +23,7 @@ use dft_physics::data::{Complex64, ComplexMatrix};
 use dft_solvers::EigenSolution;
 use std::time::{Duration, Instant};
 
-use super::driver::{Run, VerificationPredictor};
+use super::driver::{Run, VerificationPredictor, VerifyFeed, feed_attempt};
 use dft_geometry::kpoints::{self, KPoint};
 pub fn run(input: StartInput<'_>, profile: Profile, points: &[KPoint]) -> Result<Run, ScfError> {
     if points.len() == 1
@@ -288,6 +288,9 @@ pub(super) async fn run_continuation<K: Collective>(
     let mut first_reference_stop = None;
     let mut pending: Option<(map::Map, f64, usize)> = None;
     let mut predictor = VerificationPredictor::default();
+    let feed = VerifyFeed::resolve(config);
+    let skip_run = super::driver::verify_skip_run(config);
+    let response_predictor = super::driver::verify_response_predictor(config);
     let permap = config.on(Id::REFSCF_PERMAP);
     let mut field_cache = None;
 
@@ -346,6 +349,9 @@ pub(super) async fn run_continuation<K: Collective>(
                 io.value(&mut first_reference_stop)?;
                 io.value(&mut predictor.observed)?;
                 io.value(&mut predictor.skipped_last)?;
+                if skip_run {
+                    io.value(&mut predictor.last_skip_dr2)?;
+                }
                 io.value(&mut field_cache)?;
                 io.value(&mut pending)?;
                 super::checkpoint::cached_fields(&field_cache, n.len())?;
@@ -487,13 +493,20 @@ pub(super) async fn run_continuation<K: Collective>(
         let first_prediction_ha = None;
         let contraction_prediction_ha = None;
         let predicted_error_ha = if stopped && verification.is_some() {
-            predictor.predict(dr2)
+            if response_predictor && predictor.observed.is_none() {
+                // GV1: no attempt yet; the secant output-response estimate.
+                mixer
+                    .predict_output_residual(comm, &mut metric, &x, &f)?
+                    .map(|v| v / 2.)
+            } else {
+                predictor.predict(dr2)
+            }
         } else {
             None
         };
         let skipped = stopped
             && verification.is_some()
-            && predictor.skip(predicted_error_ha, profile.threshold_ry / 2.);
+            && predictor.skip_with(predicted_error_ha, profile.threshold_ry / 2., dr2, skip_run);
         if ((stopped && !skipped) || iteration == o.max_iterations) && step.energy.hartree.is_nan()
         {
             let clock = Instant::now();
@@ -529,6 +542,7 @@ pub(super) async fn run_continuation<K: Collective>(
         let mut actual_error_ha = None;
         let mut verification_s = 0.;
         let (mut verification_start_s, mut verification_end_s) = (None, None);
+        let mut fed = None;
         if stopped
             && !skipped
             && let Some(report) = &mut verification
@@ -664,6 +678,11 @@ pub(super) async fn run_continuation<K: Collective>(
                 current_calls.iter().map(|c| c.h_columns).sum(),
             );
             map_report.stage = "fine";
+            if !attempt.passed && feed != VerifyFeed::Off {
+                // GV1: keep F(y) for the mixer (G = 0 carries no residual).
+                set_zero(&plan, &mut checked, 0.);
+                fed = Some(checked);
+            }
 
             report.attempts.push(attempt);
             certificate = Some(record);
@@ -689,6 +708,14 @@ pub(super) async fn run_continuation<K: Collective>(
             match mixer.update(comm, &mut metric, &x, &f, &mut next) {
                 Ok(d) => diagnostics = d,
                 Err(e) => failure = Some(e.to_string()),
+            }
+            if failure.is_none()
+                && let Some(g) = &fed
+            {
+                match feed_attempt(feed, &mut mixer, comm, &mut metric, &y, g, &mut next) {
+                    Ok(d) => diagnostics = d,
+                    Err(e) => failure = Some(e.to_string()),
+                }
             }
             if failure.is_none() {
                 {

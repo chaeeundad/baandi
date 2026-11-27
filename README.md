@@ -473,6 +473,61 @@ Campaign: MPQE gen66 (Materials Project structures vs Quantum ESPRESSO 7.6); BAA
 
 Wall times are informational and compare only entries with equal k sets (26 of 29; 13 Ti2MnIr, 23 NaCl, 26 LiAlGe excluded because QE detects a smaller symmetry group at its own tolerance, so the k sets differ). Totals: BAANDI 2335.2 s against QE 2004.8 s (x1.165). BAANDI split: verification 179.1 s (QE has none), SCF only about 1995.7 s against QE electrons 1875.4 s, forces 48.1 s plus stress 98.5 s against QE forces plus stress 74.6 s. Per-entry ratios range from 0.82 to 1.95; BAANDI is faster for Si, B, Na4IrO4. Entries 02, 16, 17, 20, 21, 22, 27, 29 used symmetry tolerance 1e-7 to match QE's k set. Limits: single runs, full BAANDI runs including verification against QE's default layout, not QE's best configuration; the speed target is judged separately on verify-off runs against QE's best layout. Structures and pseudopotentials are one set of Materials Project entries, not a general accuracy guarantee.
 
+### RPA building blocks: many bands, dielectric constant, correlation energy
+
+Stages R1 to R3 of the [RPA/cRPA plan](docs/roadmap/rpa-crpa-plan.md), each against a real run of an independent code on dev08 at identical conditions (cell, pseudopotential file, cutoff, FFT grid, k mesh, bands). Meshes and cutoffs are oracle-comparison settings, not converged material values. Protocols: [R1](tests/reference/response/r1/README.md), [R2](tests/reference/response/r2/README.md), [R3](tests/reference/response/r3/README.md).
+
+**R1, many-band NSCF eigenvalues against Quantum ESPRESSO (PWSCF v.7.6)** (`pw.x` nscf, cg, `nbnd` = N_b + 8, first N_b compared; one constant offset removed at the first-k VBM). Gate 2e-5 Ha. [`tests/reference/response/r1/dev08-2026-11-27/summary.json`](tests/reference/response/r1/dev08-2026-11-27/summary.json).
+
+| Case | k points | Bands | Max aligned difference (Ha) | Offset (Ha) | Plane-wave counts | Status |
+|---|---:|---:|---:|---:|---|---|
+| si2-444 | 64 | 400 | 2.32e-06 | -2.07e-06 | equal at every k | pass |
+| si2-888 | 512 | 400 | 2.32e-06 | -2.07e-06 | equal at every k | pass |
+| lif-222 | 8 | 40 | 8.05e-06 | +6.33e-06 | equal at every k | pass |
+| aln-222 | 8 | 80 | 7.84e-06 | +7.25e-06 | equal at every k | pass |
+| si2-skewed-222 | 8 | 60 | 2.34e-06 | +8.38e-08 | equal at every k | pass |
+
+**R2, static dielectric constant eps_inf (omega = 0, q -> 0, RPA) against Yambo 5.3.0 and ABINIT 10.8.3**. Yambo and ABINIT drop the k+G = 0 nonlocal-velocity term at Gamma (Yambo the whole k+G = 0 plane wave of [V_NL, r], ABINIT its l = 1 gradient); BAANDI keeps it, because it is part of the exact dH/dk (finite-difference proof at k = 0, R2-GAMMA-VEL), so the matched comparison uses BAANDI's diagnostic velocity switch `no-g0-all` for Yambo and `no-g0` for ABINIT, and the default `full` values are listed as BAANDI's result. Gate 0.5 % relative, with and without local fields (LF), every diagonal component. [`tests/reference/response/r2/dev08-2026-11-28/summary.json`](tests/reference/response/r2/dev08-2026-11-28/summary.json); first run with `full` against Yambo: [`tests/reference/response/r2/dev08-2026-11-27/summary.json`](tests/reference/response/r2/dev08-2026-11-27/summary.json).
+
+| Case | N_G | Bands | BAANDI default eps_inf with LF / without LF | `full` vs Yambo (max rel) | `no-g0-all` vs Yambo (max rel) | `no-g0` vs ABINIT (max rel) | Matched gate |
+|---|---:|---:|---|---:|---:|---:|---|
+| si2-444 | 65 | 100 | 22.6813 / 24.8945 | 1.1e-05 | 8.0e-06 | not run | pass |
+| c2-444 | 27 | 100 | 7.1525 / 7.4393 | 4.3e-05 | 6.9e-06 | not run | pass |
+| lif-444 | 27 | 60 | 1.9988 / 2.0893 | 3.2e-03 | 1.9e-05 | 5.0e-05 | pass |
+| aln-444 | 67 | 120 | 4.5744 / 4.5431 ; 4.9347 / 4.9010 | 5.2e-03 | 1.3e-05 | 1.4e-05 | pass |
+| si2-888 | 65 | 100 | 13.4268 / 14.8668 | 1.8e-05 | not run | not run | pass (`full` only) |
+
+AlN: with LF xx = yy / zz ; without LF xx = yy / zz. ABINIT cannot read Si.pz-vbc.UPF and was run on LiF and AlN only (its printed eps along a small q, 4 to 5 digits; BAANDI's tensor projected on that direction). The `full` differences (LiF 3.2e-03, AlN 5.2e-03) are the oracles' Gamma treatment on these coarse meshes (Gamma weight 1/64, 1/48), not a BAANDI error; nothing was tuned toward the oracles. BAANDI-only: MPI ranks 2/4/8 against 1 differ by at most 6.2e-14 relative, Chebyshev against dense bands by 7.0e-10.
+
+**R3, RPA correlation energy (ACFDT) against ABINIT 10.8.3** (`gwrpacorr`, nfreqim 32; BAANDI `[rpa] response_sphere = "G"`, one |G| sphere for every q with v = 4 pi/|q+G|^2, each mesh q at its first-zone image, the ABINIT convention). The q = 0 term is reported separately: the two codes treat the Coulomb singularity differently (BAANDI: k.p head and wings averaged over directions; ABINIT: auxiliary function, `gw_icutcoul` 6; its other choices 3/7/16 change the Si q = 0 term by at most 0.5 %). Gate: finite-q sum within 1 meV/atom at each matched cutoff. Si uses PseudoDojo files here (ABINIT cannot read Si.pz-vbc). [`tests/reference/response/r3/dev08-2026-11-28/summary.json`](tests/reference/response/r3/dev08-2026-11-28/summary.json).
+
+| Case | E_cut^chi (Ha) | Bands | BAANDI E_c (Ha/cell) | ABINIT E_c (Ha/cell) | Finite-q sum diff (meV/atom) | Largest single-q diff (meV/atom) | q = 0 term diff, weight 1/N_q (meV/atom) | Finite-q gate |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| si2-dojo-444 | 6 | 181 | -0.437579 | -0.429884 | -0.004 | 0.003 | -104.69 | pass |
+| si2-dojo-444 | 8 | 283 | -0.445863 | -0.438168 | -0.006 | 0.003 | -104.69 | pass |
+| si2-dojo-444 | 10 | 411 | -0.450043 | -0.442348 | -0.010 | 0.003 | -104.69 | pass |
+| si2-dojo-444 | 12 | 537 | -0.452143 | -0.444447 | -0.014 | 0.004 | -104.69 | pass |
+| lif-444 | 4 | 51 | -0.224771 | -0.224094 | -0.065 | 0.021 | -9.15 | pass |
+| lif-444 | 5 | 59 | -0.251487 | -0.250803 | -0.062 | 0.025 | -9.25 | pass |
+| lif-444 | 6 | 65 | -0.265058 | -0.264370 | -0.063 | 0.023 | -9.30 | pass |
+| lif-444 | 8 | 113 | -0.340970 | -0.340265 | -0.063 | 0.021 | -9.53 | pass |
+| c2-444 | 4 | 27 | -0.354100 | -0.349503 | +0.273 | 0.112 | -62.82 | pass |
+| c2-444 | 5 | 51 | -0.430747 | -0.426086 | -0.005 | 0.011 | -63.42 | pass |
+| c2-444 | 6 | 59 | -0.448918 | -0.444247 | +0.037 | 0.055 | -63.59 | pass |
+| c2-444 | 8 | 65 | -0.456849 | -0.452174 | +0.010 | 0.004 | -63.61 | pass |
+
+The total E_c therefore differs by the q = 0 term alone. It is a convention that vanishes with the mesh: Si (PseudoDojo, 6 Ha, SCF on 4x4x4 in both codes) on finer q meshes:
+
+| q mesh | N_q | BAANDI E_c (Ha/cell) | ABINIT E_c (Ha/cell) | Difference (meV/atom) | Difference x N_q (Ha/cell) |
+|---|---:|---:|---:|---:|---:|
+| 4x4x4 | 64 | -0.437579 | -0.429884 | -104.7 | -0.492 |
+| 6x6x6 | 216 | -0.436348 | -0.434740 | -21.9 | -0.347 |
+| 8x8x8 | 512 | -0.436708 | -0.436060 | -8.8 | -0.332 |
+
+![RPA q=0 convergence](docs/img/rpa-q0-convergence.svg)
+
+Difference x N_q tends to about -0.33 Ha/cell, so the remaining difference falls as 1/N_q: a pure q = 0 convention (the 6x6x6 and 8x8x8 ABINIT q = 0 terms are inferred as total minus BAANDI's finite-q part). ABINIT's frequency grid (nfreqim 16/32/64) changes its E_c by less than 0.001 meV/atom (Si, 6 Ha). BAANDI-only: MPI ranks 2/4/8 against 1 give E_c within 1.0e-13 Ha (gate 1e-09 Ha; Si.pz-vbc, 4 Ha, 4x4x4). Not yet checked: extrapolated-cutoff values, molecules and spin cases (later R3 items). Conventions: [ADR 0052](docs/decisions/0052-nscf-band-checkpoint.md), [ADR 0054](docs/decisions/0054-response-chi0-conventions.md), [ADR 0055](docs/decisions/0055-rpa-acfdt-correlation.md).
+
 Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.
 
 <!-- validation:end -->

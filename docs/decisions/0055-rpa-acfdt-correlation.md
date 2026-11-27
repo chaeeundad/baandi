@@ -1,6 +1,6 @@
 # ADR 0055: RPA correlation energy (ACFDT) conventions and per-q checkpoint (R3)
 
-- Status: **Proposed** (ticket RPA-R3-ACFDT, 2026-11-27; orchestrator review pending).
+- Status: **Accepted** 2026-11-28 (ticket RPA-R3-ACFDT, proposed 2026-11-27). Evidence: finite-q E_c vs ABINIT 10.8.3 on dev08 within 0.27 meV/atom (gate 1), q = 0 convention difference falling as 1/N_q, `tests/reference/response/r3/dev08-2026-11-28/summary.json`.
 - Scope: `dft_response::acfdt`, `dft_response::transitions::Transitions::block`,
   `dft_numerics::linalg::hermitian_cholesky`, `dft_engine::response::rpa`,
   `baandi rpa` / `[task] type = "rpa"` / `[rpa]`. Plan:

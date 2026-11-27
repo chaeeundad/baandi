@@ -1,9 +1,28 @@
 # R1 oracle protocol: many-band NSCF against QE 7.6 `pw.x` nscf (dev08)
 
-Status: inputs prepared 2026-11-27 (RPA-R1-MANY-BANDS); no QE run recorded
-yet. Numbers count as "QE reference" only after a real dev08 run with the
-command, QE version, input, UPF SHA-256 and machine stored here. No UPF is
-committed. Plan: `docs/roadmap/rpa-crpa-plan.md` ticket R1.
+Status: **validated against QE 7.6 on dev08, 2026-11-27** (inputs prepared
+2026-11-27, RPA-R1-MANY-BANDS). Record: `dev08-2026-11-27/summary.json`
+(BAANDI tree gen69 `dc397661` and binary SHA-256, `pw.x` PWSCF v.7.6 SHA-256,
+input and UPF SHA-256 per case, commands; raw outputs stay on dev08 under
+`/scr/mino/rustdft` and `/data/sig-dft`). No UPF is committed. Plan:
+`docs/roadmap/rpa-crpa-plan.md` ticket R1; conventions: ADR 0052.
+
+| Case | k | N_b | max aligned difference (Ha) | offset (Ha) | npw | gate 2e-5 Ha |
+| --- | --- | --- | --- | --- | --- | --- |
+| Si2 4x4x4 | 64 | 400 | 2.32e-6 | -2.07e-6 | equal at every k | pass |
+| Si2 8x8x8 | 512 | 400 | 2.32e-6 | -2.07e-6 | equal at every k | pass |
+| LiF 2x2x2 | 8 | 40 | 8.05e-6 | +6.33e-6 | equal at every k | pass |
+| AlN 2x2x2 | 8 | 80 | 7.84e-6 | +7.25e-6 | equal at every k | pass |
+| skewed Si2 2x2x2 | 8 | 60 | 2.34e-6 | +8.38e-8 | equal at every k | pass |
+
+Conventions of the matched QE run (all learned on dev08 and now in
+`make_qe_r1.py`): `nbnd` = N_b + 8 with only the first N_b compared (the
+top bands of QE's iterative solver converge last); `diagonalization = 'cg'`
+run as `pw.x -nk <ranks>` when 2 nbnd exceeds the plane-wave count; the QE
+SCF k mesh equals the toml `[kpoints] kgrid` (Si2 8x8x8 uses a 4x4x4 SCF,
+so its extremes equal the 4x4x4 case: same density, worst point k0 =
+Gamma). The README of the R1-R3 results is generated from the summary by
+`scripts/make_readme_figures.py`.
 
 Gate (plan R1): BAANDI vs QE eigenvalues <= 2e-5 Ha for every band up to
 N_b at every k, after removing one constant offset (highest occupied
@@ -72,4 +91,5 @@ Cholesky on Si2 400 bands).
   Hartree) and compares per k and band; exit 0 only when npw matches and the
   aligned maximum is within `--gate` (default 2e-5 Ha). Parser path checked
   on the Mac against a synthetic XML built from a BAANDI run (offset 0.01 Ha
-  recovered, aligned max 8.9e-16 Ha); not yet run on a real QE output.
+  recovered, aligned max 8.9e-16 Ha); run on the real dev08 QE outputs of
+  2026-11-27 (see Status).

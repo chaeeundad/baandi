@@ -705,6 +705,153 @@ def mpqe_results():
             "Structures and pseudopotentials are one set of Materials Project entries, not a general accuracy guarantee.", ""]
 
 
+RPA_R1 = "tests/reference/response/r1/dev08-2026-11-27/summary.json"
+RPA_R2_FULL = "tests/reference/response/r2/dev08-2026-11-27/summary.json"
+RPA_R2 = "tests/reference/response/r2/dev08-2026-11-28/summary.json"
+RPA_R3 = "tests/reference/response/r3/dev08-2026-11-28/summary.json"
+
+
+def rpa_q0_rows():
+    """R3 Si-dojo mesh series: q=0 convention difference against 1/N_q."""
+    return load(os.path.join(ROOT, RPA_R3))["si2_dojo_mesh_6ha"]["rows"]
+
+
+def fig_rpa_q0():
+    rows = rpa_q0_rows()
+    w, h = 760, 330
+    s = svg_open(w, h, "RPA correlation energy, Si: BAANDI minus ABINIT 10.8.3 against 1/N_q (q=0 convention term)")
+    s += txt(20, 24, "RPA E_c, Si (PseudoDojo, 6 Ha): BAANDI - ABINIT shrinks as 1/N_q (q=0 term only)", 14, weight="bold")
+    x0, x1, y0, y1 = 110, 720, 60, 260
+    xmax = 1.0 / 56
+    ymin = 20 * math.floor(min(r["diff_mev_per_atom"] for r in rows) * 1.1 / 20)
+    def px(v): return x0 + v / xmax * (x1 - x0)
+    def py(v): return y0 + v / ymin * (y1 - y0)
+    for k in range(0, int(ymin) - 1, -20):
+        yy = py(k)
+        s += f'<line x1="{x0}" y1="{yy:.1f}" x2="{x1}" y2="{yy:.1f}" stroke="{GRID}"/>' + txt(x0 - 6, yy + 4, f"{k}", 11, "end", MUTED)
+    s += txt(x0 - 6, y0 - 12, "meV/atom", 11, "end", MUTED)
+    for r in rows:
+        xx = px(1.0 / r["N_q"])
+        s += f'<line x1="{xx:.1f}" y1="{y0}" x2="{xx:.1f}" y2="{y1}" stroke="{GRID}"/>' + txt(xx, y1 + 16, f"{r['mesh']} (1/{r['N_q']})", 11, "middle", MUTED)
+    s += txt((x0 + x1) / 2, y1 + 38, "1 / N_q (number of q points of the Gamma-centred mesh)", 12, "middle", MUTED)
+    last = rows[-1]
+    slope = last["diff_mev_per_atom"] * last["N_q"]
+    s += (f'<line x1="{px(0):.1f}" y1="{py(0):.1f}" x2="{px(xmax):.1f}" y2="{py(slope * xmax):.1f}" stroke="{C_TOL}" '
+          f'stroke-width="1.5" stroke-dasharray="5 3"/>')
+    s += txt(px(xmax) - 4, py(slope * xmax) + 18, f"c / N_q, c from {last['mesh']}", 11, "end", C_TOL)
+    pts = [(px(1.0 / r["N_q"]), py(r["diff_mev_per_atom"])) for r in rows]
+    s += '<polyline fill="none" stroke="%s" stroke-width="1.5" points="%s"/>' % (C_OURS, " ".join(f"{a:.1f},{b:.1f}" for a, b in pts))
+    for (a, b), r in zip(pts, rows):
+        s += f'<circle cx="{a:.1f}" cy="{b:.1f}" r="4" fill="{C_OURS}"/>' + txt(a + 8, b + 18, f"{r['diff_mev_per_atom']:.1f}", 11)
+    fq = max(abs(p["finite_q_sum_diff_mev_per_atom"]) for p in load(os.path.join(ROOT, RPA_R3))["cases"]["si2-dojo-444"]["per_cutoff"].values())
+    s += txt((x0 + x1) / 2, h - 12, f"finite-q sums agree within {fq:.3f} meV/atom at 4x4x4; source: " + RPA_R3, 11, "middle", MUTED)
+    return s + "</svg>\n"
+
+
+def _max_rel(triples):
+    return max(abs(t[2]) for t in triples)
+
+
+def rpa_results():
+    """R1-R3 oracle evidence (QE 7.6, Yambo 5.3.0, ABINIT 10.8.3) from the dev08 summaries."""
+    r1, r2f, r2, r3 = (load(os.path.join(ROOT, p)) for p in (RPA_R1, RPA_R2_FULL, RPA_R2, RPA_R3))
+    lines = ["### RPA building blocks: many bands, dielectric constant, correlation energy", "",
+             "Stages R1 to R3 of the [RPA/cRPA plan](docs/roadmap/rpa-crpa-plan.md), each against a real run of an "
+             "independent code on dev08 at identical conditions (cell, pseudopotential file, cutoff, FFT grid, k mesh, bands). "
+             "Meshes and cutoffs are oracle-comparison settings, not converged material values. "
+             "Protocols: [R1](tests/reference/response/r1/README.md), [R2](tests/reference/response/r2/README.md), "
+             "[R3](tests/reference/response/r3/README.md).", "",
+             f"**R1, many-band NSCF eigenvalues against Quantum ESPRESSO ({r1['oracle']['version']})** (`pw.x` nscf, cg, `nbnd` = N_b + 8, "
+             "first N_b compared; one constant offset removed at the first-k VBM). Gate 2e-5 Ha. " + evidence_link(RPA_R1) + ".", "",
+             "| Case | k points | Bands | Max aligned difference (Ha) | Offset (Ha) | Plane-wave counts | Status |",
+             "|---|---:|---:|---:|---:|---|---|"]
+    for name, c in r1["cases"].items():
+        npw = "equal at every k" if not c["npw_mismatch_k"] else f"differ at {len(c['npw_mismatch_k'])} k"
+        lines.append(f"| {name} | {c['k_points']} | {c['bands']} | {c['max_aligned_ha']:.2e} | {c['offset_ha']:+.2e} | {npw} | "
+                     f"{'pass' if c['pass'] and c['max_aligned_ha'] <= 2e-5 else 'FAIL'} |")
+    yv, av = r2["oracles"]["yambo"]["version"], r2["oracles"]["abinit"]["version"]
+    gate = r2["gate_rel"]
+    lines += ["", f"**R2, static dielectric constant eps_inf (omega = 0, q -> 0, RPA) against Yambo {yv} and ABINIT {av}**. "
+              "Yambo and ABINIT drop the k+G = 0 nonlocal-velocity term at Gamma (Yambo the whole k+G = 0 plane wave "
+              "of [V_NL, r], ABINIT its l = 1 gradient); BAANDI keeps it, because it is part of the exact dH/dk "
+              "(finite-difference proof at k = 0, R2-GAMMA-VEL), so the matched comparison uses BAANDI's diagnostic "
+              "velocity switch `no-g0-all` for Yambo and `no-g0` for ABINIT, and the default `full` values are listed "
+              f"as BAANDI's result. Gate {100 * gate:g} % relative, with and without local fields (LF), every diagonal "
+              "component. " + evidence_link(RPA_R2) + "; first run with `full` against Yambo: " + evidence_link(RPA_R2_FULL) + ".", "",
+              "| Case | N_G | Bands | BAANDI default eps_inf with LF / without LF | `full` vs Yambo (max rel) | "
+              "`no-g0-all` vs Yambo (max rel) | `no-g0` vs ABINIT (max rel) | Matched gate |",
+              "|---|---:|---:|---|---:|---:|---:|---|"]
+    names = list(r2["cases"]) + [k[len("yambo-"):] for k in r2f if k.startswith("yambo-") and not k.endswith("nb68")
+                                 and k[len("yambo-"):] not in r2["cases"]]
+    for name in names:
+        c, f = r2["cases"].get(name), r2f.get("yambo-" + name)
+        if c:
+            lf = list(dict.fromkeys(f"{v:.4f}" for v in c["full"]["LF_diag"]))
+            nl = list(dict.fromkeys(f"{v:.4f}" for v in c["full"]["noLF_diag"]))
+            ng, nb = c["N_G"], c["bands"]
+        else:
+            lf = list(dict.fromkeys(f"{d['baandi_LF']:.4f}" for d in f["dirs"].values()))
+            nl = list(dict.fromkeys(f"{d['baandi_noLF']:.4f}" for d in f["dirs"].values()))
+            ng, nb = f["N_G"], f["bands"]
+        eps = " / ".join(lf) + " ; " + " / ".join(nl) if len(lf) > 1 else f"{lf[0]} / {nl[0]}"
+        full = f"{f['max_rel']:.1e}" if f else "not run"
+        yam = (_max_rel([t for d in c["no_g0_all_vs_yambo"].values() for t in d.values()])
+               if c and "no_g0_all_vs_yambo" in c else None)
+        abi = _max_rel(c["no_g0_vs_abinit"].values()) if c and "no_g0_vs_abinit" in c else None
+        matched = [v for v in (yam, abi) if v is not None]
+        status = (("pass" if max(matched) <= gate else "FAIL") if matched
+                  else ("pass (`full` only)" if f["max_rel"] <= gate else "FAIL"))
+        lines.append(f"| {name} | {ng} | {nb} | {eps} | {full} | "
+                     f"{f'{yam:.1e}' if yam is not None else 'not run'} | {f'{abi:.1e}' if abi is not None else 'not run'} | {status} |")
+    b = r2f["baandi_only_si2_444"]
+    lines += ["", "AlN: with LF xx = yy / zz ; without LF xx = yy / zz. ABINIT cannot read Si.pz-vbc.UPF and was run on LiF and AlN only (its printed "
+              "eps along a small q, 4 to 5 digits; BAANDI's tensor projected on that direction). The `full` differences "
+              f"(LiF {r2f['yambo-lif-444']['max_rel']:.1e}, AlN {r2f['yambo-aln-444']['max_rel']:.1e}) are the oracles' "
+              "Gamma treatment on these coarse meshes (Gamma weight 1/64, 1/48), not a BAANDI error; nothing was tuned "
+              "toward the oracles. BAANDI-only: MPI ranks 2/4/8 against 1 differ by at most "
+              f"{max(b['max_rel_np2_np4_np8']):.1e} relative, Chebyshev against dense bands by {b['cheb_vs_dense_max_rel']:.1e}.", ""]
+    o = r3["oracle"]
+    lines += [f"**R3, RPA correlation energy (ACFDT) against ABINIT {o['version']}** (`gwrpacorr`, nfreqim 32; "
+              "BAANDI `[rpa] response_sphere = \"G\"`, one |G| sphere for every q with v = 4 pi/|q+G|^2, each mesh q at its "
+              "first-zone image, the ABINIT convention). The q = 0 term is reported separately: the two codes treat the "
+              "Coulomb singularity differently (BAANDI: k.p head and wings averaged over directions; ABINIT: auxiliary "
+              "function, `gw_icutcoul` 6; its other choices 3/7/16 change the Si q = 0 term by at most 0.5 %). Gate: "
+              f"finite-q sum within {r3['gate']['finite_q_sum_mev_per_atom']:g} meV/atom at each matched cutoff. "
+              "Si uses PseudoDojo files here (ABINIT cannot read Si.pz-vbc). " + evidence_link(RPA_R3) + ".", "",
+              "| Case | E_cut^chi (Ha) | Bands | BAANDI E_c (Ha/cell) | ABINIT E_c (Ha/cell) | Finite-q sum diff (meV/atom) | "
+              "Largest single-q diff (meV/atom) | q = 0 term diff, weight 1/N_q (meV/atom) | Finite-q gate |",
+              "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for name, c in r3["cases"].items():
+        cuts = sorted(c["per_cutoff"], key=float)
+        for cut, nb in zip(cuts, c["bands_per_cutoff"]):
+            p = c["per_cutoff"][cut]
+            ok = p["finite_q_pass"] and abs(p["finite_q_sum_diff_mev_per_atom"]) <= r3["gate"]["finite_q_sum_mev_per_atom"]
+            lines.append(f"| {name} | {float(cut):g} | {nb} | {p['baandi_total_ha']:.6f} | {p['abinit_total_ha']:.6f} | "
+                         f"{p['finite_q_sum_diff_mev_per_atom']:+.3f} | {p['max_single_q_mev_per_atom']:.3f} | "
+                         f"{p['q0_diff_mev_per_atom']:+.2f} | {'pass' if ok else 'FAIL'} |")
+    mesh = r3["si2_dojo_mesh_6ha"]
+    lines += ["", "The total E_c therefore differs by the q = 0 term alone. It is a convention that vanishes with the mesh: "
+              "Si (PseudoDojo, 6 Ha, SCF on 4x4x4 in both codes) on finer q meshes:", "",
+              "| q mesh | N_q | BAANDI E_c (Ha/cell) | ABINIT E_c (Ha/cell) | Difference (meV/atom) | Difference x N_q (Ha/cell) |",
+              "|---|---:|---:|---:|---:|---:|"]
+    for r in mesh["rows"]:
+        lines.append(f"| {r['mesh']} | {r['N_q']} | {r['baandi_ha']:.6f} | {r['abinit_ha']:.6f} | "
+                     f"{r['diff_mev_per_atom']:+.1f} | {r['diff_times_Nq_ha']:+.3f} |")
+    rs = r3["baandi_only_rank_series"]
+    worst = max(rs["max_abs_dEc_vs_np1_ha"].values())
+    lines += ["", "![RPA q=0 convergence](docs/img/rpa-q0-convergence.svg)", "",
+              f"Difference x N_q tends to about {mesh['rows'][-1]['diff_times_Nq_ha']:.2f} Ha/cell, so the remaining "
+              "difference falls as 1/N_q: a pure q = 0 convention (the 6x6x6 and 8x8x8 ABINIT q = 0 terms are inferred "
+              "as total minus BAANDI's finite-q part). ABINIT's frequency grid (nfreqim 16/32/64) changes its E_c by less "
+              f"than 0.001 meV/atom (Si, 6 Ha). BAANDI-only: MPI ranks 2/4/8 against 1 give E_c within {worst:.1e} Ha "
+              f"(gate {rs['gate_ha']:g} Ha; Si.pz-vbc, 4 Ha, 4x4x4). Not yet checked: extrapolated-cutoff values, "
+              "molecules and spin cases (later R3 items). Conventions: "
+              "[ADR 0052](docs/decisions/0052-nscf-band-checkpoint.md), "
+              "[ADR 0054](docs/decisions/0054-response-chi0-conventions.md), "
+              "[ADR 0055](docs/decisions/0055-rpa-acfdt-correlation.md).", ""]
+    return lines
+
+
 def block(rows, kruns, gamma, perf=None):
     if not show_perf():
         perf = None
@@ -802,6 +949,7 @@ def block(rows, kruns, gamma, perf=None):
               "with `scripts/demo_self_healing.sh`.", ""]
     lines += reference_runtime_results()
     lines += mpqe_results()
+    lines += rpa_results()
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
               "fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.", "", END]
@@ -847,6 +995,8 @@ def main():
         f.write(fig_relaxation())
     with open(os.path.join(IMG, "mpqe-wall-ratio.svg"), "w") as f:
         f.write(fig_mpqe())
+    with open(os.path.join(IMG, "rpa-q0-convergence.svg"), "w") as f:
+        f.write(fig_rpa_q0())
     readme = os.path.join(ROOT, "README.md")
     text = open(readme).read()
     new = block(rows, kruns, gamma, perf)

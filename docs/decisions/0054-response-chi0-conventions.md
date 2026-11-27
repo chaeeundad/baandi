@@ -1,6 +1,6 @@
 # ADR 0054: Response basis, chi0 and optical-limit conventions (R2)
 
-- Status: **Proposed** (ticket RPA-R2-CHI0, 2026-11-27; orchestrator review pending).
+- Status: **Accepted** 2026-11-28 (ticket RPA-R2-CHI0, proposed 2026-11-27). Evidence: eps_inf vs Yambo 5.3.0 / ABINIT 10.8.3 on dev08 within 1.9e-5 / 5.0e-5 relative at the oracles' Gamma k+G=0 convention (gate 0.5 %), `tests/reference/response/r2/dev08-2026-11-28/summary.json`.
 - Scope: new crate `dft-response`, `dft_engine::response`,
   `dft_physics::stress::projector_k_gradient`, `NscfResult::{bases, grid_dims}`,
   `baandi dielectric`. Plan: `docs/roadmap/rpa-crpa-plan.md` 2.1-2.4, 3.1,

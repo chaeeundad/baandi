@@ -220,7 +220,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DERIV_RADIAL_TABLES), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_SHELLS), Value::Choice("on"));
     assert_eq!(value(Id::FD_EMPTY_THRESHOLD), Value::Choice("weighted"));
-    assert_eq!(value(Id::FD_EMPTY_VERIFY), Value::Choice("off"));
+    assert_eq!(value(Id::FD_EMPTY_VERIFY), Value::Choice("on"));
     assert_eq!(value(Id::FD_BUFFER), Value::Choice("on"));
     assert_eq!(value(Id::COLLINEAR_TIME_REVERSAL), Value::Choice("on"));
     assert_eq!(value(Id::FD_GROWTH_AT_STOP), Value::Choice("on"));

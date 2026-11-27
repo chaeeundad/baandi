@@ -50,8 +50,15 @@ SHA-256, host, and the exact commands. Do not store `qe-work/` or `cp/`.
 Also record on dev08 (BAANDI only): `band_solver = "chebyshev"` on
 `si2-444.toml` against the dense `nscf.json` (gate 1e-8 Ha, all certified
 bands) and an MPI rank series 1/2/4/8 of the dense and Chebyshev runs
-(`--features mpi`, gate 1e-10 Ha between rank counts; dense is expected
-bit-identical).
+(`--features mpi`, gate 1e-10 Ha between rank counts; dense differs at about
+1e-13 Ha between rank counts because the per-rank EVD is threaded).
+
+QE side for many bands: `make_qe_r1.py` asks QE for `nbnd = bands + 8` (the top
+bands of an iterative solver converge last; dev08 2026-11-27: QE left band 400
+unconverged at 7 of 64 k with nbnd = 400) and switches to `diagonalization = 'cg'`
+when 2*nbnd exceeds the plane-wave count (Davidson refuses: "more bands than
+PWs"); run that nscf with `pw.x -nk <ranks>` (R&G-distributed cg failed its
+Cholesky on Si2 400 bands).
 
 ## Tools
 

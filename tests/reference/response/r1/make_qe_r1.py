@@ -16,7 +16,7 @@ def fmt(x):
     return repr(float(x))
 
 
-def common(meta, nr, prefix, calculation, nbnd):
+def common(meta, nr, prefix, calculation, nbnd, diag="david"):
     lattice = meta["lattice_columns_bohr"]  # columns are lattice vectors
     rows = [[lattice[i][j] for i in range(3)] for j in range(3)]
     species = sorted({a["species"] for a in meta["atoms"]})
@@ -48,7 +48,7 @@ def common(meta, nr, prefix, calculation, nbnd):
         f"  nr3 = {nr[2]},",
         "/",
         "&ELECTRONS",
-        "  diagonalization = 'david',",
+        f"  diagonalization = '{diag}',",
         "  diago_full_acc = .true.,",
         "  conv_thr = 1.0d-12,",
         "  mixing_beta = 0.7,",
@@ -71,6 +71,8 @@ def main():
     ap.add_argument("--scf-kgrid", nargs=3, type=int, required=True)
     ap.add_argument("--prefix", required=True)
     ap.add_argument("--dir", default=".")
+    ap.add_argument("--extra-bands", type=int, default=8,
+                    help="QE nscf solves nbnd = bands + extra; compare_r1.py compares the first bands")
     a = ap.parse_args()
     meta = json.loads(Path(a.nscf_json).read_text())
     out = Path(a.dir)
@@ -78,13 +80,20 @@ def main():
     occupied = max(meta["occupied_bands"])
     scf = common(meta, a.nr, a.prefix, "scf", occupied + 4)
     scf += ["K_POINTS automatic", " ".join(str(n) for n in a.scf_kgrid) + " 0 0 0"]
-    nscf = common(meta, a.nr, a.prefix, "nscf", meta["nbands"])
+    nbnd = meta["nbands"] + a.extra_bands
+    # QE's Davidson refuses when its 2*nbnd workspace exceeds the plane-wave
+    # count ("more bands than PWs"); use cg then, and run it with one process
+    # per pool (-nk = ranks): R&G-distributed cg fails its Cholesky here.
+    min_npw = min(s["basis_size"] for s in meta["stats"][0])
+    diag = "cg" if 2 * nbnd > min_npw else "david"
+    nscf = common(meta, a.nr, a.prefix, "nscf", nbnd, diag)
     points = meta["kpoints"]
     nscf += ["K_POINTS crystal", str(len(points))]
     nscf += [" ".join(fmt(x) for x in p["fractional"]) + " " + fmt(p["weight"]) for p in points]
     (out / f"{a.prefix}-scf.in").write_text("\n".join(scf) + "\n")
     (out / f"{a.prefix}-nscf.in").write_text("\n".join(nscf) + "\n")
-    print(f"wrote {out}/{a.prefix}-scf.in and {a.prefix}-nscf.in ({len(points)} k, nbnd {meta['nbands']})")
+    print(f"wrote {out}/{a.prefix}-scf.in and {a.prefix}-nscf.in ({len(points)} k, nbnd {nbnd} = {meta['nbands']} + {a.extra_bands}, diagonalization {diag}"
+          + (", run pw.x -nk <ranks>" if diag == "cg" else "") + ")")
 
 
 if __name__ == "__main__":

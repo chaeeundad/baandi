@@ -47,9 +47,11 @@ def main():
     worst_at = None
     per_k = []
     for k, ((_, q), b) in enumerate(zip(qe, ours)):
-        if len(q) != len(b):
-            print(f"band count differs at k {k}: BAANDI {len(b)}, QE {len(q)}")
+        if len(q) < len(b):
+            print(f"QE has fewer bands at k {k}: BAANDI {len(b)}, QE {len(q)}")
             return 1
+        # QE solves extra top bands (make_qe_r1.py --extra-bands); compare the first len(b).
+        q = q[: len(b)]
         d_abs = max(abs(x - y) for x, y in zip(q, b))
         d_al = [abs(x - offset - y) for x, y in zip(q, b)]
         m = max(d_al)

@@ -3719,6 +3719,55 @@ within 6.2e-14 Ha; explicit 2 bands refused at delivery);
 (N = 75: start 45, cap 65; cap > n and >= the start for N = 1..400).
 Existing growth tests unchanged.
 
+### FD start, growth at stop and verification predictor (GB2, 2026-11-27)
+
+dev08 gen63 (Cs2TcI6, 75 electrons, FD 0.005 Ha, verified, dF/atom 1.44e-6
+against QE): explicit 45 bands 15 maps (QE 11), one failed verification;
+automatic 45 -> 54 -> 65 bands at map 2 on a transient miss (edge electrons
+1.02e-4, then 7.6e-9), 1.8x the wall of the explicit run for the same state;
+preflight printed `atomic_start ... fallback_reason: Fermi-Dirac occupations`.
+
+1. Start. The reference FD driver already starts from the atomic density and
+   the atomic orbital span (Ritz in the atomic columns plus kinetic
+   completion); `reference_scf.start` reports `atomic` /
+   `atomic_with_kinetic_completion`. The preflight reason was a stale label of
+   the strict oracle FD path and is now reported only for that path. The 15
+   vs 11 maps are therefore not a start fallback. Collinear FD started from
+   uniform channel counts; `SPIN_FD_ATOMIC_DENSITY=on` (default off) starts
+   each channel from the atomic density scaled to (N +- m)/2. Measured
+   (`refscf::spin_fd_atomic_channel_start`, synthetic Gaussian NC, theta
+   0.02 Ha, free and fixed moment): maps atomic/uniform 7/6 and 7/6
+   (one atom, 5 Bohr skewed cell, 2x2x2), 9/8 and 9/7 (two atoms, 9 x 8 x
+   8.5 Bohr, 2x2x2); dF within 5.7e-10 Ha. No fixture favours it, so the
+   default stays uniform until a real spin-FD set on dev08 says otherwise.
+2. Growth. Automatic growth reacts to a coverage miss only on a map that
+   meets the stop rule, the last map of the budget, or a verification map
+   (`FD_GROWTH_AT_STOP`, default on): the miss grows the count from that
+   map's orbitals and the same input density is solved again; the regrown
+   map is judged by the unchanged stop rule. Earlier misses are recorded as
+   transient (`Run::coverage_misses`, JSON `transient_coverage_misses`). The
+   cost of the rule: an under-sized start converges in the truncated space
+   first (He fixture 9 maps both rules; odd Z = 3 fixture 8 vs 7 maps;
+   one-electron engine fixture 5 vs 5). Its benefit is the Cs2TcI6 case: a
+   transient miss no longer drives the count to the cap.
+   `refscf::fd_band_growth_matches_explicit_count_and_reports_cap` now
+   checks both rules; with growth at stop the 2 -> 6 -> 10 growth happens at
+   map 5, F within 2.1e-12 Ha and E within 7.1e-12 Ha of the explicit run,
+   mu 4.1e-7 Ha (a first-order quantity at the 5e-9 class; ONEPATH-3 records
+   up to 7e-6), the pre-GB2 rule keeps the former 1e-7 mu check.
+3. Verification. Failed attempts right after a stop are the conservative
+   pair criterion (SCF-TAIL-ACCOUNTING: V/T = A(1+A) per mode, high on weakly
+   screened long-wavelength modes), not eigensolver noise: on a slab fixture
+   a tenfold tighter verification eigen tolerance changed the failing error
+   (6.15x threshold) only in the fourth digit. The criterion is unchanged.
+   The cheap fix ported is the closed-shell verification predictor
+   (`FD_VERIFY_PREDICTOR`, default on): after an attempt with error e at stop
+   residual r0, a later stop at r skips its attempt when e r / r0 >= the
+   threshold, never twice in a row (the skipped stop runs an ordinary map).
+   Runs with at most one failed attempt are bit-identical. Slab fixture
+   (5 x 5 x 28 Bohr, two Z = 3 atoms, 2x2x1): attempts 3 -> 2, same 17 maps,
+   identical F. Checkpoints carry the predictor state when the switch is on.
+
 ### FD buffer bands (2026-11-26)
 
 Problem: FD runs on the reference driver failed with `electronic reference

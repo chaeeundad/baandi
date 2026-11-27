@@ -303,6 +303,22 @@ fn reference_fd_automatic_band_count() {
     let doc_auto = doc.unwrap();
     let growth = &doc_auto["reference_scf"]["band_count_growth"];
     assert_eq!(growth["mode"], "automatic", "{growth}");
+    // GB2: the reference FD start is the atomic one (density and orbital
+    // span); preflight no longer reports an FD fallback for this driver.
+    assert_eq!(doc_auto["reference_scf"]["start"]["density"], "atomic");
+    assert!(
+        doc_auto["reference_scf"]["start"]["orbitals"]
+            .as_str()
+            .unwrap()
+            .starts_with("atomic"),
+        "{}",
+        doc_auto["reference_scf"]["start"]
+    );
+    assert!(!stderr.contains("Fermi-Dirac occupations"), "{stderr}");
+    assert_eq!(
+        growth["growth_trigger"],
+        "stopping, budget-final or verification map (GB2)"
+    );
     assert_eq!(growth["initial_bands"], 5);
     assert_eq!(growth["band_cap"], 12);
     let events = growth["events"].as_array().unwrap();

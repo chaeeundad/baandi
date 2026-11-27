@@ -4921,3 +4921,21 @@ FD_EMPTY_VERIFY, verify off and on, maps, H columns, engine and verification sec
 Lesson: the FD map spent a quarter to a half of its H columns on retained bands with negligible occupation and on the
 buffer; the occupation-weighted threshold removes most of the first part without moving the fixed point, while the
 buffer itself is load-bearing for the correctness of the top Ritz pairs.
+
+### GB2 (2026-11-27): FD start, growth at stop, verification predictor
+
+Context: dev08 gen63 Cs2TcI6 (75 e, FD 0.005 Ha): explicit 45 bands 15 maps (QE 11) with one failed
+verification; automatic 45 -> 54 -> 65 bands on a transient miss at map 2, 1.8x the wall.
+- `FD_GROWTH_AT_STOP` (default on): automatic growth only on a stopping, budget-final or verification
+  map; transient misses recorded. Mac fixtures: maps He 9/9, odd Z=3 8 vs 7, one-electron 5/5; the
+  Cs2TcI6 transient no longer reaches the cap (expected 65 -> 45 bands; dev08 to measure).
+- `FD_VERIFY_PREDICTOR` (default on): closed-shell verification predictor ported to the spin/FD
+  driver; slab fixture attempts 3 -> 2, same maps, identical F; runs with <= 1 failed attempt unchanged.
+  Not a repeat of the retired VERIFY_REUSE (no failed-map output enters the mixer).
+- `SPIN_FD_ATOMIC_DENSITY` (default off): collinear FD channel start from the scaled atomic density;
+  Mac maps atomic/uniform 7/6, 7/6, 9/8, 9/7 (four synthetic fixtures): not adopted; dev08 real
+  spin-FD cases needed before any default.
+- Finding: the reference FD start was already atomic (density and orbital span); the preflight
+  "Fermi-Dirac occupations" fallback was a stale strict-oracle label (fixed). Failed verifications
+  after a stop are the criterion (tenfold tighter verification eigen tolerance: error unchanged to
+  4 digits on the slab fixture), not eigensolver noise.

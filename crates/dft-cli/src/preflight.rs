@@ -784,8 +784,18 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         atomic_start: (options.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then(
             || {
                 // ONEPATH-3B: a collinear fixed sector uses the atomic start.
-                let reason = if finite {
-                    Some("Fermi-Dirac occupations")
+                // GB2: so does Fermi-Dirac on the reference driver (atomic
+                // orbital span and Ritz start, atomic density when available);
+                // only the strict oracle FD path starts without them.
+                let reference = crate::driver_select::select(
+                    config,
+                    crate::driver_select::Mode::Classic,
+                    crate::driver_select::Command::Run,
+                    &[],
+                )
+                .reference();
+                let reason = if finite && !reference {
+                    Some("Fermi-Dirac occupations (strict oracle path)")
                 } else {
                     atomic_fallback
                 };

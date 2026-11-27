@@ -3397,7 +3397,11 @@ fn band_growth_json(
             "band_cap":r.band_cap,"growth_rule":"max(bands+4, ceil(1.2*bands)), at most band_cap",
             "events":r.events.iter().map(|e| json!({"iteration":e.iteration,"verification_map":e.verification,
                 "from_bands":e.from,"to_bands":e.to,"edge_max_fraction":e.edge_max_fraction,
-                "edge_electrons":e.edge_electrons})).collect::<Vec<_>>()})
+                "edge_electrons":e.edge_electrons})).collect::<Vec<_>>(),
+            "growth_trigger":if dft_numerics::switches::on(dft_numerics::switches::Id::FD_GROWTH_AT_STOP) {
+                "stopping, budget-final or verification map (GB2)" } else { "every map" },
+            "transient_coverage_misses":misses.iter().map(|m| json!({"iteration":m.iteration,"first_iteration_redo":m.redo,
+                "edge_max_fraction":m.edge_max_fraction,"edge_electrons":m.edge_electrons})).collect::<Vec<_>>()})
         }
         None if finite => {
             json!({"mode":"fixed","initial_bands":cap,"final_bands":cap,"band_cap":cap,"events":[],

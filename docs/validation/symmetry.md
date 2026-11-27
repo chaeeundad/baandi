@@ -43,6 +43,19 @@ to one within 1e-14. Each full index has a representative, operation, integer
 shift and multiplicity. The convention is
 `k_full = (+/- R^-T) k_rep + reciprocal_shift`.
 
+Since GT2 (ADR 0051) the engine reduces with `reduce_mesh_with` and the policy
+of `K_REDUCTION` (default `pointwise`): orbits are star(k) on the mesh under
+every crystal operation (and k ~ -k), images off the mesh are ignored, and the
+operation list (hence the density, force, stress and relaxation group) is the
+whole crystal group. On a mesh every operation (and time reversal) preserves,
+the result is `reduce_mesh` bit for bit and is recorded as `mesh_subgroup`.
+Exact identity: point-wise reduced = full mesh with crystal projection
+(`unreduced`), not the unsymmetrized full mesh. The "mesh" density group of
+the sections below is therefore the crystal group under the default; the
+statements about the mesh-preserving subgroup hold for `K_REDUCTION=mesh`.
+Evidence (strict path): `tests/reference/symmetry/gt2-pointwise-k-reduction.txt`
+and `gt2-silicon-k444s.txt`; numbers in ADR 0051.
+
 For `x' = R*x + tau`, the density projector is
 `rho_sym(G) = mean_op[exp(-2*pi*i*G.tau) rho(R^T G)]`.
 The corresponding Bloch phase is `exp(-i*(k+G).tau)` with physical vectors, or

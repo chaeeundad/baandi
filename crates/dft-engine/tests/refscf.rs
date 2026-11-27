@@ -7973,6 +7973,14 @@ fn g6b_symmetry_diamond_diagnostics() {
     let cell = common::cell();
     let atoms = common::atoms();
     let full = dft_geometry::kpoints::monkhorst_pack([2; 3], [0.5; 3]).unwrap();
+    // GT2: this fingerprint records the mesh-subgroup trajectory (the shifted
+    // 2^3 mesh is not invariant under all 48 operations); with the point-wise
+    // default (crystal-group projection) this 1 Ha, 3-map toy stops in the
+    // XC screened-charge guard (negative density 1.4e-3 e, a different
+    // trajectory of an underresolved fixture; not a fingerprint target).
+    let _mesh = dft_numerics::switches::RunConfig::from_pairs(&[("k_reduction", "mesh")])
+        .unwrap()
+        .enter();
     let prepared = Prepared::new(&cell, &atoms, &full, 1e-7, true).unwrap();
     let pp = common::potential_with_atomic_start(2., 1.8, true, 81, "SLA PZ");
     let potentials = [SpeciesPotential {

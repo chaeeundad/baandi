@@ -1,0 +1,33 @@
+GT2 tetra/fd/full: E=1.952243997285390e0 Ha
+GT2 tetra/fd/unreduced: E=1.952426240121296e0 Ha
+GT2 tetra/fd/pointwise: E=1.952426240121437e0 Ha
+GT2 tetra/fd/mesh: E=1.952243997285263e0 Ha
+GT2 tetra/fd/dense: E=1.974941931457180e0 Ha
+GT2 tetra/fd full-dense8: dE=-2.269793417178967e-2 Ha max|dF|=2.265376507280059e-2 Ha/Bohr max|dsigma|=1.390918084177786e-3 Ha/Bohr^3
+GT2 tetra/fd pointwise-dense8: dE=-2.2515691335743382e-2 Ha max|dF|=7.340721369662184e-3 Ha/Bohr max|dsigma|=1.8672859943182941e-4 Ha/Bohr^3
+GT2 tetra/fd pointwise-unreduced: dE=1.4055423491754482e-13 Ha max|dF|=3.75921516138078e-13 Ha/Bohr max|dsigma|=3.098563072789773e-14 Ha/Bohr^3
+GT2 tetra/fd mesh-full: dE=-1.27675647831893e-13 Ha max|dF|=4.363925887318487e-12 Ha/Bohr max|dsigma|=7.275430258246729e-14 Ha/Bohr^3
+GT2 tetra/fd pointwise-full: dE=1.8224283604628688e-4 Ha max|dF|=1.531304370313849e-2 Ha/Bohr max|dsigma|=1.2041894847459635e-3 Ha/Bohr^3
+GT2 tetra/fd unreduced-full: dE=1.8224283590573265e-4 Ha max|dF|=1.5313043702762569e-2 Ha/Bohr max|dsigma|=1.2041894847149778e-3 Ha/Bohr^3
+GT2 tetra/spin_fd/full: E=1.961499533944594e0 Ha
+GT2 tetra/spin_fd/unreduced: E=1.961725924134609e0 Ha
+GT2 tetra/spin_fd/pointwise: E=1.961725924134555e0 Ha
+GT2 tetra/spin_fd/mesh: E=1.961499533944700e0 Ha
+GT2 tetra/spin_fd/dense: E=1.983234923131765e0 Ha
+GT2 tetra/spin_fd full-dense8: dE=-2.173538918717055e-2 Ha max|dF|=2.281710220390143e-2 Ha/Bohr max|dsigma|=0e0 Ha/Bohr^3
+GT2 tetra/spin_fd pointwise-dense8: dE=-2.1508998997209705e-2 Ha max|dF|=6.913595741854017e-3 Ha/Bohr max|dsigma|=0e0 Ha/Bohr^3
+GT2 tetra/spin_fd pointwise-unreduced: dE=-5.3512749786932545e-14 Ha max|dF|=3.6655400936780325e-11 Ha/Bohr max|dsigma|=0e0 Ha/Bohr^3
+GT2 tetra/spin_fd mesh-full: dE=1.0591527654923993e-13 Ha max|dF|=5.906586331150265e-11 Ha/Bohr max|dsigma|=0e0 Ha/Bohr^3
+GT2 tetra/spin_fd pointwise-full: dE=2.263901899608456e-4 Ha max|dF|=1.590350646204744e-2 Ha/Bohr max|dsigma|=0e0 Ha/Bohr^3
+GT2 tetra/spin_fd unreduced-full: dE=2.2639019001435834e-4 Ha max|dF|=1.5903506498702813e-2 Ha/Bohr max|dsigma|=0e0 Ha/Bohr^3
+GT2 rhombo/fd/full: E=1.892930190806181e0 Ha
+GT2 rhombo/fd/unreduced: E=1.893063537572023e0 Ha
+GT2 rhombo/fd/pointwise: E=1.893063537572087e0 Ha
+GT2 rhombo/fd/mesh: E=1.892930190806196e0 Ha
+GT2 rhombo/fd/dense: E=1.902278613155013e0 Ha
+GT2 rhombo/fd full-dense8: dE=-9.348422348832042e-3 Ha max|dF|=3.371279273786272e-2 Ha/Bohr max|dsigma|=1.5871092709306318e-3 Ha/Bohr^3
+GT2 rhombo/fd pointwise-dense8: dE=-9.215075582926335e-3 Ha max|dF|=3.341646833061558e-2 Ha/Bohr max|dsigma|=1.5881743361174754e-3 Ha/Bohr^3
+GT2 rhombo/fd pointwise-unreduced: dE=6.372680161348399e-14 Ha max|dF|=1.4016565685892601e-13 Ha/Bohr max|dsigma|=6.841749389252527e-15 Ha/Bohr^3
+GT2 rhombo/fd mesh-full: dE=1.4210854715202004e-14 Ha max|dF|=9.347644186474824e-13 Ha/Bohr max|dsigma|=2.4240285394589703e-14 Ha/Bohr^3
+GT2 rhombo/fd pointwise-full: dE=1.3334676590570638e-4 Ha max|dF|=1.344578475785509e-2 Ha/Bohr max|dsigma|=6.401771488440989e-4 Ha/Bohr^3
+GT2 rhombo/fd unreduced-full: dE=1.3334676584197958e-4 Ha max|dF|=1.344578475785509e-2 Ha/Bohr max|dsigma|=6.401771488440987e-4 Ha/Bohr^3

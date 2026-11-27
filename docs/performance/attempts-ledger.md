@@ -4939,3 +4939,20 @@ verification; automatic 45 -> 54 -> 65 bands on a transient miss at map 2, 1.8x 
   "Fermi-Dirac occupations" fallback was a stale strict-oracle label (fixed). Failed verifications
   after a stop are the criterion (tenfold tighter verification eigen tolerance: error unchanged to
   4 digits on the slab fixture), not eigensolver noise.
+
+### GT2 (2026-11-27): point-wise k reduction with the full crystal group (ADR 0051)
+
+Context: dev08 gen61 Ta6Zn7 6x6x3: BAANDI 34 k against QE 26 (12 operations, 4 preserve the mesh).
+- `K_REDUCTION` (default `pointwise`; `mesh` = former, `unreduced` = oracle): orbits star(k) on the
+  mesh under all operations, density/forces/stress/relaxation with the whole group. Ta6Zn7 34 -> 26 k;
+  4x4x2 fixtures 12 -> 9 (tetrahedron), 12 -> 8 (diamond), 14 -> 11 (rhombohedral). Exact against the
+  full mesh with crystal projection (strict path, |dE| <= 1.4e-13 Ha, |dF| <= 3.7e-11 Ha/Bohr);
+  a k-quadrature change against the unsymmetrized full mesh (1e-4 Ha on toy 4x4x2 metals; Si shifted
+  4^3 -1.55e-5 Ha at the same 10 k). Invariant meshes bit-identical.
+- Mesh lookups through a hash index instead of N^2 |G| pair searches (geometry tests 1.4 s -> 0.2 s
+  debug); no change of results.
+dev08 request: Ta6Zn7 (and the other gen61 entries whose preflight says "pointwise_crystal") wall,
+nks and energy against QE with K_REDUCTION=pointwise and mesh.
+Lesson: a mesh that only a subgroup preserves has no symmetric full-mesh sum; matching QE's k count
+means adopting its quadrature (group average), and the exact oracle is the crystal-projected full
+mesh, not the unsymmetrized one.

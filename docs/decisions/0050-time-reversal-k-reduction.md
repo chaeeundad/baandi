@@ -110,3 +110,7 @@ the density is projected with the full crystal group (`symmetry.density_group
 symmetric; it therefore changes the converged density at the k-sampling error
 level against the present default (`mesh`), and forces/stress must be
 symmetrized with the same group. It needs its own ticket and ADR.
+
+**Resolved by ADR 0051 (GT2, 2026-11-27):** point-wise reduction with the full
+crystal group is the default (`K_REDUCTION=pointwise`); Ta6Zn7 6x6x3 now
+reduces to 26 k.

@@ -590,4 +590,191 @@ fn ta6zn7_mesh_subgroup_explains_k_count() {
         .filter(|&i| root(&mut parent, i) == i)
         .count();
     assert_eq!(orbits, 26);
+    // GT2 (ADR 0051): the point-wise reduction reproduces the union-find count
+    // and its orbits, with and without time reversal (inversion present).
+    for tr in [true, false] {
+        let p = reduce_mesh_with(&full, &ops, tr, KReduction::Pointwise).unwrap();
+        assert_eq!(p.reduction, KReduction::Pointwise);
+        assert_eq!(p.mesh_preserving_operations, 4);
+        assert_eq!(p.points.len(), 26, "tr={tr}");
+        check_orbit_map(&full, &p);
+        for e in &p.entries {
+            for f in &p.entries {
+                if e.representative_id == f.representative_id {
+                    assert_eq!(root(&mut parent, e.full_id), root(&mut parent, f.full_id));
+                }
+            }
+        }
+    }
+}
+
+/// Independent check of an orbit map: every full point is R^-T (+/-) k_rep
+/// plus its recorded reciprocal shift, multiplicities count the orbit, weights
+/// are multiplicity / N and every full point appears once.
+fn check_orbit_map(full: &[dft_geometry::kpoints::KPoint], map: &KOrbitMap) {
+    assert_eq!(map.entries.len(), full.len());
+    for (j, e) in map.entries.iter().enumerate() {
+        assert_eq!(e.full_id, j);
+        let op = &map.operations[e.operation_id];
+        for i in 0..3 {
+            let lhs: f64 = (0..3)
+                .map(|a| {
+                    op.rotation[a][i] as f64
+                        * (full[j].fractional[a] - e.reciprocal_shift[a] as f64)
+                })
+                .sum();
+            let rhs = map.points[e.representative_id].fractional[i]
+                * if op.antiunitary { -1. } else { 1. };
+            assert!((lhs - rhs).abs() < 1e-12, "{lhs} {rhs}");
+        }
+        let n = map
+            .entries
+            .iter()
+            .filter(|q| q.representative_id == e.representative_id)
+            .count();
+        assert_eq!(n, e.multiplicity);
+        let w = map.points[e.representative_id].weight;
+        assert!((w - n as f64 / full.len() as f64).abs() < 1e-15);
+    }
+}
+
+/// GT2 (ADR 0051): on a mesh that every operation preserves the point-wise
+/// policy is the mesh-subgroup reduction bit for bit (recorded as such); on a
+/// non-invariant mesh it reduces with the whole group into star(k) on the
+/// mesh, never more points than the subgroup reduction; `Unreduced` keeps
+/// every point with the crystal group as operation list.
+#[test]
+fn pointwise_reduction_contract() {
+    let d = Cell::from_user_rows_bohr([[0., 5., 5.], [5., 0., 5.], [5., 5., 0.]]).unwrap();
+    let si = [Atom::new("Si", [0.; 3]), Atom::new("Si", [0.25; 3])];
+    let ops = detect(&d, &si, 1e-7).unwrap();
+    let mut rows = Vec::new();
+    for (grid, shift) in [
+        ([4; 3], 0.),
+        ([4; 3], 0.5),
+        ([3, 4, 5], 0.),
+        ([2, 2, 1], 0.),
+        ([4, 4, 2], 0.5),
+    ] {
+        let full = monkhorst_pack(grid, [shift; 3]).unwrap();
+        for tr in [true, false] {
+            let mesh = reduce_mesh(&full, &ops, tr, false).unwrap();
+            let pw = reduce_mesh_with(&full, &ops, tr, KReduction::Pointwise).unwrap();
+            check_orbit_map(&full, &pw);
+            assert!(pw.points.len() <= mesh.points.len());
+            if mesh.mesh_preserving_operations == ops.len() {
+                assert_eq!(pw.reduction, KReduction::MeshSubgroup);
+                assert_eq!(pw.points, mesh.points);
+            } else {
+                assert_eq!(pw.reduction, KReduction::Pointwise);
+                assert_eq!(
+                    pw.operations.iter().filter(|o| !o.antiunitary).count(),
+                    ops.len()
+                );
+            }
+            let un = reduce_mesh_with(&full, &ops, tr, KReduction::Unreduced).unwrap();
+            check_orbit_map(&full, &un);
+            assert_eq!(un.points, full);
+            assert_eq!(un.operations.len(), ops.len());
+            rows.push((
+                grid,
+                shift,
+                tr,
+                mesh.mesh_preserving_operations,
+                mesh.points.len(),
+                pw.points.len(),
+            ));
+        }
+    }
+    for r in &rows {
+        println!(
+            "diamond {:?} shift {} tr {}: mesh-preserving {} of 48, mesh-subgroup {} k, point-wise {} k",
+            r.0, r.1, r.2, r.3, r.4, r.5
+        );
+    }
+    // Shifted 4x4x4 in the fcc primitive cell: 12 of 48 preserve the mesh,
+    // and no image of a mesh point under the other 36 lands on the mesh (10 k
+    // both ways, the usual count).
+    assert_eq!((rows[2].3, rows[2].4, rows[2].5), (12, 10, 10));
+    // Point-wise orbits are star(k) on the mesh: a point and an image on the
+    // mesh are always in one orbit (direct check on the shifted mesh).
+    let full = monkhorst_pack([4; 3], [0.5; 3]).unwrap();
+    let pw = reduce_mesh_with(&full, &ops, true, KReduction::Pointwise).unwrap();
+    for (i, p) in full.iter().enumerate() {
+        for o in &pw.operations {
+            let k = o.reciprocal_action(p.fractional);
+            if let Some(j) = full.iter().position(|q| {
+                (0..3).all(|a| {
+                    let x = q.fractional[a] - k[a];
+                    (x - x.round()).abs() < 1e-12
+                })
+            }) {
+                assert_eq!(
+                    pw.entries[i].representative_id,
+                    pw.entries[j].representative_id
+                );
+            }
+        }
+    }
+}
+
+/// GT2 fixtures where the point-wise reduction is smaller than the
+/// mesh-subgroup reduction (Gamma 4x4x2, time reversal on): cubic -43m
+/// (no inversion), diamond (Oh with inversion) and a rhombohedral -3m cell in
+/// the Materials Project hexagonal-axes setting (the Ta6Zn7 situation).
+pub fn gt2_rhombohedral() -> (Cell, Vec<Atom>) {
+    let c = Cell::from_user_rows_bohr([
+        [-2.5, -4.330127018922193, 0.0],
+        [2.5, -4.330127018922193, 0.0],
+        [0.0, -2.886751345948129, 6.0],
+    ])
+    .unwrap();
+    let a = vec![
+        Atom::new("H", [0.; 3]),
+        Atom::new("H", [0.2, 0.2, 0.4]),
+        Atom::new("H", [0.8, 0.8, 0.6]),
+    ];
+    (c, a)
+}
+#[test]
+fn pointwise_smaller_than_mesh_subgroup_fixtures() {
+    let tetra: Vec<_> = [
+        [0.1, 0.1, 0.1],
+        [0.1, -0.1, -0.1],
+        [-0.1, 0.1, -0.1],
+        [-0.1, -0.1, 0.1],
+    ]
+    .into_iter()
+    .map(|p| Atom::new("H", p))
+    .collect();
+    let (rc, ra) = gt2_rhombohedral();
+    let cases = [
+        (
+            Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap(),
+            tetra,
+            (24, 8, 12, 9),
+        ),
+        (
+            Cell::from_user_rows_bohr([[0., 5., 5.], [5., 0., 5.], [5., 5., 0.]]).unwrap(),
+            vec![Atom::new("Si", [0.; 3]), Atom::new("Si", [0.25; 3])],
+            (48, 8, 12, 8),
+        ),
+        (rc, ra, (12, 4, 14, 11)),
+    ];
+    let full = monkhorst_pack([4, 4, 2], [0.; 3]).unwrap();
+    for (c, a, expected) in cases {
+        let ops = detect(&c, &a, 1e-7).unwrap();
+        let m = reduce_mesh(&full, &ops, true, false).unwrap();
+        let p = reduce_mesh_with(&full, &ops, true, KReduction::Pointwise).unwrap();
+        check_orbit_map(&full, &p);
+        assert_eq!(
+            (
+                ops.len(),
+                m.mesh_preserving_operations,
+                m.points.len(),
+                p.points.len()
+            ),
+            expected
+        );
+    }
 }

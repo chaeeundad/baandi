@@ -540,13 +540,46 @@ pub struct KOrbitEntry {
     pub reciprocal_shift: [i32; 3],
     pub multiplicity: usize,
 }
+/// How a full mesh is reduced (GT2, ADR 0051).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KReduction {
+    /// Orbits under the subgroup that maps the whole mesh onto itself. The
+    /// weighted irreducible sum equals the full-mesh sum exactly.
+    MeshSubgroup,
+    /// Point-wise orbits under every crystal operation: k and S k are merged
+    /// whenever S k lies on the mesh (mod G). The weighted irreducible sum
+    /// equals the full-mesh sum projected onto the crystal group.
+    Pointwise,
+    /// No reduction (every mesh point is its own orbit) with the crystal group
+    /// as the operation list: the oracle of `Pointwise` (full mesh, crystal
+    /// projection of the density, crystal symmetrization of derivatives).
+    Unreduced,
+}
+impl KReduction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MeshSubgroup => "mesh_subgroup",
+            Self::Pointwise => "pointwise_crystal",
+            Self::Unreduced => "unreduced_crystal",
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct KOrbitMap {
     pub points: Vec<KPoint>,
-    /// Mesh-preserving operations, including explicit antiunitary partners.
+    /// Operations of the reduction, including explicit antiunitary partners:
+    /// the mesh-preserving subgroup (`MeshSubgroup`) or the whole crystal
+    /// group (`Pointwise`, `Unreduced`). Their unitary part is the group the
+    /// density and the derivatives are symmetrized with.
     pub operations: Vec<SymmetryOperation>,
     pub entries: Vec<KOrbitEntry>,
     pub phase_convention: &'static str,
+    /// Reduction actually applied. `Pointwise` on a mesh that every operation
+    /// (and time reversal, when used) preserves is the `MeshSubgroup` result
+    /// bit for bit and is recorded as `MeshSubgroup`.
+    pub reduction: KReduction,
+    /// Unitary crystal operations that map the whole mesh onto itself.
+    pub mesh_preserving_operations: usize,
 }
 fn equivalent(a: [f64; 3], b: [f64; 3]) -> bool {
     (0..3).all(|i| {
@@ -554,27 +587,75 @@ fn equivalent(a: [f64; 3], b: [f64; 3]) -> bool {
         (d - d.round()).abs() <= 1e-12
     })
 }
-/// Select the mesh-preserving subgroup, or reject any excluded operation when
-/// strict=true. Only uniform, duplicate-free full meshes are accepted.
-pub fn reduce_mesh(
-    full: &[KPoint],
+/// Hash index of mesh points modulo reciprocal lattice vectors (GT2): replaces
+/// the former all-pairs searches (N^2 |G| equivalence tests) by O(1) lookups.
+/// Buckets are the wrapped coordinates rounded to 1e-6; a lookup scans the 27
+/// neighbouring buckets and accepts with the same 1e-12 test as before, so the
+/// result does not depend on bucket boundaries.
+struct MeshIndex<'a> {
+    points: &'a [KPoint],
+    buckets: std::collections::HashMap<[i64; 3], Vec<usize>>,
+}
+const MESH_KEY_SCALE: f64 = 1e6;
+impl<'a> MeshIndex<'a> {
+    fn key(k: [f64; 3]) -> [i64; 3] {
+        k.map(|x| ((x - x.floor()) * MESH_KEY_SCALE).round() as i64 % MESH_KEY_SCALE as i64)
+    }
+    fn new(points: &'a [KPoint]) -> Self {
+        let mut buckets: std::collections::HashMap<[i64; 3], Vec<usize>> =
+            std::collections::HashMap::with_capacity(points.len());
+        for (i, p) in points.iter().enumerate() {
+            buckets.entry(Self::key(p.fractional)).or_default().push(i);
+        }
+        Self { points, buckets }
+    }
+    /// Smallest index of a mesh point equivalent to k, if any.
+    fn find(&self, k: [f64; 3]) -> Option<usize> {
+        let base = Self::key(k);
+        let n = MESH_KEY_SCALE as i64;
+        let mut best: Option<usize> = None;
+        for d0 in -1..=1 {
+            for d1 in -1..=1 {
+                for d2 in -1..=1 {
+                    let key = [
+                        (base[0] + d0).rem_euclid(n),
+                        (base[1] + d1).rem_euclid(n),
+                        (base[2] + d2).rem_euclid(n),
+                    ];
+                    for &j in self.buckets.get(&key).into_iter().flatten() {
+                        if equivalent(k, self.points[j].fractional) && best.is_none_or(|b| j < b) {
+                            best = Some(j);
+                        }
+                    }
+                }
+            }
+        }
+        best
+    }
+    fn preserved_by(&self, o: &SymmetryOperation) -> bool {
+        self.points
+            .iter()
+            .all(|p| self.find(o.reciprocal_action(p.fractional)).is_some())
+    }
+}
+/// Uniform, duplicate-free full mesh and unitary unimodular identity-spin
+/// operations (shared input contract of both reductions).
+fn check_mesh_input<'a>(
+    full: &'a [KPoint],
     operations: &[SymmetryOperation],
-    time_reversal: bool,
-    strict: bool,
-) -> Result<KOrbitMap, SymmetryError> {
+) -> Result<MeshIndex<'a>, SymmetryError> {
     kpoints::validate(full).map_err(|_| SymmetryError("invalid full mesh"))?;
+    let index = MeshIndex::new(full);
     if full
         .iter()
         .any(|p| (p.weight - 1.0 / full.len() as f64).abs() > 1e-14)
-        || full.iter().enumerate().any(|(i, p)| {
-            full[..i]
-                .iter()
-                .any(|q| equivalent(p.fractional, q.fractional))
-        })
+        || full
+            .iter()
+            .enumerate()
+            .any(|(i, p)| index.find(p.fractional) != Some(i))
     {
         return Err(SymmetryError("uniform duplicate-free full mesh required"));
     }
-    let mut subgroup = Vec::new();
     for op in operations {
         if op.spin_action != SpinAction::Identity
             || op.antiunitary
@@ -584,11 +665,75 @@ pub fn reduce_mesh(
                 "unitary unimodular identity-spin operations required",
             ));
         }
-        let invariant = full.iter().all(|p| {
-            full.iter()
-                .any(|q| equivalent(op.reciprocal_action(p.fractional), q.fractional))
+    }
+    Ok(index)
+}
+/// Orbits of the mesh under `group` (images off the mesh ignored). The
+/// representative is the first unassigned mesh index; each member records the
+/// first operation of `group` mapping the representative onto it.
+fn orbits(
+    full: &[KPoint],
+    index: &MeshIndex<'_>,
+    group: &[SymmetryOperation],
+) -> Result<(Vec<KPoint>, Vec<KOrbitEntry>), SymmetryError> {
+    let mut points = Vec::new();
+    let mut entries: Vec<Option<KOrbitEntry>> = vec![None; full.len()];
+    let mut members: Vec<(usize, usize)> = Vec::with_capacity(group.len());
+    for i in 0..full.len() {
+        if entries[i].is_some() {
+            continue;
+        }
+        let rep = points.len();
+        members.clear();
+        for (op_id, op) in group.iter().enumerate() {
+            if let Some(j) = index.find(op.reciprocal_action(full[i].fractional))
+                && !members.iter().any(|&(m, _)| m == j)
+            {
+                members.push((j, op_id));
+            }
+        }
+        members.sort_unstable();
+        if members.is_empty() {
+            return Err(SymmetryError("operation group lacks identity"));
+        }
+        let count = members.len();
+        for &(j, op_id) in &members {
+            if entries[j].is_some() {
+                return Err(SymmetryError(
+                    "overlapping orbits: operation set is not a group",
+                ));
+            }
+            let transformed = group[op_id].reciprocal_action(full[i].fractional);
+            entries[j] = Some(KOrbitEntry {
+                full_id: j,
+                representative_id: rep,
+                operation_id: op_id,
+                reciprocal_shift: std::array::from_fn(|a| {
+                    (full[j].fractional[a] - transformed[a]).round() as i32
+                }),
+                multiplicity: count,
+            });
+        }
+        points.push(KPoint {
+            fractional: full[i].fractional,
+            weight: count as f64 / full.len() as f64,
         });
-        if invariant {
+    }
+    kpoints::validate(&points).map_err(|_| SymmetryError("reduced weight sum"))?;
+    Ok((points, entries.into_iter().map(Option::unwrap).collect()))
+}
+/// Select the mesh-preserving subgroup, or reject any excluded operation when
+/// strict=true. Only uniform, duplicate-free full meshes are accepted.
+pub fn reduce_mesh(
+    full: &[KPoint],
+    operations: &[SymmetryOperation],
+    time_reversal: bool,
+    strict: bool,
+) -> Result<KOrbitMap, SymmetryError> {
+    let index = check_mesh_input(full, operations)?;
+    let mut subgroup = Vec::new();
+    for op in operations {
+        if index.preserved_by(op) {
             subgroup.push(op.clone());
         } else if strict {
             return Err(SymmetryError("operation does not preserve shifted mesh"));
@@ -597,6 +742,7 @@ pub fn reduce_mesh(
     if subgroup.is_empty() {
         return Err(SymmetryError("no mesh-preserving operations"));
     }
+    let preserving = subgroup.len();
     if time_reversal {
         let partners: Vec<_> = subgroup
             .iter()
@@ -606,70 +752,91 @@ pub fn reduce_mesh(
                 o
             })
             .collect();
-        if partners.iter().any(|o| {
-            full.iter().any(|p| {
-                !full
-                    .iter()
-                    .any(|q| equivalent(o.reciprocal_action(p.fractional), q.fractional))
-            })
-        }) {
+        if partners.iter().any(|o| !index.preserved_by(o)) {
             return Err(SymmetryError("time reversal does not preserve mesh"));
         }
         subgroup.extend(partners);
     }
-    let mut points = Vec::new();
-    let mut entries: Vec<Option<KOrbitEntry>> = vec![None; full.len()];
-    for i in 0..full.len() {
-        if entries[i].is_some() {
-            continue;
-        }
-        let rep = points.len();
-        let mut count = 0;
-        for (j, p) in full.iter().enumerate() {
-            if let Some((op_id, op)) = subgroup
-                .iter()
-                .enumerate()
-                .find(|(_, o)| equivalent(o.reciprocal_action(full[i].fractional), p.fractional))
-            {
-                if entries[j].is_some() {
-                    return Err(SymmetryError(
-                        "overlapping orbits: operation set is not a group",
-                    ));
-                }
-                let transformed = op.reciprocal_action(full[i].fractional);
-                entries[j] = Some(KOrbitEntry {
-                    full_id: j,
-                    representative_id: rep,
-                    operation_id: op_id,
-                    reciprocal_shift: std::array::from_fn(|a| {
-                        (p.fractional[a] - transformed[a]).round() as i32
-                    }),
-                    multiplicity: 0,
-                });
-                count += 1;
-            }
-        }
-        if count == 0 {
-            return Err(SymmetryError("operation group lacks identity"));
-        }
-        for e in entries
-            .iter_mut()
-            .flatten()
-            .filter(|e| e.representative_id == rep)
-        {
-            e.multiplicity = count;
-        }
-        points.push(KPoint {
-            fractional: full[i].fractional,
-            weight: count as f64 / full.len() as f64,
-        });
-    }
-    kpoints::validate(&points).map_err(|_| SymmetryError("reduced weight sum"))?;
+    let (points, entries) = orbits(full, &index, &subgroup)?;
     Ok(KOrbitMap {
         points,
         operations: subgroup,
-        entries: entries.into_iter().map(Option::unwrap).collect(),
-        phase_convention: "exp(-i(k+G).tau), physical reciprocal vectors; fractional dot includes 2*pi",
+        entries,
+        phase_convention: PHASE_CONVENTION,
+        reduction: KReduction::MeshSubgroup,
+        mesh_preserving_operations: preserving,
+    })
+}
+const PHASE_CONVENTION: &str =
+    "exp(-i(k+G).tau), physical reciprocal vectors; fractional dot includes 2*pi";
+
+/// Reduce a full mesh with the selected policy (GT2, ADR 0051).
+///
+/// `Pointwise`: orbits are star(k) intersected with the mesh, star(k) = {S k}
+/// over all crystal operations (and -S k with time reversal); images that
+/// leave the mesh are ignored. Because the operations form a group, k ~ S k
+/// is an equivalence on the mesh and each member of an orbit is the image of
+/// its representative under one operation. The weight of an orbit is its size
+/// over the mesh size. For a fixed crystal-invariant potential rho_{S k}(r) =
+/// rho_k(S^-1 r), so with P the crystal projector
+/// P(sum_mesh rho_k / N) = sum_orbits (|orbit| / N) P rho_rep: the reduced set
+/// with the crystal projection reproduces the full mesh with the crystal
+/// projection exactly. It equals the unprojected full-mesh sum only when the
+/// mesh is invariant; otherwise the k quadrature becomes the group average of
+/// the mesh (a k-sampling change, ADR 0051). When every operation (and time
+/// reversal) preserves the mesh the result is `reduce_mesh` bit for bit.
+pub fn reduce_mesh_with(
+    full: &[KPoint],
+    operations: &[SymmetryOperation],
+    time_reversal: bool,
+    reduction: KReduction,
+) -> Result<KOrbitMap, SymmetryError> {
+    if reduction == KReduction::MeshSubgroup {
+        return reduce_mesh(full, operations, time_reversal, false);
+    }
+    let index = check_mesh_input(full, operations)?;
+    let preserving = operations.iter().filter(|o| index.preserved_by(o)).count();
+    if preserving == 0 {
+        return Err(SymmetryError("no mesh-preserving operations"));
+    }
+    let partner = |o: &SymmetryOperation| {
+        let mut o = o.clone();
+        o.antiunitary = true;
+        o
+    };
+    let tr_preserves = !time_reversal || operations.iter().all(|o| index.preserved_by(&partner(o)));
+    if reduction == KReduction::Pointwise && preserving == operations.len() && tr_preserves {
+        return reduce_mesh(full, operations, time_reversal, false);
+    }
+    let mut group = operations.to_vec();
+    if reduction == KReduction::Pointwise && time_reversal {
+        group.extend(operations.iter().map(partner));
+    }
+    let (points, entries) = if reduction == KReduction::Unreduced {
+        let identity = group
+            .iter()
+            .position(|o| o.rotation == [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+            .ok_or(SymmetryError("operation group lacks identity"))?;
+        let entries: Vec<KOrbitEntry> = (0..full.len())
+            .map(|j| KOrbitEntry {
+                full_id: j,
+                representative_id: j,
+                operation_id: identity,
+                reciprocal_shift: [0; 3],
+                multiplicity: 1,
+            })
+            .collect();
+        (full.to_vec(), entries)
+    } else {
+        orbits(full, &index, &group)?
+    };
+    Ok(KOrbitMap {
+        points,
+        operations: group,
+        entries,
+        phase_convention: PHASE_CONVENTION,
+        reduction,
+        mesh_preserving_operations: preserving,
     })
 }
 

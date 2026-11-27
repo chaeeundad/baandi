@@ -14,8 +14,9 @@ Collinear and finite-temperature drivers reject explicitly. For cell modes, see
 ```toml
 [relax]
 method = "bfgs"                 # alternatively "fire"
-force_tol_ha_bohr = 1e-3
-energy_tol_ha = 1e-8
+force_tol_ha_bohr = 3.889e-4    # default (= 0.02 eV/A), on the max atomic force norm |F_i| (Ha/Bohr)
+force_criterion = "norm"        # default; "component" = largest free Cartesian component
+# energy_tol_ha = 1e-8          # optional (unset by default): also require |dE| < tol
 max_steps = 200
 max_displacement_bohr = 0.2
 trust_radius_bohr = 0.2
@@ -30,12 +31,25 @@ The same constraints can be written per atom in the compact `[structure]` form
 an extended XYZ `move_mask`; give them in one place only
 ([Structure input](../cli.md#structure-input)).
 Constraints project both optimizer forces and steps; the original physical force
-arrays remain unchanged in the trajectory/results. The maximum force used for
-stopping is the maximum absolute **free Cartesian component**, not the maximum
-atom-vector norm. Both this force threshold and the absolute energy-change
-threshold must pass on two consecutive accepted steps. The initial SCF is step 0;
+arrays remain unchanged in the trajectory/results.
+
+Stop rule ([ADR 0056](../decisions/0056-relax-stop-rule-and-fire-units.md),
+2026-11-27, the ASE `fmax` / VASP `EDIFFG < 0` convention): the run is converged
+when the **largest atomic force norm** |F_i| of the projected force is below
+`force_tol_ha_bohr`, default 0.02 eV/A = 3.889e-4 Ha/Bohr (before ADR 0056:
+1e-3 Ha/Bohr on the component plus a 1e-8 Ha energy test). Fully frozen atoms count
+zero, partially frozen atoms the norm of their free components.
+`force_criterion = "component"` selects the rule used before ADR 0056 (largest
+free Cartesian component); the norm is larger by up to sqrt(3), so at equal
+tolerance the norm rule is stricter. There is no energy requirement by
+default: the first frame that passes the force test stops, the initial one
+included (exit 0 with zero steps). Setting `energy_tol_ha` adds the former
+energy test: the force test and |dE| < `energy_tol_ha` must then hold on two
+consecutive accepted steps. Inputs that set `energy_tol_ha` explicitly keep
+that behaviour. The initial SCF is step 0;
 `max_steps` counts subsequent ionic moves. All force and energy tolerances are
-strict inequalities. Exit 0 means converged, 3 means ionic step budget exhausted,
+strict inequalities. Variable-cell modes keep their stress and energy rule
+(energy default 1e-8 Ha there), see [cell relaxation](cell-relaxation.md). Exit 0 means converged, 3 means ionic step budget exhausted,
 4 means SCF/derivative failure after the retry, 1 invalid input, 5 I/O failure.
 An exhausted ionic trajectory still contains certified SCFs and usable forces.
 
@@ -64,18 +78,27 @@ secant pairs update it; unresolved/nonpositive curvature pairs are skipped.
 A nonfinite or uphill search direction resets the spring model. Uniform scaling
 limits the largest **per-atom Euclidean displacement** by both the current trust
 radius and `max_displacement_bohr`. The trust radius halves after an energy rise
-larger than the configured energy tolerance or a failed-SCF retry; otherwise it
+larger than `energy_tol_ha` (when unset: twice `scf.standard_threshold_ha`,
+1e-8 Ha at the default) or a failed-SCF retry; otherwise it
 grows by 1.1 up to its input value. There is no energy line search or global
 minimum guarantee. This is a capped, safeguarded BFGS step, not a solution of an
 exact quadratic trust-region subproblem. Energy monotonicity is measured on the
 Si oracle, not guaranteed for every system.
 
-FIRE is a selectable alternative, not an automatic switch. It uses unit
-fictitious masses, an Euler velocity kick, initial dt=0.1 and alpha=0.1. Positive
-power mixes velocity toward the force; after five positive-power steps dt grows
-by 1.1 up to 1 and alpha shrinks by 0.99. Nonpositive power clears velocity,
-halves dt and restores alpha. Its displacements use the same per-atom cap.
-These fictitious integration parameters do not represent physical dynamics.
+FIRE is a selectable alternative, not an automatic switch. Since ADR 0056 it
+moves atoms as ASE FIRE does in eV/Angstrom: unit fictitious masses, an Euler
+velocity kick, `fire_dt` (initial, default 0.1) and `fire_dt_max` (default 1.0)
+in ASE units Angstrom/sqrt(eV), internally multiplied by
+sqrt(27.2114)/0.529177 = 9.858 for Hartree atomic units (displacement
+dt^2 F, so the same dt gives the same step as ASE for the same physical force),
+alpha=0.1. The first step is a pure kick. Positive power mixes velocity toward
+the force; once more than five consecutive positive-power steps preceded, dt
+grows by 1.1 up to `fire_dt_max` and alpha shrinks by 0.99. Nonpositive power
+clears velocity, halves dt and restores alpha. Its displacements use the same
+per-atom cap (ASE caps the norm of the whole step at 0.2 A instead). Before ADR
+0056 the same numbers were applied in Hartree units, which made the steps about
+97 times shorter. These fictitious integration parameters do not represent
+physical dynamics.
 
 With `[symmetry] mode="auto"`, P19A/P20A symmetrize density and raw forces.
 The isotropic starting Hessian, invariant updates and scalar cap preserve the
@@ -159,10 +182,17 @@ A finished failed/unconverged run is not silently restarted with a new budget.
 - `final.toml`: replacement `[[system.atoms]]` entries in the original cell,
   with original species labels and unwrapped fractional coordinates.
 - `results.json`: additive `relaxation` block, settings, constraints, status,
-  all accepted energies/raw forces/positions, projected maxima, failure records,
-  input/executable/PP SHA-256 provenance. Internal record units are Ha and Bohr.
-- `relax.log`: step, energy (Ha), projected maximum force (Ha/Bohr), maximum
-  atom displacement (Bohr), SCF iterations and fresh/warm provenance.
+  all accepted energies/raw forces/positions, projected maxima per frame
+  (`max_force_ha_bohr` = largest free component, `max_force_norm_ha_bohr` =
+  largest atomic norm), `final_max_force_norm_ha_bohr`, the applied `stop_rule`,
+  failure records, input/executable/PP SHA-256 provenance. Internal record
+  units are Ha and Bohr.
+- `relax.log`: step, energy (Ha), projected maximum force component (Ha/Bohr),
+  maximum atom displacement (Bohr), SCF iterations, fresh/warm provenance and
+  (seventh column, ADR 0056) projected maximum atomic force norm (Ha/Bohr).
+- stdout: one line per step with both force measures and the step's wall
+  (`wall=...s`); the wall is not stored in the deterministic files above
+  (`progress.jsonl` carries `elapsed_s` per step).
 
 Existing output files require `--resume`; symlink, nonregular, hard-linked and
 input-alias destinations reject. Ordinary XYZ and POSCAR are lossy views; retain

@@ -21,6 +21,18 @@ pub enum Method {
     Bfgs,
     Fire,
 }
+/// Force measure of the stop rule (ADR 0056). `Norm`: the largest Cartesian
+/// force norm |F_i| over atoms after constraint projection (ASE `fmax`, VASP
+/// EDIFFG < 0). `Component`: the largest absolute free Cartesian component,
+/// the rule before ADR 0056. Component <= norm <= sqrt(3) component, so at
+/// equal tolerance the norm rule is the stricter one, by up to sqrt(3).
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ForceCriterion {
+    #[default]
+    Norm,
+    Component,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fixed {
@@ -152,14 +164,34 @@ pub struct Settings {
     pub pulay_warning_ha_bohr3: f64,
     pub rebuild_every: usize,
     pub force_tol_ha_bohr: f64,
-    pub energy_tol_ha: f64,
+    /// Force measure compared with `force_tol_ha_bohr` (default norm, ADR 0056).
+    pub force_criterion: ForceCriterion,
+    /// Optional energy-change requirement (ADR 0056). Unset (default) in ions
+    /// mode: the force test alone stops. Set: |dE| < tol together with the force
+    /// test on two consecutive accepted steps (the rule before ADR 0056). Cell
+    /// modes keep that rule with 1e-8 Ha when unset ([`Settings::cell_energy_tol_ha`]).
+    pub energy_tol_ha: Option<f64>,
     pub max_steps: usize,
     pub max_displacement_bohr: f64,
     pub trust_radius_bohr: f64,
     pub warm_start: bool,
+    /// FIRE initial and maximum time step in ASE FIRE units, Angstrom/sqrt(eV)
+    /// (unit masses, forces in eV/Angstrom): the same numbers move atoms as
+    /// ase.optimize.FIRE does (ADR 0056). Defaults 0.1 and 1.0 (ASE defaults).
+    pub fire_dt: f64,
+    pub fire_dt_max: f64,
     /// C3 predictor; acts only with `warm_start` in ions mode. Default none.
     pub start_extrapolation: Extrapolation,
     pub fixed: Vec<Fixed>,
+}
+/// Default force tolerance (ADR 0056): 0.02 eV/Angstrom on the atomic norm,
+/// 3.889e-4 Ha/Bohr. Without the energy test the force threshold alone sets
+/// the accuracy; 0.02 eV/A is the PRELAX target and a common production value.
+pub const DEFAULT_FORCE_TOL_EV_ANGSTROM: f64 = 0.02;
+pub fn default_force_tol_ha_bohr() -> f64 {
+    use dft_units::{Angstrom, Bohr, EnergyUnit, to_hartree};
+    // eV/A -> Ha/Bohr: energy to Ha, then per Bohr = per A times (A per Bohr).
+    to_hartree(DEFAULT_FORCE_TOL_EV_ANGSTROM, EnergyUnit::ElectronVolt) * Angstrom::from(Bohr(1.)).0
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -172,12 +204,15 @@ impl Default for Settings {
             stress_tol_ha_bohr3: 1e-6,
             pulay_warning_ha_bohr3: 5e-6,
             rebuild_every: 0,
-            force_tol_ha_bohr: 1e-3,
-            energy_tol_ha: 1e-8,
+            force_tol_ha_bohr: default_force_tol_ha_bohr(),
+            force_criterion: ForceCriterion::Norm,
+            energy_tol_ha: None,
             max_steps: 200,
             max_displacement_bohr: 0.2,
             trust_radius_bohr: 0.2,
             warm_start: true,
+            fire_dt: optimizer::FIRE_DT,
+            fire_dt_max: optimizer::FIRE_DT_MAX,
             start_extrapolation: Extrapolation::None,
             fixed: vec![],
         }
@@ -208,6 +243,12 @@ fn verification_summary(state: &dft_engine::ScfResult, opts: &ScfOptions) -> Opt
         "h_vectors":v.attempts.iter().map(|a| a.operator_applications).sum::<usize>(),
     }))
 }
+/// Largest Euclidean norm of the per-atom triples of a flat Cartesian vector.
+fn max_atom_norm(v: &[f64]) -> f64 {
+    v.chunks(3)
+        .map(|a| a.iter().map(|x| x * x).sum::<f64>().sqrt())
+        .fold(0., f64::max)
+}
 fn error(code: u8, e: impl std::fmt::Display) -> RunError {
     RunError {
         code,
@@ -220,22 +261,75 @@ impl Settings {
             self.force_tol_ha_bohr,
             self.stress_tol_ha_bohr3,
             self.pulay_warning_ha_bohr3,
-            self.energy_tol_ha,
+            self.energy_tol_ha.unwrap_or(1.),
             self.max_displacement_bohr,
             self.trust_radius_bohr,
+            self.fire_dt,
+            self.fire_dt_max,
         ]
         .iter()
         .any(|v| !v.is_finite() || *v <= 0.)
+            || self.fire_dt > self.fire_dt_max
             || !self.pressure_ha_bohr3.is_finite()
             || self.max_steps == 0
             || self.fixed.iter().any(|f| f.atom >= n)
         {
             return Err(error(
                 1,
-                "relax: positive finite tolerances/radii, positive max_steps and valid zero-based fixed atom indices required",
+                "relax: positive finite tolerances/radii/FIRE time steps (fire_dt <= fire_dt_max), positive max_steps and valid zero-based fixed atom indices required",
             ));
         }
         Ok(())
+    }
+    /// Optimizer state with this input's FIRE time steps.
+    fn optimizer(&self, n: usize) -> optimizer::Optimizer {
+        optimizer::Optimizer::with_fire(n, self.trust_radius_bohr, self.fire_dt, self.fire_dt_max)
+    }
+    /// Force measure of `frame` used by the stop rule.
+    fn force_measure(&self, frame: &Frame) -> f64 {
+        match self.force_criterion {
+            ForceCriterion::Norm => frame.max_force_norm_ha_bohr,
+            ForceCriterion::Component => frame.max_force_ha_bohr,
+        }
+    }
+    /// Force part of the stop rule (strict inequality, as ASE `fmax`).
+    fn force_converged(&self, frame: &Frame) -> bool {
+        self.force_measure(frame) < self.force_tol_ha_bohr
+    }
+    /// Energy tolerance of the cell modes: their stop rule and enthalpy
+    /// backtracking keep the rule before ADR 0056 (default 1e-8 Ha).
+    fn cell_energy_tol_ha(&self) -> f64 {
+        self.energy_tol_ha.unwrap_or(1e-8)
+    }
+    /// Ions-mode stop rule after an accepted frame with energy change `delta`
+    /// (None for the initial frame). Returns the new counter and whether the
+    /// run converged. Without `energy_tol_ha` one frame that passes the force
+    /// test stops (the initial one included); with it, the force test and
+    /// |dE| < tol must hold on two consecutive accepted steps.
+    fn ionic_stop(&self, frame: &Frame, delta: Option<f64>, consecutive: usize) -> (usize, bool) {
+        let force = self.force_converged(frame);
+        match self.energy_tol_ha {
+            None => (usize::from(force), force),
+            Some(tol) => {
+                let next = if force && delta.is_some_and(|d| d.abs() < tol) {
+                    consecutive + 1
+                } else {
+                    0
+                };
+                (next, next >= 2)
+            }
+        }
+    }
+    /// An energy rise above this halves the trust radius: the energy tolerance
+    /// when given, otherwise twice the SCF energy accuracy (the standard
+    /// threshold, or the strict energy tolerance), which equals the former
+    /// default 1e-8 Ha at the default 5e-9 Ha threshold.
+    fn energy_rise_tol_ha(&self, opts: &ScfOptions) -> f64 {
+        self.energy_tol_ha.unwrap_or_else(|| {
+            2. * opts
+                .standard
+                .map_or(opts.energy_tolerance, |p| p.threshold_ha)
+        })
     }
     fn project(&self, v: &mut [f64]) {
         for fixed in &self.fixed {
@@ -260,7 +354,11 @@ struct Frame {
     fractional: Vec<[f64; 3]>,
     energy_ha: f64,
     forces_ha_bohr: Vec<[f64; 3]>,
+    /// Largest absolute free Cartesian component of the projected force.
     max_force_ha_bohr: f64,
+    /// Largest atomic norm |F_i| of the projected force (ADR 0056).
+    #[serde(default)]
+    max_force_norm_ha_bohr: f64,
     step_length_bohr: f64,
     scf_iterations: usize,
     provenance: String,
@@ -740,6 +838,7 @@ impl Context {
             }),
             forces_ha_bohr: forces.values,
             max_force_ha_bohr: projected.iter().map(|v| v.abs()).fold(0., f64::max),
+            max_force_norm_ha_bohr: max_atom_norm(&projected),
             step_length_bohr: length,
             scf_iterations: state.history.len(),
             provenance: provenance.into(),
@@ -1069,14 +1168,17 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         };
         let mut extrapolation = Vec::new();
         push_history(&mut extrapolation, &frame.positions, &density, n_at);
+        // ADR 0056: without the energy requirement an initial structure that
+        // already meets the force test is converged after zero ionic steps.
+        let (consecutive, converged) = settings.ionic_stop(&frame, None, 0);
         Restart {
             version: 1,
             identity,
-            optimizer: optimizer::Optimizer::new(n, settings.trust_radius_bohr),
+            optimizer: settings.optimizer(n),
             frames: vec![frame],
             density,
-            consecutive: 0,
-            status: "running".into(),
+            consecutive,
+            status: if converged { "converged" } else { "running" }.into(),
             failures,
             extrapolation,
         }
@@ -1085,7 +1187,11 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     // Publish accepted state before derived outputs; resume regenerates outputs.
     save(&restart_path, &state)?;
     outputs(&ctx, &settings, &state, out)?;
+    let rise_tol = settings.energy_rise_tol_ha(&ctx.opts);
     while state.frames.len() - 1 < settings.max_steps && state.status == "running" {
+        // Wall of this ionic step (proposal, every attempt, outputs); printed on
+        // the step line only: frames and relax.log stay deterministic for resume.
+        let started = std::time::Instant::now();
         let last = state.frames.last().unwrap().clone();
         ctx.position(&last.fractional);
         let source = if ctx.selection.reference() {
@@ -1161,14 +1267,10 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
                 push_history(&mut state.extrapolation, &frame.positions, &density, n_at);
             }
             let delta = frame.energy_ha - last.energy_ha;
-            if frame.max_force_ha_bohr < settings.force_tol_ha_bohr
-                && delta.abs() < settings.energy_tol_ha
-            {
-                state.consecutive += 1;
-            } else {
-                state.consecutive = 0;
-            }
-            if attempt > 0 || delta > settings.energy_tol_ha {
+            let (consecutive, converged) =
+                settings.ionic_stop(&frame, Some(delta), state.consecutive);
+            state.consecutive = consecutive;
+            if attempt > 0 || delta > rise_tol {
                 proposed.radius *= 0.5;
             } else {
                 proposed.radius = (proposed.radius * 1.1).min(settings.trust_radius_bohr);
@@ -1179,7 +1281,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             state.optimizer = proposed;
             state.frames.push(frame);
             state.density = density;
-            if state.consecutive >= 2 {
+            if converged {
                 state.status = "converged".into();
             }
         } else {
@@ -1190,7 +1292,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             state.status = "unconverged".into();
         }
         save(&restart_path, &state)?;
-        outputs(&ctx, &settings, &state, out)?;
+        outputs_with_wall(&ctx, &settings, &state, out, Some(started.elapsed()))?;
     }
     match state.status.as_str() {
         "converged" => Ok(()),
@@ -1202,12 +1304,21 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     }
 }
 
-#[allow(clippy::needless_range_loop)] // Lattice vectors are columns, file vectors are rows.
 fn outputs(
     ctx: &Context,
     settings: &Settings,
     state: &Restart,
     out: &Path,
+) -> Result<(), RunError> {
+    outputs_with_wall(ctx, settings, state, out, None)
+}
+#[allow(clippy::needless_range_loop)] // Lattice vectors are columns, file vectors are rows.
+fn outputs_with_wall(
+    ctx: &Context,
+    settings: &Settings,
+    state: &Restart,
+    out: &Path,
+    wall: Option<std::time::Duration>,
 ) -> Result<(), RunError> {
     // UX1 progress stream (ADR 0053): one record per new frame or failure.
     if let Some(f) = state.frames.last() {
@@ -1247,8 +1358,11 @@ fn outputs(
         .collect();
     let lattice = ctx.cell.lattice_columns_bohr();
     let mut xyz = String::new();
+    // Columns 1-6 unchanged since P21A; max_force_Ha_Bohr is the largest free
+    // Cartesian component, max_force_norm_Ha_Bohr the largest atomic norm
+    // (ADR 0056; the stop rule uses relaxation.stop_rule.force_criterion).
     let mut log = String::from(
-        "step energy_Ha max_force_Ha_Bohr step_length_Bohr scf_iterations provenance\n",
+        "step energy_Ha max_force_Ha_Bohr step_length_Bohr scf_iterations provenance max_force_norm_Ha_Bohr\n",
     );
     for (i, frame) in state.frames.iter().enumerate() {
         let lattice = frame.cell_columns_bohr.unwrap_or(lattice);
@@ -1284,12 +1398,13 @@ fn outputs(
         }
         writeln!(
             log,
-            "{i} {:.17e} {:.17e} {:.17e} {} {}",
+            "{i} {:.17e} {:.17e} {:.17e} {} {} {:.17e}",
             frame.energy_ha,
             frame.max_force_ha_bohr,
             frame.step_length_bohr,
             frame.scf_iterations,
-            frame.provenance
+            frame.provenance,
+            frame.max_force_norm_ha_bohr
         )
         .unwrap();
     }
@@ -1384,6 +1499,7 @@ fn outputs(
             "verification":if ctx.opts.standard.is_some() { ctx.opts.verification.name() } else { "strict_certificate" },
             "note":"every ionic or cell step runs this SCF; forces and stress of a standard step rest on its passed fixed-point verification (frames[].verification); tighten scf.standard_threshold_ha for force- or stress-sensitive runs"},
         "relaxation":{"status":state.status,"steps":state.frames.len()-1,"final_max_force_ha_bohr":last.max_force_ha_bohr,
+        "final_max_force_norm_ha_bohr":last.max_force_norm_ha_bohr,"stop_rule":stop_rule_json(settings, false),
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});
     ctx.selection.record(&mut result);
@@ -1409,15 +1525,37 @@ fn outputs(
         atomic(&out.join(name), text.as_bytes())?;
     }
     println!(
-        "step {} E={:.12e} Ha maxF={:.6e} Ha/Bohr displacement={:.6e} Bohr SCF={} {}",
+        "step {} E={:.12e} Ha maxF={:.6e} Ha/Bohr max|F|={:.6e} Ha/Bohr displacement={:.6e} Bohr SCF={} {}{}",
         state.frames.len() - 1,
         last.energy_ha,
         last.max_force_ha_bohr,
+        last.max_force_norm_ha_bohr,
         last.step_length_bohr,
         last.scf_iterations,
-        state.status
+        state.status,
+        wall.map_or(String::new(), |w| format!(" wall={:.3}s", w.as_secs_f64()))
     );
     Ok(())
+}
+/// The stop rule that applied, for results.json (ADR 0056).
+fn stop_rule_json(settings: &Settings, cell: bool) -> Value {
+    let energy = if cell {
+        Some(settings.cell_energy_tol_ha())
+    } else {
+        settings.energy_tol_ha
+    };
+    json!({
+        "force_criterion": settings.force_criterion,
+        "force_measure": match settings.force_criterion {
+            ForceCriterion::Norm => "max over atoms of |F_i| (projected), Ha/Bohr",
+            ForceCriterion::Component => "max free Cartesian |F_ia| (projected), Ha/Bohr",
+        },
+        "force_tol_ha_bohr": settings.force_tol_ha_bohr,
+        "energy_tol_ha": energy,
+        "consecutive_steps_required": if energy.is_some() { 2 } else { 1 },
+        "inequality": "strict",
+        "adr": "0056",
+    })
 }
 
 #[cfg(test)]
@@ -1496,6 +1634,163 @@ mod extrapolation_tests {
         assert_eq!(settings.start_extrapolation, Extrapolation::SecondOrder);
         assert_eq!(Settings::default().start_extrapolation, Extrapolation::None);
         assert!(toml::from_str::<Settings>("start_extrapolation = \"cubic\"").is_err());
+    }
+}
+
+#[cfg(test)]
+mod stop_rule_tests {
+    //! ADR 0056 stop rule: units Ha/Bohr for forces, Ha for energies; all
+    //! comparisons below are exact (no tolerance) because the measures are
+    //! computed from the given numbers only.
+    use super::*;
+    /// A frame whose projected force is `forces` under `settings` constraints,
+    /// built the same way `evaluate_with` builds the recorded maxima.
+    fn frame(settings: &Settings, forces: &[[f64; 3]], energy: f64) -> Frame {
+        let mut projected: Vec<f64> = forces.iter().flatten().copied().collect();
+        settings.project(&mut projected);
+        Frame {
+            positions: vec![0.; 3 * forces.len()],
+            cell_columns_bohr: None,
+            stress_ha_bohr3: None,
+            pulay_assessment: None,
+            fractional: vec![[0.; 3]; forces.len()],
+            energy_ha: energy,
+            forces_ha_bohr: forces.to_vec(),
+            max_force_ha_bohr: projected.iter().map(|v| v.abs()).fold(0., f64::max),
+            max_force_norm_ha_bohr: max_atom_norm(&projected),
+            step_length_bohr: 0.,
+            scf_iterations: 0,
+            provenance: "test".into(),
+            scf_h_vectors: None,
+            start_fallback: None,
+            start_clipped_fraction: None,
+            verification: None,
+        }
+    }
+    #[test]
+    fn defaults_parse_and_validate() {
+        let d = Settings::default();
+        assert_eq!(d.force_criterion, ForceCriterion::Norm);
+        assert_eq!(d.energy_tol_ha, None);
+        assert_eq!((d.fire_dt, d.fire_dt_max), (0.1, 1.0));
+        // 0.02 eV/A = 0.02 / (27.211386 eV / 0.52917721 A) Ha/Bohr.
+        let expected = 0.02 * 0.529_177_210_9 / 27.211_386_245_988;
+        assert!(
+            (d.force_tol_ha_bohr - expected).abs() < 1e-8 * expected,
+            "{}",
+            d.force_tol_ha_bohr
+        );
+        assert!((d.force_tol_ha_bohr - 3.889e-4).abs() < 1e-7);
+        // Old inputs keep parsing: energy_tol_ha now opts into the energy test.
+        let old: Settings =
+            toml::from_str("force_tol_ha_bohr = 1e-3\nenergy_tol_ha = 1e-8").unwrap();
+        assert_eq!(old.energy_tol_ha, Some(1e-8));
+        let s: Settings =
+            toml::from_str("force_criterion = \"component\"\nfire_dt = 0.2\nfire_dt_max = 0.5")
+                .unwrap();
+        assert_eq!(s.force_criterion, ForceCriterion::Component);
+        assert!(s.validate(1).is_ok());
+        assert!(toml::from_str::<Settings>("force_criterion = \"rms\"").is_err());
+        for bad in [
+            "energy_tol_ha = 0.0",
+            "energy_tol_ha = -1e-8",
+            "fire_dt = 0.0",
+            "fire_dt = 2.0",
+            "fire_dt_max = -1.0",
+        ] {
+            let s: Settings = toml::from_str(bad).unwrap();
+            assert!(s.validate(1).is_err(), "{bad}");
+        }
+    }
+    #[test]
+    fn norm_is_stricter_than_component_by_up_to_sqrt3() {
+        // One atom with equal components c: component = c, norm = sqrt(3) c.
+        let c = 1e-3 / 1.5;
+        let norm = Settings {
+            force_tol_ha_bohr: 1e-3,
+            ..Settings::default()
+        };
+        let component = Settings {
+            force_criterion: ForceCriterion::Component,
+            ..norm.clone()
+        };
+        let f = frame(&norm, &[[c, -c, c], [1e-5, 0., 0.]], 0.);
+        assert_eq!(f.max_force_ha_bohr, c);
+        assert_eq!(f.max_force_norm_ha_bohr, (3. * c * c).sqrt());
+        assert!(component.force_converged(&f));
+        assert!(!norm.force_converged(&f));
+        // Along one axis the two measures coincide.
+        let axis = frame(&norm, &[[0., 9e-4, 0.]], 0.);
+        assert!(norm.force_converged(&axis) && component.force_converged(&axis));
+        // Strict inequality at the tolerance.
+        let edge = frame(&norm, &[[1e-3, 0., 0.]], 0.);
+        assert!(!norm.force_converged(&edge));
+    }
+    #[test]
+    fn constraints_are_projected_before_the_norm() {
+        let settings = Settings {
+            fixed: vec![
+                Fixed {
+                    atom: 0,
+                    components: [true; 3],
+                },
+                Fixed {
+                    atom: 1,
+                    components: [false, true, true],
+                },
+            ],
+            force_tol_ha_bohr: 1e-3,
+            ..Settings::default()
+        };
+        // Large forces on frozen components do not count; atom 1 keeps only x.
+        let f = frame(
+            &settings,
+            &[[1., 1., 1.], [5e-4, 1., 1.], [3e-4, 4e-4, 0.]],
+            0.,
+        );
+        assert_eq!(f.max_force_norm_ha_bohr, 5e-4);
+        assert!(settings.force_converged(&f));
+        // Raw physical forces stay in the frame.
+        assert_eq!(f.forces_ha_bohr[0], [1., 1., 1.]);
+    }
+    #[test]
+    fn energy_requirement_is_optional() {
+        let off = Settings::default();
+        let small = frame(&off, &[[1e-4, 0., 0.]], -1.);
+        let large = frame(&off, &[[1e-2, 0., 0.]], -1.);
+        // Off (default): the first frame that passes the force test stops,
+        // the initial frame (no energy change) included.
+        assert_eq!(off.ionic_stop(&small, None, 0), (1, true));
+        assert_eq!(off.ionic_stop(&small, Some(-0.5), 0), (1, true));
+        assert_eq!(off.ionic_stop(&large, Some(0.), 1), (0, false));
+        // On: force and |dE| < tol on two consecutive accepted steps; the
+        // initial frame never counts (the rule before ADR 0056).
+        let on = Settings {
+            energy_tol_ha: Some(1e-8),
+            ..Settings::default()
+        };
+        assert_eq!(on.ionic_stop(&small, None, 0), (0, false));
+        assert_eq!(on.ionic_stop(&small, Some(5e-9), 0), (1, false));
+        assert_eq!(on.ionic_stop(&small, Some(-5e-9), 1), (2, true));
+        assert_eq!(on.ionic_stop(&small, Some(2e-8), 1), (0, false));
+        assert_eq!(on.ionic_stop(&large, Some(0.), 1), (0, false));
+        // Trust-radius energy-rise tolerance: explicit value, else 2x the SCF
+        // energy accuracy.
+        let mut strict = ScfOptions::strict_reference();
+        strict.energy_tolerance = 1e-9;
+        assert_eq!(on.energy_rise_tol_ha(&strict), 1e-8);
+        assert_eq!(off.energy_rise_tol_ha(&strict), 2e-9);
+        let standard = ScfOptions::default();
+        let threshold = standard.standard.unwrap().threshold_ha;
+        assert_eq!(off.energy_rise_tol_ha(&standard), 2. * threshold);
+        // Cell modes keep their energy rule (default 1e-8 Ha).
+        assert_eq!(off.cell_energy_tol_ha(), 1e-8);
+        assert_eq!(on.cell_energy_tol_ha(), 1e-8);
+        let rule = stop_rule_json(&off, false);
+        assert_eq!(rule["force_criterion"], "norm");
+        assert!(rule["energy_tol_ha"].is_null());
+        assert_eq!(rule["consecutive_steps_required"], 1);
+        assert_eq!(stop_rule_json(&off, true)["consecutive_steps_required"], 2);
     }
 }
 

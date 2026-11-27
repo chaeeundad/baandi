@@ -1424,7 +1424,10 @@ starts and `start_extrapolation` are unchanged, and the relaxation
 no wall time in this payload). Reference optimizer resume lacks an orbital
 seed and is not guaranteed bit-identical; see [relaxation](user/relaxation.md). `verify = "off"`
 with `[relax]` is an input error. The threshold is `scf.standard_threshold_ha`
-(default 5e-9 Ha). **For force-sensitive runs (tight `force_tol_ha_bohr`, small
+(default 5e-9 Ha; for `relax.mode = "ions"`/`"ions_cell"` without an explicit
+value, min(that default, `force_tol_ha_bohr`^2/3200), 4.73e-11 Ha at the default
+force tolerance, `threshold_source = "relax_force_default"`, ADR 0057).
+**For force-sensitive runs (tight `force_tol_ha_bohr`, small
 `energy_tol_ha`, phonon-like finite differences) tighten the threshold**: the
 SCF energy is resolved to about the threshold, so an ionic energy test at
 1e-12 Ha needs a threshold of the same order (the synthetic oracle in
@@ -1451,9 +1454,9 @@ input error. **Stress default threshold (provisional):** an input with
 `scf.standard_threshold_ha` runs at 5e-11 Ha instead of 5e-9 Ha, because 5e-9
 missed the 1e-7 Ha/Bohr^3 stress class on a synthetic nonlocal fixture
 (1.3e-7) while 5e-11 met it on both fixtures (margin 1.6x). Forces,
-`relax.mode = "ions"` and plain runs keep 5e-9 Ha; an explicit
+and plain runs keep 5e-9 Ha (`relax.mode = "ions"` uses the force-tied default of ADR 0057); an explicit
 `scf.standard_threshold_ha` always wins. `single_path.standard_threshold_ha` and
-`single_path.threshold_source` (`user`, `stress_default`, `default`) record
+`single_path.threshold_source` (`user`, `stress_default`, `relax_force_default`, `default`) record
 what applied (also in the relaxation `scf` block). The rule awaits
 confirmation by the dev08 request `performance/requests/onepath2-stress.md`;
 measurements: ledger rows ONEPATH-2 and ONEPATH-2-STRESS-DEFAULT.

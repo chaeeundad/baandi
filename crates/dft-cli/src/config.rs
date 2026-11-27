@@ -576,8 +576,10 @@ pub struct ScfPath {
     pub reason: Option<&'static str>,
     /// Where the standard threshold came from (None off the standard path):
     /// `user` (`scf.standard_threshold_ha`), `stress_default`
-    /// (`STRESS_DEFAULT_THRESHOLD_HA`, stress or variable-cell input) or
-    /// `default` (`StandardProfile::default()`).
+    /// (`STRESS_DEFAULT_THRESHOLD_HA`, stress or variable-cell input),
+    /// `relax_force_default` (force_tol^2/3200 of a relaxation that moves
+    /// atoms, when tighter than the other default; ADR 0057) or `default`
+    /// (`StandardProfile::default()`).
     pub threshold_source: Option<&'static str>,
 }
 /// Default standard threshold, Ha, of inputs that ask for stress
@@ -654,15 +656,10 @@ impl Config {
                 "relax needs forces from a passed fixed-point verification on every ionic step (ADR 0043 item 5, ONEPATH-1); remove scf.verify = \"off\"".into(),
             ));
         }
-        // An explicit threshold always wins; otherwise inputs that ask for
-        // stress get the stress default, everything else the class default.
+        // An explicit threshold always wins.
         let (threshold_ha, source) = match threshold {
             Some(t) => (t, "user"),
-            None if self.wants_stress() => (STRESS_DEFAULT_THRESHOLD_HA, "stress_default"),
-            None => (
-                dft_engine::StandardProfile::default().threshold_ha,
-                "default",
-            ),
+            None => self.default_standard_threshold(),
         };
         Ok(ScfPath {
             standard: Some(dft_engine::StandardProfile { threshold_ha }),
@@ -685,6 +682,36 @@ impl Config {
         } else {
             dft_engine::PulayAssessmentMode::Off
         }
+    }
+    /// Standard threshold, Ha, and its source when the input sets no
+    /// `scf.standard_threshold_ha`: inputs that ask for stress get the stress
+    /// default, everything else the class default, and a relaxation that moves
+    /// atoms tightens it to the force-tied threshold when that is smaller
+    /// (ADR 0057). The one rule for `scf_path` and the reference profile.
+    pub fn default_standard_threshold(&self) -> (f64, &'static str) {
+        let (base, source) = if self.wants_stress() {
+            (STRESS_DEFAULT_THRESHOLD_HA, "stress_default")
+        } else {
+            (
+                dft_engine::StandardProfile::default().threshold_ha,
+                "default",
+            )
+        };
+        match self.relax_force_threshold_ha() {
+            Some(t) if t < base => (t, "relax_force_default"),
+            _ => (base, source),
+        }
+    }
+    /// Force-tied default threshold (ADR 0057) of a relaxation that moves
+    /// atoms (`relax.mode = "ions"` or `"ions_cell"`) with a valid force
+    /// tolerance; None otherwise (no relaxation, `cell` mode, or a tolerance
+    /// that validation rejects later).
+    pub fn relax_force_threshold_ha(&self) -> Option<f64> {
+        let r = self.relax.as_ref()?;
+        (r.mode != crate::relax::cell::Mode::Cell
+            && r.force_tol_ha_bohr.is_finite()
+            && r.force_tol_ha_bohr > 0.)
+            .then(|| crate::relax::force_default_threshold_ha(r.force_tol_ha_bohr))
     }
     pub fn wants_stress(&self) -> bool {
         self.output.as_ref().is_some_and(|o| o.stress)
@@ -1608,6 +1635,70 @@ mod tests {
         assert_eq!(parse("band_cap=20\n").fd_band_count(37.5).unwrap(), 20);
         let explicit = parse("[scf]\nnbands=45\n");
         assert_eq!(explicit.fd_band_count(37.5).unwrap(), 45);
+    }
+    /// ADR 0057: a relaxation that moves atoms and sets no threshold runs at
+    /// force_tol^2/3200 Ha (Bohr^2/Ha coefficient, never above the class or
+    /// stress default, never below the floor); an explicit threshold wins and
+    /// inputs without `[relax]` keep their thresholds exactly.
+    #[test]
+    fn relax_force_tied_default_threshold() {
+        let path = |tail: &str| {
+            let c = Config::parse(&format!("{EXAMPLE}\n{tail}")).unwrap();
+            let p = c.scf_path_with(false).unwrap();
+            (
+                p.standard.unwrap().threshold_ha,
+                p.threshold_source.unwrap(),
+            )
+        };
+        let tol = crate::relax::default_force_tol_ha_bohr();
+        let ions = path("[relax]\n");
+        assert_eq!(
+            ions,
+            (
+                crate::relax::force_default_threshold_ha(tol),
+                "relax_force_default"
+            )
+        );
+        assert!((ions.0 - 4.727e-11).abs() < 1e-14, "{}", ions.0);
+        assert_eq!(
+            path("[relax]\nforce_tol_ha_bohr=1e-4\n"),
+            (
+                crate::relax::force_default_threshold_ha(1e-4),
+                "relax_force_default"
+            )
+        );
+        // 1e-8 / 3200 Ha, to rounding.
+        assert!((crate::relax::force_default_threshold_ha(1e-4) - 3.125e-12).abs() < 1e-24);
+        // Loose tolerances never loosen the class default; tiny ones stop at the floor.
+        assert_eq!(path("[relax]\nforce_tol_ha_bohr=1e-2\n"), (5e-9, "default"));
+        assert_eq!(
+            path("[relax]\nforce_tol_ha_bohr=1e-7\n"),
+            (dft_engine::StandardProfile::FLOOR_HA, "relax_force_default")
+        );
+        assert_eq!(
+            path("[relax]\nmode='ions_cell'\n"),
+            (
+                crate::relax::force_default_threshold_ha(tol),
+                "relax_force_default"
+            )
+        );
+        assert_eq!(
+            path("[relax]\nmode='ions_cell'\nforce_tol_ha_bohr=1e-3\n"),
+            (STRESS_DEFAULT_THRESHOLD_HA, "stress_default")
+        );
+        assert_eq!(
+            path("[relax]\nmode='cell'\n"),
+            (STRESS_DEFAULT_THRESHOLD_HA, "stress_default")
+        );
+        assert_eq!(
+            path("[scf]\nstandard_threshold_ha=5e-9\n[relax]\n"),
+            (5e-9, "user")
+        );
+        assert_eq!(path(""), (5e-9, "default"));
+        assert_eq!(
+            path("[output]\nstress=true\n"),
+            (STRESS_DEFAULT_THRESHOLD_HA, "stress_default")
+        );
     }
     #[test]
     fn density_group_contract_and_metadata() {

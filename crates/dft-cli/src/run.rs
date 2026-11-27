@@ -210,13 +210,8 @@ pub fn reference_profile(
         beta: s.and_then(|s| s.mixing_beta).unwrap_or(0.7),
         history: s.and_then(|s| s.mixing_history).unwrap_or(8),
         threshold_ry: 2.0
-            * s.and_then(|s| s.standard_threshold_ha).unwrap_or_else(|| {
-                if config.wants_stress() {
-                    dft_engine::StandardProfile::STRESS_THRESHOLD_HA
-                } else {
-                    dft_engine::StandardProfile::default().threshold_ha
-                }
-            }),
+            * s.and_then(|s| s.standard_threshold_ha)
+                .unwrap_or_else(|| config.default_standard_threshold().0),
         preconditioning: if s.and_then(|s| s.reference_preconditioning.as_deref()) == Some("tf") {
             Preconditioning::ThomasFermi
         } else {

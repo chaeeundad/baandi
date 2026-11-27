@@ -29,7 +29,11 @@ larger free-electron mesh: `cargo test --release -p dft-response --test oracles 
 Velocity vs central differences of H_k at fixed Miller set (R2-VEL-CHECK, production
 `NonlocalOperator` rows, multi-projector s/p/d/f fixture): `cargo test -p dft-response --test velocity_fd`;
 PseudoDojo LiF/AlN: `DFT_NC_DIR=/abs/pseudodojo/ex cargo test --release -p dft-response --test velocity_fd -- --ignored --nocapture`.
-Diagnostic switch `BAANDI_RESPONSE_VELOCITY=full|local|sp` (engine; default full).
+Gamma (R2-GAMMA-VEL): `velocity_at_gamma_includes_the_l1_term_at_k_plus_g_zero` (k = 0 and a
+tiny k; the l = 1 projector gradient at k + G = 0, `beta_1'(0) Y_1m(e_b)`, must stay: dropping it
+fails the FD check). Engine level, complete-basis matrix FD at Gamma:
+`DFT_NC_DIR=... cargo test --release -p dft-engine --features strict-oracle --test response_velocity_hf gamma -- --ignored --nocapture`.
+Diagnostic switch `BAANDI_RESPONSE_VELOCITY=full|local|sp|no-g0|no-g0-all` (engine; default full).
 **Rules:** keep public API changes out of unrelated tickets; every behavior change adds or updates a test with stated tolerance and units; prefer general-purpose crates (ADR 0003); record design decisions in an ADR.
 
 ## Layout

@@ -255,6 +255,31 @@ struct Errors {
     richardson: Vec<f64>,
     /// max over k, b of max |p_NL| / max |p| (size of the nonlocal term).
     nonlocal_share: f64,
+    /// max over k, b of max |p - p(no k+G = 0 gradient)| / max |p|: the size
+    /// of the l = 1 term at k + G = 0 (zero unless k is a reciprocal lattice
+    /// vector of the Miller set, i.e. Gamma here).
+    g0_share: f64,
+    /// Same as `full` with the k + G = 0 gradient rows zeroed in the velocity
+    /// (what a code that skips |k+G| = 0 would get); the sensitivity control.
+    full_without_g0: Vec<f64>,
+}
+
+/// The projector gradients with every k + G = 0 row set to zero.
+fn without_g0(
+    basis: &PlaneWaveBasis,
+    grad: &dft_physics::stress::ProjectorKGradient,
+) -> dft_physics::stress::ProjectorKGradient {
+    let mut out = grad.clone();
+    for (ig, g) in basis.momenta().iter().enumerate() {
+        if g.norm_squared == 0. {
+            for m in out.gradients.iter_mut() {
+                for c in 0..m.cols() {
+                    m[(ig, c)] = C::default();
+                }
+            }
+        }
+    }
+    out
 }
 
 fn check(crystal: &Crystal<'_>, ks: &[[f64; 3]], steps: &[f64]) -> Errors {
@@ -263,6 +288,8 @@ fn check(crystal: &Crystal<'_>, ks: &[[f64; 3]], steps: &[f64]) -> Errors {
         nonlocal: vec![0.; steps.len()],
         richardson: vec![0.; steps.len()],
         nonlocal_share: 0.,
+        g0_share: 0.,
+        full_without_g0: vec![0.; steps.len()],
     };
     let species = crystal.species();
     for &k in ks {
@@ -272,11 +299,16 @@ fn check(crystal: &Crystal<'_>, ks: &[[f64; 3]], steps: &[f64]) -> Errors {
         let grad = projector_k_gradient(&basis, crystal.cell.volume_bohr3(), &species).unwrap();
         let full = velocity(&momenta, Some(&grad), &x, &x).unwrap();
         let kinetic = velocity(&momenta, None, &x, &x).unwrap();
+        let no_g0 = velocity(&momenta, Some(&without_g0(&basis, &grad)), &x, &x).unwrap();
+        let mut k_full = vec![0_f64; steps.len()];
+        let mut k_no_g0 = vec![0_f64; steps.len()];
+        let mut k_g0 = 0_f64;
         for b in 0..3 {
             let scale = max_abs(&full[b]);
             let nl = diff(&full[b], &kinetic[b]);
             let nl_scale = max_abs(&nl);
             errors.nonlocal_share = errors.nonlocal_share.max(nl_scale / scale);
+            k_g0 = k_g0.max(max_diff(&full[b], &no_g0[b]) / scale);
             let central = |h: f64| {
                 let mut fd = diff(
                     &crystal.shifted(&basis, &x, b, h),
@@ -293,6 +325,8 @@ fn check(crystal: &Crystal<'_>, ks: &[[f64; 3]], steps: &[f64]) -> Errors {
                 let fd_nl = diff(&fd, &kinetic[b]);
                 let e_nl = max_diff(&fd_nl, &nl) / nl_scale;
                 errors.full[s] = errors.full[s].max(e_full);
+                k_full[s] = k_full[s].max(e_full);
+                k_no_g0[s] = k_no_g0[s].max(max_diff(&fd, &no_g0[b]) / scale);
                 errors.nonlocal[s] = errors.nonlocal[s].max(e_nl);
                 let half = central(h / 2.);
                 let mut r = half.clone();
@@ -307,6 +341,18 @@ fn check(crystal: &Crystal<'_>, ks: &[[f64; 3]], steps: &[f64]) -> Errors {
                 errors.richardson[s] = errors.richardson[s].max(e_r);
             }
         }
+        errors.g0_share = errors.g0_share.max(k_g0);
+        for (e, k) in errors.full_without_g0.iter_mut().zip(&k_no_g0) {
+            *e = e.max(*k);
+        }
+        let best = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+        println!(
+            "  k {k:?}: N_pw {}, k+G = 0 term max|dp|/max|p| {k_g0:.3e}; best over h of max rel err \
+             full p vs FD {:.3e}, without the k+G = 0 gradient {:.3e}",
+            basis.vectors().len(),
+            best(&k_full),
+            best(&k_no_g0)
+        );
     }
     println!(
         "{}: {} bands (i == j and i != j), k {:?}, |p_NL|/|p| up to {:.3e}",
@@ -381,6 +427,99 @@ fn velocity_matches_central_differences_of_the_hamiltonian_multi_projector() {
     assert!(e.nonlocal[2] < 0.05 * e.nonlocal[1], "{:?}", e.nonlocal);
 }
 
+/// R2-GAMMA-VEL: max over b of max_ij |p_b(k_tiny) - p_b(Gamma)| / max |p_b(Gamma)|
+/// with the SAME vectors (the Gamma eigenvectors) and the same Miller set, for
+/// the production gradient and for the gradient without its k + G = 0 rows at
+/// Gamma. The velocity operator is analytic in k, so the first must be
+/// O(|k_tiny|); dropping the l = 1 term at k + G = 0 makes it O(1).
+fn continuity(crystal: &Crystal<'_>, tiny: [f64; 3]) -> (f64, f64) {
+    let species = crystal.species();
+    let volume = crystal.cell.volume_bohr3();
+    let gamma = PlaneWaveBasis::at_k(&crystal.cell, Hartree(crystal.cutoff), [0.; 3]).unwrap();
+    let near = PlaneWaveBasis::at_k(&crystal.cell, Hartree(crystal.cutoff), tiny).unwrap();
+    let miller = |b: &PlaneWaveBasis| b.vectors().iter().map(|g| g.miller).collect::<Vec<_>>();
+    assert_eq!(
+        miller(&gamma),
+        miller(&near),
+        "Miller set changed at k_tiny"
+    );
+    let x = crystal.vectors(&gamma);
+    let p = |b: &PlaneWaveBasis, drop: bool| {
+        let momenta: Vec<[f64; 3]> = b.momenta().iter().map(|g| g.cartesian).collect();
+        let grad = projector_k_gradient(b, volume, &species).unwrap();
+        let grad = if drop { without_g0(b, &grad) } else { grad };
+        velocity(&momenta, Some(&grad), &x, &x).unwrap()
+    };
+    let (at_gamma, dropped, at_near) = (p(&gamma, false), p(&gamma, true), p(&near, false));
+    let mut out = (0_f64, 0_f64);
+    for b in 0..3 {
+        let scale = max_abs(&at_gamma[b]);
+        out.0 = out.0.max(max_diff(&at_near[b], &at_gamma[b]) / scale);
+        out.1 = out.1.max(max_diff(&at_near[b], &dropped[b]) / scale);
+    }
+    println!(
+        "  continuity k_tiny {tiny:?} (|k| {:.2e} Bohr^-1): max rel |p(k_tiny) - p(0)| {:.3e}; \
+         against p(0) without the k+G = 0 gradient {:.3e}",
+        near.k_cartesian().iter().map(|v| v * v).sum::<f64>().sqrt(),
+        out.0,
+        out.1
+    );
+    out
+}
+
+/// Fractional k of Cartesian length about 1e-6 Bohr^-1 in a general direction.
+const TINY: [f64; 3] = [1.1e-6, -0.7e-6, 0.4e-6];
+
+/// R2-GAMMA-VEL: the velocity at k = 0 exactly, where the G = 0 plane wave
+/// has k + G = 0. For a projector of angular momentum l the k-space factor is
+/// `beta_l(|q|) Y_lm(q^)` with `beta_l(q) = q^l (a_0 + a_2 q^2 + ...)`, so the
+/// factor is the solid harmonic `q^l Y_lm(q^)` (a homogeneous polynomial of
+/// degree l in q) times an even series: smooth at q = 0. Its gradient there
+/// is zero for l = 0 (even in q) and l >= 2 (degree >= 2), and for l = 1 it
+/// is `a_0 grad(q Y_1m(q^)) = beta_1'(0) Y_1m(e_b)` along e_b, finite and
+/// direction dependent. `projector_k_gradient` uses that limit; the check
+/// below compares the full matrix (i == j and i != j) with central
+/// differences of H at k = 0 +- h e_b (both sides of q = 0) and at a tiny k,
+/// and shows that dropping the term is detected.
+#[test]
+fn velocity_at_gamma_includes_the_l1_term_at_k_plus_g_zero() {
+    let pp = multi_projector_upf();
+    let cell =
+        Cell::from_user_rows_bohr([[5.0, 0.0, 0.0], [0.6, 4.8, 0.0], [0.3, 0.5, 5.2]]).unwrap();
+    let positions = vec![
+        cell.fractional_to_cartesian_bohr([0.13, 0.27, 0.61]),
+        cell.fractional_to_cartesian_bohr([0.58, 0.71, 0.09]),
+    ];
+    let crystal = Crystal {
+        name: "synthetic s/p/d/f at Gamma and k_tiny",
+        cell,
+        species: vec![(&pp, positions)],
+        cutoff: 3.0,
+        local: local_components(),
+        bands: 8,
+    };
+    let e = check(&crystal, &[[0., 0., 0.], TINY], &STEPS);
+    let best = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+    // The k + G = 0 term must matter in this fixture.
+    assert!(e.g0_share > 1e-2, "k+G = 0 share {:e}", e.g0_share);
+    assert!(
+        best(&e.full) <= 1e-7,
+        "full velocity vs FD {:e}",
+        best(&e.full)
+    );
+    // Richardson floor at the tiny k: rounding eps / h of the h = 1e-2 pair.
+    assert!(best(&e.richardson) <= 1e-7, "{:e}", best(&e.richardson));
+    // Sensitivity: without the l = 1 term at k + G = 0 the FD check fails.
+    assert!(
+        best(&e.full_without_g0) > 1e-3,
+        "dropping the k+G = 0 term must be visible {:e}",
+        best(&e.full_without_g0)
+    );
+    let (smooth, dropped) = continuity(&crystal, TINY);
+    assert!(smooth <= 1e-5, "p(k) discontinuous at Gamma {smooth:e}");
+    assert!(dropped > 1e-3, "{dropped:e}");
+}
+
 fn dojo(dir: &std::path::Path, element: &str) -> dft_upf::Pseudopotential {
     let path = dir.join(format!("{element}.upf"));
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
@@ -417,8 +556,9 @@ fn velocity_matches_central_differences_on_pseudodojo_lif_and_aln() {
         local: local_components(),
         bands: 12,
     };
-    let ks = [[0., 0., 0.], [0.25, 0., 0.25], [0.25, -0.25, 0.]];
+    let ks = [[0., 0., 0.], TINY, [0.25, 0., 0.25], [0.25, -0.25, 0.]];
     let e1 = check(&lif, &ks, &STEPS);
+    let c1 = continuity(&lif, TINY);
     let aln = Cell::from_user_rows_bohr([
         [5.877, 0.0, 0.0],
         [-2.9385, 5.089631298041145, 0.0],
@@ -446,10 +586,18 @@ fn velocity_matches_central_differences_on_pseudodojo_lif_and_aln() {
         local: local_components(),
         bands: 16,
     };
-    let e2 = check(&aln, &[[0., 0., 0.], [0.25, 0., 1. / 3.]], &STEPS);
-    for e in [e1, e2] {
-        let best = e.richardson.iter().copied().fold(f64::INFINITY, f64::min);
-        assert!(best <= 1e-7, "nonlocal velocity vs Richardson FD {best:e}");
+    let e2 = check(&aln, &[[0., 0., 0.], TINY, [0.25, 0., 1. / 3.]], &STEPS);
+    let c2 = continuity(&aln, TINY);
+    for (e, c) in [(e1, c1), (e2, c2)] {
+        let best = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+        let r = best(&e.richardson);
+        assert!(r <= 1e-7, "nonlocal velocity vs Richardson FD {r:e}");
+        // R2-GAMMA-VEL: Gamma is in `ks`; the l = 1 term at k + G = 0 is
+        // present, matches the FD, and dropping it is detected.
+        assert!(e.g0_share > 1e-4, "{:e}", e.g0_share);
+        assert!(best(&e.full) <= 1e-6, "{:e}", best(&e.full));
+        assert!(best(&e.full_without_g0) > 10. * best(&e.full));
+        assert!(c.0 <= 1e-4, "p(k) discontinuous at Gamma {:e}", c.0);
     }
 }
 

@@ -116,6 +116,37 @@ fn groups(e: &[f64], range: std::ops::Range<usize>) -> Vec<(usize, usize)> {
     out
 }
 
+/// R2-GAMMA-VEL diagnostics of the velocity at k + G = 0 (switch
+/// `RESPONSE_VELOCITY`): `no-g0` zeroes the projector k-gradient row there
+/// (only the l = 1 columns are nonzero, `beta_1'(0) Y_1m(e_b)`); `no-g0-all`
+/// also zeroes the projector values of that row (l = 0 only), i.e. the
+/// commutator without the k + G = 0 plane wave at all. Both are physically
+/// wrong (the FD checks fail); they model other codes' treatments. Other
+/// values: no change.
+fn drop_k_plus_g_zero(
+    basis: &dft_basis::PlaneWaveBasis,
+    projectors: &mut dft_physics::stress::ProjectorKGradient,
+    terms: &str,
+) {
+    if terms != "no-g0" && terms != "no-g0-all" {
+        return;
+    }
+    for (ig, g) in basis.momenta().iter().enumerate() {
+        if g.norm_squared == 0. {
+            if terms == "no-g0-all" {
+                for c in 0..projectors.values.cols() {
+                    projectors.values[(ig, c)] = Complex64::default();
+                }
+            }
+            for m in projectors.gradients.iter_mut() {
+                for c in 0..m.cols() {
+                    m[(ig, c)] = Complex64::default();
+                }
+            }
+        }
+    }
+}
+
 /// The dipole record of one k (diagnostic; outside the chi0 accumulation).
 #[allow(clippy::too_many_arguments)]
 fn dipole_record(
@@ -127,6 +158,7 @@ fn dipole_record(
     energies: &[f64],
     occupied: usize,
     bands: usize,
+    velocity_terms: &str,
 ) -> Result<KDipoles, ScfError> {
     let n = full.rows();
     let pick = |r: std::ops::Range<usize>| -> Result<ComplexMatrix, ScfError> {
@@ -138,8 +170,9 @@ fn dipole_record(
     };
     let (occ, emp) = (pick(0..occupied)?, pick(occupied..bands)?);
     let momenta: Vec<[f64; 3]> = basis.momenta().iter().map(|g| g.cartesian).collect();
-    let projectors =
+    let mut projectors =
         dft_physics::stress::projector_k_gradient(basis, volume, species).map_err(numerical)?;
+    drop_k_plus_g_zero(basis, &mut projectors, velocity_terms);
     let full_p = dft_response::velocity::velocity(&momenta, Some(&projectors), &occ, &emp)
         .map_err(numerical)?;
     let local_p =
@@ -494,6 +527,7 @@ pub fn dielectric_with<K: Collective>(
                     }
                 }
             }
+            drop_k_plus_g_zero(basis, &mut projectors, velocity_terms);
             let orbitals = KOrbitals {
                 miller: &miller,
                 coefficients: &full,
@@ -536,6 +570,7 @@ pub fn dielectric_with<K: Collective>(
                 &spectrum.eigenvalues,
                 occupied,
                 bands,
+                velocity_terms,
             )?);
         }
     }

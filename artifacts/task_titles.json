@@ -241,5 +241,6 @@
  "GS1C-GRID-SUBGROUP": "지정된 FFT 격자와 맞는 대칭만 남기고 계산 계속(QE 방식)",
  "GF2-FD-SCF-COST": "금속 SCF 단위 비용 분석과 개선(Ta6Zn7 410 s vs QE 217 s)",
  "GT1-TIME-REVERSAL": "비자성 계산에서 시간 반전으로 k점 줄이기(Ta6Zn7 34→26)",
- "GB1-FD-BAND-COVERAGE": "금속 빈 밴드 판정을 수렴 상태 기준으로, 홀수 전자 자동 밴드 수 수정(Cs2TcI6)"
+ "GB1-FD-BAND-COVERAGE": "금속 빈 밴드 판정을 수렴 상태 기준으로, 홀수 전자 자동 밴드 수 수정(Cs2TcI6)",
+ "GB2-FD-START-GROWTH": "금속: 원자 시작 오비탈 지원, 밴드 증가를 일시 상태가 아닌 판정으로, 검증 실패 비용 줄이기"
 }

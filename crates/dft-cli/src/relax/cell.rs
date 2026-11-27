@@ -356,7 +356,7 @@ pub(super) fn execute(
             ionic: Restart {
                 version: 1,
                 identity: id,
-                optimizer: optimizer::Optimizer::new(n, settings.trust_radius_bohr),
+                optimizer: settings.optimizer(n),
                 frames: vec![frame],
                 density,
                 consecutive: 0,
@@ -448,7 +448,7 @@ pub(super) fn execute(
                 .map(|(frame, density, _)| (frame, density))
             });
             match trial {
-                Ok((frame,density)) if enthalpy(&frame,settings.pressure_ha_bohr3)<=enthalpy(&last,settings.pressure_ha_bohr3)+settings.energy_tol_ha=>{accepted=Some((frame,density,q,attempt));break;}
+                Ok((frame,density)) if enthalpy(&frame,settings.pressure_ha_bohr3)<=enthalpy(&last,settings.pressure_ha_bohr3)+settings.cell_energy_tol_ha()=>{accepted=Some((frame,density,q,attempt));break;}
                 Ok((frame,_))=>s.ionic.failures.push(json!({"step":s.ionic.frames.len(),"attempt":attempt+1,"reason":"enthalpy increase","enthalpy_ha":enthalpy(&frame,settings.pressure_ha_bohr3)})),
                 Err(e) => {
                     s.ionic.failures.push(json!({"step":s.ionic.frames.len(),"attempt":attempt+1,"reason":e.to_string(),"coordinates":q}));
@@ -465,11 +465,12 @@ pub(super) fn execute(
                 .iter()
                 .map(|v| v.abs() * l / determinant(frame.cell_columns_bohr.unwrap()).abs())
                 .fold(0., f64::max);
-            let ions_ok =
-                settings.mode == Mode::Cell || frame.max_force_ha_bohr < settings.force_tol_ha_bohr;
+            // ADR 0056: the force measure follows `force_criterion` (default
+            // norm); the stress and energy parts of the cell rule are unchanged.
+            let ions_ok = settings.mode == Mode::Cell || settings.force_converged(&frame);
             s.ionic.consecutive = if ions_ok
                 && stress < settings.stress_tol_ha_bohr3
-                && delta.abs() < settings.energy_tol_ha
+                && delta.abs() < settings.cell_energy_tol_ha()
             {
                 s.ionic.consecutive + 1
             } else {
@@ -511,8 +512,7 @@ pub(super) fn execute(
                         s.ionic.frames.push(frame);
                         s.ionic.density = density;
                         s.ionic.consecutive = 0;
-                        s.ionic.optimizer =
-                            optimizer::Optimizer::new(n, settings.trust_radius_bohr);
+                        s.ionic.optimizer = settings.optimizer(n);
                     }
                     Err(e) => {
                         ctx.opts = old_options;
@@ -576,6 +576,10 @@ fn emit(ctx: &Context, settings: &Settings, s: &State, out: &Path) -> Result<(),
         serde_json::from_slice(&fs::read(out.join("results.json"))?).map_err(|e| error(5, e))?;
     let block = &mut result["relaxation"];
     block["steps"] = json!(s.accepted_steps);
+    let mut stop_rule = super::stop_rule_json(settings, true);
+    stop_rule["stress_tol_ha_bohr3"] = json!(settings.stress_tol_ha_bohr3);
+    stop_rule["force_test"] = json!(settings.mode != Mode::Cell);
+    block["stop_rule"] = stop_rule;
     block["enthalpy_history_ha"] = json!(
         s.ionic
             .frames
@@ -630,19 +634,20 @@ fn emit(ctx: &Context, settings: &Settings, s: &State, out: &Path) -> Result<(),
     );
     use std::fmt::Write as _;
     let mut log = String::from(
-        "frame energy_Ha enthalpy_Ha volume_Bohr3 pressure_Ha_Bohr3 max_force_Ha_Bohr displacement_Bohr provenance\n",
+        "frame energy_Ha enthalpy_Ha volume_Bohr3 pressure_Ha_Bohr3 max_force_Ha_Bohr displacement_Bohr provenance max_force_norm_Ha_Bohr\n",
     );
     for (i, f) in s.ionic.frames.iter().enumerate() {
         writeln!(
             log,
-            "{i} {:.17e} {:.17e} {:.17e} {:.17e} {:.17e} {:.17e} {}",
+            "{i} {:.17e} {:.17e} {:.17e} {:.17e} {:.17e} {:.17e} {} {:.17e}",
             f.energy_ha,
             enthalpy(f, settings.pressure_ha_bohr3),
             determinant(f.cell_columns_bohr.unwrap()).abs(),
             pressure(f),
             f.max_force_ha_bohr,
             f.step_length_bohr,
-            f.provenance
+            f.provenance,
+            f.max_force_norm_ha_bohr
         )
         .unwrap();
     }
@@ -763,6 +768,7 @@ mod tests {
                 cell_columns_bohr: Some(a),
                 pulay_assessment: None,
                 max_force_ha_bohr: 0.,
+                max_force_norm_ha_bohr: 0.,
                 step_length_bohr: 0.,
                 scf_iterations: 0,
                 provenance: "analytic oracle".into(),

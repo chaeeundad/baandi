@@ -26,7 +26,11 @@ objective is enthalpy **H = E + P V**, with constant external pressure P in
 Ha/Bohr^3. Positive P compresses. Internal tensile-positive stress is sigma;
 internal pressure is -trace(sigma)/3. Equilibrium requires projected sigma+P I
 and free ionic forces to vanish. Both derivative thresholds and the enthalpy
-change tolerance must pass for two consecutive accepted moves.
+change tolerance must pass for two consecutive accepted moves. In cell modes
+`energy_tol_ha` defaults to 1e-8 Ha (unchanged by ADR 0056, which made it
+optional for `ions` only); the ionic force test of `ions_cell` uses
+`force_criterion` (default: largest atomic force norm, ADR 0056) with default
+`force_tol_ha_bohr` 3.889e-4 Ha/Bohr (0.02 eV/A; 1e-3 before ADR 0056).
 
 `full` uses all six symmetric Cartesian strain components; rotation is excluded.
 `isotropic` preserves shape and angles. `xyz_diagonal` permits independent

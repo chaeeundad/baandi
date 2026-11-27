@@ -281,7 +281,10 @@ fn symmetry_preserves_axis_and_space_group() {
     fs::write(
         dir.join("input.toml"),
         input().replace("[0.27,0.23,0.19]", "[0.25,0.0,0.0]")
-            + "\n[symmetry]\nmode='auto'\n[relax]\nmax_steps=4\n",
+            // ADR 0056: the default stop is the force test alone; an
+            // unreachable force tolerance keeps the four-step trajectory this
+            // symmetry check was written for (exit 3).
+            + "\n[symmetry]\nmode='auto'\n[relax]\nmax_steps=4\nforce_tol_ha_bohr=1e-8\n",
     )
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
@@ -429,6 +432,80 @@ fn real_si_and_mgo() {
 }
 
 #[test]
+fn force_only_stop_rule_converges_at_the_initial_structure() {
+    // ADR 0056 at CLI level, one or two SCFs of the 3 Ry synthetic H2: with a
+    // force tolerance the start structure already meets, the default rule
+    // (norm, no energy requirement) stops after zero ionic steps; the optional
+    // energy requirement needs two consecutive accepted steps, so max_steps=1
+    // exhausts the budget (exit 3).
+    let dir = std::env::temp_dir().join(format!("adr55-stop-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("syn.xml"),
+        common::gaussian_with(1., 1.5, false, 801).replace("element=\"Xx\"", "element=\"H\""),
+    )
+    .unwrap();
+    for (name, relax, code, steps) in [
+        ("force", "force_tol_ha_bohr=10.0\nmax_steps=1\n", 0, 0),
+        (
+            "energy",
+            "force_tol_ha_bohr=10.0\nenergy_tol_ha=1.0\nmax_steps=1\n",
+            3,
+            1,
+        ),
+    ] {
+        fs::write(
+            dir.join(format!("{name}.toml")),
+            input() + "\n[relax]\n" + relax,
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .current_dir(&dir)
+            .args(["relax", &format!("{name}.toml"), "--output-dir", name])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(name).join("results.json")).unwrap())
+                .unwrap();
+        let r = &result["relaxation"];
+        assert_eq!(r["steps"], steps, "{name}");
+        assert_eq!(r["stop_rule"]["force_criterion"], "norm");
+        let frame = &r["frames"][0];
+        let f = frame["forces_ha_bohr"].as_array().unwrap();
+        let norm = f
+            .iter()
+            .map(|a| {
+                a.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.as_f64().unwrap().powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+            })
+            .fold(0., f64::max);
+        // No constraints: the recorded norm is the raw atomic norm (relative
+        // 1e-15 for the different summation order).
+        let recorded = frame["max_force_norm_ha_bohr"].as_f64().unwrap();
+        assert!((recorded - norm).abs() <= 1e-15 * norm, "{recorded} {norm}");
+        assert!(recorded >= frame["max_force_ha_bohr"].as_f64().unwrap());
+        let log = fs::read_to_string(dir.join(name).join("relax.log")).unwrap();
+        assert!(
+            log.lines()
+                .next()
+                .unwrap()
+                .ends_with("max_force_norm_Ha_Bohr")
+        );
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 #[ignore = "FIRE trajectory with many small ionic steps; run release"]
 fn fire_converges_from_displaced_structure() {
     let dir = std::env::temp_dir().join(format!("p21-fire-{}", std::process::id()));
@@ -454,9 +531,12 @@ fn fire_converges_from_displaced_structure() {
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     let r = &result["relaxation"];
     println!(
-        "FIRE: steps={} maxF={} Ha/Bohr",
-        r["steps"], r["final_max_force_ha_bohr"]
+        "FIRE: steps={} maxF={} max|F|={} Ha/Bohr",
+        r["steps"], r["final_max_force_ha_bohr"], r["final_max_force_norm_ha_bohr"]
     );
+    // ADR 0056: the stop rule compares the atomic norm (default criterion).
+    assert_eq!(r["stop_rule"]["force_criterion"], "norm");
+    assert!(r["final_max_force_norm_ha_bohr"].as_f64().unwrap() < 1e-7);
     assert!(r["final_max_force_ha_bohr"].as_f64().unwrap() < 1e-7);
     fs::remove_dir_all(dir).unwrap();
 }

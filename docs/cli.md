@@ -1735,6 +1735,22 @@ The `calculation_type="relaxation"` results profile contains the `relaxation`
 block and input/executable/UPF provenance. See [input, units and output-format
 losses](user/relaxation.md) and [validation scope](validation/relaxation.md).
 
+Stop rule and FIRE units ([ADR 0056](decisions/0056-relax-stop-rule-and-fire-units.md),
+2026-11-27):
+
+| key | default | meaning |
+|---|---|---|
+| `force_tol_ha_bohr` | 3.889e-4 (= 0.02 eV/A, from `dft_units`) | converged when the force measure is below it (strict). Before ADR 0056 the default was 1e-3 on the component plus the 1e-8 Ha energy test; with the energy test gone the force threshold alone sets the accuracy, so the default is the PRELAX target 0.02 eV/A, a common production value |
+| `force_criterion` | `"norm"` | `"norm"`: largest atomic norm \|F_i\| of the constraint-projected force (ASE `fmax`, VASP `EDIFFG < 0`); `"component"`: largest free Cartesian component (the rule before ADR 0056; looser by up to sqrt(3)) |
+| `energy_tol_ha` | unset | ions mode: unset = no energy test (the first frame passing the force test stops, the initial one included); set = force test and \|dE\| < tol on two consecutive accepted steps. Cell modes: 1e-8 Ha when unset (unchanged) |
+| `fire_dt`, `fire_dt_max` | 0.1, 1.0 | FIRE time steps in ASE units Angstrom/sqrt(eV); scaled by sqrt(Ha/eV)/(Bohr/A) = 9.858 internally, so the same numbers move atoms as ASE FIRE does |
+
+Old inputs parse unchanged; an input that sets `energy_tol_ha` keeps the energy
+test. Frames record `max_force_ha_bohr` (component) and `max_force_norm_ha_bohr`;
+`relax.log` appends `max_force_norm_Ha_Bohr` as its seventh column; results.json
+`relaxation.stop_rule` records the rule that applied. The stdout step line
+prints both measures and the step wall.
+
 
 ## Stress and pressure (P22A)
 

@@ -1859,7 +1859,7 @@ fn execute_mode_inner(
             let delivered = if mode.observe || mode.agent {
                 crate::telemetry::drive_reference(input, request, mode, &out)?
             } else {
-                dft_engine::refscf::api::solve(input, request).map_err(engine_error)?
+                crate::progress::solve(input, request).map_err(engine_error)?
             };
             reference_derivatives = Some(delivered.derivatives);
             let result = delivered.run.into_scalar();
@@ -3101,7 +3101,7 @@ fn reference_electronic_run(
     let delivery = if mode.observe || mode.agent {
         crate::telemetry::drive_reference(input, request, mode, out)?
     } else {
-        dft_engine::refscf::api::solve(input, request).map_err(engine_error)?
+        crate::progress::solve(input, request).map_err(engine_error)?
     };
     // GD2: launch-profile milestones of the spin/FD path (PHASE_PROFILE only;
     // no clock reads otherwise), as on the closed-shell path.

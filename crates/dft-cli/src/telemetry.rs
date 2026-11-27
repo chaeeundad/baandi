@@ -360,6 +360,7 @@ pub fn drive_reference(
     let identity = reference_broadcast(Ok(identity), comm)?;
     let calc_id = identity.as_str().ok_or_else(|| fail("runtime identity"))?;
     let required = request.derivatives.forces || request.derivatives.stress;
+    let threshold_ry = request.profile.threshold_ry;
     // Only root mirrors events to a caller-specified external endpoint.
     let sink = reference_agree(
         Sink::new(out, if root { mode.events.as_deref() } else { None }),
@@ -398,7 +399,9 @@ pub fn drive_reference(
         )
     };
     let run = (|| -> Result<(), RunError> {
+        crate::progress::scf_start(threshold_ry);
         reference_agree(runtime.initialize().map_err(engine_error), comm)?;
+        crate::progress::phase("scf");
         sequence += 1;
         publish(reference_state_json(
             calc_id,
@@ -461,6 +464,7 @@ pub fn drive_reference(
                 continue;
             }
             let report = reference_agree(runtime.step().map_err(engine_error), comm)?;
+            crate::progress::scf_map(&report);
             sequence += 1;
             publish(reference_step_json(
                 calc_id,
@@ -477,6 +481,8 @@ pub fn drive_reference(
             RuntimeState::Cancelled => "cancelled",
             _ => "failed",
         };
+        crate::progress::scf_end(Some(kind == "converged"), None);
+        crate::progress::phase("post-scf");
         publish(reference_state_json(
             calc_id,
             sequence,

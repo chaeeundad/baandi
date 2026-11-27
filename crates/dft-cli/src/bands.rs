@@ -280,7 +280,7 @@ impl Context {
                 .map_err(|e| err(4, e))
             })
             .transpose()?;
-        let delivered = refscf::api::solve(
+        let delivered = dft_cli::progress::solve(
             StartInput {
                 cell: &self.cell,
                 atoms: &self.atoms,

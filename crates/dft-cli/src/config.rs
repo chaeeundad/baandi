@@ -82,6 +82,9 @@ pub struct Config {
     /// `dgemm_timers`).
     #[serde(default)]
     pub profile: BTreeMap<String, toml::Value>,
+    /// UX1 (ADR 0053): job selection of the single entry (`crate::task`);
+    /// the drivers ignore it, the alias subcommands select their own job.
+    pub task: Option<crate::task::TaskTable>,
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]

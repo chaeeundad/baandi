@@ -26,6 +26,7 @@ mod relaxation;
 mod run;
 mod run_config;
 mod self_healing;
+mod single_entry;
 mod stress;
 mod structure_convert;
 mod structure_input;

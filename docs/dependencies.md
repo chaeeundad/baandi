@@ -19,6 +19,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | ndrustfft | 0.6.2 | MIT | dft-numerics (dev-dependency, test oracle) |
 | num-complex | 0.4.6 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics, dft-solvers |
 | pulp | 0.22.3 | MIT | dft-numerics (P48B promotion from transitive, default features off) |
+| ratatui | 0.30.2 | MIT | dft-cli (UX1 `baandi watch` terminal UI; default features off, `crossterm` backend; ADR 0053) |
 | rayon | 1.12.0 | MIT OR Apache-2.0 | dft-numerics (P10J promotion from transitive) |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | dft-numerics |
 | serde | 1.0.229 | MIT OR Apache-2.0 | dft-cli |
@@ -273,3 +274,33 @@ not link it into BAANDI, and no ASE, pymatgen or mp-api source is copied.
 Materials Project data carry their own terms of use (see the Materials Project
 website; not re-audited offline); a converted input records the `mp_id` and database version for
 attribution.
+
+## UX1: ratatui terminal UI (ADR 0053, 2026-11-27)
+
+`dft-cli` depends on ratatui 0.30.2 (MIT, maintained by the ratatui
+organisation, pure Rust, no system library) with default features off and
+only the `crossterm` backend enabled; crossterm 0.29.0 (MIT) comes through
+ratatui-crossterm 0.1.2 and is used through the `ratatui::crossterm`
+re-export, so there is one crossterm version. Only the monitor
+(`baandi watch`, `crates/dft-cli/src/monitor/`) uses it; the numerical crates
+and the job path do not. Apple Silicon: built and tested on the Mac host
+(aarch64-apple-darwin); the full-screen view is exercised on ratatui's test
+backend in `cargo test`. Claude fetched the crates from crates.io
+(`cargo fetch`); offline worktrees that use `../rust-dft-vendor` need the
+vendor directory refreshed by the orchestrator before they build this
+change.
+
+The lock file gained 47 package entries with these declared licenses (cargo metadata, 2026-11-27): MIT (ratatui,
+ratatui-core, ratatui-widgets, ratatui-crossterm, crossterm, crossterm_winapi,
+castaway, compact_str, convert_case, derive_more, derive_more-impl,
+instability, lru, mio, redox_syscall, strum 0.28.0, strum_macros 0.28.0;
+strum 0.27.2 was already present); MIT OR Apache-2.0 (allocator-api2, by_address,
+document-features, errno, indoc, itertools 0.14.0, kasuari, line-clipping,
+litrs, num_threads, palette, palette_derive, palette_math, parking_lot,
+parking_lot_core, signal-hook-mio, signal-hook-registry, static_assertions,
+unicode-segmentation, unicode-truncate, unicode-width; legacy spelling
+MIT/Apache-2.0 for signal-hook, winapi and its two target shims);
+Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT (linux-raw-sys, rustix,
+wasi); Apache-2.0 OR BSL-1.0 (ryu); Zlib (foldhash). No copyleft expression
+is added. Several entries are target-specific (Windows, Linux, WASI) and are
+not linked into a macOS binary.

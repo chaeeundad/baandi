@@ -147,6 +147,79 @@ SHA-256) exactly as an explicit entry; `results.json` adds
 `pseudopotential_lookup` with the directory, the path chosen for each species
 and the rule that chose it.
 
+## Running and monitoring
+
+One program, VASP-style ([ADR 0053](decisions/0053-single-entry-and-progress-stream.md)).
+In a directory with `input.toml`:
+
+```sh
+baandi                 # runs the job of [task]; or: baandi -i other.toml
+baandi                 # again, while it runs: shows its live state
+baandi watch [DIR]     # live or final state of a job (DIR: output dir or a dir with input.toml)
+baandi watch --plain   # text view (automatic when stdout is not a terminal); --once prints once
+```
+
+The `[task]` table selects the job; it is the only selector:
+
+| `type` | runs (alias) | requires |
+| --- | --- | --- |
+| `"scf"` (default without `[task]`) | `baandi run` | no `[relax]` table |
+| `"relax"` | `baandi relax` (fixed cell) | `[relax]`, `mode` absent or `"ions"` |
+| `"cell-relax"` | `baandi relax` (variable cell) | `[relax]` with `mode = "cell"` or `"ions_cell"` |
+| `"bands"` | `baandi bands` | `[bands]` |
+| `"dos"` | `baandi dos` | |
+| `"nscf"` | `baandi nscf` | `[nscf]` |
+
+Optional keys: `resume = true` (relax, cell-relax; continue from
+`restart.json`) and `checkpoint_dir = "DIR"` (nscf). A `[relax]` table never
+selects relaxation by itself, and every inconsistent combination is an input
+error (exit 1). Output goes to `[output] directory` (default `results`,
+relative to the working directory). The subcommands stay as aliases with
+their own arguments (an explicit subcommand ignores `[task]`), and the
+utilities (`validate`, `grid`, `convert`, `eval`, `explain`, `status`,
+`inspect-upf`, `pseudo`, `checkpoint`, `restart`, `preflight-review`) are
+unchanged.
+
+Every job (bare entry or alias) writes, in its output directory:
+
+- `progress.jsonl`: schema `baandi-progress-1`, one JSON line per boundary
+  (`start` with a system summary, `phase`, `scf_start`, `scf_map` with
+  energy, dE, dr2 (Ry), threshold and map time, `scf_end`, `relax_step` with
+  energy, max force, step length and pressure, `warning`, `end` with status
+  and exit code). Field list and versioning rule: ADR 0053. Records are
+  written between maps only and by MPI rank 0 only; the stream does not
+  change any number (tested bit for bit). A previous stream is kept as
+  `progress.prev.jsonl`.
+- `baandi.lock` while the job runs. A second job in the same directory is
+  refused (exit 5) while the lock's process is alive (or the lock comes from
+  another host); a lock left by a dead process is replaced with a warning.
+
+`--no-progress` (any job command) writes neither file.
+
+The monitor reads only these files. On a terminal it is a full-screen view:
+
+```text
+┌ BAANDI  relax  RUNNING pid 4242   results  elapsed 00:12:31 ──────────────────┐
+│H2 (relaxation oracle) | 2 atoms | 1 k point | 4 bands | 3 Ry | 1 rank(s)      │
+│Phase: SCF 4 (relax step 3), map 4 [verification]                              │
+└───────────────────────────────────────────────────────────────────────────────┘
+ Overview │ SCF maps │ Relaxation │ Events
+┌SCF 4 convergence (log10)──────────────┐┌Relaxation: log10 max|F| [Ha/Bohr]────┐
+│ dr2 and |dE| per map, threshold line  ││ per step, force tolerance line       │
+│                                       │├Relaxation: energy [Ha]───────────────┤
+└───────────────────────────────────────┘└──────────────────────────────────────┘
+┌SCF 4 of 4 maps (stop dr2 < 1.00e-8 Ry)┐┌Events and warnings───────────────────┐
+│map kind  energy (Ha)  dE  dr2  time s ││ verification/retry maps, SCF ends,   │
+│                                       ││ relax steps, warnings, final status  │
+└───────────────────────────────────────┘└──────────────────────────────────────┘
+ q quit   Tab/Shift-Tab or 1-4 switch panel
+```
+
+`q` (or Esc) leaves the monitor; the job continues. Per-map records come
+from the reference driver (`run`, `relax`, `bands`, `dos`, `nscf`, and
+`run --observe/--agent`); the strict-oracle drivers report start, phases,
+relaxation steps and the end only.
+
 ## Converting structures
 
 The CLI reads the explicit and compact forms and, natively, POSCAR and extended

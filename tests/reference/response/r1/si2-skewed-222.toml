@@ -1,0 +1,24 @@
+# R1 QE oracle case: skewed/strained Si2 (monoclinic shear of the fcc vectors, displaced atoms),
+# same structure as refscf_nscf_many::silicon_mesh_and_skewed_cell. Si.pz-vbc.UPF (not committed).
+[system]
+name = "R1 Si2 skewed 2x2x2 many-band NSCF"
+lattice_unit = "bohr"
+lattice_vectors = [[0.3,5.130606428358966,5.3306064283589665],[5.030606428358967,0.4,5.130606428358966],[5.130606428358966,5.430606428358966,-0.2]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.01,-0.02,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.26,0.24,0.255]
+[pseudopotentials]
+Si = "Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kgrid = [2,2,2]
+[xc]
+functional = "lda-pz"
+[nscf]
+bands = 60
+band_solver = "dense"
+eigen_tolerance_ha = 1e-6
+k_mesh = [2,2,2]

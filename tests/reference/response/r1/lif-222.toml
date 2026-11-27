@@ -1,0 +1,25 @@
+# R1 QE oracle case: LiF rock salt (a = 4.03 Angstrom), PseudoDojo PBE Li/F (not committed),
+# same structure as refscf_nscf_many::dojo_lif_and_aln; 60 Ry (oracle comparison, not a converged cutoff).
+[system]
+name = "R1 LiF 2x2x2 many-band NSCF"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,3.80785,3.80785],[3.80785,0.0,3.80785],[3.80785,3.80785,0.0]]
+[[system.atoms]]
+species = "Li"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "F"
+fractional = [0.5,0.5,0.5]
+[pseudopotentials]
+Li = "Li.upf"
+F = "F.upf"
+[basis]
+ecutwfc_ry = 60
+kgrid = [2,2,2]
+[xc]
+functional = "pbe"
+[nscf]
+bands = 40
+band_solver = "dense"
+eigen_tolerance_ha = 1e-6
+k_mesh = [2,2,2]

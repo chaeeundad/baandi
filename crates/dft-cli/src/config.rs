@@ -296,6 +296,17 @@ impl LatticeUnit {
         }
     }
 }
+/// GT1 (ADR 0050): whether the k sampling of a run used time reversal
+/// (k ~ -k; within each channel for collinear spin) and why.
+pub fn time_reversal_json(config: &Config) -> serde_json::Value {
+    let used = config.basis.time_reversal();
+    serde_json::json!({
+        "used": used,
+        "source": if config.basis.ktime_reversal.is_some() { "basis.ktime_reversal" } else if config.basis.kgrid.is_some() { "kgrid default" } else { "explicit-list default" },
+        "scope": if config.spin.as_ref().is_some_and(|s| s.mode != SpinMode::Unpolarized) { "within each collinear spin channel; no spin swap" } else { "spin-unpolarized" },
+        "policy": "ADR 0050",
+    })
+}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Atom {
@@ -681,7 +692,11 @@ impl Config {
                 "xc.spin: required polarized capability unavailable for lda-pz; select pbe or lda-pw",
             ));
         }
-        if self.basis.time_reversal() {
+        // GT1 (ADR 0050): k ~ -k holds within each collinear channel; the
+        // former rejection stays available as COLLINEAR_TIME_REVERSAL=off.
+        if self.basis.time_reversal()
+            && !dft_numerics::switches::on(dft_numerics::switches::Id::COLLINEAR_TIME_REVERSAL)
+        {
             return Err(fail(
                 "symmetry.operations: reduction is not valid for this model; use the full mesh with basis.ktime_reversal = false",
             ));

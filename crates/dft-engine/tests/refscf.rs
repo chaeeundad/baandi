@@ -7138,6 +7138,11 @@ fn g6_symmetry_geometry_guard_and_small_map() {
         verification: dft_engine::Verification::Off,
         ..Default::default()
     };
+    // GT1 (ADR 0050): collinear time reversal is accepted by default; the
+    // former rejection is kept behind COLLINEAR_TIME_REVERSAL=off.
+    let off = dft_numerics::switches::RunConfig::from_pairs(&[("collinear_time_reversal", "off")])
+        .unwrap()
+        .enter();
     let spin_tr = dft_engine::refscf::electronic::run_prepared(
         StartInput {
             cell: &cell,
@@ -7157,6 +7162,7 @@ fn g6_symmetry_geometry_guard_and_small_map() {
     assert!(
         matches!(spin_tr, Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("disable time reversal"))
     );
+    drop(off);
     let moved = [Atom::new("Xx", [0.125; 3])];
     assert!(
         k_driver::run_prepared(

@@ -453,3 +453,141 @@ fn cl2_like_explicit_grid_drops_only_operations_that_do_not_map_the_grid() {
     assert_eq!((gridded.operations_count, gridded.dropped_for_grid), (4, 4));
     assert_eq!(gridded.dropped_for_grid_rotation, 4);
 }
+
+/// GT1 (ADR 0050): time reversal adds the k ~ -k partners. Without inversion
+/// (regular tetrahedron, -43m) it shrinks the irreducible set; with inversion
+/// in the mesh-preserving group the reduced points and weights are identical
+/// with and without it, so such runs are unchanged bit for bit.
+#[test]
+fn time_reversal_folds_only_without_inversion() {
+    let c = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+    let a = 0.1;
+    let tetra: Vec<_> = [[a, a, a], [a, -a, -a], [-a, a, -a], [-a, -a, a]]
+        .into_iter()
+        .map(|p| Atom::new("H", p))
+        .collect();
+    let ops = detect(&c, &tetra, 1e-7).unwrap();
+    assert_eq!(ops.len(), 24);
+    assert!(
+        !ops.iter()
+            .any(|o| o.rotation == [[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
+    );
+    let full = monkhorst_pack([3; 3], [0.; 3]).unwrap();
+    let identity: Vec<_> = ops
+        .iter()
+        .filter(|o| o.rotation == [[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        .cloned()
+        .collect();
+    assert_eq!(identity.len(), 1);
+    let count =
+        |ops: &[SymmetryOperation], tr| reduce_mesh(&full, ops, tr, false).unwrap().points.len();
+    let (none, tr_only, crystal, crystal_tr) = (
+        count(&identity, false),
+        count(&identity, true),
+        count(&ops, false),
+        count(&ops, true),
+    );
+    println!(
+        "tetrahedron 3x3x3: full={none} tr={tr_only} crystal={crystal} crystal+tr={crystal_tr}"
+    );
+    assert_eq!((none, tr_only), (27, 14));
+    assert!(crystal_tr < crystal, "{crystal_tr} {crystal}");
+    // Centrosymmetric: diamond 4x4x4 shifted and unshifted, hcp-like skew mesh.
+    let d = Cell::from_user_rows_bohr([[0., 5., 5.], [5., 0., 5.], [5., 5., 0.]]).unwrap();
+    let si = [Atom::new("Si", [0.; 3]), Atom::new("Si", [0.25; 3])];
+    let dops = detect(&d, &si, 1e-7).unwrap();
+    for (grid, shift) in [([4; 3], 0.), ([4; 3], 0.5), ([3, 4, 5], 0.)] {
+        let full = monkhorst_pack(grid, [shift; 3]).unwrap();
+        let with = reduce_mesh(&full, &dops, true, false).unwrap();
+        let without = reduce_mesh(&full, &dops, false, false).unwrap();
+        assert!(
+            without
+                .operations
+                .iter()
+                .any(|o| o.rotation == [[-1, 0, 0], [0, -1, 0], [0, 0, -1]])
+        );
+        assert_eq!(with.points.len(), without.points.len(), "{grid:?} {shift}");
+        for (p, q) in with.points.iter().zip(&without.points) {
+            assert_eq!(
+                p.fractional.map(f64::to_bits),
+                q.fractional.map(f64::to_bits)
+            );
+            assert_eq!(p.weight.to_bits(), q.weight.to_bits());
+        }
+    }
+}
+
+/// GT1 cause record (dev08 MP campaign, Ta6Zn7 mp-aaackwro, 6x6x3 Gamma
+/// mesh): QE 7.6 reports 12 operations with inversion and 26 k; BAANDI 34.
+/// Time reversal is on and adds nothing (inversion). The difference is the
+/// mesh-preserving subgroup: in this cell setting only 4 of the 12
+/// operations map the 6x6x3 mesh onto itself, and reduce_mesh uses only
+/// those, while a point-wise reduction with all 12 (QE-like) gives 26.
+#[test]
+fn ta6zn7_mesh_subgroup_explains_k_count() {
+    let c = Cell::from_user_rows_bohr([
+        [-4.745669651409705, -8.219736886585833, 0.0],
+        [4.745669651409705, -8.219736886585833, 0.0],
+        [0.0, -5.4798258697719, 17.22086864710133],
+    ])
+    .unwrap();
+    let sites: [(&str, [f64; 3]); 13] = [
+        ("Ta", [0.16470429, 0.16470429, 0.50588812]),
+        ("Ta", [0.83529571, 0.83529571, 0.49411188]),
+        ("Ta", [0.35067452, 0.35067452, 0.94797944]),
+        ("Ta", [0.64932548, 0.64932548, 0.05202056]),
+        ("Ta", [0.45447874, 0.45447874, 0.63656577]),
+        ("Ta", [0.54552126, 0.54552126, 0.36343423]),
+        ("Zn", [0.0, 0.0, 0.0]),
+        ("Zn", [0.58629293, 0.09410151, 0.22550305]),
+        ("Zn", [0.09410151, 0.09410151, 0.22550305]),
+        ("Zn", [0.09410151, 0.58629293, 0.22550305]),
+        ("Zn", [0.41370707, 0.90589849, 0.77449695]),
+        ("Zn", [0.90589849, 0.90589849, 0.77449695]),
+        ("Zn", [0.90589849, 0.41370707, 0.77449695]),
+    ];
+    let atoms: Vec<_> = sites.iter().map(|(s, p)| Atom::new(*s, *p)).collect();
+    let ops = detect(&c, &atoms, 1e-4).unwrap();
+    assert_eq!(ops.len(), 12);
+    let full = monkhorst_pack([6, 6, 3], [0.; 3]).unwrap();
+    let with = reduce_mesh(&full, &ops, true, false).unwrap();
+    let without = reduce_mesh(&full, &ops, false, false).unwrap();
+    let mesh_ops = with.operations.iter().filter(|o| !o.antiunitary).count();
+    println!(
+        "Ta6Zn7 6x6x3: crystal={} mesh-preserving={mesh_ops} irreducible tr={} no-tr={}",
+        ops.len(),
+        with.points.len(),
+        without.points.len()
+    );
+    assert_eq!(mesh_ops, 4);
+    assert_eq!((with.points.len(), without.points.len()), (34, 34));
+    // Point-wise orbits under all 12 operations and k ~ -k (QE-like count).
+    let key = |k: [f64; 3]| k.map(|x| ((x - x.floor()) * 36.).round() as i64 % 36);
+    let index: std::collections::HashMap<_, _> = full
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (key(p.fractional), i))
+        .collect();
+    let mut parent: Vec<usize> = (0..full.len()).collect();
+    fn root(p: &mut [usize], mut i: usize) -> usize {
+        while p[i] != i {
+            i = p[i];
+        }
+        i
+    }
+    for (i, p) in full.iter().enumerate() {
+        for op in &ops {
+            for sign in [1., -1.] {
+                let k = op.reciprocal_action(p.fractional).map(|x| sign * x);
+                if let Some(&j) = index.get(&key(k)) {
+                    let (a, b) = (root(&mut parent, i), root(&mut parent, j));
+                    parent[a] = b;
+                }
+            }
+        }
+    }
+    let orbits = (0..full.len())
+        .filter(|&i| root(&mut parent, i) == i)
+        .count();
+    assert_eq!(orbits, 26);
+}

@@ -2481,6 +2481,7 @@ fn execute_mode_inner(
         result["structure_provenance"] = provenance;
     }
     if !config.basis.legacy_gamma() {
+        result["time_reversal"] = crate::config::time_reversal_json(&config);
         result["kpoints"] = json!({
             "grid": config.basis.kgrid, "shift": config.basis.kgrid.map(|_| config.basis.kshift.unwrap_or([0.0;3])),
             "explicit": config.basis.kgrid.is_none(), "count": r.k_points.len(),
@@ -3261,6 +3262,7 @@ fn reference_electronic_run(
     if let Some(metadata) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = metadata;
     }
+    result["time_reversal"] = crate::config::time_reversal_json(config);
     crate::driver_select::select(
         config,
         crate::driver_select::Mode::Classic,

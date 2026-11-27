@@ -33,12 +33,16 @@ impl Case {
         )
     }
     fn run(&self, text: &str, command: &str) -> std::process::Output {
+        self.run_env(text, command, &[])
+    }
+    fn run_env(&self, text: &str, command: &str, env: &[(&str, &str)]) -> std::process::Output {
         fs::write(self.dir.join("input.toml"), text).unwrap();
         // These tests check the strict reference (certificate, digests): since
         // ONEPATH-3 spin runs take the standard path unless the reference switch
         // is on (tests/all/onepath_spin_metals.rs covers the standard path).
         Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .env("BAANDI_REFERENCE_STRICT", "on")
+            .envs(env.iter().copied())
             .current_dir(&self.dir)
             .args([command, "input.toml"])
             .output()
@@ -88,10 +92,6 @@ fn spin_preflight_rejections() {
             ),
             "xc.spin: required polarized capability unavailable for lda-pz; select pbe or lda-pw",
         ),
-        (
-            base.replace("[basis]", "[basis]\nktime_reversal=true"),
-            "symmetry.operations",
-        ),
         (base.replace("nbands=4", "nbands=1"), "empty band"),
     ];
     for (text, key) in cases {
@@ -104,6 +104,18 @@ fn spin_preflight_rejections() {
                 out
             );
         }
+    } // GT1 (ADR 0050): collinear time reversal is accepted by default; the
+    // switch restores the former rejection.
+    let tr = base.replace("[basis]", "[basis]\nktime_reversal=true");
+    let out = c.run(&tr, "validate");
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    for command in ["validate", "run"] {
+        let out = c.run_env(&tr, command, &[("BAANDI_COLLINEAR_TIME_REVERSAL", "off")]);
+        assert_eq!(out.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("symmetry.operations"),
+            "{out:?}"
+        );
     }
 }
 #[test]
@@ -270,6 +282,153 @@ fn shared_symmetry_budget_matrix() {
                         reference = Some(signature);
                     }
                     println!("PASS {label}");
+                }
+            }
+        }
+    }
+}
+
+/// GT1 (ADR 0050): time reversal in the k reduction against the full mesh.
+/// Four synthetic Z=1/2 atoms (two electrons) on a regular tetrahedron in a cubic cell (point group -43m, no
+/// inversion), nonlocal synthetic potential with an l = 1 projector, Gamma
+/// centred 3x3x1 mesh (TR folds 9 -> 5). For each model (fixed and FD,
+/// unpolarized and collinear) the full mesh without symmetry is the oracle;
+/// TR only (5 k) and crystal + TR (3 k) must agree in energy (free energy
+/// for FD) within the strict class 1e-10 Ha and in forces within 1e-6
+/// Ha/Bohr (the bound of the existing path comparisons; strict SCF leaves
+/// ~1e-8 Ha/Bohr of force noise). The geometry test time_reversal_folds_only_without_inversion
+/// covers the 3D mesh where TR folds beyond the crystal group.
+#[test]
+fn time_reversal_matches_full_mesh() {
+    time_reversal_case("on", &["fixed", "fd", "spin", "spin_fd"], 1e-10);
+}
+
+/// The same comparison on the default (standard) reference spin/FD driver,
+/// whose own guard used to reject collinear time reversal; the standard
+/// threshold is tightened to 1e-12 Ha so that the strict 1e-10 Ha class
+/// applies between the full and the reduced run.
+#[test]
+fn time_reversal_standard_spin_driver() {
+    time_reversal_case("off", &["spin", "spin_fd"], 1e-10);
+}
+
+fn time_reversal_case(strict: &str, selected: &[&str], tolerance: f64) {
+    let c = Case::new();
+    fs::write(
+        c.dir.join("nl.xml"),
+        common::gaussian_with(0.5, 1.0, true, 401)
+            .replace("SLA PZ", "SLA PW")
+            .replace("element=\"Xx\"", "element=\"H\""),
+    )
+    .unwrap();
+    let a = 0.1;
+    let atoms: String = [[a, a, a], [a, -a, -a], [-a, a, -a], [-a, -a, a]]
+        .iter()
+        .map(|p| format!("[[system.atoms]]\nspecies='H'\nfractional={p:?}\n"))
+        .collect();
+    let models = [
+        ("fixed", "[spin]\nmode='unpolarized'\n", "nbands=4", ""),
+        (
+            "fd",
+            "[spin]\nmode='unpolarized'\n",
+            "nbands=8",
+            "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.02\nband_cap=8\n",
+        ),
+        (
+            "spin",
+            "[spin]\nmode='collinear'\nn_up=1\nn_down=1\n",
+            "nbands=4",
+            "",
+        ),
+        (
+            "spin_fd",
+            "[spin]\nmode='collinear'\ntotal_moment=0.5\n",
+            "nbands=8",
+            "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.02\nband_cap=8\n",
+        ),
+    ];
+    let energy = |r: &serde_json::Value| {
+        r["thermodynamics"]["free_energy_ha"]
+            .as_f64()
+            .or_else(|| r["total_energy"]["ha"].as_f64())
+            .or_else(|| r["energies"]["total_ha"].as_f64())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no energy in {:?}",
+                    r.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                )
+            })
+    };
+    let threshold = if strict == "off" {
+        "standard_threshold_ha=1e-12\n"
+    } else {
+        ""
+    };
+    for (model, spin, bands, occupations) in models {
+        if !selected.contains(&model) {
+            continue;
+        }
+        let mut oracle: Option<(f64, Vec<f64>)> = None;
+        for (arm, symmetry, tr, nks) in [
+            ("full", "off", false, 9),
+            ("tr", "off", true, 5),
+            ("crystal_tr", "auto", true, 3),
+        ] {
+            let text = format!(
+                "[system]\nname='tr {model} {arm}'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.0,5.0,0.0],[0.0,0.0,5.0]]\n{atoms}[pseudopotentials]\nH='nl.xml'\n[basis]\necutwfc_ry=6.0\nkgrid=[3,3,1]\nktime_reversal={tr}\nfft_grid=[18,18,18]\n[xc]\nfunctional='lda-pw'\n[scf]\n{bands}\n{threshold}{spin}{occupations}[symmetry]\nmode='{symmetry}'\n[output]\nforces=true\n"
+            );
+            let out = c.run_env(&text, "run", &[("BAANDI_REFERENCE_STRICT", strict)]);
+            assert!(
+                out.status.success(),
+                "{model}/{arm}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let r: serde_json::Value =
+                serde_json::from_slice(&fs::read(c.dir.join("results/results.json")).unwrap())
+                    .unwrap();
+            assert_eq!(r["time_reversal"]["used"], tr, "{model}/{arm}");
+            let e = energy(&r);
+            assert_eq!(r["forces"]["status"], "available", "{model}/{arm}");
+            let f: Vec<f64> = r["forces"]["values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|v| v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()))
+                .collect();
+            let k = r["symmetry"]["irreducible_k_count"]
+                .as_u64()
+                .or_else(|| {
+                    r["band_data"]["k_points"]
+                        .as_array()
+                        .map(|v| v.len() as u64)
+                })
+                .or_else(|| {
+                    r["identity"]["basis"]["k_points"]
+                        .as_array()
+                        .map(|v| v.len() as u64)
+                })
+                .or_else(|| r["kpoints"]["count"].as_u64());
+            println!("GT1 strict={strict} {model}/{arm}: nks={k:?} E={e:.15e} Ha");
+            assert_eq!(k, Some(nks), "{model}/{arm}");
+            match &oracle {
+                None => oracle = Some((e, f)),
+                Some((e0, f0)) => {
+                    assert!(
+                        (e - e0).abs() <= tolerance,
+                        "{model}/{arm}: dE={:e} Ha",
+                        e - e0
+                    );
+                    assert_eq!(f.len(), f0.len(), "{model}/{arm}");
+                    let df = f
+                        .iter()
+                        .zip(f0)
+                        .map(|(x, y)| (x - y).abs())
+                        .fold(0.0, f64::max);
+                    println!(
+                        "GT1 {model}/{arm}: dE={:e} Ha max|dF|={df:e} Ha/Bohr",
+                        e - e0
+                    );
+                    assert!(df <= 1e-6, "{model}/{arm}: max|dF|={df:e} Ha/Bohr");
                 }
             }
         }

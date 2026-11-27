@@ -639,7 +639,22 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         {
             warnings.push(format!("symmetry.fft_grid: explicit basis.fft_grid {:?} does not preserve {} of {} detected operations ({} by rotation, {} by translation); using the {}-operation subgroup it preserves (omit basis.fft_grid for the full group)", prepared.grid.dims(), r.dropped_for_grid, r.detected_operations_count, r.dropped_for_grid_rotation, r.dropped_for_grid_translation, r.operations_count));
         }
-        warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} mesh-preserving spatial operations; tolerance={} Bohr; magnetic spin swap/time reversal disabled without proof",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),config.symmetry.tolerance_bohr));
+        // GT1: state what the reduction actually used (the former text said
+        // "time reversal disabled" even when the k ~ -k partners were applied).
+        let collinear = config
+            .spin
+            .as_ref()
+            .is_some_and(|s| s.mode != crate::config::SpinMode::Unpolarized);
+        let crystal = config.symmetrization.as_ref().map_or_else(
+            || symmetry.density_operations(true).len(),
+            |r| r.operations_count,
+        );
+        let time_reversal = match (map.operations.iter().any(|o| o.antiunitary), collinear) {
+            (false, _) => "time reversal off (basis.ktime_reversal = false)",
+            (true, false) => "time reversal on (k ~ -k)",
+            (true, true) => "time reversal on within each spin channel (k ~ -k; ADR 0050)",
+        };
+        warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} of {} crystal operations preserve the k mesh and reduce it; {}; tolerance={} Bohr; spin swaps and spin-flipping magnetic operations disabled",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),crystal,time_reversal,config.symmetry.tolerance_bohr));
     }
     let mut counts = Vec::new();
     for point in &points {

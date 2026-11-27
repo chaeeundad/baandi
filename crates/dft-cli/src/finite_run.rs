@@ -278,6 +278,7 @@ pub(super) fn execute(
     if let Some(report) = spin_share {
         result["spin"]["spin_share"] = report;
     }
+    result["time_reversal"] = crate::config::time_reversal_json(config);
     result["gamma_real_used"] = json!(false);
     result["gamma_real_fallback_reason"] = json!(gamma_real_fallback_reason);
     if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {

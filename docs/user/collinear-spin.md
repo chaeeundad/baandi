@@ -34,7 +34,8 @@ initial_moment_seed = 1.0  # does not change the fixed electron sector
 # Existing cutoff/mesh entries go here.
 kgrid = [2, 2, 2]
 kshift = [0.5, 0.5, 0.5]
-ktime_reversal = false   # no magnetic time-reversal reduction
+# ktime_reversal defaults to true for a grid: k ~ -k within each spin channel
+# (ADR 0050); set false for the full mesh.
 ```
 
 The example sector presupposes five valence electrons; it is not a material

@@ -392,6 +392,8 @@ table! {
         "GF2: with FD_EMPTY_THRESHOLD on, the fixed-point verification map of the spin/FD driver also uses the empty-band rule with the occupations of the map it verifies (the verification criterion, the Coulomb-metric error of the fresh output density, is unchanged); off = the verification map converges every retained band at the occupied threshold";
     FD_BUFFER: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GF2: the spin/FD reference Davidson solves max(4, ceil(n / 10)) buffer columns beyond the n retained bands (empty-band threshold, never required, not in the density); off solves exactly n columns (experiment only: on the GF2 Mac fixtures Au, Al, Sr, Ru the top retained bands then converge to wrong eigenpairs, missed states up to 0.36 Ha, and Sr converges to a free energy 2.7e-10 Ha away, outside the strict class); SCF trajectory change";
+    COLLINEAR_TIME_REVERSAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GT1 (ADR 0050): collinear spin runs accept basis.ktime_reversal (k ~ -k within each spin channel: each channel Hamiltonian has real local and nonlocal potentials without spin-orbit coupling, so H_s(-k) = conj H_s(k)); a k grid therefore reduces by time reversal by default as in unpolarized runs; off restores the former rejection (collinear input then needs basis.ktime_reversal = false)";
 }
 
 struct Resolved {

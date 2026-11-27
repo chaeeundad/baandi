@@ -251,5 +251,8 @@
  "GR1-README-MP": "README 검증 결과에 MP 29개 QE 비교 결과 추가",
  "CL1-SWITCH-CONSOLIDATE": "스위치 정리: 효과 확인된 것 기본값으로 굳히고 되돌리기·실험 스위치 제거",
  "RPA-R1-MANY-BANDS": "RPA 1단계: 빈 밴드 수백~수천 개 풀기(NSCF 확장, 밀집 경로, Chebyshev)",
- "PRELAX-P0": "이온 이완 가속(전처리): 0단계 현재 구현 감사, 1단계 DFT 벤치 설계"
+ "PRELAX-P0": "이온 이완 가속(전처리): 0단계 현재 구현 감사, 1단계 DFT 벤치 설계",
+ "RPA-R2-CHI0": "RPA 2단계: 쌍밀도·chi0·유전 행렬(반도체)",
+ "SI1-STRUCTURE-INPUT": "구조 입력 개선: 한 줄 원자 블록, 직교 좌표, 원자별 고정·자기모멘트, 의사퍼텐셜 폴더, POSCAR·extxyz 직접 읽기",
+ "UX1-SINGLE-ENTRY-MONITOR": "단일 실행 방식(입력으로 작업 선택) + 실행 중 디렉토리 실시간 모니터(현대적 터미널 UI)"
 }

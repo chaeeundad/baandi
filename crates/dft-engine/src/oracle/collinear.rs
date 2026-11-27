@@ -49,13 +49,16 @@ impl CollinearProblem {
         self.enable_prepared_symmetry(&prepared)
     }
 
-    /// Share one verified spatial map across both spin channels.
-    /// Antiunitary reduction remains unsupported for collinear models.
+    /// Share one verified spatial map across both spin channels. Time
+    /// reversal (k ~ -k within each channel, ADR 0050) is accepted unless
+    /// `COLLINEAR_TIME_REVERSAL=off`; spin swaps stay unsupported.
     pub fn enable_prepared_symmetry(
         &mut self,
         prepared: &PreparedSymmetry,
     ) -> Result<(), ScfError> {
-        if prepared.time_reversal {
+        if prepared.time_reversal
+            && !dft_numerics::switches::on(dft_numerics::switches::Id::COLLINEAR_TIME_REVERSAL)
+        {
             return Err(ScfError::InvalidInput(
                 "symmetry: collinear preparation must disable time reversal",
             ));

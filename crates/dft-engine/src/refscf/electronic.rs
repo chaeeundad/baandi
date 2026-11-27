@@ -649,7 +649,13 @@ pub(super) async fn run_continuation<K: Collective>(
     mut trace: Option<&mut Trace>,
     boundary: &Boundary,
 ) -> Result<Run, ScfError> {
-    if policy.channels() == 2 && prepared.is_some_and(|p| p.time_reversal) {
+    let config = RunConfig::current();
+    // GT1 (ADR 0050): per-channel time reversal is valid for collinear
+    // non-SOC models; off restores the former rejection.
+    if policy.channels() == 2
+        && prepared.is_some_and(|p| p.time_reversal)
+        && !config.on(Id::COLLINEAR_TIME_REVERSAL)
+    {
         return Err(ScfError::InvalidInput(
             "symmetry: collinear preparation must disable time reversal",
         ));
@@ -657,7 +663,6 @@ pub(super) async fn run_continuation<K: Collective>(
     let clock = Instant::now();
     let mut profile = profile.validate()?;
     let opts = input.options;
-    let config = RunConfig::current();
     if opts.standard.is_none()
         || opts.max_iterations == 0
         || (opts.crystal_density_group && prepared.is_none())

@@ -1234,7 +1234,10 @@ fixed-occupation run prints a hint when the final gap is below 1e-3 Ha.
 For collinear FD, omit channel counts and `total_moment` for one shared mu and
 free moment, or supply `total_moment` (possibly fractional) or matching
 `n_up`/`n_down` for two roots. Positive-temperature sector endpoints reject.
-Use a full mesh (`basis.ktime_reversal = false`) and `lda-pw` or `pbe`.
+Use `lda-pw` or `pbe`. A k grid is reduced by time reversal within each
+spin channel by default (k ~ -k, ADR 0050); `basis.ktime_reversal = false`
+keeps the full mesh, and `BAANDI_COLLINEAR_TIME_REVERSAL=off` restores the
+former rejection.
 
 Results contain occupations in spin/k/band order, mu, S/k_B, E, positive TS,
 F=E-TS, separate E/-TS/F ledger lines, a fresh finite-T certificate, and the
@@ -1299,9 +1302,13 @@ used exactly and 25^3 keeps the 24-operation subgroup without the quarter transl
 can reject with an actionable diagnostic; no invalid reduction is silently accepted.
 
 Unpolarized fixed occupations and Fermi–Dirac are supported. Collinear input
-requires `basis.ktime_reversal=false`; only spatial identity-spin operations
-act on each channel. Spin swaps and magnetic antiunitary operations are disabled
-without a model-invariance proof. Fields, local constraints and Hubbard input
+uses spatial identity-spin operations on each channel and, unless
+`basis.ktime_reversal=false`, time reversal within each channel (k ~ -k; ADR
+0050). Spin swaps and spin-flipping magnetic antiunitary operations are disabled
+without a model-invariance proof. Only operations that map the whole k mesh
+onto itself reduce it (preflight: "N of M crystal operations preserve the k
+mesh"); a cell setting in which some operations do not preserve the mesh keeps
+more irreducible points than a point-wise reduction (ADR 0050, follow-up). Fields, local constraints and Hubbard input
 are unsupported and rejected. Reference auto symmetry supports observation/control and checkpoint v2, whose
 state retains prepared symmetry. Oracle auto symmetry still requires Classic
 execution and its v1 limitations remain. Band and density file formats

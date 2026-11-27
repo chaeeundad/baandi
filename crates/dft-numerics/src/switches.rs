@@ -386,6 +386,8 @@ table! {
         "GD1: with two or more k blocks the derivative pass reads the projector transforms and their q derivatives from uniform radial tables (step 0.005 Bohr^-1, 8-point Lagrange, nodes split over ranks, node values equal to the quadrature) instead of one quadrature per distinct |k+G|; rounding class; off restores the quadrature";
     DERIV_SHELLS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GD1: the local and core |G|-shell transforms of the derivative pass (local/core forces and stress, the rebuilt core density) are evaluated once per pass with the G-independent integrand (including erf) hoisted, split over the ranks in contiguous blocks and shared by one allgatherv, instead of per shell on every rank (and per atom for the core density); bit-identical; off restores the per-shell evaluation";
+    COLLINEAR_TIME_REVERSAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GT1 (ADR 0050): collinear spin runs accept basis.ktime_reversal (k ~ -k within each spin channel: each channel Hamiltonian has real local and nonlocal potentials without spin-orbit coupling, so H_s(-k) = conj H_s(k)); a k grid therefore reduces by time reversal by default as in unpolarized runs; off restores the former rejection (collinear input then needs basis.ktime_reversal = false)";
 }
 
 struct Resolved {

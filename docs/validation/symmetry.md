@@ -35,7 +35,9 @@ strict path: 7.8e-12 Ha.
 `reduce_mesh` takes a duplicate-free uniform full mesh. It selects only
 operations that map every point onto that mesh (fractional tolerance 1e-12).
 Its strict variant rejects any excluded operation. Time-reversal partners are
-explicit antiunitary entries for unpolarized runs only. Representatives use the
+explicit antiunitary entries; for collinear runs they act within each spin
+channel (k ~ -k, never a spin swap; ADR 0050, switch
+`COLLINEAR_TIME_REVERSAL`). Representatives use the
 first full-mesh index; weights are integer multiplicity/full-count and must sum
 to one within 1e-14. Each full index has a representative, operation, integer
 shift and multiplicity. The convention is
@@ -125,8 +127,8 @@ these timings do not establish QE-relative performance. No default was changed.
 
 ## Limits and owner follow-up
 
-No space-group naming, primitive-cell standardization, magnetic time reversal,
-spin swap, SOC, fields, Hubbard terms, or local constraints are implemented.
+No space-group naming, primitive-cell standardization, spin-flipping magnetic
+time reversal, spin swap, SOC, fields, Hubbard terms, or local constraints are implemented.
 The engine rejects symmetry checkpoint capture/import because the existing
 checkpoint identity has no symmetry record; CLI auto is Classic-only. No
 checkpoint schema is silently extended. Arbitrary incommensurate origins may

@@ -322,7 +322,7 @@ fn prepared_symmetry_rejects_a_different_engine_geometry() {
 }
 
 #[test]
-fn shared_spin_preparation_preserves_no_time_reversal_policy() {
+fn shared_spin_preparation_time_reversal_policy() {
     use dft_engine::collinear::{CollinearProblem, SpinSector};
     let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
     let atoms = [Atom::new("Xx", [0.; 3])];
@@ -351,12 +351,20 @@ fn shared_spin_preparation_preserves_no_time_reversal_policy() {
     )
     .unwrap();
     let antiunitary = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, true).unwrap();
-    assert!(matches!(
-        problem.enable_prepared_symmetry(&antiunitary),
-        Err(ScfError::InvalidInput(
-            "symmetry: collinear preparation must disable time reversal"
-        ))
-    ));
+    // GT1 (ADR 0050): rejected only with COLLINEAR_TIME_REVERSAL=off.
+    {
+        let _off =
+            dft_numerics::switches::RunConfig::from_pairs(&[("collinear_time_reversal", "off")])
+                .unwrap()
+                .enter();
+        assert!(matches!(
+            problem.enable_prepared_symmetry(&antiunitary),
+            Err(ScfError::InvalidInput(
+                "symmetry: collinear preparation must disable time reversal"
+            ))
+        ));
+    }
+    problem.enable_prepared_symmetry(&antiunitary).unwrap();
     let spatial = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, false).unwrap();
     problem.enable_prepared_symmetry(&spatial).unwrap();
 }

@@ -219,12 +219,13 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DERIV_NL_GEMM), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_RADIAL_TABLES), Value::Choice("on"));
     assert_eq!(value(Id::DERIV_SHELLS), Value::Choice("on"));
+    assert_eq!(value(Id::COLLINEAR_TIME_REVERSAL), Value::Choice("on"));
     // Default off since 2026-11-27 (FD/spin only; dev08 gen59 arm D).
     assert_eq!(
         switches::resolve(switches::switch(Id::STANDARD_RESIDUAL_GUARD), None).0,
         Value::Choice("off")
     );
-    assert_eq!(TABLE.len(), 87);
+    assert_eq!(TABLE.len(), 88);
 }
 
 #[test]

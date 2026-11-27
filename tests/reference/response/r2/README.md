@@ -27,8 +27,12 @@ Same cell and coordinates, UPF files (SHA-256 recorded), `ecutwfc`
 same Gamma-centred mesh, NSCF on the FULL Gamma-centred mesh (explicit k
 list in crystal coordinates, `nosym`, `noinv`), band count N_b = BAANDI
 `settings.bands` (all bands enter the sum, no band window), response cutoff
-`E_cut^chi` = `settings.ecut_chi_hartree` (Yambo `NGsBlkXd` = 2 E_cut^chi in
-Ry; BerkeleyGW `epsilon_cutoff` = 2 E_cut^chi in Ry), static limit omega = 0,
+`E_cut^chi` = `settings.ecut_chi_hartree` (Yambo `NGsBlkXd` = BAANDI
+`response_size` in RL units, not Ry: Yambo rounds an energy value up to the
+next G shell, dev08 2026-11-27 Si2: 6 Ry became 89 G against BAANDI's 65; QE
+nscf with `nbnd = N_b + 8` per the R1 lesson and Yambo `BndsRnXd` =
+`DipBands` = 1..N_b; prefer N_b at a degeneracy closure, Yambo warns when N_b
+splits a degenerate level; BerkeleyGW `epsilon_cutoff` = 2 E_cut^chi in Ry), static limit omega = 0,
 q -> 0 with the nonlocal commutator in the dipoles (Yambo default
 `DipApproach = "G-space v"` with the nonlocal term on), RPA (no xc kernel),
 fixed occupations. Threads and ranks are free: accuracy comparison only, no

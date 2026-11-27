@@ -42,7 +42,11 @@ mpirun -np 8 pw.x -in si2_444-nscf.in > si2_444-nscf.out
 python3 -I ../$R/compare_r1.py baandi/nscf.json qe-work/si2_444.save/data-file-schema.xml --json si2_444-compare.json
 ```
 
-Repeat with `si2-888.toml` (`--scf-kgrid 8 8 8`, prefix `si2_888`). Store
+Repeat with `si2-888.toml` (`--scf-kgrid 4 4 4`: its SCF runs on
+`kgrid = [4,4,4]`, only the NSCF mesh is 8x8x8; prefix `si2_888`). The
+`--scf-kgrid` must equal the toml's `[kpoints] kgrid`, otherwise the two SCF
+densities differ (dev08 2026-11-27: an 8x8x8 QE SCF shifted the eigenvalues by
+1.5e-3 Ha). Store
 here per case: the BAANDI `nscf.json` (and `nscf_eigenvalues.csv`), the two
 QE inputs and outputs (`*.out`), `*-compare.json`, `pw.x` version line, UPF
 SHA-256, host, and the exact commands. Do not store `qe-work/` or `cp/`.

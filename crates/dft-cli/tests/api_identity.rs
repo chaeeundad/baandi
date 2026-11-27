@@ -377,22 +377,30 @@ fn facade_delivery_matches_existing_dispatch() {
         assert!(matches!(fd.run, api::Run::Electronic(_)));
         let fd_forces = fd.derivatives.forces.expect("FD forces delivered");
         assert!(fd_forces.values.iter().flatten().all(|v| v.is_finite()));
-        // A Gamma seed with prepared symmetry stays rejected; complex-k seeds
-        // with symmetry are supported since R7B-CELL-RELAX (symmetric warm
-        // starts of the cell relaxation).
+        // A real-Gamma seed with prepared symmetry stays rejected (prepared
+        // solves use complex k blocks). API-SEED-GRID: complex-k seeds with
+        // prepared symmetry are supported since R7B-CELL-RELAX, but only on
+        // the prepared grid. The k seed here comes from the solve without
+        // symmetry on its natural grid ([8,8,8]); the off-origin atom gives an
+        // inversion with fractional translation 2*tau = (0.26,0.42,0.64), so
+        // the symmetric grid is [50,50,25] and the seed must be rejected,
+        // never resampled. The supported warm start (seed exported by a
+        // symmetric solve on the prepared grid) is covered by
+        // `refscf::api::seeded_symmetry_tests::prepared_seed_preserves_stepper_delivery`.
         let mut symmetric = api::Request::new(profile, points.clone());
         symmetric.seed = Some(seed.clone());
         symmetric.symmetry =
             Some(refscf::symmetry::Prepared::new(&cell, &atoms, &points, 1e-5, false).unwrap());
-        let symmetric = api::solve(input(), symmetric);
-        if gamma {
-            assert!(matches!(
-                symmetric,
-                Err(dft_engine::ScfError::InvalidInput(_))
-            ));
+        let expected = if gamma {
+            assert!(matches!(seed, api::IonicSeed::Gamma(_)));
+            "reference ionic seed: Gamma/k mismatch"
         } else {
-            let run = symmetric.unwrap().run.into_scalar().unwrap();
-            assert!(run.outcome.converged);
+            assert!(matches!(seed, api::IonicSeed::K(_)));
+            "reference k ionic seed: incompatible cell, basis, grid, mesh or charge"
+        };
+        match api::solve(input(), symmetric) {
+            Err(dft_engine::ScfError::InvalidInput(message)) => assert_eq!(message, expected),
+            other => panic!("gamma={gamma}: expected rejection, got {:?}", other.err()),
         }
         let mut request = api::Request::new(profile, points.clone());
         request.seed = Some(seed.clone());

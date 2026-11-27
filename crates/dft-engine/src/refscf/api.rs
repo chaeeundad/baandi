@@ -631,4 +631,140 @@ mod seeded_symmetry_tests {
                 .is_err()
         );
     }
+
+    /// API-SEED-GRID: a k seed exported by a solve without symmetry lives on
+    /// the natural grid; an off-origin atom makes the prepared group carry
+    /// fractional translations, so the symmetric grid differs and the seed
+    /// must be rejected before any SCF work (never resampled).
+    #[test]
+    fn unsymmetrized_seed_rejected_on_prepared_grid() {
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+            .unwrap()
+            .enter();
+        let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.125; 3])];
+        let pp = crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let points = vec![KPoint {
+            fractional: [0.; 3],
+            weight: 1.,
+        }];
+        let options = ScfOptions {
+            cutoff_hartree: 1.,
+            bands: Some(2),
+            max_iterations: 100,
+            ..Default::default()
+        };
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        };
+        let mut plain = Request::new(Profile::default(), points.clone());
+        plain.save_ionic_seed = true;
+        let plain = solve(input(), plain).unwrap();
+        let seed = plain.ionic_seed.unwrap();
+        assert!(matches!(seed, IonicSeed::K(_)));
+        let natural: [usize; 3] = plain
+            .run
+            .into_scalar()
+            .unwrap()
+            .outcome
+            .result
+            .density
+            .shape()
+            .try_into()
+            .unwrap();
+        let prepared = symmetry::Prepared::new(&cell, &atoms, &points, 1e-7, false).unwrap();
+        assert!(
+            prepared
+                .operations(false)
+                .iter()
+                .any(|o| o.translation.iter().any(|t| *t != 0.))
+        );
+        assert_ne!(prepared.grid(&input()).unwrap(), natural);
+        let mut seeded = Request::new(Profile::default(), points.clone());
+        seeded.seed = Some(seed);
+        seeded.symmetry = Some(prepared);
+        assert!(matches!(
+            solve(input(), seeded),
+            Err(ScfError::InvalidInput(
+                "reference k ionic seed: incompatible cell, basis, grid, mesh or charge"
+            ))
+        ));
+    }
+
+    /// SYM-START-CHECK: on the prepared grid the clipped atomic start of an
+    /// off-origin atom (sharp Gaussian atomic charge, rc = 1 Bohr, so the
+    /// G-truncated start rings negative and is clipped) has grid components
+    /// outside the density sphere; the
+    /// from-scratch symmetric solve must start (it was rejected as
+    /// "input breaks the selected symmetry"). A genuinely asymmetric start
+    /// density (supplied through a seed) is still rejected.
+    #[test]
+    fn symmetric_start_filters_density_sphere() {
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+            .unwrap()
+            .enter();
+        let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.125; 3])];
+        let pp = crate::pool_fixture::potential_with_atomic_start(2., 1.0, true, 161, "SLA PZ");
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let points = vec![KPoint {
+            fractional: [0.; 3],
+            weight: 1.,
+        }];
+        let options = ScfOptions {
+            cutoff_hartree: 2.,
+            bands: Some(2),
+            max_iterations: 100,
+            ..Default::default()
+        };
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        };
+        let request = |seed| {
+            let mut request = Request::new(Profile::default(), points.clone());
+            request.symmetry =
+                Some(symmetry::Prepared::new(&cell, &atoms, &points, 1e-7, false).unwrap());
+            request.seed = seed;
+            request.save_ionic_seed = true;
+            request
+        };
+        // Before SYM-START-CHECK this solve failed at the start check.
+        let mut cold = solve(input(), request(None)).unwrap();
+        let seed = cold.ionic_seed.take().unwrap();
+        let run = cold.run.into_scalar().unwrap();
+        assert!(run.outcome.converged);
+        let result = &run.outcome.result;
+        // The unmodified symmetric seed is accepted.
+        assert!(solve(input(), request(Some(seed.clone()))).is_ok());
+        // Break the group by a small, charge-conserving, index-dependent bump.
+        let mut density: Vec<f64> = result.density.iter().copied().collect();
+        for (i, v) in density.iter_mut().enumerate() {
+            *v *= 1. + 1e-3 * ((i * 37) % 11) as f64 / 11.;
+        }
+        let volume = cell.volume_bohr3();
+        let charge = density.iter().sum::<f64>() * volume / density.len() as f64;
+        for v in &mut density {
+            *v *= result.charge / charge;
+        }
+        let broken = seed.with_density(&density, volume, result.charge).unwrap();
+        assert!(matches!(
+            solve(input(), request(Some(broken))),
+            Err(ScfError::InvalidInput(
+                "symmetry.density: input breaks the selected symmetry; use full mesh"
+            ))
+        ));
+    }
 }

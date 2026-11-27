@@ -260,6 +260,10 @@ impl Workspace {
     }
     /// Legacy checks the initial density without replacing it. Retain the same
     /// 1e-12 pointwise allowance and leave the original values untouched.
+    /// SYM-START-CHECK: the projection is compared with the start density
+    /// filtered to the density sphere (the projector's support), so a clipped
+    /// atomic start with grid components outside the sphere is not mistaken
+    /// for a symmetry-breaking input.
     pub fn check_start<K: Collective>(
         &mut self,
         fields: &mut StartFields,
@@ -269,11 +273,18 @@ impl Workspace {
         let mut projected = density.to_vec();
         self.apply(fields, comm, &mut projected)?;
         self.report.maps.clear();
-        let bad = density
-            .iter()
-            .flatten()
-            .zip(projected.iter().flatten())
-            .any(|(a, b)| !a.is_finite() || (a - b).abs() > 1e-12);
+        let mut filtered = Vec::with_capacity(density.len());
+        for n in density {
+            let mut g = fields.forward(comm, n)?;
+            self.projector.truncate(&mut g)?;
+            filtered.push(fields.inverse(comm, &g)?);
+        }
+        let bad = density.iter().flatten().any(|a| !a.is_finite())
+            || filtered
+                .iter()
+                .flatten()
+                .zip(projected.iter().flatten())
+                .any(|(a, b)| !a.is_finite() || (a - b).abs() > 1e-12);
         let mut agreed = [0.];
         comm.tree_sum_f64(&[f64::from(bad)], &mut agreed)
             .map_err(super::numerical)?;

@@ -109,6 +109,15 @@ impl BandGrowth {
         let n = channel_electrons.max(0.);
         (n.ceil() as usize + 4).max((1.2 * n).ceil() as usize)
     }
+    /// GB1 (2026-11-27): the band cap implied for a channel target `n` when
+    /// the caller gives none: the automatic start followed by two growth
+    /// steps, `next(next(automatic_initial(n)))`. It always exceeds `n`, so a
+    /// finite chemical potential exists at the retained-capacity endpoint for
+    /// every electron count, odd or even (the CLI applies a floor of 32).
+    pub fn automatic_cap(channel_electrons: f64) -> usize {
+        let start = Self::automatic_initial(channel_electrons);
+        Self::next(Self::next(start, usize::MAX), usize::MAX)
+    }
     /// One growth step: `max(bands + 4, ceil(1.2 bands))`, bounded by `limit`.
     pub fn next(bands: usize, limit: usize) -> usize {
         (bands + 4)
@@ -125,6 +134,17 @@ pub struct GrowthEvent {
     pub verification: bool,
     pub from: usize,
     pub to: usize,
+    pub edge_max_fraction: f64,
+    pub edge_electrons: f64,
+}
+/// GB1: a map of a fixed-count FD run that missed the empty-state coverage
+/// criterion before delivery (diagnostic only; the delivered state, its
+/// verification map and the last map of an exhausted budget are checked hard).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CoverageMiss {
+    pub iteration: usize,
+    /// The first-iteration redo map (same input density, tighter ethr).
+    pub redo: bool,
     pub edge_max_fraction: f64,
     pub edge_electrons: f64,
 }
@@ -177,6 +197,10 @@ pub struct Run {
     /// Automatic band count: initial count, cap and growth events (`None`
     /// when the count was fixed by the caller).
     pub band_growth: Option<BandGrowthReport>,
+    /// Fixed-count FD: transient maps that missed the coverage criterion
+    /// (empty with automatic growth, which grows instead; since a restart
+    /// only the maps solved by this invocation).
+    pub coverage_misses: Vec<CoverageMiss>,
     pub setup_s: f64,
     pub total_s: f64,
     /// Occupation policy of this delivery (derivatives read theta, cap, sector).
@@ -721,6 +745,7 @@ pub(super) async fn run_continuation<K: Collective>(
     };
     let initial_bands = bands;
     let mut growth_events: Vec<GrowthEvent> = Vec::new();
+    let mut coverage_misses: Vec<CoverageMiss> = Vec::new();
     if let Some((theta, constraint)) = policy.finite() {
         crate::model::spin::validate_options(&options, theta, cap)?;
         if !theta.is_finite()
@@ -1073,6 +1098,22 @@ pub(super) async fn run_continuation<K: Collective>(
                     other => break other?,
                 }
             };
+            if let Some(miss) = step.coverage {
+                // Fixed count: a transient map may miss the criterion (an
+                // early density far from the fixed point); delivery is checked.
+                if comm.rank() == 0 && coverage_misses.is_empty() {
+                    eprintln!(
+                        "fd coverage: iteration {iteration}: transient map misses the empty-state criterion at {bands} bands (edge fraction {:.3e}, edge electrons {:.3e}); checked again at delivery",
+                        miss.edge_max_fraction, miss.edge_electrons,
+                    );
+                }
+                coverage_misses.push(CoverageMiss {
+                    iteration,
+                    redo,
+                    edge_max_fraction: miss.edge_max_fraction,
+                    edge_electrons: miss.edge_electrons,
+                });
+            }
             collect_calls(&step, &mut calls);
             let y = transform(&mut plan, comm, &step.density, &policy, electrons, volume)?;
             let f: Vec<_> = y.iter().zip(&x).map(|(a, b)| a - b).collect();
@@ -1143,6 +1184,7 @@ pub(super) async fn run_continuation<K: Collective>(
             && (!guard || step.guard < profile.threshold_ry / 2.)
             && valid;
         if stopped {
+            delivered_coverage(&step, comm, bands, false)?;
             check_gaps(&step, &policy, opts.eigen_tolerance)?;
         }
         let mut map_report = StepReport::new(
@@ -1214,6 +1256,7 @@ pub(super) async fn run_continuation<K: Collective>(
                 cache.preserve_input(false);
             }
             collect_calls(&fresh, &mut verification_calls);
+            delivered_coverage(&fresh, comm, bands, true)?;
             check_gaps(&fresh, &policy, opts.eigen_tolerance)?;
             let z = transform(&mut plan, comm, &fresh.density, &policy, electrons, volume)?;
             let residual: Vec<_> = z.iter().zip(&y).map(|(a, b)| a - b).collect();
@@ -1458,6 +1501,8 @@ pub(super) async fn run_continuation<K: Collective>(
         }
         map_report.safe_point = true;
         if passed || iteration == opts.max_iterations {
+            // The last map of an exhausted budget is delivered too.
+            delivered_coverage(&step, comm, bands, false)?;
             boundary.publish(map_report);
             let mut densities = Vec::new();
             let mut blocks = Vec::new();
@@ -1570,6 +1615,7 @@ pub(super) async fn run_continuation<K: Collective>(
                     band_cap: cap,
                     events: growth_events.clone(),
                 }),
+                coverage_misses: coverage_misses.clone(),
                 setup_s,
                 total_s: clock.elapsed().as_secs_f64(),
                 force_identity: identity.with_policy(occupation_identity(&policy)),
@@ -1643,6 +1689,30 @@ fn grow<K: Collective>(
     });
     *bands = next;
     Ok(())
+}
+/// GB1: the hard FD coverage check of a delivered map (fixed band count; with
+/// automatic growth such a map never reaches delivery). The refusal message is
+/// the unchanged `map::COVERAGE`; the numbers go to stderr on rank 0.
+fn delivered_coverage<K: Collective>(
+    step: &Map,
+    comm: &K,
+    bands: usize,
+    verification: bool,
+) -> Result<(), ScfError> {
+    let Some(miss) = step.coverage else {
+        return Ok(());
+    };
+    if comm.rank() == 0 {
+        eprintln!(
+            "fd coverage: delivered {}map at {bands} bands: top-band occupation fraction {:.3e} (limit {:.0e}), edge electrons {:.3e} (limit {:.0e} N)",
+            if verification { "verification " } else { "" },
+            miss.edge_max_fraction,
+            map::EDGE_FRACTION,
+            miss.edge_electrons,
+            map::EDGE_ELECTRONS,
+        );
+    }
+    Err(ScfError::InvalidInput(map::COVERAGE))
 }
 /// Smallest plane-wave basis over the k points of one channel (every global
 /// k, also with GK9 pools).

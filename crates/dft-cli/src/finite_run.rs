@@ -22,7 +22,10 @@ pub(super) fn execute(
     // ADR 0043 / review F01-F02: `single_path`, `execution`, `parallel` keys.
     path_record: Value,
 ) -> Result<RunReport, RunError> {
-    let cap = config.fd_band_count().map_err(|e| error(1, e))?;
+    let cap = config
+        .fd_channel_target(target)
+        .and_then(|n| config.fd_band_count(n))
+        .map_err(|e| error(1, e))?;
     let sector = config.spin_sector(target).map_err(|e| error(1, e))?;
     let gamma_real_fallback_reason;
     let mut spin_share = None;

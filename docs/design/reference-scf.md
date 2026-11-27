@@ -3557,7 +3557,8 @@ mandatory in reference Davidson, including numerically zero tails; since
 kinetic, nonlocal, band energy and the residual-square guard all use the
 same occupation times normalized k weight exactly once. An explicit FD band
 count (`scf.nbands`) is prepared before construction; without it the automatic
-count below applies, bounded by `band_cap` (CLI default 32).
+count below applies, bounded by `band_cap` (CLI default max(32, start + two
+growth steps) since GB1).
 Positive theta, interior sector capacities, number/moment residuals and the
 legacy top-band coverage limits are enforced without clipping occupations.
 Internal energy E, positive TS and Mermin F=E-TS are separate records.
@@ -3600,9 +3601,11 @@ of work (dev08 QE campaign: Ru, 32 electrons, QE's default 20 bands, top band
 Contract (`api::Request::band_growth`, `electronic::BandGrowth`):
 
 - Engaged by the CLI for reference FD (scalar and collinear) when `scf.nbands`
-  is omitted; the ceiling is `occupations.band_cap` (default 32). An explicit
+  is omitted; the ceiling is `occupations.band_cap` (default 32; since GB1
+  `max(32, automatic_cap(n))`). An explicit
   `scf.nbands` is the fixed count (`Config::fd_band_count`, FD-FORCES) and an
-  insufficient count fails with the unchanged message. Engine callers that do
+  insufficient count fails with the unchanged message (since GB1 only at
+  delivery). Engine callers that do
   not set `band_growth` are unchanged (fixed count = the policy's `band_cap`).
 - Start: `max(ceil(n) + 4, ceil(1.2 n))`, n the largest channel electron
   target (N/2 unpolarized; max(N/2, n_up, n_down) at free moment; (N+|m|)/2 at
@@ -3654,6 +3657,67 @@ against an explicit 16-band run: |dF| 1.3e-15 Ha, max force difference
 3.2e-8 Ha/Bohr on forces up to 6.1e-2, max stress difference 9.9e-11
 Ha/Bohr^3). Forces and stress use the delivered (grown) block; the force
 identity does not include the band count, only the policy cap.
+
+### FD coverage at delivery and default cap (GB1, 2026-11-27)
+
+Problem (dev08, MP Cs2TcI6, 75 valence electrons, unpolarized FD, theta
+0.005 Ha): (a) with explicit `scf.nbands = 45` (QE converged with 45 bands;
+band 45 at least 31.8 theta above E_F at every k, top occupation at most
+1.6e-14) the reference run refused about 18 s into the SCF with the coverage
+message: the criterion was applied to every map, and an early map from the
+non-atomic start (the atomic start falls back for FD) has a compressed
+spectrum that is no evidence about the fixed point. (b) Without `scf.nbands`
+and `band_cap` preflight refused (`no finite chemical potential at
+retained-capacity endpoint`): the CLI default cap was the constant 32, below
+the channel target n = 37.5.
+
+Contract:
+
+- Criterion unchanged (`electronic_map::EDGE_FRACTION` 1e-8 on the top-band
+  occupation fraction f/capacity at any k, `EDGE_ELECTRONS` 1e-10 max(N, 1)
+  on the k-weighted top-band electrons; the top band about 18.4 theta above
+  mu). It is a property of a retained spectrum, so it is decided on the state
+  the run delivers.
+- Fixed (explicit) count: a map that misses the criterion is kept (its FD
+  root on the retained bands conserves the electron number exactly) and
+  recorded (`Run::coverage_misses`: iteration, first-iteration redo flag,
+  edge fraction and edge electrons; one stderr line at the first miss;
+  `results.json.reference_scf.band_count_growth.transient_coverage_misses`).
+  The hard check (`delivered_coverage`) runs on the map that meets the stop
+  rule, on its verification map and on the last map of an exhausted budget;
+  a miss there refuses with the unchanged message
+  `occupations.bands: insufficient empty-state coverage at explicit cap;
+  increase cap and repeat the convergence study`, the numbers and limits on
+  stderr. A count too small for the fixed point is therefore still refused,
+  only later (after the SCF instead of at the first map).
+- Automatic growth: unchanged (every map that misses grows the count; such a
+  map never reaches delivery).
+- Default cap (no `scf.nbands`, no `band_cap`):
+  `max(32, BandGrowth::automatic_cap(n))`, `automatic_cap(n) =
+  next(next(automatic_initial(n)))`, i.e. the automatic start plus two growth
+  steps, with n the largest channel target (`Config::fd_channel_target`: N/2
+  unpolarized, (N+|m|)/2 at a fixed moment, max(N/2, n_up, n_down) at free
+  moment). It exceeds n for every N, odd or even, so a finite chemical
+  potential exists at the endpoint; for n <= 17 it is the old 32. Example:
+  N = 75, n = 37.5: start 45 (QE's smeared default), cap 65. An explicit
+  `band_cap` is unchanged and still rejected at preflight when it is not
+  above n. The strict oracle FD path (`finite_run`) solves this count when
+  `scf.nbands` and `band_cap` are omitted.
+- The strict oracle paths (`oracle::finite_temperature`, `oracle::collinear`)
+  keep their per-map refusal (reference tools, not delivery paths).
+
+Validation (Mac, debug): `refscf::fd_explicit_count_checks_coverage_at_delivery`
+(N = 3, atomic start, theta 0.04 Ha, Gamma: at an explicit 10 bands the first
+map misses the criterion, edge electrons 5.9e-10 > 3e-10, the delivered state
+has 1.8e-10; accepted, one recorded miss, F within 8.1e-12 Ha of a 14-band
+run; explicit 9 bands refused at delivery with the unchanged message);
+CLI `reference_gaps::reference_fd_odd_electrons_default_cap` (Z = 3 synthetic
+atom without atomic data, 2x2x2 mesh, theta 0.02 Ha, no `scf.nbands` and no
+`band_cap`: default cap 32, automatic 6 -> 10 -> 14 bands, explicit 14 bands
+within 6.2e-14 Ha; explicit 2 bands refused at delivery);
+`dft-cli` unit `config::tests::fd_default_cap_exceeds_channel_target`
+(N = 75: start 45, cap 65; cap > n and >= the start for N = 1..400).
+Existing growth tests unchanged.
 
 ### FD buffer bands (2026-11-26)
 

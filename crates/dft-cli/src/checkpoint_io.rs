@@ -2688,7 +2688,8 @@ impl ReferenceContext {
         let theta = self.config.finite_temperature()?;
         let sector = self.config.spin_sector(electrons)?;
         let band_cap = if theta.is_some() {
-            self.config.fd_band_count()?
+            self.config
+                .fd_band_count(self.config.fd_channel_target(electrons)?)?
         } else {
             0
         };

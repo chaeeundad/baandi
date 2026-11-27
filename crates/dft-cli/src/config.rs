@@ -53,6 +53,8 @@ pub struct Config {
     pub scf: Option<Scf>,
     pub output: Option<Output>,
     pub bands: Option<Bands>,
+    /// R1: many-band fixed-density solve (`baandi nscf`, docs/cli.md).
+    pub nscf: Option<Nscf>,
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
     /// D3-DISPERSION (ADR 0048): Grimme D3 correction evaluated once per
@@ -1786,6 +1788,26 @@ pub struct Bands {
     pub spacing_inv_bohr: Option<f64>,
     pub nbands: Option<usize>,
     pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
+}
+/// `[nscf]` (R1, `docs/roadmap/rpa-crpa-plan.md` 3.6): bands per channel and
+/// k, the solver, the residual certificate and an optional Gamma-centered
+/// full k mesh (no symmetry reduction); without `k_mesh` the `[basis]` k
+/// points are used.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Nscf {
+    pub bands: usize,
+    /// "davidson" | "dense" | "chebyshev" (default "dense").
+    pub band_solver: Option<String>,
+    /// Default 1e-6 Ha.
+    pub eigen_tolerance_ha: Option<f64>,
+    pub k_mesh: Option<[usize; 3]>,
+    /// Chebyshev only: uncertified buffer columns (default max(8, bands/10)).
+    pub buffer_bands: Option<usize>,
+    /// Chebyshev only: filter degree (default 10).
+    pub filter_degree: Option<usize>,
+    /// Chebyshev only: sweeps before failure (default 300).
     pub max_iterations: Option<usize>,
 }
 #[derive(Debug, Deserialize)]

@@ -158,6 +158,37 @@ The rank 1/3/8 matrix uses the deterministic collective simulator. It establishe
 same-rank continuation identity, not a dev08 MPI performance measurement or a
 new Quantum ESPRESSO reference.
 
+## NSCF band units (`nscf_bands_v1`, R1, ADR 0052)
+
+`baandi nscf --checkpoint-dir CP` (docs/cli.md) stores each completed
+(channel, k) unit of the many-band solve as its own container
+`CP/nscf-c{channel}-k{k:06}.cp` in the `BAANDICP` envelope below (magic,
+header/payload lengths, JSON header, payload, SHA-256; same 512 MiB/32 MiB
+limits; same-directory hard-link no-clobber publication). Header
+(`deny_unknown_fields`): `schema_version` 1, `kind` `"nscf_bands_v1"`,
+`fingerprint` (string map, every key must match on resume: `input_sha256`,
+`upf_sha256`, `density_sha256` of the SCF density bytes, `points_sha256` of the
+k list, `solver`, `bands`, `tolerance_ha_bits`, `buffer_bands`,
+`filter_degree`, `ranks`, `threads`, `platform`, `backend`, `code_version`),
+`channel`, `k_index`, `bands`, `basis_size`, `eigenvalues_ha_bits` and
+`residuals_ha_bits` (IEEE bits, Hartree), and `sections` (`{offset, count}`
+in bytes, array index = rank, contiguous and covering the payload). Each
+rank section: u64 LE owned-row count R, R u64 LE global plane-wave indices,
+then R x bands complex coefficients column-major as (re, im) f64 LE.
+
+Units are gathered (exact copies through `allgatherv_f64`) and published by
+rank 0 after the unit's fresh residual certificate passed. After all units,
+rank 0 writes `CP/nscf-manifest.json` last (fingerprint, unit names and
+SHA-256); an existing identical manifest is accepted, a different one rejects.
+Resume: every rank reads its own section, the owned rows must equal the
+current partition, the engine agrees the unit's presence over ranks and
+re-certifies the loaded bands with a fresh H application against the
+requested tolerance before using them; a missing unit is recomputed. A
+checksum, fingerprint, partition or certificate mismatch rejects (exit 4)
+and nothing is overwritten. Pair densities and chi0 are never stored here;
+`chi0_q_v1` is an R2/R3 payload. Memory note: the gather is an allgatherv, so
+every rank briefly holds the whole unit (N_PW x bands x 16 B).
+
 ## Byte layout
 
 All offsets are byte offsets. A file contains exactly:

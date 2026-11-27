@@ -78,6 +78,9 @@ pub struct DistributedComplexHamiltonian {
     back: ComplexMatrix,
     partial: Vec<f64>,
     reduced: Vec<f64>,
+    /// R1: FFT grid index of every global plane-wave row (the plan's input),
+    /// read only by the explicit dense matrix.
+    g_to_fft: Vec<[usize; 3]>,
 }
 
 impl DistributedComplexHamiltonian {
@@ -159,6 +162,7 @@ impl DistributedComplexHamiltonian {
             back: ComplexMatrix::zeros(rows, capacity)?,
             partial: vec![0.; 2 * p * capacity],
             reduced: vec![0.; 2 * p * capacity],
+            g_to_fft: grid.g_to_fft().to_vec(),
         })
     }
 
@@ -572,6 +576,229 @@ impl DistributedComplexHamiltonian {
     }
 }
 
+/// R1 (many-empty-band solve, `docs/roadmap/rpa-crpa-plan.md` 3.2): the
+/// explicit matrix of this operator and a rigorous upper spectral bound.
+/// Neither runs inside the SCF or the iterative band solvers' apply loop.
+impl DistributedComplexHamiltonian {
+    /// Every rank's owned rows (global index, kinetic, projector row), gathered
+    /// in global plane-wave order. A permutation of the owned values: the
+    /// result has the same bits for every rank count.
+    fn gather_rows<K: Collective>(
+        &self,
+        comm: &K,
+    ) -> Result<(Vec<f64>, ComplexMatrix), SolverError> {
+        let n = self.global_len;
+        let p = self.projectors.cols();
+        let width = 2 + 2 * p;
+        let rows = self.local_rows();
+        let mut lens = vec![0.; comm.size()];
+        comm.allgatherv_f64(&[rows.len() as f64], &vec![1; comm.size()], &mut lens)
+            .map_err(error)?;
+        let counts: Vec<usize> = lens.iter().map(|&l| l as usize * width).collect();
+        if counts.iter().sum::<usize>() != n * width {
+            return Err(SolverError::InvalidParameter("dense matrix row layout"));
+        }
+        let mut local = Vec::with_capacity(rows.len() * width);
+        for (i, &g) in rows.iter().enumerate() {
+            local.push(g as f64);
+            local.push(self.kinetic[i]);
+            for c in 0..p {
+                let z = self.projectors[(i, c)];
+                local.extend([z.re, z.im]);
+            }
+        }
+        let mut all = vec![0.; n * width];
+        comm.allgatherv_f64(&local, &counts, &mut all)
+            .map_err(error)?;
+        let mut kinetic = vec![f64::NAN; n];
+        let mut projectors = ComplexMatrix::zeros(n, p)?;
+        for row in all.chunks_exact(width) {
+            let g = row[0] as usize;
+            if g >= n || !kinetic[g].is_nan() {
+                return Err(SolverError::InvalidParameter("dense matrix row ownership"));
+            }
+            kinetic[g] = row[1];
+            for c in 0..p {
+                projectors[(g, c)] = C::new(row[2 + 2 * c], row[3 + 2 * c]);
+            }
+        }
+        Ok((kinetic, projectors))
+    }
+
+    /// Replicated explicit H_k (`global_len()` square, rows and columns in
+    /// global plane-wave order):
+    /// `T_G delta_GG' + V_N(G - G') + sum_atom sum_ij P_Gi D_ij conj(P_G'j)`,
+    /// with `V_N(h) = N^-1 sum_r V(r) exp(-i h.r)` on this operator's grid and
+    /// `G - G'` taken modulo the grid, which is exactly the convolution the
+    /// FFT apply performs; the dense matrix and [`Self::apply_block`] are the
+    /// same linear map up to roundoff, through an independent route (one
+    /// serial 3D DFT of the gathered potential, no distributed FFT). The
+    /// result is Hermitian by construction (averaged with its adjoint) and
+    /// has identical bits on every rank for every rank count. Memory: one
+    /// N x N complex matrix plus one full grid. Collective.
+    pub fn dense_matrix<K: Collective>(&self, comm: &K) -> Result<ComplexMatrix, SolverError> {
+        self.agree(comm, self.epoch.is_none())?;
+        let (kinetic, projectors) = self.gather_rows(comm)?;
+        let shape = self.fft.shape();
+        let mut full = vec![0.; shape.iter().product()];
+        let mut scratch = Vec::new();
+        self.fft
+            .gather_planes(comm, &self.potential, &mut scratch, &mut full)
+            .map_err(error)?;
+        drop(scratch);
+        let real = ndarray::Array3::from_shape_vec(
+            shape,
+            full.into_iter().map(|v| C::new(v, 0.)).collect(),
+        )
+        .map_err(error)?;
+        let mut vg = ndarray::Array3::zeros(shape);
+        {
+            use dft_numerics::Fft3d;
+            dft_numerics::FftPlan3d::new(shape)
+                .map_err(error)?
+                .to_reciprocal(&real, &mut vg)
+                .map_err(error)?;
+        }
+        drop(real);
+        let n = self.global_len;
+        let mut h = ComplexMatrix::zeros(n, n)?;
+        for j in 0..n {
+            let b = self.g_to_fft[j];
+            let column = h.column_mut(j);
+            for (value, a) in column.iter_mut().zip(&self.g_to_fft) {
+                *value = vg[[
+                    (a[0] + shape[0] - b[0]) % shape[0],
+                    (a[1] + shape[1] - b[1]) % shape[1],
+                    (a[2] + shape[2] - b[2]) % shape[2],
+                ]];
+            }
+            column[j] += kinetic[j];
+        }
+        drop(vg);
+        // Q = P D (block diagonal per atom), then H += Q P^H column by column.
+        let p = projectors.cols();
+        let mut q = ComplexMatrix::zeros(n, p)?;
+        let mut offset = 0;
+        for (&count, d) in self.channels.iter().zip(&self.couplings) {
+            for j in 0..count {
+                for i in 0..count {
+                    let coupling = d[i * count + j];
+                    if coupling == 0. {
+                        continue;
+                    }
+                    for g in 0..n {
+                        let z = coupling * projectors[(g, offset + i)];
+                        q[(g, offset + j)] += z;
+                    }
+                }
+            }
+            offset += count;
+        }
+        for j in 0..n {
+            for c in 0..p {
+                let s = projectors[(j, c)].conj();
+                if s == C::default() {
+                    continue;
+                }
+                for (value, z) in h.column_mut(j).iter_mut().zip(q.column(c)) {
+                    *value += z * s;
+                }
+            }
+        }
+        for j in 0..n {
+            h[(j, j)] = C::new(h[(j, j)].re, 0.);
+            for i in 0..j {
+                let average = (h[(i, j)] + h[(j, i)].conj()) * 0.5;
+                h[(i, j)] = average;
+                h[(j, i)] = average.conj();
+            }
+        }
+        h.validate_finite()?;
+        self.agree(comm, false)?;
+        Ok(h)
+    }
+
+    /// Rigorous upper bound of the spectrum (Ha):
+    /// `max T + max V(r) + max(0, max_atom lambda_max(D_atom)) lambda_max(P^H P)`.
+    /// Each term bounds its operator's Rayleigh quotient (the FFT apply's
+    /// local part is `N^-1 sum_r V(r) |psi(r)|^2` with Parseval). Collective.
+    pub fn spectral_upper_bound<K: Collective>(&mut self, comm: &K) -> Result<f64, SolverError> {
+        self.agree(comm, self.epoch.is_none())?;
+        let local = [
+            self.kinetic
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max),
+            self.potential
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max),
+        ];
+        let mut all = vec![0.; 2 * comm.size()];
+        comm.allgatherv_f64(&local, &vec![2; comm.size()], &mut all)
+            .map_err(error)?;
+        let t = all
+            .iter()
+            .step_by(2)
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let v = all
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let p = self.projectors.cols();
+        let mut nonlocal = 0.;
+        if p > 0 {
+            let mut gram = dft_numerics::linalg::gemm(
+                &self.projectors,
+                MatrixOp::Adjoint,
+                &self.projectors,
+                MatrixOp::Identity,
+            )?;
+            let flat: Vec<f64> = gram.as_slice().iter().flat_map(|z| [z.re, z.im]).collect();
+            let mut sum = vec![0.; flat.len()];
+            comm.tree_sum_f64(&flat, &mut sum).map_err(error)?;
+            for (z, pair) in gram.as_mut_slice().iter_mut().zip(sum.as_chunks::<2>().0) {
+                *z = C::new(pair[0], pair[1]);
+            }
+            for j in 0..p {
+                for i in 0..j {
+                    let average = (gram[(i, j)] + gram[(j, i)].conj()) * 0.5;
+                    gram[(i, j)] = average;
+                    gram[(j, i)] = average.conj();
+                }
+            }
+            let norm = dft_numerics::linalg::hermitian_eigh(&gram)?
+                .0
+                .last()
+                .copied()
+                .unwrap_or(0.);
+            let mut coupling = 0_f64;
+            for (&count, d) in self.channels.iter().zip(&self.couplings) {
+                if count == 0 {
+                    continue;
+                }
+                let mut m = ComplexMatrix::zeros(count, count)?;
+                for j in 0..count {
+                    for i in 0..count {
+                        m[(i, j)] = C::new(0.5 * (d[i * count + j] + d[j * count + i]), 0.);
+                    }
+                }
+                let top = dft_numerics::linalg::hermitian_eigh(&m)?.0[count - 1];
+                coupling = coupling.max(top);
+            }
+            nonlocal = coupling.max(0.) * norm.max(0.);
+        }
+        let bound = t + v + nonlocal;
+        if !bound.is_finite() {
+            return Err(SolverError::InvalidParameter("nonfinite spectral bound"));
+        }
+        Ok(bound)
+    }
+}
+
 impl dft_solvers::ref_davidson_complex::DistributedComplexOperator
     for DistributedComplexHamiltonian
 {
@@ -846,6 +1073,85 @@ mod tests {
         eprintln!(
             "G3 complex operator: max H={worst_h:e} Ha, density={worst_density:e} e/Bohr^3, nonlocal={worst_nl:e} Ha"
         );
+    }
+
+    /// R1: the explicit dense H_k equals the FFT apply on unit vectors, is
+    /// bit-identical across rank counts, and the spectral bound is an upper
+    /// bound of its largest eigenvalue.
+    #[test]
+    fn dense_matrix_matches_apply_and_bounds_spectrum() {
+        let mut worst = 0_f64;
+        for skew in [false, true] {
+            let cell = Cell::from_user_rows_bohr(if skew {
+                [[6., 0., 0.], [0.7, 5.5, 0.], [0.3, -0.2, 7.]]
+            } else {
+                [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]
+            })
+            .unwrap();
+            for k in [[0.; 3], [0.13, -0.21, 0.07]] {
+                for projectors in [false, true] {
+                    let (basis, grid, h) = fixture(&cell, k, projectors);
+                    let n = basis.vectors().len();
+                    let mut identity = ComplexMatrix::zeros(n, n).unwrap();
+                    for i in 0..n {
+                        identity[(i, i)] = C::new(1., 0.);
+                    }
+                    let mut expected = ComplexMatrix::zeros(n, n).unwrap();
+                    h.apply_block(&identity, &mut expected).unwrap();
+                    let mut reference: Option<Vec<u64>> = None;
+                    for ranks in [1, 3] {
+                        let outputs = dft_mpi::simulate(ranks, |comm| {
+                            let (_, _, h) = fixture(&cell, k, projectors);
+                            let mut op = DistributedComplexHamiltonian::new_owned(
+                                &basis,
+                                &grid,
+                                h.nonlocal(),
+                                1,
+                                comm.rank(),
+                                ranks,
+                                WorkerPool::new(1).unwrap(),
+                            )
+                            .unwrap();
+                            let potential: Vec<_> = op
+                                .plane_offsets()
+                                .iter()
+                                .map(|&i| h.local_potential_values()[i])
+                                .collect();
+                            op.set_owned_potential(&potential, 0).unwrap();
+                            let dense = op.dense_matrix(comm).unwrap();
+                            let bound = op.spectral_upper_bound(comm).unwrap();
+                            (dense, bound)
+                        });
+                        for (dense, bound) in outputs {
+                            let bits: Vec<u64> = dense
+                                .as_slice()
+                                .iter()
+                                .flat_map(|z| [z.re.to_bits(), z.im.to_bits()])
+                                .collect();
+                            match &reference {
+                                None => reference = Some(bits),
+                                Some(r) => assert!(*r == bits, "dense H differs across ranks"),
+                            }
+                            let error = dense
+                                .as_slice()
+                                .iter()
+                                .zip(expected.as_slice())
+                                .map(|(a, b)| (a - b).norm())
+                                .fold(0., f64::max);
+                            worst = worst.max(error);
+                            assert!(error < 1e-13, "dense vs apply {error:e} Ha");
+                            let top = *dft_numerics::linalg::hermitian_eigh(&dense)
+                                .unwrap()
+                                .0
+                                .last()
+                                .unwrap();
+                            assert!(bound >= top, "bound {bound} below lambda_max {top}");
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("R1 dense H vs FFT apply: max {worst:e} Ha");
     }
 
     #[test]

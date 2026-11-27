@@ -1,5 +1,7 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
 mod bordered;
+/// R1 many-band Chebyshev-filtered subspace iteration (complex, owned rows).
+pub mod chebyshev_complex;
 pub mod davidson_stages;
 pub mod distributed;
 pub mod distributed_davidson;

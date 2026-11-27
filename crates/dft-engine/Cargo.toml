@@ -142,6 +142,11 @@ path = "tests/refscf_nscf.rs"
 required-features = ["strict-oracle"]
 
 [[test]]
+name = "refscf_nscf_many"
+path = "tests/refscf_nscf_many.rs"
+required-features = ["strict-oracle"]
+
+[[test]]
 name = "refstart"
 path = "tests/refstart.rs"
 required-features = ["strict-oracle"]

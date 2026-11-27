@@ -1,0 +1,24 @@
+# R1 QE oracle case (protocol: README.md). Si 2-atom fcc, Si.pz-vbc.UPF (not committed),
+# 30 Ry, SCF on the 4x4x4 Gamma-centered mesh, NSCF 400 bands on the full 512-point mesh.
+[system]
+name = "R1 Si2 8x8x8 many-band NSCF"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,5.1306064283589663,5.1306064283589663],[5.1306064283589663,0.0,5.1306064283589663],[5.1306064283589663,5.1306064283589663,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kgrid = [4,4,4]
+[xc]
+functional = "lda-pz"
+[nscf]
+bands = 400
+band_solver = "dense"
+eigen_tolerance_ha = 1e-6
+k_mesh = [8,8,8]

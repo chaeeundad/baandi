@@ -64,6 +64,8 @@ pub mod telemetry;
 
 mod checkpoint_inspect;
 pub mod checkpoint_io;
+/// R1 `nscf_bands_v1` per-k checkpoint units (docs/checkpoint-format.md).
+pub mod nscf_store;
 
 #[cfg(test)]
 #[allow(dead_code)]

@@ -713,6 +713,56 @@ exports, not calculations by the other codes. Output input-alias/symlink/hardlin
 checks occur before computing. Exit codes are 1 input, 2 UPF, 3 SCF exhaustion,
 4 numerical/noninsulating/NSCF failure, 5 I/O/plot failure. Writes are not a
 multi-file transaction; check exit status before using files.
+## Many-band fixed-density solve `baandi nscf` (R1)
+
+```sh
+baandi nscf input.toml [--output-dir DIR] [--checkpoint-dir CP]
+```
+
+Reference SCF (verified, as `bands`), then the R1 many-empty-band solve
+(`docs/roadmap/rpa-crpa-plan.md` 3.2) of the SCF density on the `[nscf]` k
+points. Requires the reference driver. Every returned band carries a fresh
+residual `||H psi - e psi||` (Ha) from an independent H application; the run
+fails (exit 4) if any band exceeds `eigen_tolerance_ha`.
+
+```toml
+[nscf]
+bands = 400                 # per channel and k; occupied + 4 <= bands <= N_PW(k)
+band_solver = "dense"       # dense (default) | chebyshev | davidson
+eigen_tolerance_ha = 1e-6   # residual certificate (default 1e-6 Ha)
+k_mesh = [8, 8, 8]          # optional: Gamma-centered FULL mesh, no symmetry
+                            # reduction; omitted = the [basis] k points
+buffer_bands = 40           # chebyshev only (default max(8, bands/10))
+filter_degree = 10          # chebyshev only (default 10)
+max_iterations = 300        # chebyshev only (sweeps, default 300)
+```
+
+- `dense`: explicit H_k (kinetic diagonal, local V(G-G') from one DFT of the
+  gathered potential, nonlocal P D P^H) and the complete faer Hermitian EVD
+  (all N_PW eigenpairs, the lowest `bands` kept). Intended for N_PW up to
+  about 6000 (memory about 3 N_PW^2 x 16 B per rank; every rank solves every
+  k with the replicated matrix, bit-identical across rank counts). This is
+  both the small-cell production path and the oracle of `chebyshev`.
+- `chebyshev`: Chebyshev-filtered subspace iteration on `apply_block` with
+  `buffer_bands` uncertified buffer columns (discarded) and locking of
+  converged leading bands; the spectral upper bound is rigorous
+  (max T + max V + nonlocal bound). Defaults are initial values from the R1
+  fixtures, not yet calibrated on the generality set.
+- `davidson`: the existing all-bands-strict reference Davidson (`bands`).
+
+Outputs: `nscf.json` (metadata, atoms, k points, per-k basis size and solver
+work, `band_data.eigenvalues_ha`/`residuals_ha` as channel x k x band,
+absolute Hartree, BAANDI G=0 convention, not VBM referenced),
+`nscf_eigenvalues.csv` (`channel,k_index,kx,ky,kz,weight,band,energy_ha,energy_ev,residual_ha`),
+`EIGENVAL` (VASP layout, absolute eV, k weights, occupations 2/0 or 1/0 per
+spin), and `results.json` (= `nscf.json`). `--checkpoint-dir` writes one
+`nscf_bands_v1` unit per completed (channel, k) and a manifest last
+(`docs/checkpoint-format.md`, "NSCF band units"); a rerun with the same
+directory resumes every matching unit after re-certifying its residuals, and
+rejects units whose fingerprint (input, UPF, SCF density, k list, solver
+settings, ranks, threads, platform, backend, code version), partition or
+checksum differs. QE oracle protocol: `tests/reference/response/r1/README.md`.
+
 ## Full input preflight (P8G)
 
 `baandi validate input.toml [--json]` now opens and validates the referenced

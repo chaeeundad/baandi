@@ -190,5 +190,13 @@
     "status": "open",
     "phase": "standard-class recalibration (decision 3 of 2026-11-11)",
     "detail": "R7A synthetic sheared Gamma frozen-strain case after CELL-FROZEN-DENSITY: standard threshold 5e-9 Ha stops at map 7 with dr2 9.96e-9 Ry (threshold 1e-8 Ry) and delivers dE 2.4e-8 Ha against the strict oracle; at 5e-13 dE 4.7e-15 Ha. The R7A Gamma standard-threshold assertion is reduced to a gross 1e-6 Ha bound until the standard class is recalibrated against delivered accuracy (user decision 2026-11-26, option A). Owner: after 2026-12-01."
+  },
+  {
+    "id": "I-NEAR-GAP-DIAG",
+    "title": "Fixed-occupation SCF on a near-zero-gap geometry plateaus and stops as Exhausted without saying why",
+    "severity": "low",
+    "status": "open",
+    "phase": "SCF diagnostics (found by PRELAX-P1 stage 1)",
+    "detail": "dev08 2026-11-27, PRELAX-P1 stage 1 si8-lda-k222-a0.2 seed 9 (random 0.2 Bohr start, 20 bands, fixed occupations): dr2 drops to 1.6e-4 Ry by it 9 then oscillates 1e-4..1e-3 Ry; not_converged Exhausted at it 100 (max 100) and at it 147 with max_iterations 300 (early end not explained). Fermi-Dirac 0.01 eV: gap at Gamma 6.1 meV (bands 16/17), all other k gapped by >1 eV. Case issue, not an optimizer result; seed 9 is excluded from the PRELAX-P1 medians (fails at evaluation 1 in every arm). Wanted: (1) a clear message when HOMO/LUMO are within a few meV or swap between iterations under fixed occupations, suggesting smearing; (2) explain why the run ends at 147 with max_iterations 300. Records: dev08 /data/sig-dft/prelax-p1/diag-s9/."
   }
 ]

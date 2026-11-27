@@ -2,9 +2,11 @@
 
 `baandi-convert` turns a structure file (anything ASE reads: CIF, POSCAR,
 extended XYZ, XSF, ...) or a Materials Project id into the explicit `[system]`
-block BAANDI reads. It runs on your workstation; the `baandi`/`dft-cli`
-executable never reads structure files or contacts a database, so compute nodes
-need no Python, ASE or network. See [Converting structures](../../docs/cli.md#converting-structures).
+block BAANDI reads (`--compact` writes the one-atom-per-line `[structure]` form).
+It runs on your workstation; the `baandi`/`dft-cli` executable reads only POSCAR
+and extended XYZ files itself ([example 15](../15-poscar-input/)) and never
+contacts a database, so compute nodes need no Python, ASE or network. See
+[Converting structures](../../docs/cli.md#converting-structures).
 
 UPF: `Si.pz-vbc.UPF`, NC LDA-PZ, as in [example 01](../01-si-gamma-lda/).
 From the repository root, first [build and set PSEUDO_DIR](../README.md#setup).

@@ -1420,7 +1420,8 @@ fn execute_mode_inner(
     let bytes = launch::timed("input_read", || fs::read(input))
         .map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
-    let config = launch::timed("input_parse", || Config::parse(text)).map_err(|e| error(1, e))?;
+    let config =
+        launch::timed("input_parse", || Config::parse_at(text, input)).map_err(|e| error(1, e))?;
     launch::elapsed("input_read_parse", input_clock);
     setup_seconds.insert("input_read_parse", phase_clock.elapsed().as_secs_f64());
     let config_clock = launch::clock();
@@ -2480,6 +2481,7 @@ fn execute_mode_inner(
     if let Some(provenance) = config.system.provenance_json() {
         result["structure_provenance"] = provenance;
     }
+    config.annotate_structure(&mut result);
     if !config.basis.legacy_gamma() {
         result["time_reversal"] = crate::config::time_reversal_json(&config);
         result["kpoints"] = json!({
@@ -3364,6 +3366,7 @@ fn reference_electronic_run(
     if let Some(provenance) = config.system.provenance_json() {
         result["structure_provenance"] = provenance;
     }
+    config.annotate_structure(&mut result);
     if mode.observe || mode.agent {
         crate::telemetry::annotate_reference_result(&mut result, out)?;
     }

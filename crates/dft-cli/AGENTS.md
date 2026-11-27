@@ -147,3 +147,18 @@ run-local counters and the completion marker `completed: true` (written last).
 `scripts/parse_results.py` validates a results file (rejects truncated, stale
 binary, missing/zero clocks of an active path, impossible rows); unit tests
 `scripts/tests/test_parse_results.py`, real-output checks in `tests/all/run_config.rs`.
+
+## Structure input (SI1, 2026-11-27)
+
+`config/structure_input.rs` rewrites `[structure]` (compact atoms block or
+`file` = POSCAR/extended XYZ) into the explicit `[system]` TOML value before
+deserialization, maps nonzero per-atom `magmom` to `spin.initial_moment_seed`
+(sum) and keeps per-atom `fixed` flags in `Config::structure_fixed` (merged
+into relax settings only when `relax.fixed` is empty; both given = error).
+`[pseudopotentials] dir` fills missing species entries by documented rules.
+Parse inputs with a path through `Config::parse_at`/`parse_unvalidated_at` so
+relative files resolve against the input directory. `[system]` inputs keep
+their arithmetic; results gain `structure` (and `pseudopotential_lookup`).
+Readers are checked against ASE 3.26 readings in
+`tests/fixtures/structure_input/` (`make_fixtures.py`, test-only);
+`cargo test -p dft-cli --test all structure_input`.

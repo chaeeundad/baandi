@@ -1,12 +1,14 @@
 # Validate-only in debug tests; run numerical workflows with a release build.
-[system]
+# Compact structure form: magmom (Bohr magnetons) per atom; the sum becomes
+# spin.initial_moment_seed (here 2.0, a start value, not a constraint).
+[structure]
 name = "Fe bcc fixed moment"
 lattice_unit = "angstrom"
-lattice_vectors = [[-1.435, 1.435, 1.435], [1.435, -1.435, 1.435], [1.435, 1.435, -1.435]]
-
-[[system.atoms]]
-species = "Fe"
-fractional = [0.0, 0.0, 0.0]
+lattice = [[-1.435, 1.435, 1.435], [1.435, -1.435, 1.435], [1.435, 1.435, -1.435]]
+coordinates = "fractional"
+atoms = """
+Fe  0.0  0.0  0.0  magmom=2.0
+"""
 
 [pseudopotentials]
 Fe = "/absolute/path/to/pseudo/Fe.upf"
@@ -23,7 +25,6 @@ functional = "pbe"
 [spin]
 mode = "collinear"
 total_moment = 2.0
-initial_moment_seed = 2.0
 
 [occupations]
 mode = "fermi_dirac"

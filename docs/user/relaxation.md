@@ -25,6 +25,10 @@ fixed = [{atom = 0}, {atom = 2, components = [false, true, true]}]
 
 Atom indices are zero-based in input order. Omitted `components` fixes all three
 Cartesian components. `true` fixes that component; `false` leaves it free.
+The same constraints can be written per atom in the compact `[structure]` form
+(`Si 0 0 0 fixed=xyz`, `fixed=z`, ...) or come from POSCAR selective dynamics or
+an extended XYZ `move_mask`; give them in one place only
+([Structure input](../cli.md#structure-input)).
 Constraints project both optimizer forces and steps; the original physical force
 arrays remain unchanged in the trajectory/results. The maximum force used for
 stopping is the maximum absolute **free Cartesian component**, not the maximum

@@ -1,0 +1,17 @@
+Displaced Si8, atom 1 frozen (selective dynamics)
+   5.43
+     1.0  0.0  0.0
+     0.0  1.0  0.0
+     0.0  0.0  1.0
+   Si
+   8
+Selective dynamics
+Direct
+  0.002  0.00  0.00   F F F
+  0.00   0.50  0.50   T T T
+  0.50   0.00  0.50   T T T
+  0.50   0.50  0.00   T T T
+  0.25   0.25  0.25   T T T
+  0.25   0.75  0.75   T T T
+  0.75   0.25  0.75   T T T
+  0.75   0.75  0.25   T T T

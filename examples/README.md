@@ -60,12 +60,16 @@ establish numerical convergence or physical accuracy.
 | [12-mpi](12-mpi/) | MPI with the same Si input |
 | [13-strict-oracle](13-strict-oracle/) | Strict oracle for validation |
 | [14-structure-file](14-structure-file/) | Structure file or Materials Project id to input (`baandi-convert`) |
+| [15-poscar-input](15-poscar-input/) | POSCAR read by the executable, selective dynamics as relax constraints |
 
-To start from your own structure file (CIF, POSCAR, extended XYZ, XSF and other
-ASE-readable formats) or a Materials Project id, run the workstation-side
-converter `python3 python/baandi-convert/baandi_convert.py FILE --skeleton -o input.toml`
-(example 14, [Converting structures](../docs/cli.md#converting-structures)). The
-CLI itself reads only the explicit TOML form.
+Examples 01, 06 and 07 write the structure in the compact `[structure]` form
+(one atom per line); the `[system]` form with `[[system.atoms]]` keeps working
+and gives bit-identical results. The executable reads VASP POSCAR/CONTCAR and
+extended XYZ files itself (`[structure] file = "POSCAR"`, example 15). For CIF
+(with symmetry expansion), XSF and other ASE-readable formats or a Materials
+Project id, run the workstation-side converter
+`python3 python/baandi-convert/baandi_convert.py FILE --compact --skeleton -o input.toml`
+(example 14, [Structure input](../docs/cli.md#structure-input)).
 
 ## Earlier inputs
 

@@ -85,6 +85,49 @@ class Writer(unittest.TestCase):
         self.assertIn('name = "Si2"', text)
 
 
+def parse_compact(text):
+    """Minimal independent reader of the emitted compact subset."""
+    rows = re.search(r"^lattice = \[\n(.*?)\n\]", text, re.S | re.M).group(1)
+    lattice = [[float(x) for x in r.strip(" [],").split(",")] for r in rows.splitlines()]
+    block = re.search(r"^atoms = '''\n(.*?)'''$", text, re.S | re.M).group(1)
+    sites = []
+    for line in block.splitlines():
+        t = line.split()
+        flags = dict(f.split("=", 1) for f in t[4:])
+        sites.append((t[0], [float(x) for x in t[1:4]], flags))
+    unit = re.search(r'^lattice_unit = "(\w+)"$', text, re.M).group(1)
+    return unit, lattice, sites
+
+
+class Compact(unittest.TestCase):
+    def test_compact_form_matches_the_system_form(self):
+        s = bc.structure_from_pmg_dict(SI_PMG, "test")
+        s.provenance = {"source_kind": "test"}
+        unit, lattice, sites = parse_structure(bc.to_toml(s, units="bohr"))
+        cunit, clattice, csites = parse_compact(bc.to_toml(s, units="bohr", compact=True))
+        self.assertEqual((unit, lattice), (cunit, clattice))
+        self.assertEqual([(a, f) for a, f in sites], [(a, f) for a, f, _ in csites])
+        self.assertTrue(all(not flags for _, _, flags in csites))
+        text = bc.to_toml(s, compact=True, skeleton=True)
+        for needle in ["[structure]", 'coordinates = "fractional"', "[structure.provenance]", "[basis]"]:
+            self.assertIn(needle, text)
+        self.assertNotIn("[system]", text)
+
+    def test_flags_from_constraints_and_moments(self):
+        s = bc.structure_from_pmg_dict(SI_PMG, "test")
+        s.provenance = {}
+        s.fixed = [[True, True, True], [False, True, False]]
+        s.magmoms = [0.5, 0.0]
+        _, _, sites = parse_compact(bc.to_toml(s, compact=True))
+        self.assertEqual(sites[0][2], {"fixed": "xyz", "magmom": "0.5"})
+        self.assertEqual(sites[1][2], {"fixed": "y"})
+        # A constraint the compact form cannot carry is reported when it is written.
+        s.fixed = bc.ConversionError("constraint FixBondLength cannot be written")
+        with self.assertRaisesRegex(bc.ConversionError, "FixBondLength"):
+            bc.to_toml(s, compact=True)
+        bc.to_toml(s)  # the [system] form never writes flags
+
+
 class Rejections(unittest.TestCase):
     def test_partial_occupancy_mixed_sites_and_overlap(self):
         partial = json.loads(json.dumps(SI_PMG))
@@ -138,6 +181,12 @@ class MaterialsProjectOffline(unittest.TestCase):
         self.assertNotIn("secret-test-key-123", out + err)
         self.assertEqual(out, (FIXTURES / "si_mp0_converted.toml").read_text())
         self.assertIn('source_sha256 = "' + bc.sha256_file(cache / "mp/mp-0.json") + '"', out)
+        # SI1: the compact form of the same record (committed fixture, read by
+        # tests/all/structure_convert.rs and compared bitwise with [system]).
+        with mock.patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1795651200", "BAANDI_CACHE_DIR": str(cache)}):
+            code, out, err = self.run_main(["--mp", "mp-0", "--compact"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, (FIXTURES / "si_mp0_compact.toml").read_text())
 
     def test_missing_cache_without_key_is_a_clear_error(self):
         code, out, err = self.run_main(["--mp", "mp-149", "--cache-dir", str(self.tmp / "empty")])
@@ -268,6 +317,36 @@ class AseFormats(unittest.TestCase):
         )
         with self.assertRaisesRegex(bc.ConversionError, "occupancy|disorder"):
             bc.read_file(path)
+
+    def test_ase_constraints_and_moments_become_compact_flags(self):
+        from ase import Atoms
+        from ase.build import bulk
+        from ase.constraints import FixAtoms, FixCartesian, FixScaled
+        from ase.io import write
+
+        slab = Atoms(
+            "Al2O2",
+            cell=[[4.1, 0, 0], [0, 3.9, 0], [0, 0, 16.0]],
+            scaled_positions=[[0, 0, 0.1], [0.5, 0.5, 0.1], [0.5, 0, 0.21], [0, 0.5, 0.2]],
+            pbc=True,
+        )
+        slab.set_constraint(
+            [FixAtoms(indices=[0]), FixScaled(3, mask=[False, False, True]), FixCartesian(2, mask=[True, False, False])]
+        )
+        slab.set_initial_magnetic_moments([1.0, 0, 0, -0.5])
+        path = self.tmp / "slab.traj"
+        write(str(path), slab)
+        _, _, sites = parse_compact(bc.to_toml(bc.read_file(path), compact=True))
+        self.assertEqual([f.get("fixed") for _, _, f in sites], ["xyz", None, "x", "z"])
+        self.assertEqual([f.get("magmom") for _, _, f in sites], ["1.0", None, None, "-0.5"])
+        # A lattice constraint that is no Cartesian axis (fcc cell).
+        si = bulk("Si", "diamond", a=5.43)
+        si.set_constraint(FixScaled(1, mask=[True, False, False]))
+        write(str(self.tmp / "si.traj"), si)
+        s = bc.read_file(self.tmp / "si.traj")
+        bc.to_toml(s)
+        with self.assertRaisesRegex(bc.ConversionError, "not a Cartesian axis"):
+            bc.to_toml(s, compact=True)
 
     def test_nonperiodic_needs_assume_periodic(self):
         from ase import Atoms

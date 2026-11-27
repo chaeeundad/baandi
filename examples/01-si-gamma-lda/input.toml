@@ -1,16 +1,16 @@
 # Validate-only in debug tests; run numerical workflows with a release build.
-[system]
+# Compact structure form (docs/cli.md, "Structure input"); the same structure
+# written as [system] with [[system.atoms]] gives bit-identical results.
+[structure]
 name = "Si diamond"
 lattice_unit = "angstrom"
-lattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.0, 0.0, 0.0]
-
-[[system.atoms]]
-species = "Si"
-fractional = [0.25, 0.25, 0.25]
+# Each row is one lattice vector.
+lattice = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]
+coordinates = "fractional"
+atoms = """
+Si  0.00  0.00  0.00
+Si  0.25  0.25  0.25
+"""
 
 [pseudopotentials]
 Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"

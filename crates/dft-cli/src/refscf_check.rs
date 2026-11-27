@@ -99,7 +99,8 @@ pub fn execute(
     {
         return Err(fail("invalid steps/tolerance"));
     }
-    let config = Config::parse(&fs::read_to_string(input).map_err(fail)?).map_err(fail)?;
+    let config =
+        Config::parse_at(&fs::read_to_string(input).map_err(fail)?, input).map_err(fail)?;
     if let Some(comm) = dft_engine::parallel::SharedComm::active() {
         replay(&config, root, steps, tolerance, &comm)
     } else {

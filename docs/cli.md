@@ -20,14 +20,140 @@ internally. `lattice_unit` is `bohr` or `angstrom`. Atoms have a species label
 and fractional coordinates. Relative pseudopotential paths resolve against the
 input file's directory. All structured tables reject unknown fields, except the
 free-form `[system.provenance]` table described under
-[Converting structures](#converting-structures).
+[Converting structures](#converting-structures). The structure can also be
+written in the compact `[structure]` form or read from a POSCAR or extended XYZ
+file, and pseudopotentials can be looked up in a directory; see
+[Structure input](#structure-input).
+
+## Structure input
+
+(SI1, user decision 2026-11-27.) Three equivalent ways to give the structure;
+an input uses exactly one of `[system]` and `[structure]` (both: error).
+
+1. `[system]` with `lattice_vectors` and `[[system.atoms]]` (above): unchanged.
+2. Compact form, one atom per line:
+
+```toml
+[structure]
+name = "Si slab"                 # optional; default the formula, e.g. "Si2"
+lattice_unit = "angstrom"        # or "bohr" (required, P7U explicit units)
+lattice = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]  # rows = vectors
+coordinates = "fractional"       # or "cartesian" (Cartesian in lattice_unit); required
+atoms = '''
+Si  0.00 0.00 0.00
+Si  0.25 0.25 0.25  fixed=xyz  magmom=0.5   # comment
+'''
+```
+
+   Each line: species label, three coordinates, then optional `key=value`
+   flags separated by spaces; `#` starts a comment, blank lines are skipped.
+   Coordinates and lattice entries accept the expression syntax of the
+   explicit form (`1/3`, recorded in `input_expressions`). Flags:
+   - `fixed` = `x`, `y`, `z`, `xy`, `xz`, `yz`, `xyz` (any order) or `true`
+     (= `xyz`) or `false`: Cartesian components frozen by `baandi relax`, the
+     same meaning as `[relax] fixed = [{atom = i, components = [...]}]`.
+     Giving both per-atom flags and `relax.fixed` is an error. Other commands
+     ignore the flags (they are recorded in `results.json`).
+   - `magmom` = initial collinear moment in Bohr magnetons. The engine starts
+     from a uniform polarization, so only the sum of the moments is used: it
+     becomes `spin.initial_moment_seed` (a start value, not a constraint; the
+     sector still comes from `n_up`/`n_down` or `total_moment`). Nonzero
+     moments need `[spin] mode = "collinear"`; giving them together with
+     `spin.initial_moment_seed` is an error. All-zero moments are recorded and
+     need no `[spin]` table.
+   `[structure.provenance]` is accepted and copied like `[system.provenance]`.
+   Unknown keys, flags and coordinate modes are errors.
+3. A structure file, read by the executable itself (Rust readers, no Python,
+   ASE or network):
+
+```toml
+[structure]
+file = "POSCAR"          # relative to the input file
+# format = "poscar"      # or "extxyz"; default from the name: POSCAR*, CONTCAR*,
+#                        # *.vasp, *.poscar -> poscar; *.extxyz, *.xyz -> extxyz
+# frame = -1             # extended XYZ only: zero-based frame, negative from the end (default last)
+# name = "..."           # default the formula
+```
+
+   With `file`, the keys `lattice`, `lattice_unit`, `coordinates` and `atoms`
+   are errors (the file supplies them). Supported formats, implemented from
+   their public descriptions:
+   - **VASP POSCAR/CONTCAR**, VASP 5 layout with the species line (a VASP 4
+     file without it is rejected); scale factor: one positive number, a
+     negative number = target cell volume in Å^3, or three positive factors of
+     the Cartesian x, y, z components; `Direct` or `Cartesian` (also scaled);
+     `Selective dynamics` flags (`T` free, `F` frozen along a lattice
+     direction) become `fixed` flags. A frozen lattice direction i restricts
+     moves to b_i . d = 0; this is a Cartesian component only if the
+     reciprocal direction b_i is parallel to an axis, otherwise the file is
+     rejected (freezing all three directions always works). A species name
+     `Si/hash` (VASP 6) is read as `Si`. Lengths are Å. Velocities after the
+     positions are ignored.
+   - **Extended XYZ**: `Lattice="a1 a2 a3"` (rows, Å) required;
+     `Properties=` (default `species:S:1:pos:R:3`) with `species`, `pos`
+     (Cartesian Å), optional `move_mask` (`L:1` for the whole atom or `L:3`
+     per Cartesian component, `T` = movable) and `initial_magmoms` or
+     `magmoms` (`R:1`, Bohr magnetons, mapped as `magmom`); other columns are
+     skipped. `pbc` must be `T T T` (default when a lattice is present); keys
+     are matched ignoring case; quoted values may contain spaces.
+   CIF (symmetry expansion), XSF and other formats are converted with
+   `baandi-convert` (next section).
+
+The structure is converted to the explicit `[system]` form before anything
+else (Cartesian positions through the same code as explicit `cartesian`
+atoms), so a run from any of the three forms with the same numbers is
+bit-identical (`tests/all/structure_input.rs`, synthetic potential).
+For `[structure]` inputs, `results.json` (run, bands, dos and relax outputs)
+records the following block (inputs with an explicit `[system]` table keep
+their results schema unchanged; the table is its own record):
+
+```text
+"structure": {
+  "schema": "baandi-structure-1",
+  "lattice_rows_bohr": [[...], [...], [...]],
+  "species": ["Si", "Si"],
+  "fractional": [[0.0, 0.0, 0.0], [0.25, 0.25, 0.25]],
+  "fixed": [[true, true, true], null],            // only when flags were given
+  "source": {"kind": "file",                       // "system", "compact" or "file"
+             "coordinates": "fractional",
+             "file": {"path": "POSCAR", "resolved_path": "/abs/POSCAR",
+                      "sha256": "...", "format": "poscar"},
+             "magmoms_mu_b": [...], "initial_moment_seed_from_magmoms": 0.5}
+}
+```
+
+The fractional positions are those the run used (after a `symmetry.mode =
+"auto"` projection, if any); for `relax` they are the start structure.
+
+### Pseudopotential directory
+
+```toml
+[pseudopotentials]
+dir = "/path/to/upf"        # relative paths resolve against the input file
+O = "special/O.pbe-v2.upf"  # an explicit per-species entry always wins
+```
+
+Every species used by the atoms without an explicit entry is looked up in
+`dir`, first by its label, then by the element symbol at the start of the
+label (`Fe1` -> `Fe`). For each name the first rule that matches decides:
+(1) the exact file `<name>.upf`, (2) the exact file `<name>.UPF`, (3) the
+only file called `<name>.upf` ignoring case, (4) the only `*.upf` file
+(ignoring case) whose name starts with `<name>.`, `<name>_` or `<name>-`
+ignoring case (for example `Si.pz-vbc.UPF`). Matching uses the directory
+listing, so it behaves the same on case-insensitive file systems. Several
+candidates at one rule, or none at all, are errors that ask for an explicit
+entry. The resolved file is then read, checked and recorded (path and
+SHA-256) exactly as an explicit entry; `results.json` adds
+`pseudopotential_lookup` with the directory, the path chosen for each species
+and the rule that chose it.
 
 ## Converting structures
 
-The CLI reads structures only in the explicit form above. It never opens CIF,
-POSCAR or other structure files and never contacts a database: compute and MPI
-nodes may have no Python, ASE or network, and a run must not depend on them.
-Conversion is a separate, workstation-side step done by `baandi-convert`
+The CLI reads the explicit and compact forms and, natively, POSCAR and extended
+XYZ files ([Structure input](#structure-input)). It never opens CIF or other
+structure files and never contacts a database: compute and MPI nodes may have
+no Python, ASE or network, and a run must not depend on them. Other formats are
+converted in a separate, workstation-side step by `baandi-convert`
 ([`python/baandi-convert`](../python/baandi-convert/baandi_convert.py), Python 3.9+):
 
 ```sh
@@ -42,6 +168,7 @@ python3 python/baandi-convert/baandi_convert.py POSCAR --skeleton --units bohr -
 | `--format F` | ASE format name (`cif`, `vasp`, `extxyz`, `xsf`, ...); default: ASE detection |
 | `--index I` | image of a multi-structure file; default -1 (the last) |
 | `--reader ase\|pymatgen` | file reader; default ASE |
+| `--compact` | write the compact `[structure]` form (one atom per line, `[structure.provenance]`); ASE constraints (`FixAtoms`, `FixCartesian`, `FixScaled` along an axis) and nonzero initial moments become `fixed=`/`magmom=` flags |
 | `--skeleton` | also write placeholder `[pseudopotentials]`, `[basis]`, `[xc]` and `[scf]` sections with comments |
 | `--units angstrom\|bohr` | lattice unit written; default `angstrom` keeps the file's numbers; `bohr` divides by 0.529177210903 Å (CODATA 2018) |
 | `--name NAME` | `system.name`; default the formula, for example `Si8` |
@@ -102,8 +229,11 @@ tests skip with a note when ASE is missing; no test uses the network) and
 Why a converter and not structure sources in the input: an earlier design let
 the TOML name `file(...)` or `mp(...)` and resolved them at startup. It was
 replaced (user decision, 2026-11-26) because it would make every run, on every
-MPI rank, depend on Python, ASE and possibly network. With the converter the
-input file is complete, self-describing and reproducible by itself.
+MPI rank, depend on Python, ASE and possibly network. The native POSCAR and
+extended XYZ readers (SI1, 2026-11-27) keep that property: they are plain Rust
+in the executable, and `results.json` records the file's SHA-256 and the
+resolved structure, so the run stays reproducible. Formats that need symmetry
+expansion or a database stay in the converter.
 
 Optional SCF fields and defaults:
 

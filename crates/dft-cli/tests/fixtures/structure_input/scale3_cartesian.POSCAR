@@ -1,0 +1,12 @@
+three scale factors
+  1.0 1.1 0.9
+  5.0 0.0 0.0
+  0.0 5.0 0.0
+  0.0 0.0 5.0
+  H O
+  2 1
+Selective dynamics
+Cartesian
+  0.0 0.0 0.0  F F F
+  0.7 0.6 0.1  T T T
+  1.1 1.3 2.2  T F T

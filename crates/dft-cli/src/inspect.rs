@@ -176,7 +176,7 @@ pub fn explain(path: &Path) -> Result<(), Error> {
     if path.extension().is_some_and(|e| e == "toml")
         && !crate::checkpoint_inspect::recognizes(path)?
     {
-        let config = Config::parse_unvalidated(&std::fs::read_to_string(path)?)?;
+        let config = Config::parse_unvalidated_at(&std::fs::read_to_string(path)?, path)?;
         let (_, _scope) = crate::run_config::for_run(&config)?;
         let preliminary = crate::driver_select::preliminary(&config);
         let record = preliminary.json();

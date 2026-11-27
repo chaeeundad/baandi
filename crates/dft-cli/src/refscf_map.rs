@@ -256,7 +256,7 @@ pub fn execute(args: &Arguments) -> Result<(), RunError> {
         return Err(fail("invalid steps/threshold/tolerance"));
     }
     let text = fs::read_to_string(&args.input).map_err(fail)?;
-    let config = Config::parse(&text).map_err(fail)?;
+    let config = Config::parse_at(&text, &args.input).map_err(fail)?;
     let points = config.resolved_points().map_err(fail)?;
     if config.collinear()
         || config.finite_temperature().map_err(fail)?.is_some()

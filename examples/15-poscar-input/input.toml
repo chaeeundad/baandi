@@ -1,0 +1,27 @@
+# Validate-only in debug tests; run numerical workflows with a release build.
+# The structure comes from the VASP POSCAR next to this file, read by the
+# BAANDI executable itself (no Python, no ASE). Selective dynamics F F F
+# freezes atom 1 in `baandi relax`; results.json records the file's SHA-256.
+[structure]
+file = "POSCAR"
+
+[pseudopotentials]
+Si = "/absolute/path/to/pseudo/Si.pz-vbc.UPF"
+
+[basis]
+ecutwfc_ry = 30.0
+kpoints = [[0.0, 0.0, 0.0]]
+
+[xc]
+functional = "lda-pz"
+
+[output]
+forces = true
+
+[relax]
+mode = "ions"
+method = "bfgs"
+max_steps = 40
+force_tol_ha_bohr = 1e-3
+energy_tol_ha = 1e-8
+max_displacement_bohr = 0.1

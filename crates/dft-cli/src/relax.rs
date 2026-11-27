@@ -879,12 +879,17 @@ fn load(path: &Path, identity: &str, n: usize) -> Result<Restart, RunError> {
 /// max-step exhaustion, exit 4 is an SCF/derivative failure, exit 0 converged.
 pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     let bytes = fs::read(input)?;
-    let config = Config::parse(std::str::from_utf8(&bytes).map_err(|e| error(1, e))?)
+    let config = Config::parse_at(std::str::from_utf8(&bytes).map_err(|e| error(1, e))?, input)
         .map_err(|e| error(1, e))?;
     if config.compat.reference() {
         return Err(error(1, crate::config::REFERENCE_SCOPE));
     }
     let mut settings = config.relax.clone().unwrap_or_default();
+    // SI1: per-atom fixed flags of [structure] (or POSCAR selective
+    // dynamics); parse rejects them together with relax.fixed.
+    if settings.fixed.is_empty() {
+        settings.fixed = config.structure_fixed.clone();
+    }
     settings.start_extrapolation = settings.start_extrapolation.effective()?;
     settings.validate(config.system.atoms.len())?;
     // ONEPATH-1/ONEPATH-2 (ADR 0043 item 5): every relaxation mode runs each
@@ -1375,6 +1380,7 @@ fn outputs(
     if let Some(provenance) = ctx.config.system.provenance_json() {
         result["structure_provenance"] = provenance;
     }
+    ctx.config.annotate_structure(&mut result);
     for (name, text) in [
         ("trajectory.extxyz", xyz),
         ("final.xyz", final_xyz),

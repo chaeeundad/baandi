@@ -313,6 +313,7 @@ pub(super) fn execute(
     if let Some(provenance) = config.system.provenance_json() {
         result["structure_provenance"] = provenance;
     }
+    config.annotate_structure(&mut result);
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         converged,

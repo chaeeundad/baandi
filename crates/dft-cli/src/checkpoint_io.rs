@@ -1865,7 +1865,7 @@ fn context(
 > {
     use crate::{config::Config, run::sha256};
     use dft_engine::{OccupationPolicy, ScfProblem, SpeciesPotential};
-    let config = Config::parse(&fs::read_to_string(input)?)?;
+    let config = Config::parse_at(&fs::read_to_string(input)?, input)?;
     config.validate()?;
     if config.symmetry.mode == crate::config::SymmetryMode::Auto {
         return Err(invalid(
@@ -2608,7 +2608,7 @@ struct ReferenceContext {
 impl ReferenceContext {
     fn load(input: &Path, command: crate::driver_select::Command) -> Result<Option<Self>, Error> {
         let bytes = fs::read(input)?;
-        let config = crate::config::Config::parse(std::str::from_utf8(&bytes)?)?;
+        let config = crate::config::Config::parse_at(std::str::from_utf8(&bytes)?, input)?;
         config.validate()?;
         let mut potentials = Vec::new();
         let mut upf_sha256 = Vec::new();

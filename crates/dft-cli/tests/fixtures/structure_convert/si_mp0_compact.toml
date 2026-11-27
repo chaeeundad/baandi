@@ -1,0 +1,30 @@
+# Written by baandi-convert 1; numbers carry 17 significant digits.
+# [structure.provenance] is recorded in results.json and never used for the physics.
+[structure]
+name = "Si2"
+lattice_unit = "angstrom"
+# Each row is one lattice vector.
+lattice = [
+  [0.0, 2.7149999999999999, 2.7149999999999999],
+  [2.7149999999999999, 0.0, 2.7149999999999999],
+  [2.7149999999999999, 2.7149999999999999, 0.0],
+]
+coordinates = "fractional"
+# species, three fractional coordinates, optional fixed=<Cartesian components> magmom=<mu_B>
+atoms = '''
+Si 0.0 0.0 0.0
+Si 0.25 0.25 0.25
+'''
+
+[structure.provenance]
+source_kind = "materials_project"
+mp_id = "mp-0"
+database_version = "synthetic-offline-fixture (not a Materials Project record)"
+retrieved_utc = "2026-11-26T00:00:00Z"
+source_sha256 = "9a5df544936e9f26cf7cdd7f6cba3cf8267a3808ca1ea36c8d3041dcd7438ef5"
+reader = "synthetic"
+reader_version = "hand-written test fixture"
+converter = "baandi-convert"
+converter_version = "1"
+converted_utc = "2026-11-26T00:00:00Z"
+units_written = "angstrom"

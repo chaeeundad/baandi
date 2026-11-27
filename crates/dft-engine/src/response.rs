@@ -56,7 +56,133 @@ pub struct DielectricOptions {
     pub omega0_hartree: Option<f64>,
     /// Empty bands per transition unit (the MPI work unit).
     pub band_block: usize,
+    /// R2-VEL-CHECK diagnostic: which k points get a gauge-invariant dipole
+    /// record ([`DielectricResult::dipoles`]); default none.
+    pub dipole_dump: DipoleDump,
 }
+
+/// k points of the diagnostic dipole record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DipoleDump {
+    Off,
+    /// Index 0 (Gamma of a Gamma-centred mesh) and index 1 (the first other k).
+    GammaAndFirst,
+    All,
+}
+
+/// Bands whose consecutive eigenvalues differ by less than this (Ha) form one
+/// degenerate group of the dipole record.
+pub const DIPOLE_GROUP_TOLERANCE: f64 = 1e-5;
+
+/// One (occupied group V, empty group C) pair of the dipole record at one k.
+/// Band indices 0-based, inclusive. `velocity[a] = sum_{v in V, c in C}
+/// |<u_v| dH_k/dk_a |u_c>|^2` (Ha^2 Bohr^2, the full velocity with the
+/// nonlocal commutator); `position[a] = sum |<u_v|dH/dk_a|u_c>|^2 /
+/// (e_c - e_v)^2` = `sum |<v| r_a |c>|^2` (Bohr^2); `*_local` with the
+/// kinetic velocity k + G only (no [V_NL, r]).
+#[derive(Clone, Debug)]
+pub struct DipoleGroupPair {
+    pub v: (usize, usize),
+    pub c: (usize, usize),
+    /// Group mean eigenvalues (Ha).
+    pub e_v: f64,
+    pub e_c: f64,
+    /// The empty group ends at the last computed band (it may be incomplete).
+    pub c_at_band_limit: bool,
+    pub velocity: [f64; 3],
+    pub position: [f64; 3],
+    pub velocity_local: [f64; 3],
+    pub position_local: [f64; 3],
+}
+
+/// Dipole record of one k point.
+#[derive(Clone, Debug)]
+pub struct KDipoles {
+    pub k_index: usize,
+    pub k_fractional: [f64; 3],
+    pub k_cartesian: [f64; 3],
+    pub pairs: Vec<DipoleGroupPair>,
+}
+
+/// Consecutive runs of `e[range]` with spacing below the group tolerance.
+fn groups(e: &[f64], range: std::ops::Range<usize>) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for i in range {
+        match out.last_mut() {
+            Some(g) if e[i] - e[g.1] < DIPOLE_GROUP_TOLERANCE => g.1 = i,
+            _ => out.push((i, i)),
+        }
+    }
+    out
+}
+
+/// The dipole record of one k (diagnostic; outside the chi0 accumulation).
+#[allow(clippy::too_many_arguments)]
+fn dipole_record(
+    k_index: usize,
+    basis: &dft_basis::PlaneWaveBasis,
+    volume: f64,
+    species: &[Species<'_>],
+    full: &ComplexMatrix,
+    energies: &[f64],
+    occupied: usize,
+    bands: usize,
+) -> Result<KDipoles, ScfError> {
+    let n = full.rows();
+    let pick = |r: std::ops::Range<usize>| -> Result<ComplexMatrix, ScfError> {
+        let mut m = ComplexMatrix::zeros(n, r.len()).map_err(numerical)?;
+        for (j, b) in r.enumerate() {
+            m.column_mut(j).copy_from_slice(full.column(b));
+        }
+        Ok(m)
+    };
+    let (occ, emp) = (pick(0..occupied)?, pick(occupied..bands)?);
+    let momenta: Vec<[f64; 3]> = basis.momenta().iter().map(|g| g.cartesian).collect();
+    let projectors =
+        dft_physics::stress::projector_k_gradient(basis, volume, species).map_err(numerical)?;
+    let full_p = dft_response::velocity::velocity(&momenta, Some(&projectors), &occ, &emp)
+        .map_err(numerical)?;
+    let local_p =
+        dft_response::velocity::velocity(&momenta, None, &occ, &emp).map_err(numerical)?;
+    let mean = |g: (usize, usize)| energies[g.0..=g.1].iter().sum::<f64>() / (g.1 - g.0 + 1) as f64;
+    let mut pairs = Vec::new();
+    for v in groups(energies, 0..occupied) {
+        for c in groups(energies, occupied..bands) {
+            let mut pair = DipoleGroupPair {
+                v,
+                c,
+                e_v: mean(v),
+                e_c: mean(c),
+                c_at_band_limit: c.1 + 1 == bands,
+                velocity: [0.; 3],
+                position: [0.; 3],
+                velocity_local: [0.; 3],
+                position_local: [0.; 3],
+            };
+            for a in 0..3 {
+                for i in v.0..=v.1 {
+                    for j in c.0..=c.1 {
+                        let d2 = (energies[j] - energies[i]).powi(2);
+                        let f = full_p[a][(i, j - occupied)].norm_sqr();
+                        let l = local_p[a][(i, j - occupied)].norm_sqr();
+                        pair.velocity[a] += f;
+                        pair.position[a] += f / d2;
+                        pair.velocity_local[a] += l;
+                        pair.position_local[a] += l / d2;
+                    }
+                }
+            }
+            pairs.push(pair);
+        }
+    }
+    Ok(KDipoles {
+        k_index,
+        k_fractional: basis.k_fractional(),
+        k_cartesian: basis.k_cartesian(),
+        pairs,
+    })
+}
+
 impl DielectricOptions {
     pub fn new(ecut_chi_hartree: f64) -> Self {
         Self {
@@ -67,6 +193,7 @@ impl DielectricOptions {
             frequency_points: 16,
             omega0_hartree: None,
             band_block: 32,
+            dipole_dump: DipoleDump::Off,
         }
     }
 }
@@ -100,6 +227,8 @@ pub struct DielectricResult {
     pub units: usize,
     /// NSCF eigenvalues (Ha) per k.
     pub eigenvalues: Vec<Vec<f64>>,
+    /// Diagnostic dipole records (`options.dipole_dump`), k order; every rank.
+    pub dipoles: Vec<KDipoles>,
 }
 
 /// [`dielectric_with`] on the registered communicator (or serially).
@@ -306,6 +435,24 @@ pub fn dielectric_with<K: Collective>(
             positions_bohr: r,
         })
         .collect();
+    // R2-VEL-CHECK diagnostic (switch RESPONSE_VELOCITY, default full): which
+    // part of d H_k / d k enters the dipoles. `column_l` is the angular
+    // momentum of every projector column of `projector_k_gradient` (species,
+    // atom, projector, m order).
+    let velocity_terms =
+        dft_numerics::switches::choice(dft_numerics::switches::Id::RESPONSE_VELOCITY);
+    let column_l: Vec<usize> = species
+        .iter()
+        .flat_map(|s| {
+            let per_atom: Vec<usize> = s
+                .potential
+                .projectors()
+                .iter()
+                .flat_map(|p| std::iter::repeat_n(p.l(), 2 * p.l() + 1))
+                .collect();
+            std::iter::repeat_n(per_atom, s.positions_bohr.len()).flatten()
+        })
+        .collect();
     let response_miller: Vec<[i32; 3]> = response.vectors().iter().map(|g| g.miller).collect();
     let mut fft = PairFft::new(dims, &response_miller).map_err(numerical)?;
     let mut accumulator = Accumulator::new(n_g, &frequencies, true, threads).map_err(numerical)?;
@@ -315,6 +462,7 @@ pub fn dielectric_with<K: Collective>(
         .map(|m| m..(m + options.band_block).min(bands))
         .collect();
     let mut unit = 0;
+    let mut dipoles = Vec::new();
     for (k, (spectrum, basis)) in spectra.iter().zip(&nscf.bases).enumerate() {
         let n_pw = basis.vectors().len();
         let full = gather(comm, spectrum, n_pw)?;
@@ -331,8 +479,21 @@ pub fn dielectric_with<K: Collective>(
             }
             let miller: Vec<[i32; 3]> = basis.vectors().iter().map(|g| g.miller).collect();
             let momenta: Vec<[f64; 3]> = basis.momenta().iter().map(|g| g.cartesian).collect();
-            let projectors = dft_physics::stress::projector_k_gradient(basis, volume, &species)
+            let mut projectors = dft_physics::stress::projector_k_gradient(basis, volume, &species)
                 .map_err(numerical)?;
+            if velocity_terms == "sp" {
+                // Zero the l >= 2 columns: D couples only equal (l, m), so this
+                // removes exactly their terms from d V_NL / d k.
+                for (c, &l) in column_l.iter().enumerate() {
+                    if l >= 2 {
+                        for m in std::iter::once(&mut projectors.values)
+                            .chain(projectors.gradients.iter_mut())
+                        {
+                            m.column_mut(c).fill(Complex64::default());
+                        }
+                    }
+                }
+            }
             let orbitals = KOrbitals {
                 miller: &miller,
                 coefficients: &full,
@@ -351,7 +512,7 @@ pub fn dielectric_with<K: Collective>(
                         scale,
                         Some(Velocity {
                             momenta: &momenta,
-                            projectors: Some(&projectors),
+                            projectors: (velocity_terms != "local").then_some(&projectors),
                         }),
                     )
                     .map_err(numerical)?;
@@ -359,6 +520,24 @@ pub fn dielectric_with<K: Collective>(
             Ok(())
         })();
         agree(comm, local)?;
+        let dump = match options.dipole_dump {
+            DipoleDump::Off => false,
+            DipoleDump::GammaAndFirst => k < 2,
+            DipoleDump::All => true,
+        };
+        if dump {
+            // Replicated data on every rank: same result (or error) everywhere.
+            dipoles.push(dipole_record(
+                k,
+                basis,
+                volume,
+                &species,
+                &full,
+                &spectrum.eigenvalues,
+                occupied,
+                bands,
+            )?);
+        }
     }
     let chi0 = accumulator.reduce(comm).map_err(numerical)?;
     let norms: Vec<f64> = response
@@ -389,5 +568,6 @@ pub fn dielectric_with<K: Collective>(
         transitions: chi0.transitions,
         units: unit,
         eigenvalues: spectra.iter().map(|b| b.eigenvalues.clone()).collect(),
+        dipoles,
     })
 }

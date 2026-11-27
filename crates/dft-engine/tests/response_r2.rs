@@ -216,6 +216,62 @@ fn dielectric_tensor_and_rank_contract() {
     });
 }
 
+/// R2-VEL-CHECK diagnostic dipole record: results unchanged, every (v, c)
+/// band pair in exactly one group pair, nonnegative sums, the nonlocal
+/// commutator visible, and the r sums consistent with the velocity sums.
+#[test]
+fn dipole_record_is_diagnostic_only_and_complete() {
+    use dft_engine::response::{DIPOLE_GROUP_TOLERANCE, DipoleDump};
+    with_system(|system| {
+        let run = |dump| {
+            dielectric_with(
+                system.input(),
+                std::slice::from_ref(&system.density),
+                &system.points,
+                DielectricOptions {
+                    dipole_dump: dump,
+                    ..options()
+                },
+                &refscf::metric::Serial,
+            )
+            .unwrap()
+        };
+        let off = run(DipoleDump::Off);
+        let all = run(DipoleDump::All);
+        let first = run(DipoleDump::GammaAndFirst);
+        assert!(off.dipoles.is_empty());
+        assert_eq!(bits(&off), bits(&all), "the record must not change results");
+        assert_eq!(all.dipoles.len(), system.points.len());
+        assert_eq!(first.dipoles.len(), 2);
+        let mut nonlocal = 0_f64;
+        for (k, record) in all.dipoles.iter().enumerate() {
+            assert_eq!(record.k_index, k);
+            let e = &all.eigenvalues[k];
+            let pairs: usize = record
+                .pairs
+                .iter()
+                .map(|p| (p.v.1 - p.v.0 + 1) * (p.c.1 - p.c.0 + 1))
+                .sum();
+            assert_eq!(pairs, all.occupied * (all.bands - all.occupied));
+            for p in &record.pairs {
+                assert!(p.v.1 < all.occupied && p.c.0 >= all.occupied && p.c.1 < all.bands);
+                for g in [p.v, p.c] {
+                    assert!(e[g.1] - e[g.0] < DIPOLE_GROUP_TOLERANCE * (g.1 - g.0 + 1) as f64);
+                }
+                for a in 0..3 {
+                    assert!(p.velocity[a] >= 0. && p.velocity_local[a] >= 0.);
+                    // r sums between the bounds set by the extreme gaps.
+                    let (lo, hi) = (e[p.c.0] - e[p.v.1], e[p.c.1] - e[p.v.0]);
+                    assert!(p.position[a] <= p.velocity[a] / (lo * lo) * (1. + 1e-12));
+                    assert!(p.position[a] >= p.velocity[a] / (hi * hi) * (1. - 1e-12));
+                    nonlocal = nonlocal.max((p.velocity[a] - p.velocity_local[a]).abs());
+                }
+            }
+        }
+        assert!(nonlocal > 1e-6, "the fixture must show the nonlocal term");
+    });
+}
+
 #[test]
 fn guards_reject_unsupported_inputs() {
     with_system(|system| {

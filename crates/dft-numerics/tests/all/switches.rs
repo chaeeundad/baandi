@@ -222,7 +222,10 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::VERIFY_FEED), Value::Choice("off"));
     assert_eq!(value(Id::VERIFY_SKIPS), Value::Choice("one"));
     assert_eq!(value(Id::VERIFY_RESPONSE_PREDICTOR), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 77);
+    // R2-VEL-CHECK diagnostic: the physical velocity by default.
+    assert_eq!(value(Id::RESPONSE_VELOCITY), Value::Choice("full"));
+    assert_eq!(value(Id::RESPONSE_DIPOLE_DUMP), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 79);
 }
 
 #[test]

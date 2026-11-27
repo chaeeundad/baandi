@@ -222,6 +222,12 @@ table! {
 
     // History-preserving restart (ticket BREAKTHROUGH-1-RESTART, docs/design/restart-keep.md); default off.
 
+    // Response (dft-engine::response, R2-VEL-CHECK); diagnostic only.
+    RESPONSE_VELOCITY: Kind::Choice { allowed: &["full", "local", "sp"], default: "full" }, "full", "full, local, sp",
+        "R2-VEL-CHECK diagnostic of the q -> 0 dipoles of baandi dielectric: full = d H_k / d k with the kinetic and the nonlocal commutator (the physical velocity); local = kinetic part k + G only (drops [V_NL, r]); sp = nonlocal commutator of the l = 0, 1 projector channels only (drops l >= 2); the Hamiltonian, bands and pair densities are unchanged; never a production setting";
+    RESPONSE_DIPOLE_DUMP: Kind::Choice { allowed: &["off", "gamma", "all"], default: "off" }, "off", "off, gamma, all",
+        "R2-VEL-CHECK diagnostic: baandi dielectric also writes dipoles.csv, the gauge-invariant q -> 0 dipole sums per (occupied, empty) degenerate-group pair (groups: consecutive bands within 1e-5 Ha): sum |<v|dH/dk_a|c>|^2 and sum |<v|r_a|c>|^2, with and without the nonlocal commutator; gamma = mesh k index 0 (Gamma) and 1 (the first other k), all = every k; results unchanged; off writes nothing";
+
     // Physics (dft-physics).
 
     NONLOCAL_BLOCK: Kind::Choice { allowed: &["auto", "on", "off"], default: "auto" }, "auto", "auto, on, off",

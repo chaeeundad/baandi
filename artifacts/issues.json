@@ -211,8 +211,8 @@
     "id": "I-API-GAMMA-LASTBITS",
     "title": "api_identity cli_results_match_pre_facade_binary: gamma density differs from the gen73 binary in the last mantissa bits",
     "severity": "low",
-    "status": "open",
+    "status": "mitigated",
     "phase": "found in gen79/gen81 extended relax line (2026-11-28)",
-    "detail": "dev08: ignored test api_identity cli_results_match_pre_facade_binary fails at api_identity.rs:263 'gamma: density bytes' against the gen73 dft-cli baseline; first doubles differ only in the low bytes (~1e-12 relative or below). Production identity runs (si32, si8 strict, si64) are bit-identical in gen81, and the GaAs symmetry probe converges. Candidates between gen73 and gen79: SYM-START-CHECK start path, summation order in a changed module. To do: bisect gen73..gen81 on this test, decide whether the baseline must be refreshed."
+    "detail": "dev08: ignored test api_identity cli_results_match_pre_facade_binary fails at api_identity.rs:263 'gamma: density bytes' against the gen73 dft-cli baseline; first doubles differ only in the low bytes (~1e-12 relative or below). Production identity runs (si32, si8 strict, si64) are bit-identical in gen81, and the GaAs symmetry probe converges. Candidates between gen73 and gen79: SYM-START-CHECK start path, summation order in a changed module. To do: bisect gen73..gen81 on this test, decide whether the baseline must be refreshed. 2026-11-28 Mac: no code change between 25bf99de and 47c42b26 moves plain gamma bits (identical density bytes on aarch64). Likely dev08 baseline/test build mismatch (target-cpu=native and/or mkl backend vs plain cargo test build). Test now checks /execution/backend first, masks commit ids/switch help, and documents the baseline policy (same flags/features, commit >= RELAX-STOP-RULE). Close after one dev08 run with a matched baseline."
   }
 ]

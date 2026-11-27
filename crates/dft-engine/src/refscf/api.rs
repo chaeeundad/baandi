@@ -631,4 +631,70 @@ mod seeded_symmetry_tests {
                 .is_err()
         );
     }
+
+    /// API-SEED-GRID: a k seed exported by a solve without symmetry lives on
+    /// the natural grid; an off-origin atom makes the prepared group carry
+    /// fractional translations, so the symmetric grid differs and the seed
+    /// must be rejected before any SCF work (never resampled).
+    #[test]
+    fn unsymmetrized_seed_rejected_on_prepared_grid() {
+        let _scope = dft_numerics::switches::RunConfig::from_pairs(&[])
+            .unwrap()
+            .enter();
+        let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.125; 3])];
+        let pp = crate::pool_fixture::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+        let potentials = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let points = vec![KPoint {
+            fractional: [0.; 3],
+            weight: 1.,
+        }];
+        let options = ScfOptions {
+            cutoff_hartree: 1.,
+            bands: Some(2),
+            max_iterations: 100,
+            ..Default::default()
+        };
+        let input = || StartInput {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &potentials,
+            options: &options,
+        };
+        let mut plain = Request::new(Profile::default(), points.clone());
+        plain.save_ionic_seed = true;
+        let plain = solve(input(), plain).unwrap();
+        let seed = plain.ionic_seed.unwrap();
+        assert!(matches!(seed, IonicSeed::K(_)));
+        let natural: [usize; 3] = plain
+            .run
+            .into_scalar()
+            .unwrap()
+            .outcome
+            .result
+            .density
+            .shape()
+            .try_into()
+            .unwrap();
+        let prepared = symmetry::Prepared::new(&cell, &atoms, &points, 1e-7, false).unwrap();
+        assert!(
+            prepared
+                .operations(false)
+                .iter()
+                .any(|o| o.translation.iter().any(|t| *t != 0.))
+        );
+        assert_ne!(prepared.grid(&input()).unwrap(), natural);
+        let mut seeded = Request::new(Profile::default(), points.clone());
+        seeded.seed = Some(seed);
+        seeded.symmetry = Some(prepared);
+        assert!(matches!(
+            solve(input(), seeded),
+            Err(ScfError::InvalidInput(
+                "reference k ionic seed: incompatible cell, basis, grid, mesh or charge"
+            ))
+        ));
+    }
 }

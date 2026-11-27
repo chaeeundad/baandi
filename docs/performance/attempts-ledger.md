@@ -4840,6 +4840,96 @@ Remaining per-pass costs (not changed): the PBE XC re-evaluation and GGA stress 
 Lesson: post-SCF derivatives inherited per-k operator builds and per-G scalar loops from the first correct version;
 the band sum belongs in GEMMs and the strain/position derivative should contract a band-summed field, not each band.
 
+## GD2-DERIV-XC — joint force + stress pass, split derivative PBE, tabulated local/core shells (2026-11-27; Mac evidence, dev08 pending)
+
+Trigger (relayed, dev08 MPI8 gen66 final MP campaign, 26 equal-k entries): BAANDI forces+stress 146.5 s against QE
+74.6 s; after GD1 the derivative stages left are xc / core_xc / shells (gen60 stage_seconds, per rank): Sr forces
+core_xc 0.373, stress xc 0.714; Hg 0.49 / 0.93; Ta6Zn7 forces core_xc 1.32 + shells 0.86, stress shells 2.74 + xc 2.17.
+Diagnosis (C = code, O = Mac): (a) the CLI and `refscf::api` evaluate forces, then stress, each from scratch: density
+transform, local/core shells, core density, the full PBE evaluation with the core (forces: for the NLCC term; stress:
+again), the core-potential transform, projector tables and a complete k pass with a per-k basis build; (b) the stress
+XC term evaluated PBE twice (the potential, then `gga::stress_metric` with its own three gradients and a second
+xcx call on the same density); (c) every rank evaluated the pointwise PBE (xcx dual-number autodiff, two functionals)
+on the whole grid; (d) the serial GGA gradient re-did the same forward FFT for each of the three axes; (e) the
+local/core shell values cost one ~1500-point quadrature per distinct |G| per function (a low-symmetry cell has about
+half as many distinct |G| as density-sphere G vectors), split over ranks but still the largest stage on Ta6Zn7.
+Changes (switch table 97 -> 100; all switches default on, off = former behaviour):
+1. `DERIV_JOINT` (bit-identical): `stress::forces_and_frozen_stress` computes both from one pass (one validate, one
+   density transform, shells with slopes, one core density, one XC evaluation, one core-potential transform, slope
+   tables, one k pass). `nonlocal_k_derivatives` now always returns the forces of its projections (also with stress),
+   so the k pass costs one kernel call per k. `refscf::api::Observables` runs it from the force evaluator when stress
+   is also requested and hands the frozen stress to the stress evaluator of the same state (keyed by addresses; the
+   Pulay scan, when selected, runs as before). A failing joint pass falls back to the separate force pass. Stress
+   record: one stage `joint_with_forces` 0 s; the force record carries the joint stage clocks. Oracle callers and the
+   relax adapter (`evaluate_forces_with_operations`) keep the separate passes.
+2. `DERIV_XC_SPLIT` (bit-identical): `gga::evaluate_for_derivatives` (unpolarized PBE, library or original-PW92
+   correlation) forms the three gradients from one forward FFT, evaluates xcx on a contiguous point block per rank
+   (`gga::PointSplit`, engine adapter = one allgatherv of n(x+c)exc, x+c vrho, x+c vsigma per point with a status
+   value), sums the energy over the gathered values in the former order, and returns the GGA stress metric from the
+   same gradients and vsigma (withheld when screening changed a point, then the former metric call runs).
+   `ScfOptions::evaluate_xc_for_derivatives` mirrors `evaluate_xc` (core, floor, screening scope, mask, valence
+   integral). LDA and spin PBE keep the former evaluation.
+3. `DERIV_SHELL_TABLES` (rounding class): local/core shell values and slopes from one GK14-style table per
+   (potential, function) (h 0.005 Bohr^-1, 8-point Lagrange, j0/j1 parity); only the q-dependent radial integral
+   (`ShellEvaluator::integral`) is tabulated, the analytic Gaussian-Coulomb term is added exactly
+   (`ShellEvaluator::finish`; `eval` == `finish(integral)` bit for bit). Node values split over ranks (one
+   allgatherv). Engaged only when the node count is below the distinct-|G| count (general cost rule; Ru hcp 80 Ry and
+   the synthetic fixtures keep the exact values).
+4. Kinetic stress takes the delivered matrix columns by reference (no per-k orbital copy; bit-identical).
+5. CLI spin/FD path: launch-profile marks (`scf_return`, `volumetric_write`, `early_record_write`,
+   `derivatives_forces/stress`, `results_write`, `launch` record), only with PHASE_PROFILE on.
+Accuracy evidence (Mac):
+- Bit identity (`dft-engine/tests/gd2_derivatives.rs`): synthetic PBE + NLCC, skewed cell, 5 complex k, screening off
+  and on: legacy arm (three switches off) = split forces/stress = joint pass, per term, and equal on 2/3/7 simulated
+  ranks; FD reference delivery through `refscf::api::solve` (deferred forces+stress): free energy, forces and stress
+  bits equal between arms, stress record `joint_with_forces`. `dft-physics` `gd2_pbe_for_derivatives_bit_identical`:
+  potential, energy, integral and metric bits equal to `gga::evaluate`/`evaluate_pw92` + `stress_metric(_pw92)` on
+  1/2/3/7 simulated ranks, screening off/on, with a screened point (metric withheld). Kernel test: stress-mode forces
+  equal force-mode forces bit for bit.
+- Shell tables: integral error relative to its own peak <= 3.4e-16 (synthetic, 498 shells), <= 6.4e-16 over 19 real
+  PseudoDojo files (Sr Ta Zn Ru Hg K B Ge Te Si O Fe Ir I Au Al Ti Ga Hf; 4000 off-node q in (0, 20] Bohr^-1; test
+  `gd2_shell_tables_real`); engine shell values (18496 values) within 2.2e-16 absolute of the quadrature and
+  bit-identical on 2/3/7 ranks (`shell_tables_rank_independent_and_close_to_quadrature`).
+- Real runs (CLI, PseudoDojo PBE, FD 0.2 eV, serial): Ru hcp 80 Ry 6x6x4 (39 k): default vs legacy arm forces and
+  stress bit-identical (tables not engaged). TaZn2 skewed triclinic (3 atoms, 60 Ry, 2x2x2 -> 8 k, 36 bands, tables
+  engaged): max|dF| 8.8e-15 Ha/Bohr (|F| 0.17), max|dS| 1.9e-16 Ha/Bohr^3 (|S| 2.3e-3); tables-off arm bit-identical to
+  legacy. Si2 FD matrices unchanged (force 2.03e-8, stress 5.6e-11, R7A <= 4.0e-10, same as GD1).
+Timing (O, Mac, loaded host load 7-13, one run per arm, same binary; seconds):
+
+| case | legacy forces + stress | GD2 joint | notes |
+|---|---|---|---|
+| Ru hcp 39 k (serial) | 0.189 + 0.417 = 0.606 | 0.440 | no tables; shells 0.163 once instead of 0.099 + 0.163 |
+| TaZn2 8 k (serial) | 0.889 + 1.807 = 2.696 | 0.922 | shells 0.749 + 1.450 -> 0.518 |
+| Sr fcc 8x8x8 (29 k, serial) | - | 0.312 | whole run 15.2 s; derivative 2 % |
+
+Stage timing on a Ta6Zn7-like grid (O; test `forces::gd2_timing_tests::gd2_stage_timing`, hexagonal 13.3/9.3 Bohr,
+13 atoms Ta6Zn7 PseudoDojo PBE+NLCC, 40 Ha, grid 75x75x54, 137657 density G, 8159 distinct |G|; max over simulated
+ranks, threads on one host):
+
+| arm | shells (with slopes) | core density | force XC | stress XC + metric |
+|---|---|---|---|---|
+| P=1 legacy / GD2 | 1.282 / 0.607 | 0.084 / 0.082 | 0.150 / 0.184 | 0.205 / 0.137 |
+| P=8 legacy / GD2 | 0.209 / 0.104 | 0.148 / 0.118 | 0.255 / 0.117 | 0.304 / 0.127 |
+
+Second run (host load 32-40): P=1 shells 1.321 / 0.457, force XC 0.100 / 0.125, stress 0.200 / 0.161; P=8 shells
+0.220 / 0.104, force XC 0.178 / 0.166, stress 0.353 / 0.117: the shell and stress columns repeat, the force XC column
+is within Mac thread noise (simulated ranks are threads on a loaded host; dev08 decides).
+With the joint pass the force XC column is not paid at all when stress is also requested.
+Expected dev08 (E, from gen60 stages): Ta6Zn7 forces stages (shells 0.86, core_xc 1.32, nonlocal pass) disappear into
+the stress pass; stress shells 2.74 -> table build (~30k quadratures / 8 ranks, ~0.1-0.3 s); stress xc 2.17 -> about
+1/8 of the pointwise part plus the replicated FFTs (~0.4-0.6 s); Sr/Hg: forces core_xc (0.37/0.49) gone, stress xc
+(0.71/0.93) -> ~0.15-0.25.
+Not changed (backlog): the replicated full-grid FFTs of the derivative XC (10 per evaluation) and of the local/core
+terms; spin PBE (`SpinXc`) not split; per-k basis rebuild (now once per k in the joint pass, not twice); reuse of
+the SCF's final XC potential (not exact: the last map's potential belongs to the mixed input density, not the
+delivered density, so it was not attempted). Small-wall metals (Sr 1.78x, KB6 1.95x): on the Mac the Sr run is 15.2 s,
+engine 14.86 s, derivatives 0.31 s, outputs (early record 7 ms, volumetric 9 ms, results 6 ms), input parse 51 ms,
+binary hash 53 ms; the fixed costs that matter are in the SCF (setup 1.0 s, verification 1.6 s), not in the
+derivatives or output; dev08 launch records (now available on the spin/FD path) should confirm before any change.
+Lesson: two independently correct derivative passes repeat every field they share; when both are requested the
+shared intermediates (density transform, shells, core density, XC, core potential, projections) are computed once,
+and the expensive pointwise functional is distributable without any rounding change.
+
 ## GF2-FD-SCF-COST — FD SCF engine cost: decomposition, occupation-weighted empty-band threshold (GK13), buffer test (2026-11-27; rounding/trajectory class, dev08 pending)
 
 Trigger (relayed dev08 MPI8 gen60, engine s vs QE electrons s): Ru 64 k 6.47 vs 5.69; Hg 76 k 59.9 (verification ~7)

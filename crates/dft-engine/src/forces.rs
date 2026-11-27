@@ -372,14 +372,16 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         let potential = if densities.len() == 1 {
             state
                 .options
-                .evaluate_xc(
+                .evaluate_xc_for_derivatives(
                     &density,
                     Some(&core_density),
                     &mut scratch,
                     state.cell,
                     &mut fft,
                     state.density_floor,
+                    false,
                 )?
+                .0
                 .potential
         } else {
             use dft_physics::spin::{SpinFunctional, SpinXc, SpinXcResponse};
@@ -486,10 +488,48 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     )?;
     band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
     lap("nonlocal", &mut timings);
+    let symmetrize_clock = std::time::Instant::now();
     for term in [&mut ewald, &mut local, &mut nonlocal, &mut core] {
         symmetrize(state.cell, term, state.symmetry)?;
     }
-    let values: Vec<[f64; 3]> = (0..state.atoms.len())
+    let mut result = assemble(
+        Validated {
+            verification,
+            ledger,
+            quantity,
+        },
+        ewald,
+        local,
+        nonlocal,
+        core,
+        band_passes,
+        timings,
+        start,
+    )?;
+    result
+        .timings
+        .push(("symmetrize", symmetrize_clock.elapsed().as_secs_f64()));
+    Ok(result)
+}
+
+/// Total forces of the symmetrized terms and the force record.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn assemble(
+    validated: Validated,
+    ewald: Vec<[f64; 3]>,
+    local: Vec<[f64; 3]>,
+    nonlocal: Vec<[f64; 3]>,
+    core: Vec<[f64; 3]>,
+    band_passes: usize,
+    timings: Vec<(&'static str, f64)>,
+    start: std::time::Instant,
+) -> Result<ForceResult, ScfError> {
+    let Validated {
+        verification,
+        ledger,
+        quantity,
+    } = validated;
+    let values: Vec<[f64; 3]> = (0..ewald.len())
         .map(|i| std::array::from_fn(|a| ewald[i][a] + local[i][a] + nonlocal[i][a] + core[i][a]))
         .collect();
     if values.iter().flatten().any(|f| !f.is_finite()) {
@@ -500,7 +540,6 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         return Err(ScfError::NonFinite);
     }
     let maximum_absolute_component = values.iter().flatten().map(|v| v.abs()).fold(0.0, f64::max);
-    lap("symmetrize", &mut timings);
     Ok(ForceResult {
         verification,
         ledger,
@@ -651,7 +690,8 @@ pub(crate) fn projector_tables(
 /// communicator the (potential, function, shell) units are split into
 /// contiguous rank blocks and combined by one allgatherv, so every rank holds
 /// the identical values for any rank count. `None` when `DERIV_SHELLS` is off.
-pub(crate) fn shell_values(
+#[doc(hidden)]
+pub fn shell_values(
     species: &[Species<'_>],
     density_basis: &dft_basis::PlaneWaveBasis,
     volume: f64,
@@ -688,6 +728,20 @@ pub(crate) fn shell_values(
                 units.push((p, ShellKind::CoreSlope));
             }
         }
+    }
+    // GD2: tables only when they need fewer quadratures than the shells
+    // (node count below the distinct-|G| count; small or symmetric cells
+    // keep the exact per-shell values).
+    if dft_numerics::switches::on(dft_numerics::switches::Id::DERIV_SHELL_TABLES)
+        && let Some(q_max) = shells.iter().copied().reduce(f64::max)
+        && dft_upf::radial::RadialTransformTable::nodes(
+            q_max,
+            dft_upf::radial::RADIAL_TABLE_STEP,
+            dft_upf::radial::RADIAL_TABLE_POINTS,
+        )
+        .is_ok_and(|nodes| nodes < shells.len())
+    {
+        return tabulated_shell_values(&potentials, &units, &shells, volume);
     }
     let total = units.len() * shells.len();
     let comm = crate::parallel::SharedComm::active();
@@ -743,6 +797,125 @@ pub(crate) fn shell_values(
     for (u, v) in all.into_iter().enumerate() {
         let ((p, kind), q) = (units[u / shells.len()], shells[u % shells.len()]);
         out.insert(potentials[p], kind, q, v);
+    }
+    Ok(Some(out))
+}
+
+/// GD2 (`DERIV_SHELL_TABLES`): the shell values of [`shell_values`] from one
+/// uniform radial table per (potential, function) instead of one quadrature
+/// per distinct |G|. The table holds the q-dependent radial integral alone
+/// (`ShellEvaluator::integral`: the short-range local part without the
+/// analytic Gaussian-Coulomb term, the core integral without its factors) on
+/// the GK14 nodes q_i = i h (h 0.005 Bohr^-1, 8-point Lagrange, parity of j0
+/// or j1), up to the largest shell; each shell value is
+/// `ShellEvaluator::finish` of the interpolated integral, so only the smooth
+/// integral is interpolated. Node values are the exact quadrature, split over
+/// the ranks in contiguous blocks and shared by one allgatherv (bit-identical
+/// for every rank count); every rank then interpolates all shells. Rounding
+/// class against the per-shell quadrature. `None` on any failure, as
+/// [`shell_values`] (the kernels then evaluate the shells themselves).
+fn tabulated_shell_values<'p>(
+    potentials: &[&'p dft_upf::Pseudopotential],
+    units: &[(usize, dft_physics::radial_shells::ShellKind)],
+    shells: &[f64],
+    volume: f64,
+) -> Result<Option<dft_physics::radial_shells::RadialShellValues>, ScfError> {
+    use dft_mpi::Collective;
+    use dft_physics::radial_shells::{RadialShellValues, ShellEvaluator, ShellKind};
+    use dft_upf::radial::{
+        RADIAL_TABLE_POINTS as POINTS, RADIAL_TABLE_STEP as STEP, RadialTransformTable,
+    };
+    let mut out = RadialShellValues::default();
+    let Some(q_max) = shells.iter().copied().reduce(f64::max) else {
+        return Ok(Some(out));
+    };
+    let nodes = RadialTransformTable::nodes(q_max, STEP, POINTS)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let total = units.len() * nodes;
+    let comm = crate::parallel::SharedComm::active();
+    let (rank, size) = comm.as_ref().map_or((0, 1), |c| (c.rank(), c.size()));
+    let counts = dft_mpi::block_counts(total, size);
+    let first = dft_mpi::block_displacements(&counts)[rank];
+    let mut local = vec![0.0; 1 + counts[rank]];
+    let mut evaluators: Vec<Option<ShellEvaluator<'p>>> = potentials.iter().map(|_| None).collect();
+    let evaluator = |p: usize, evaluators: &mut [Option<ShellEvaluator<'p>>]| {
+        if evaluators[p].is_none() {
+            evaluators[p] = ShellEvaluator::new(potentials[p], volume).ok();
+        }
+        evaluators[p].is_some()
+    };
+    for (slot, u) in local[1..].iter_mut().zip(first..first + counts[rank]) {
+        let ((p, kind), i) = (units[u / nodes], u % nodes);
+        // A failure is reported through the status value, never by an early
+        // return that would leave the other ranks in the gather.
+        if !evaluator(p, &mut evaluators) {
+            local[0] = 1.0;
+            break;
+        }
+        match evaluators[p]
+            .as_mut()
+            .expect("evaluator")
+            .integral(kind, i as f64 * STEP)
+        {
+            Ok(Some(v)) if v.is_finite() => *slot = v,
+            _ => {
+                local[0] = 1.0;
+                break;
+            }
+        }
+    }
+    let values = if let Some(comm) = &comm {
+        let counts: Vec<_> = counts.iter().map(|c| 1 + c).collect();
+        let mut all = vec![0.0; counts.iter().sum()];
+        comm.allgatherv_f64(&local, &counts, &mut all)
+            .map_err(|e| ScfError::Numerical(format!("derivative shell table gather: {e}")))?;
+        let mut values = Vec::with_capacity(total);
+        let mut at = 0;
+        for count in counts {
+            if all[at] != 0.0 {
+                return Ok(None);
+            }
+            values.extend_from_slice(&all[at + 1..at + count]);
+            at += count;
+        }
+        values
+    } else {
+        if local[0] != 0.0 {
+            return Ok(None);
+        }
+        local.split_off(1)
+    };
+    for (c, &(p, kind)) in units.iter().enumerate() {
+        let parity = match kind {
+            ShellKind::LocalValue | ShellKind::CoreValue => 0,
+            ShellKind::LocalSlope | ShellKind::CoreSlope => 1,
+        };
+        let Ok(table) = RadialTransformTable::from_nodes(
+            parity,
+            q_max,
+            STEP,
+            POINTS,
+            values[c * nodes..(c + 1) * nodes].to_vec(),
+        ) else {
+            return Ok(None);
+        };
+        if !evaluator(p, &mut evaluators) {
+            return Ok(None);
+        }
+        let e = evaluators[p].as_mut().expect("evaluator");
+        for &q in shells {
+            let value = match table.eval(q) {
+                Some(integral) => e.finish(kind, q, integral),
+                None => match e.eval(kind, q) {
+                    Ok(Some(v)) => Ok(v),
+                    _ => return Ok(None),
+                },
+            };
+            match value {
+                Ok(v) if v.is_finite() => out.insert(potentials[p], kind, q, v),
+                _ => return Ok(None),
+            }
+        }
     }
     Ok(Some(out))
 }
@@ -1133,7 +1306,7 @@ pub fn nonlocal_band_first(
 
 /// Polar-vector transformation A R A^-1 and the SCF atom permutation. No
 /// optimizer constraint or subtraction of a residual net force is performed.
-fn symmetrize(
+pub(crate) fn symmetrize(
     cell: &Cell,
     values: &mut Vec<[f64; 3]>,
     ops: &[dft_geometry::symmetry::SymmetryOperation],
@@ -1169,6 +1342,10 @@ fn symmetrize(
     *values = result;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "gd2_timing_tests.rs"]
+mod gd2_timing_tests;
 
 #[cfg(test)]
 mod tests {

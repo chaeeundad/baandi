@@ -91,6 +91,25 @@ pub struct Observables {
     prepared: bool,
     forces_done: bool,
     stress_done: bool,
+    /// GD2 (`DERIV_JOINT`): the frozen-Miller stress computed in the joint
+    /// pass of the forces, with the identity of the state it belongs to;
+    /// consumed by the stress evaluator of the same state.
+    joint_stress: Option<(JointKey, crate::stress::StressResult)>,
+}
+
+/// Addresses of the borrowed state of a joint derivative pass.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct JointKey([usize; 5]);
+impl JointKey {
+    fn new<T>(input: &StartInput<'_>, electronic: &T) -> Self {
+        Self([
+            electronic as *const T as usize,
+            input.cell as *const _ as usize,
+            input.atoms.as_ptr() as usize,
+            input.potentials.as_ptr() as usize,
+            input.options as *const _ as usize,
+        ])
+    }
 }
 impl Observables {
     /// Export continuation at the adapter's delivery boundary, using the same
@@ -173,13 +192,24 @@ impl Observables {
         })
     }
 
+    /// The joint-pass stress of the state `key`, if any (always cleared).
+    fn take_joint(&mut self, key: JointKey) -> Option<crate::stress::StressResult> {
+        self.joint_stress
+            .take()
+            .and_then(|(k, s)| (k == key).then_some(s))
+    }
+
     pub fn evaluate_forces(
         &mut self,
         input: StartInput<'_>,
         result: &ScfResult,
     ) -> Result<(), ScfError> {
         if self.requested.forces && !self.forces_done {
-            self.forces = Some(crate::forces(&self.state(input, result)?)?);
+            let key = JointKey::new(&input, result);
+            let state = self.state(input, result)?;
+            let (forces, joint) = forces_maybe_joint(&state, self.requested.stress)?;
+            self.forces = Some(forces);
+            self.joint_stress = joint.map(|s| (key, s));
             self.forces_done = true;
         }
         Ok(())
@@ -193,9 +223,11 @@ impl Observables {
         run: &electronic::Run,
     ) -> Result<(), ScfError> {
         if self.requested.forces && !self.forces_done {
-            self.forces = Some(crate::forces(
-                &self.view(input, crate::ElectronicState::Reference(run))?,
-            )?);
+            let key = JointKey::new(&input, run);
+            let state = self.view(input, crate::ElectronicState::Reference(run))?;
+            let (forces, joint) = forces_maybe_joint(&state, self.requested.stress)?;
+            self.forces = Some(forces);
+            self.joint_stress = joint.map(|s| (key, s));
             self.forces_done = true;
         }
         Ok(())
@@ -213,11 +245,14 @@ impl Observables {
                     "reference API: evaluate forces before stress",
                 ));
             }
+            let key = JointKey::new(&input, run);
+            let joint = self.take_joint(key);
             let state = self.view(input, crate::ElectronicState::Reference(run))?;
-            self.stress = Some(crate::stress::stress_with(
+            self.stress = Some(crate::stress::stress_with_frozen(
                 &state,
                 self.symmetry.as_ref(),
                 self.requested.pulay_assessment,
+                joint,
             )?);
             self.stress_done = true;
         }
@@ -269,16 +304,39 @@ impl Observables {
                     "reference API: evaluate forces before stress",
                 ));
             }
+            let key = JointKey::new(&input, result);
+            let joint = self.take_joint(key);
             let state = self.state(input, result)?;
-            self.stress = Some(crate::stress::stress_with(
+            self.stress = Some(crate::stress::stress_with_frozen(
                 &state,
                 self.symmetry.as_ref(),
                 self.requested.pulay_assessment,
+                joint,
             )?);
             self.stress_done = true;
         }
         Ok(())
     }
+}
+
+/// GD2: forces, and with `stress` requested the frozen-Miller stress of the
+/// same state from one joint pass when `DERIV_JOINT` applies. A failing joint
+/// pass falls back to the separate force pass (so a stress-only failure
+/// still delivers forces, and the stress evaluator reports its own error).
+fn forces_maybe_joint(
+    state: &crate::ForceState<'_>,
+    stress: bool,
+) -> Result<
+    (
+        crate::forces::ForceResult,
+        Option<crate::stress::StressResult>,
+    ),
+    ScfError,
+> {
+    if stress && let Ok(Some((forces, stress))) = crate::stress::forces_and_frozen_stress(state) {
+        return Ok((forces, Some(stress)));
+    }
+    Ok((crate::forces(state)?, None))
 }
 
 /// Same input and request on every rank. Existing drivers select the active
@@ -344,6 +402,7 @@ async fn solve_continuation(
             symmetry: request.symmetry,
             prepared: false,
             forces_done: false,
+            joint_stress: None,
             stress_done: false,
         },
         ionic_seed: None,

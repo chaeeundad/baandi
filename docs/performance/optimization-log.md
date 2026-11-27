@@ -1,5 +1,22 @@
 # Optimization log (newest first)
 
+## GD2-DERIV-XC — joint force + stress pass, split derivative PBE, tabulated shells (2026-11-27; Mac evidence, dev08 pending)
+
+Base main fb419f49 (gen66); branch task/GD2-DERIV-XC uncommitted. Motivation: dev08 gen60/gen66 relays (ledger
+GD2-DERIV-XC): after GD1 the derivative time sat in forces core_xc / shells and stress xc / shells. Change: switches
+`DERIV_JOINT` (bit-identical; one pass for forces and stress through `refscf::api`), `DERIV_XC_SPLIT` (bit-identical;
+gradients from one forward FFT, pointwise PBE split over ranks with one allgatherv, stress metric from the same
+evaluation), `DERIV_SHELL_TABLES` (rounding class; local/core shell integrals from radial tables when nodes < distinct
+|G|). Files: dft-physics gga.rs, radial_shells.rs, stress.rs, kinetic.rs; dft-engine forces.rs, stress.rs,
+functional.rs, refscf/api.rs; dft-cli run.rs (spin/FD launch marks); switches 97 -> 100. Not derived from a QE note.
+Evidence and numbers: ledger GD2-DERIV-XC (bit identity of the joint and split passes on 1/2/3/7 ranks; table error
+<= 6.4e-16 relative over 19 PseudoDojo files; TaZn2 max|dF| 8.8e-15, max|dS| 1.9e-16; Mac derivative wall Ru 0.606 ->
+0.440 s, TaZn2 2.696 -> 0.922 s, one run per arm). Commands: `baandi run --output-dir <dir> <case>.toml` with
+`BAANDI_DERIV_SHELL_TABLES=off BAANDI_DERIV_XC_SPLIT=off BAANDI_DERIV_JOINT=off` for the legacy arm (inputs in
+`rust-dft-wt/GD2-DERIV-XC-runs/`); `cargo test --release -p dft-engine --test gd2_derivatives`;
+`DFT_NC_DIR=... cargo test --release -p dft-physics --test all gd2_ -- --include-ignored --nocapture`;
+`DFT_NC_DIR=... cargo test --release -p dft-engine --lib gd2_stage_timing -- --ignored --nocapture`.
+
 ## GF2-FD-SCF-COST — occupation-weighted empty-band threshold on the spin/FD map (2026-11-27; Mac evidence, dev08 pending)
 
 Baseline main a5c291a1 (gen61), baseline binary sha256 fc824fa2... (Mac release, pure). Profile/count that motivated

@@ -206,7 +206,9 @@ impl Config {
             "detected_operations_count": self.symmetrization.as_ref().map(|r| r.detected_operations_count),
             "dropped_operations": self.symmetrization.as_ref().filter(|r| r.dropped_for_grid > 0).map(|r| serde_json::json!({
                 "count": r.dropped_for_grid,
-                "reason": format!("fractional translations/rotations do not permute the explicit basis.fft_grid {:?}; the largest grid-preserving subgroup is used (ADR 0049, GS1C)", self.basis.fft_grid.unwrap_or_default()),
+                "rotation_count": r.dropped_for_grid_rotation,
+                "translation_count": r.dropped_for_grid_translation,
+                "reason": format!("{} operations rotate the explicit basis.fft_grid {:?} off itself (n_i R_ij / n_j not an integer: the rotation mixes axes whose dimensions do not divide each other) and {} have a fractional translation that is not a multiple of the grid spacing; the largest grid-preserving subgroup is used (ADR 0049, GS1C/GS1D)", r.dropped_for_grid_rotation, self.basis.fft_grid.unwrap_or_default(), r.dropped_for_grid_translation),
             })),
             "input_symmetrization": self.symmetrization.as_ref().map(|r| serde_json::json!({
                 "policy": "ADR 0049: lattice and positions projected onto the group detected at tolerance_bohr; refused above it",

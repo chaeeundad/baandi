@@ -1285,7 +1285,11 @@ operations do not permute that grid (for example a 1/2 or 1/4 fractional
 translation on an odd dimension), the largest subgroup that does is kept, the
 input is projected onto that subgroup only, preflight prints a
 `symmetry.fft_grid` warning, and `results.json.symmetry.dropped_operations`
-records the count and reason (GS1C, ADR 0049; QE-like). Omit `basis.fft_grid`
+records the count, split into `rotation_count` (the rotation mixes axes whose
+dimensions do not divide each other, n_i R_ij / n_j not an integer) and
+`translation_count` (n_i tau_i not an integer), with the reason (GS1C/GS1D,
+ADR 0049). The rotation condition is stricter than QE's, which keeps such
+operations; a grid where the mixed dimensions divide each other keeps them. Omit `basis.fft_grid`
 to get the full group on automatic compatible dimensions.
 FFT-friendly rounding applies only to automatic selection: the existing chooser
 selects the smallest compatible 2/3/5-smooth dimensions along each axis, using a

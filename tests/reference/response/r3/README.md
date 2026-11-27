@@ -52,7 +52,12 @@ Known convention differences to check in the ABINIT log, not to tune away:
    If the ABINIT log prints the same `npweps` for every q, ABINIT uses one
    `|G|` sphere for all q: rerun BAANDI with `[rpa] response_sphere = "G"`
    (one Miller set, v still `4 pi/|q+G|^2`) for the matched comparison and
-   record which convention was used.
+   record which convention was used. In G mode E_c(q) depends on the q
+   vector: BAANDI evaluates every mesh q at its first-Brillouin-zone image
+   (mean over tied images on zone faces; ADR 0055 item 2, R3-QIMAGE) and
+   `rpa_q.csv` prints that vector. A per-q comparison must use the same
+   vector on the ABINIT side (ABINIT's printed q may be a different G0
+   image; only the shortest-image value is comparable).
 2. q -> 0. BAANDI averages the k.p head/wings limit over a Lebedev set;
    ABINIT evaluates the head at a small q along `gw_qlwl`. For the cubic
    cases (Si, C, LiF) eps_M is isotropic and the two agree in the limit;

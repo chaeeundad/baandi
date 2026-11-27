@@ -422,7 +422,7 @@ pub fn execute(
         "q_symmetry": symmetry_name,
         "q_reduction": result.q_reduction,
         "irreducible_q": result.q_points.len(),
-        "response_sphere": if options.sphere_at_gamma { "G: |G|^2/2 <= ecut_chi for every q (v uses |q+G|)" } else { "q+G: |q+G|^2/2 <= ecut_chi" },
+        "response_sphere": if options.sphere_at_gamma { "G: |G|^2/2 <= ecut_chi for every q (v uses |q+G|); q = first-Brillouin-zone image of each mesh q, mean over tied images (ADR 0055 item 2)" } else { "q+G: |q+G|^2/2 <= ecut_chi" },
         "fft_grid": result.grid_dims,
         "q0_treatment": "direction average of the q -> 0 limit (k.p head and wings), Lebedev set",
         "q0_directions": options.q0_directions,

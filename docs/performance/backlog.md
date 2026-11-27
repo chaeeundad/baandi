@@ -307,3 +307,27 @@ Gap is cost per unit of work, not H columns (IrI3: 0.50x QE's H columns, 0.81x i
 - If the GLIBC_TUNABLES arm of the GK18 dev08 request wins: set the allocator thresholds at process start (mallopt
   in the MPI/CLI adapter) or evaluate a maintained allocator crate (ADR 0003 checks).
 - Start H apply and SCF H apply: FFT kernel speed per transform on dev08 (`M2_FFT=mkl` arm of GK17).
+
+## After GF2 (GF2-FD-SCF-COST, 2026-11-27; ledger GF2-FD-SCF-COST)
+- dev08 A/B of `FD_EMPTY_THRESHOLD` (weighted default, percent, off) and `FD_EMPTY_VERIFY=on` on the MP metals (Au,
+  Ru, Sr, Hg, Ta6Zn7, Hf, TiGa), verify off and on; decide FD_EMPTY_VERIFY (verification-map eigen thresholds only,
+  criterion unchanged) with the orchestrator/user.
+- Ta6Zn7 k count: BAANDI 34 irreducible k against QE 26 (nsym 12); read BAANDI's `reference_scf.symmetry`
+  (group_order, irreducible_k_count) and preflight warnings; 34 / 26 = 1.31 more k, 5 against 4 k on the critical rank
+  at MPI8 (1.25x), the largest single factor if the group or mesh reduction differs.
+- GK9 stage 2 remainder layout (few k, large npw): Ta6Zn7 34 k on 8 ranks = 4 whole k per rank plus 2 remainder k
+  each split over 4 ranks: about 76k rows per rank against 87k (`auto` npool 8; E -12 % of the k loop); Hg 76 k:
+  10 against 9.5 k (E -4 %).
+- Reduced problem of the complex Davidson on MKL builds: Cholesky, two triangular solves and the full Hermitian EVD
+  (all n eigenvectors of an order up to 2n) run on faer even with `mkl`; an MKL route (zpotrf/ztrsm + zheevd, or
+  zheevr for the lowest n of up to 2n) behind a switch; Mac stage share 2-3 % of the Davidson time (TaZn13, Au),
+  more on dev08 where the GEMMs are MKL. Needs an MKL machine for the FFI tests (dev08).
+- A cheaper guard than the FD buffer against missed top states: the buffer costs 4 of 18 columns (Au) and 14 of 145
+  (Ta6Zn7) per Davidson call, but removing it lets the top retained bands converge to wrong eigenpairs (GF2); a
+  smaller buffer for large n or a buffer only in the first and verification maps are untested options.
+- Forced first Davidson iteration (GF2 counts, Mac, maps >= 2, weighted arm): every call corrects every solved
+  column once before any convergence test, 62-93 % of the SCF H columns (Au 0.73, Ru 0.74, Sr 0.93, Al slab 0.62,
+  TaZn13 0.86); the buffer is 4 of those 18 columns on Au. A residual-screened first iteration (kept HX makes
+  r = HX - eps X free before any H application: skip a column whose predicted Ritz change from its residual is far
+  below its threshold, keep the Ritz-change exit test) would cut this for every path; it changes what the first
+  iteration does, so it needs a safety argument (no stale buffer columns, no missed states) and the class matrix.

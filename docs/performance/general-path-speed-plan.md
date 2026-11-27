@@ -342,3 +342,12 @@ is the FFT kernel. The rest was per-k transcendental work and replicated bookkee
 bit-identically: harmonics per direction, Bessel samples per node shared over channels, erf factor per species,
 owned-only k bases from basis summaries (also in the preflight), owned projector tile reuse, lazy pooled delivery.
 E: about 1.5 s off GeTe at MPI8. Next: lazy delivery on the spin/FD driver, shared k-operator scratch (GK6), GK11.
+
+## 12. GF2: FD SCF engine cost (2026-11-27)
+
+Ledger GF2-FD-SCF-COST. On the MP metals the FD map spent a quarter to a half of its H columns on retained bands
+with negligible occupation (converged at the occupied threshold) and on the buffer columns. GK13 is implemented as
+`FD_EMPTY_THRESHOLD=weighted` (default): occupation-weighted empty-band threshold, H -7 to -20 % on the Mac fixtures
+(-2 % on a 131-band one-k case, whose H columns are mostly the forced first Davidson iteration), same fixed point. The buffer stays (removing it lets the top retained Ritz pairs converge to wrong states). Open
+items ranked for Ta6Zn7: the k count (34 vs QE 26), the remainder pool layout (E -12 % of the k loop), the reduced
+problem on MKL (2-3 % of the Davidson time on the Mac), verification-map thresholds (`FD_EMPTY_VERIFY`).

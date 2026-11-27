@@ -271,9 +271,44 @@ impl Block {
 /// columns, `delta = max(4, ceil(n / 10))`, but requires convergence and
 /// computes occupations, coverage, density, energies and delivery only for the
 /// leading `n`. The width is bounded by the smallest k basis. Fixed-sector
-/// policies solve exactly `n` (no buffer).
+/// policies solve exactly `n` (no buffer). GF2: `FD_BUFFER=off` solves `n`.
 pub(super) fn buffer_bands(bands: usize) -> usize {
-    4.max(bands.div_ceil(10))
+    if dft_numerics::switches::on(dft_numerics::switches::Id::FD_BUFFER) {
+        4.max(bands.div_ceil(10))
+    } else {
+        0
+    }
+}
+/// GF2 (plan GK13, `FD_EMPTY_THRESHOLD`): occupied-threshold band count of one
+/// (channel, k) block from the previous map's occupations `f` (electrons per
+/// band, channel capacity `capacity`) for the Davidson threshold `threshold`
+/// (Ha). Bands after the last one whose occupation fraction exceeds the cut
+/// use the empty-band threshold `max(5 threshold, 5e-6)` of
+/// `ref_davidson::Options::band_threshold`. `weighted`: cut =
+/// sqrt(threshold / empty threshold); a band of fraction f at the empty
+/// threshold then has a density error of order f sqrt(empty / gap) <=
+/// sqrt(threshold / gap), the bound of a fully occupied band at `threshold`.
+/// `percent`: cut = 0.01. `None` = every band at `threshold` (off).
+pub(super) fn occupied_threshold_count(
+    mode: &str,
+    f: &[f64],
+    capacity: f64,
+    threshold: f64,
+) -> Option<usize> {
+    let empty = (5.0 * threshold).max(5e-6);
+    let cut = match mode {
+        "weighted" => (threshold / empty).sqrt(),
+        "percent" => 0.01,
+        _ => return None,
+    };
+    if !(cut.is_finite() && capacity > 0.) || f.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    Some(
+        f.iter()
+            .rposition(|&v| v / capacity > cut)
+            .map_or(1, |i| i + 1),
+    )
 }
 pub(super) fn fd_width(bands: usize, basis: usize) -> usize {
     (bands + buffer_bands(bands)).min(basis).max(bands)
@@ -512,6 +547,7 @@ pub(super) fn evaluate<K: Collective>(
     response_diagnostics: bool,
     shortfall: Option<&mut Shortfall>,
     bands: usize,
+    previous_occupations: Option<&[Vec<Vec<f64>>]>,
 ) -> Result<Map, ScfError> {
     let fields = fields(workspace, &mut states[0], comm, cell, functional, input)?;
     // Solved columns: the retained `bands` plus the FD buffer (`solve_width`).
@@ -530,6 +566,10 @@ pub(super) fn evaluate<K: Collective>(
     let dv = cell.volume_bohr3() / points as f64;
     let pool = states[0].pool.clone();
     let pooled = pool.is_some();
+    // GF2: global index of this rank's first k block (pools) and the rule.
+    let global_first = pool.as_ref().map_or(0, |p| p.local().start);
+    let empty_mode = dft_numerics::switches::choice(dft_numerics::switches::Id::FD_EMPTY_THRESHOLD);
+    let capacity = if ns == 1 { 2. } else { 1. };
     let layout = super::k_pool::KPool::comm_of(pool.as_ref());
     let kc = super::k_pool::KComm::new(comm, &layout);
     let field_axis = states[0].fields.first_axis();
@@ -592,7 +632,25 @@ pub(super) fn evaluate<K: Collective>(
                 // the buffer columns beyond them (`solve_width`) are not.
                 // Fixed sector: first empty is mandatory as in the legacy policy.
                 let strict = policy.strict_bands(s, bands);
-                let mut options = ref_davidson::Options::new(width, ethr / 2., strict);
+                // GF2 (`FD_EMPTY_THRESHOLD`): FD retained bands that were
+                // (nearly) empty in the previous map use the empty-band
+                // Ritz threshold; they stay required (`strict` below).
+                let occupied = match (policy.finite(), previous_occupations, first) {
+                    (Some(_), Some(previous), false) => previous
+                        .get(s)
+                        .and_then(|c| c.get(global_first + k))
+                        .and_then(|f| {
+                            occupied_threshold_count(
+                                empty_mode,
+                                &f[..f.len().min(bands)],
+                                capacity,
+                                ethr / 2.,
+                            )
+                        })
+                        .map_or(strict, |n| n.min(strict)),
+                    _ => strict,
+                };
+                let mut options = ref_davidson::Options::new(width, ethr / 2., occupied);
                 options.first_step = first;
                 options.return_hx = true;
                 options.profile = diagnostics;
@@ -1306,5 +1364,55 @@ mod g4f_stiffness_tests {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod gf2_empty_threshold_tests {
+    use super::*;
+    use dft_numerics::switches::RunConfig;
+
+    #[test]
+    fn occupied_threshold_count_cuts_after_the_last_occupied_band() {
+        // Fractions 1, 0.5, 0.02, 4e-3, 1e-6 of capacity 2.
+        let f = [2., 1., 0.04, 8e-3, 2e-6];
+        // Tight threshold: empty 5e-6 Ha, cut sqrt(1e-10 / 5e-6) = 4.47e-3.
+        assert_eq!(occupied_threshold_count("weighted", &f, 2., 1e-10), Some(3));
+        // Loose threshold: empty 5 thr, cut sqrt(1/5) = 0.447.
+        assert_eq!(occupied_threshold_count("weighted", &f, 2., 1e-4), Some(2));
+        assert_eq!(occupied_threshold_count("percent", &f, 2., 1e-10), Some(3));
+        assert_eq!(occupied_threshold_count("percent", &f, 0.5, 1e-10), Some(4));
+        assert_eq!(occupied_threshold_count("off", &f, 2., 1e-10), None);
+        // A partly occupied band above an empty one keeps everything below it.
+        let g = [2., 1e-9, 0.5];
+        assert_eq!(occupied_threshold_count("weighted", &g, 2., 1e-10), Some(3));
+        // Nothing above the cut: the first band stays occupied.
+        assert_eq!(
+            occupied_threshold_count("weighted", &[0., 0.], 2., 1e-10),
+            Some(1)
+        );
+        assert_eq!(
+            occupied_threshold_count("weighted", &[f64::NAN], 2., 1e-10),
+            None
+        );
+        // Every band beyond the count uses the solver's empty-band threshold,
+        // which is at least the occupied one.
+        let o = dft_solvers::ref_davidson::Options::new(5, 1e-10, 3);
+        assert_eq!(o.band_threshold(2), 1e-10);
+        assert_eq!(o.band_threshold(3), 5e-6);
+    }
+
+    #[test]
+    fn buffer_switch_sets_the_solved_width() {
+        let on = RunConfig::from_pairs(&[]).unwrap();
+        let scope = on.enter();
+        assert_eq!(fd_width(14, 1000), 18);
+        assert_eq!(fd_width(131, 1000), 145);
+        assert_eq!(fd_width(14, 16), 16);
+        drop(scope);
+        let off = RunConfig::from_pairs(&[("fd_buffer", "off")]).unwrap();
+        let _scope = off.enter();
+        assert_eq!(fd_width(14, 1000), 14);
+        assert_eq!(fd_width(131, 1000), 131);
     }
 }

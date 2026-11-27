@@ -143,6 +143,72 @@ inputs and UPFs as above; eps_inf at omega = 0):
 LiF band series (full, LF / no LF avg): 60 1.99876 / 2.08929, 61 1.99879 /
 2.08940, 64 1.99893 / 2.08972, 68 1.99910 / 2.09011, 100 1.99967 / 2.09146.
 
+## Velocity at Gamma, k + G = 0 (R2-GAMMA-VEL, Mac 2026-11-28)
+
+dev08 found BAANDI's full velocity equal to Yambo 5.3.0 `ndb.dipoles` to
+2e-5 at every k except k = 0 (BAANDI Gamma sum of |p|^2 +1.7 % LiF, +1.9 %
+AlN; LiF VBM[3-5] -> CBM[6] r 3.84 vs 2.97 Bohr^2). The only plane wave
+special to Gamma is G = 0 with k + G = 0.
+
+Analysis. The KB factor of a projector of angular momentum l is
+`beta_l(|q|) Y_lm(q^)`, q = k + G, with `beta_l(q) = q^l (a_0 + a_2 q^2 + ...)`:
+a solid harmonic (homogeneous polynomial of degree l in q) times an even
+series, hence smooth at q = 0. Its q gradient at q = 0 vanishes for l = 0
+and l >= 2 and equals `beta_1'(0) Y_1m(e_b)` for l = 1 (finite, direction
+dependent). `projector_k_gradient` uses exactly that limit (value 0 for
+l >= 1, `beta_0(0)` for l = 0). So at Gamma the commutator has a G = 0 piece
+`B(0) D G_b(0)^H + G_b(0) D B(0)^H` that connects an s-like state with a
+G = 0 coefficient to the p projectors of the atoms.
+
+Checks (BAANDI-internal, all at k = 0 exactly and the full matrix, i != j
+included):
+
+| Check | max rel err vs central FD of H (best h) | with the k+G = 0 gradient dropped |
+| --- | --- | --- |
+| synthetic s/p/d/f (`velocity_fd`, debug) | 4.6e-9 | 3.5e-2 |
+| PseudoDojo LiF 30 Ha (`velocity_fd`, release) | 1.2e-10 | 5.7e-3 |
+| PseudoDojo AlN 30 Ha (`velocity_fd`, release) | 4.5e-10 | 1.7e-2 |
+| LiF, production NSCF H, complete EVD, 24 bands (`response_velocity_hf gamma`), Richardson | 9.6e-11 | 4.2e-2 |
+| AlN, same, 24 bands, Richardson | 4.1e-11 | 1.2e-1 |
+
+Continuity: p(k = 1.8e-6 Bohr^-1) - p(0) with the same vectors is 3e-6
+relative (synthetic), 3.0e-6 (LiF), 1.6e-6 (AlN): the velocity is smooth
+through Gamma. BAANDI's Gamma velocity is d H / d k of its Hamiltonian;
+nothing is changed in the default path.
+
+What the oracles do (inferred from numbers only; no oracle source was read).
+`BAANDI_RESPONSE_VELOCITY=no-g0` drops the k+G = 0 projector gradient,
+`no-g0-all` drops the whole k+G = 0 plane wave from the commutator (also the
+l = 0 projector value there). Same inputs, UPFs and settings as above;
+record `mac-2026-11-28-gamma-vel/summary.json`.
+
+| Case | eps_M LF / no LF: BAANDI full | no-g0 | no-g0-all | Yambo 5.3.0 | ABINIT 10.8.3 (q dir) |
+| --- | --- | --- | --- | --- | --- |
+| LiF (xx) | 1.998757 / 2.089293 | 1.995196 / 2.085782 | 1.992497 / 2.083124 | 1.992459 / 2.083084 | 1.9951 / 2.0857 |
+| AlN xx | 4.574447 / 4.934704 | 4.555187 / 4.915699 | 4.554345 / 4.914863 | 4.554305 / 4.914821 | |
+| AlN zz | 4.543120 / 4.900993 | 4.520322 / 4.878276 | 4.519763 / 4.877702 | 4.51971 / 4.877639 | |
+| AlN along ABINIT q | 4.56588 / 4.92549 | 4.54566 / 4.90547 | 4.54489 / 4.90471 | | 4.5456 / 4.9054 |
+| Si2 | 22.68135 / 24.89449 | 22.68176 / 24.89426 | 22.68129 / 24.89462 | 22.68111 / 24.89444 | |
+| C | 7.152542 / 7.439297 | 7.152410 / 7.439281 | 7.152280 / 7.439388 | 7.152231 / 7.43934 | |
+
+Gamma dipoles, full / no-g0-all: sum |p|^2 ratio 1.0177 (LiF), 1.0194 (AlN)
+(dev08: +1.7 %, +1.9 %); LiF [3-5] -> [6] r 3.8411 / 2.9716 Bohr^2 (Yambo
+2.97); AlN [6-7] -> [9] 17.631 / 15.900 and [8] -> [9] 9.756 / 8.789
+(+10.9 %, +11.0 %; dev08 +11 %). Every other k is unchanged (ratio 1.00000).
+
+Conclusion: with `no-g0-all` BAANDI reproduces Yambo to <= 2e-5 relative
+on all four cases (LiF 1.9e-5, AlN 1.3e-5, Si 8e-6, C 7e-6), and with
+`no-g0` it reproduces the ABINIT LiF and AlN values to their printed digits
+(1e-4). Both treatments omit a term that is part of d H / d k at Gamma (the
+FD checks above fail without it), so BAANDI's default (`full`) stays and the
+R2 LiF/AlN differences to Yambo and ABINIT (0.3 to 0.5 %) are the oracles'
+k + G = 0 treatment at Gamma on these coarse 4x4x4 / 4x4x3 meshes (Gamma
+weight 1/64, 1/48), not a BAANDI error. The effect shrinks with the k mesh
+(one k point of N_k); Si and C move by <= 4e-5 because their dominant Gamma
+transitions connect p-like triplets, whose G = 0 coefficients vanish by
+symmetry. Nothing was tuned
+toward the oracles; the two diagnostic values are never production settings.
+
 ## Dipole dump for external comparison (R2-VEL-CHECK diagnostic)
 
 `BAANDI_RESPONSE_DIPOLE_DUMP=gamma|all baandi dielectric <input>` (default

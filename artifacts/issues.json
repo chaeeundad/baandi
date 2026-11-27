@@ -206,5 +206,13 @@
     "status": "open",
     "phase": "after SYM-START-CHECK (2026-11-28)",
     "detail": "Toy fixtures found while testing SYM-START-CHECK: cubic 5 Bohr cell, atom at (1/8,1/8,1/8), 1 Ha: symmetric run fails with singular mixing history while the same system without symmetry converges; orthorhombic 5x5.5x6 Bohr cell: XC error from negative density in the first map. Also recheck backlog lines 369-371 (GaAs PBE symmetry auto 4x4x4 shifted refused with the old false message) on dev08."
+  },
+  {
+    "id": "I-API-GAMMA-LASTBITS",
+    "title": "api_identity cli_results_match_pre_facade_binary: gamma density differs from the gen73 binary in the last mantissa bits",
+    "severity": "low",
+    "status": "open",
+    "phase": "found in gen79/gen81 extended relax line (2026-11-28)",
+    "detail": "dev08: ignored test api_identity cli_results_match_pre_facade_binary fails at api_identity.rs:263 'gamma: density bytes' against the gen73 dft-cli baseline; first doubles differ only in the low bytes (~1e-12 relative or below). Production identity runs (si32, si8 strict, si64) are bit-identical in gen81, and the GaAs symmetry probe converges. Candidates between gen73 and gen79: SYM-START-CHECK start path, summation order in a changed module. To do: bisect gen73..gen81 on this test, decide whether the baseline must be refreshed."
   }
 ]

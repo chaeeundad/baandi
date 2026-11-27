@@ -1,0 +1,170 @@
+{
+ "per_arm": [
+  {
+   "case": "si8-lda-k222-a0.2",
+   "arm": "a3-lbfgs:cold",
+   "runs": 3,
+   "converged": 3,
+   "median_evals_to": {
+    "0.1": 4,
+    "0.05": 5,
+    "0.02": 7
+   },
+   "median_attempted": 7,
+   "failed": 0,
+   "rejected": 0,
+   "auxiliary": 0,
+   "median_scf": 71,
+   "median_h_vectors": 20834,
+   "median_wall_s": 23.227877140045166
+  },
+  {
+   "case": "si8-lda-k222-a0.2",
+   "arm": "baandi-bfgs:warm",
+   "runs": 3,
+   "converged": 3,
+   "median_evals_to": {
+    "0.1": 8,
+    "0.05": 14,
+    "0.02": 16
+   },
+   "median_attempted": 16,
+   "failed": 0,
+   "rejected": 0,
+   "auxiliary": 0,
+   "median_scf": 152,
+   "median_h_vectors": 53793,
+   "median_wall_s": 49.20483994483948
+  },
+  {
+   "case": "si8-lda-k222-a0.2",
+   "arm": "baandi-precon:warm",
+   "runs": 3,
+   "converged": 3,
+   "median_evals_to": {
+    "0.1": 5,
+    "0.05": 7,
+    "0.02": 8
+   },
+   "median_attempted": 8,
+   "failed": 0,
+   "rejected": 1,
+   "auxiliary": 0,
+   "median_scf": 84,
+   "median_h_vectors": 28780,
+   "median_wall_s": 28.60494613647461
+  },
+  {
+   "case": "si8_AlP-pbe-k222",
+   "arm": "a3-lbfgs:cold",
+   "runs": 1,
+   "converged": 1,
+   "median_evals_to": {
+    "0.1": 3,
+    "0.05": 5,
+    "0.02": 6
+   },
+   "median_attempted": 6,
+   "failed": 0,
+   "rejected": 0,
+   "auxiliary": 0,
+   "median_scf": 84,
+   "median_h_vectors": 25961,
+   "median_wall_s": 38.55422401428223
+  },
+  {
+   "case": "si8_AlP-pbe-k222",
+   "arm": "baandi-bfgs:warm",
+   "runs": 1,
+   "converged": 1,
+   "median_evals_to": {
+    "0.1": 6,
+    "0.05": 15,
+    "0.02": 16
+   },
+   "median_attempted": 16,
+   "failed": 0,
+   "rejected": 0,
+   "auxiliary": 0,
+   "median_scf": 171,
+   "median_h_vectors": 61104,
+   "median_wall_s": 77.17618918418884
+  },
+  {
+   "case": "si8_AlP-pbe-k222",
+   "arm": "baandi-precon:warm",
+   "runs": 1,
+   "converged": 1,
+   "median_evals_to": {
+    "0.1": 4,
+    "0.05": 5,
+    "0.02": 8
+   },
+   "median_attempted": 8,
+   "failed": 0,
+   "rejected": 0,
+   "auxiliary": 0,
+   "median_scf": 94,
+   "median_h_vectors": 33123,
+   "median_wall_s": 42.130666971206665
+  }
+ ],
+ "paired": [
+  {
+   "case": "si8-lda-k222-a0.2",
+   "arm": "baandi-bfgs:warm",
+   "baseline": "a3-lbfgs:cold",
+   "pairs": 3,
+   "median_eval_ratio": 2.2857142857142856,
+   "wins_ties_losses": [
+    0,
+    0,
+    3
+   ],
+   "median_wall_ratio_same_start": null,
+   "different_minimum_flags": []
+  },
+  {
+   "case": "si8-lda-k222-a0.2",
+   "arm": "baandi-precon:warm",
+   "baseline": "a3-lbfgs:cold",
+   "pairs": 3,
+   "median_eval_ratio": 1.1428571428571428,
+   "wins_ties_losses": [
+    0,
+    0,
+    3
+   ],
+   "median_wall_ratio_same_start": null,
+   "different_minimum_flags": []
+  },
+  {
+   "case": "si8_AlP-pbe-k222",
+   "arm": "baandi-bfgs:warm",
+   "baseline": "a3-lbfgs:cold",
+   "pairs": 1,
+   "median_eval_ratio": 2.6666666666666665,
+   "wins_ties_losses": [
+    0,
+    0,
+    1
+   ],
+   "median_wall_ratio_same_start": null,
+   "different_minimum_flags": []
+  },
+  {
+   "case": "si8_AlP-pbe-k222",
+   "arm": "baandi-precon:warm",
+   "baseline": "a3-lbfgs:cold",
+   "pairs": 1,
+   "median_eval_ratio": 1.3333333333333333,
+   "wins_ties_losses": [
+    0,
+    0,
+    1
+   ],
+   "median_wall_ratio_same_start": null,
+   "different_minimum_flags": []
+  }
+ ]
+}

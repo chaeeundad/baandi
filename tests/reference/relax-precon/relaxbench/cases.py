@@ -18,6 +18,11 @@ BOHR_A = 0.529177210903  # Angstrom per Bohr (CODATA 2018, same as dft-units)
 HA_EV = 27.211386245988  # eV per Hartree (CODATA 2018)
 HA_BOHR_TO_EV_A = HA_EV / BOHR_A
 
+# SCF threshold (Ha) written into every arm's [scf] table (run_bench --scf-threshold-ha);
+# None leaves the case text unchanged (the engine then resolves its own default,
+# which for `baandi relax` follows the force tolerance, ADR 0057).
+SCF_THRESHOLD_HA = None
+
 # Primary target 0.02 eV/A and intermediate thresholds, as max atomic force NORM.
 THRESHOLDS_EV_A = (0.1, 0.05, 0.02)
 TARGET_EV_A = 0.02
@@ -70,10 +75,13 @@ def sha256_file(path):
 
 
 def scf_text(case, threads):
-    """[basis]/[xc]/[scf] text with the harness thread count (identical for every method)."""
+    """[basis]/[xc]/[scf] text with the harness thread count and SCF threshold (identical for every method)."""
     text = re.sub(r"(?m)^threads\s*=.*\n", "", case["toml_sections"])
     if threads:
         text = text.replace("[scf]\n", "[scf]\nthreads=%d\n" % threads, 1)
+    if SCF_THRESHOLD_HA is not None:
+        text = re.sub(r"(?m)^standard_threshold_ha\s*=.*\n", "", text)
+        text = text.replace("[scf]\n", "[scf]\nstandard_threshold_ha=%r\n" % SCF_THRESHOLD_HA, 1)
     return text
 
 

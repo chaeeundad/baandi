@@ -10,7 +10,8 @@ never depends on Python/ASE. Example (Mac smoke):
       --pseudo-root /Volumes/990-2TB/Develop/rust-dft-wt/pseudo --threads 1 \
       --workdir /scratch/relax-precon/run --out results/x.json
 
-Methods: baandi-bfgs, baandi-fire (``baandi relax``; --start cold|warm),
+Methods: baandi-bfgs, baandi-fire, baandi-precon (``baandi relax``, the last is
+method = "precon_lbfgs", ADR 0058; --start cold|warm),
 ase-bfgs, ase-lbfgs, ase-fire, ase-precon-lbfgs, a3-lbfgs (``baandi run`` per
 evaluation through an ASE calculator; --start cold only, see relaxbench/clicalc.py).
 All methods get the same structure, PPs, XC, cutoff, k points, SCF settings,
@@ -31,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from relaxbench import cases  # noqa: E402
 from relaxbench.recorder import BudgetExhausted, Converged, Recorder  # noqa: E402
 
-METHODS = ("baandi-bfgs", "baandi-fire", "ase-bfgs", "ase-lbfgs", "ase-fire", "ase-precon-lbfgs", "a3-lbfgs")
+METHODS = ("baandi-bfgs", "baandi-fire", "baandi-precon", "ase-bfgs", "ase-lbfgs", "ase-fire", "ase-precon-lbfgs", "a3-lbfgs")
 
 
 def mark_accepted(evals, accepted_bohr, tol=1e-9):
@@ -116,6 +117,12 @@ def main():
     ap.add_argument("--max-evals", type=int, default=200)
     ap.add_argument("--workdir", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--scf-threshold-ha", default="force-tied",
+                    help="scf.standard_threshold_ha written for EVERY arm (relax and run alike): a number, "
+                         "'force-tied' (default: target^2/3200 Ha with the target in Ha/Bohr, ADR 0057's "
+                         "relaxation default at 0.02 eV/A, 4.73e-11 Ha) or 'none' (leave the case text; the "
+                         "native arms then get the engine default, which after ADR 0057 follows the harness's "
+                         "disabled native force tolerance and is not comparable with the run arms)")
     ap.add_argument("--native-own-stop", action="store_true",
                     help="baandi-* only: keep the case's native stop rule (max component + energy, twice) and "
                          "do not stop at the external target (baseline audit); the target is still recorded")
@@ -125,6 +132,10 @@ def main():
     if args.start == "warm" and not args.method.startswith("baandi-"):
         ap.error("ASE/A3 methods evaluate through `baandi run`, which has no warm start: use --start cold")
 
+    if args.scf_threshold_ha == "force-tied":
+        cases.SCF_THRESHOLD_HA = cases.ev_a_to_ha_bohr(cases.TARGET_EV_A) ** 2 / 3200.0
+    elif args.scf_threshold_ha != "none":
+        cases.SCF_THRESHOLD_HA = float(args.scf_threshold_ha)
     case = cases.load(args.case)
     start, start_note = cases.start(case, args.seed)
     if args.native_own_stop and not args.method.startswith("baandi-"):
@@ -167,7 +178,7 @@ def main():
         "stop_rule": {"quantity": "max atomic force norm over free atoms", "target_ev_a": cases.TARGET_EV_A,
                       "target_ha_bohr": cases.ev_a_to_ha_bohr(cases.TARGET_EV_A),
                       "thresholds_ev_a": list(cases.THRESHOLDS_EV_A), "max_evals": args.max_evals},
-        "threads": args.threads, "launcher": args.launcher,
+        "threads": args.threads, "launcher": args.launcher, "scf_threshold_ha": cases.SCF_THRESHOLD_HA,
         "executable": args.exe, "executable_sha256": cases.sha256_file(args.exe),
         "pseudopotentials_sha256": {s: cases.sha256_file(p) for s, p in cases.pseudo_paths(case, args.pseudo_root).items()},
         "host": {"platform": platform.platform(), "machine": platform.machine(), "node": platform.node(),

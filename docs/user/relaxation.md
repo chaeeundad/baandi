@@ -13,7 +13,7 @@ Collinear and finite-temperature drivers reject explicitly. For cell modes, see
 
 ```toml
 [relax]
-method = "bfgs"                 # alternatively "fire"
+method = "bfgs"                 # alternatively "fire" or "precon_lbfgs" (opt-in, ADR 0058)
 force_tol_ha_bohr = 3.889e-4    # default (= 0.02 eV/A), on the max atomic force norm |F_i| (Ha/Bohr)
 force_criterion = "norm"        # default; "component" = largest free Cartesian component
 # energy_tol_ha = 1e-8          # optional (unset by default): also require |dE| < tol
@@ -49,7 +49,8 @@ consecutive accepted steps. Inputs that set `energy_tol_ha` explicitly keep
 that behaviour. The initial SCF is step 0;
 `max_steps` counts subsequent ionic moves. All force and energy tolerances are
 strict inequalities. Variable-cell modes keep their stress and energy rule
-(energy default 1e-8 Ha there), see [cell relaxation](cell-relaxation.md). Exit 0 means converged, 3 means ionic step budget exhausted,
+(energy default 1e-8 Ha there), see [cell relaxation](cell-relaxation.md). Exit 0 means converged, 3 means ionic step budget exhausted (or, for
+`precon_lbfgs`, a failed line search),
 4 means SCF/derivative failure after the retry, 1 invalid input, 5 I/O failure.
 An exhausted ionic trajectory still contains certified SCFs and usable forces.
 
@@ -110,6 +111,63 @@ per-atom cap (ASE caps the norm of the whole step at 0.2 A instead). Before ADR
 0056 the same numbers were applied in Hartree units, which made the steps about
 97 times shorter. These fictitious integration parameters do not represent
 physical dynamics.
+
+### Preconditioned L-BFGS (`method = "precon_lbfgs"`, opt-in)
+
+[ADR 0058](../decisions/0058-precon-lbfgs-ionic-optimizer.md) (PRELAX-P2,
+2026-11-28). Ions mode only (`cell`/`ions_cell` reject); BFGS stays the default.
+It needs no extra key:
+
+```toml
+[relax]
+method = "precon_lbfgs"
+# force_tol_ha_bohr, max_displacement_bohr, trust_radius_bohr, warm_start,
+# fixed, start_extrapolation: same meaning as for BFGS
+```
+
+- **Model Hessian.** P = mu P1, P1 a sparse matrix over neighbour pairs (all
+  periodic images) closer than 1.3 times the sum of the two covalent radii
+  (Cordero et al. 2008; 1.8 times for H, C, N or O bonded to another element,
+  so adsorbates stay coupled to a surface). Each bond contributes
+  w (0.3 I + 0.7 n n^T) with n the bond direction and w = exp(-2.5 (d/r0 - 1)),
+  r0 the radius sum; a stabiliser 0.01 I keeps P1 positive definite for
+  translations, isolated atoms and molecules in vacuum. Fixed components are
+  removed from P1. Elements beyond Cm (Z > 96) reject before any SCF.
+- **Scale mu** (Ha/Bohr^2) is never fitted to a material: before the first
+  step it is set so that the mean diagonal of P equals the BFGS starting spring
+  (1 Ha/Bohr^2), then after every accepted step mu = y.P1^-1 y / s.y from the
+  newest secant pair (no extra DFT evaluation).
+- **L-BFGS** with 10 pairs and H0 = P^-1 (two-loop recursion; P1 solves by
+  block-Jacobi conjugate gradients, O(bonds) per iteration). P1 is rebuilt when
+  an atom moved more than 0.1 of the shortest bond since the last build; the
+  pairs are kept.
+- **Line search.** The step is capped per atom by min(`max_displacement_bohr`,
+  `trust_radius_bohr`) (no trust-radius adaptation). A trial is accepted when
+  E <= E0 + 1e-4 t g.p + 2 x (SCF threshold) (Armijo with the SCF energy
+  accuracy as noise allowance), or when its forces already pass the stop test
+  (force-only rule). Otherwise t shrinks to the zero of the interpolated
+  directional derivative (or the energy parabola), within [0.1 t, 0.5 t].
+  After three rejected trials the history is reset and the preconditioned
+  steepest-descent direction -P^-1 g gets three more; then the run ends with
+  status `line_search_failed` (exit 3, last good structure kept). A failed SCF
+  on a trial is retried once fresh at half the step, as for BFGS; a second
+  consecutive failure ends the run (exit 4).
+- **Records.** Every attempted evaluation has a global `evaluation` index.
+  Frames gain `optimizer` (`evaluation`, `mu_ha_bohr2`, `line_search_trials`,
+  `rejected_trials`, `rebuilt`, `fallback`, ...); `relaxation.rejected_trials`
+  lists evaluated but rejected trials (positions, energy, forces, SCF work);
+  `relaxation.optimizer` summarises mu, rebuilds, resets and the attempted
+  evaluation count; `relax.log` appends the columns `mu_Ha_Bohr2
+  line_search_trials rejected_trials rebuilt evaluation`, and a rejected trial
+  prints `trial step ...` on stdout. restart.json stores mu, the pairs and the
+  positions of the last P build (P is rebuilt from them on `--resume`).
+
+Measured (Phase 1, dev08, the Python re-expression of the same model with
+fixed scale): 0.21-0.41 times the evaluations of BFGS to 0.02 eV/A on Si8,
+Si8-AlP and 63-atom Si-Al-P vacancy cells. Native optimizer, Mac smoke: 8-9
+evaluations against 16-17 for BFGS on Si8 and Si8-AlP (same minima). dev08
+numbers for the native arm and the ionic-oxide/molecule-surface generality
+cases are pending (ADR 0058); until then BFGS stays the default.
 
 With `[symmetry] mode="auto"`, P19A/P20A symmetrize density and raw forces.
 The isotropic starting Hessian, invariant updates and scalar cap preserve the

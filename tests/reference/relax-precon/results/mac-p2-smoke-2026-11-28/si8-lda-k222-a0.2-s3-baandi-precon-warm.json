@@ -1,0 +1,221 @@
+{
+ "schema": "relax-precon-run-1",
+ "date": "2026-11-28T04:41:53",
+ "case": "si8-lda-k222-a0.2",
+ "case_file": "cases/si8-lda-k222-a0.2.json",
+ "seed": 3,
+ "start_structure": "random.Random(3) uniform +-0.2 Bohr per lattice axis",
+ "method": "baandi-precon",
+ "start": "warm",
+ "native_own_stop": false,
+ "stop_rule": {
+  "quantity": "max atomic force norm over free atoms",
+  "target_ev_a": 0.02,
+  "target_ha_bohr": 0.0003889380762297775,
+  "thresholds_ev_a": [
+   0.1,
+   0.05,
+   0.02
+  ],
+  "max_evals": 80
+ },
+ "threads": 4,
+ "launcher": "",
+ "scf_threshold_ha": 4.7272758481662564e-11,
+ "executable": "/Volumes/990-2TB/Develop/rust-dft/.claude/worktrees/agent-a2bf2db740626f5cb/target/release/baandi",
+ "executable_sha256": "d5fa91fc53258ff916490d2865615f08ac13d74da4dc8a726c7860a2764c4207",
+ "pseudopotentials_sha256": {
+  "Si": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+ },
+ "host": {
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "node": "Minhoui-Macmini.local",
+  "python": "3.9.6",
+  "ase": "3.26.0"
+ },
+ "info": {
+  "method_parameters": {
+   "relax": {
+    "energy_tol_ha": 1e-08,
+    "max_displacement_bohr": 0.2,
+    "trust_radius_bohr": 0.2,
+    "force_tol_ha_bohr": 0.001
+   },
+   "native_own_stop": false,
+   "note": "native force_tol 1e-9: external evaluator stops the run"
+  }
+ },
+ "summary": {
+  "attempted_evaluations": 8,
+  "failed_evaluations": 0,
+  "auxiliary_evaluations": 0,
+  "line_search_trials": 0,
+  "evaluations_to_threshold_ev_a": {
+   "0.1": 5,
+   "0.05": 7,
+   "0.02": 8
+  },
+  "converged_at_evaluation": 8,
+  "total_scf_iterations": 79,
+  "total_h_vectors": 26212,
+  "evaluation_wall_s": 22.70280408859253,
+  "final_energy_ha": -31.66972051545821,
+  "final_max_force_norm_ha_bohr": 0.0001306633054427339,
+  "final_positions_bohr": [
+   [
+    -0.05782659756455736,
+    0.07078774281181176,
+    -0.001975957938999167
+   ],
+   [
+    -0.05924872188751117,
+    5.201985082821239,
+    5.128999921549501
+   ],
+   [
+    5.071559326555952,
+    0.0704787168281141,
+    5.126459744454802
+   ],
+   [
+    5.071675836730927,
+    5.201561088010953,
+    -0.0016551730289129409
+   ],
+   [
+    2.5053357093741107,
+    2.637167302925445,
+    2.5635203494847025
+   ],
+   [
+    2.5074057835219556,
+    7.766738304592832,
+    7.693147894701693
+   ],
+   [
+    7.6363597189410966,
+    2.634966480481829,
+    7.693358178683393
+   ],
+   [
+    7.638029860476661,
+    7.767132054538912,
+    2.5628715754215476
+   ]
+  ],
+  "last_energy_ha": -31.66972051545821,
+  "last_max_force_norm_ha_bohr": 0.0001306633054427339,
+  "last_max_force_component_ha_bohr": 0.00012137828033001436,
+  "accepted_steps": 8,
+  "rejected_evaluations": 0,
+  "end_to_end_wall_s": 22.707698106765747,
+  "status": "converged"
+ },
+ "evaluations": [
+  {
+   "role": "candidate",
+   "wall_s": 3.04559588432312,
+   "energy_ha": -31.652870401996037,
+   "scf_iterations": 11,
+   "h_vectors": 3467,
+   "provenance": "fresh",
+   "index": 1,
+   "elapsed_s": 3.0466272830963135,
+   "max_force_norm_ha_bohr": 0.05390598850200888,
+   "max_force_component_ha_bohr": 0.04118877551221774,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 3.0107181072235107,
+   "energy_ha": -31.657026594192555,
+   "scf_iterations": 11,
+   "h_vectors": 3403,
+   "provenance": "warm_transfer",
+   "index": 2,
+   "elapsed_s": 6.057321310043335,
+   "max_force_norm_ha_bohr": 0.045637182419951926,
+   "max_force_component_ha_bohr": 0.03666339293415412,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 3.4651870727539062,
+   "energy_ha": -31.668756150477886,
+   "scf_iterations": 12,
+   "h_vectors": 4045,
+   "provenance": "warm_transfer",
+   "index": 3,
+   "elapsed_s": 9.522523164749146,
+   "max_force_norm_ha_bohr": 0.008721332969106122,
+   "max_force_component_ha_bohr": 0.0077739379549592175,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 3.0401718616485596,
+   "energy_ha": -31.66947099539659,
+   "scf_iterations": 11,
+   "h_vectors": 3482,
+   "provenance": "warm_transfer",
+   "index": 4,
+   "elapsed_s": 12.562721014022827,
+   "max_force_norm_ha_bohr": 0.0028938722200450503,
+   "max_force_component_ha_bohr": 0.002272554105442989,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 2.569707155227661,
+   "energy_ha": -31.66958495888297,
+   "scf_iterations": 9,
+   "h_vectors": 2924,
+   "provenance": "warm_transfer",
+   "index": 5,
+   "elapsed_s": 15.132444381713867,
+   "max_force_norm_ha_bohr": 0.0013533279827022554,
+   "max_force_component_ha_bohr": 0.0010724527489598828,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 2.8050990104675293,
+   "energy_ha": -31.669698187657964,
+   "scf_iterations": 9,
+   "h_vectors": 3398,
+   "provenance": "warm_transfer",
+   "index": 6,
+   "elapsed_s": 17.937544345855713,
+   "max_force_norm_ha_bohr": 0.0011905119216305729,
+   "max_force_component_ha_bohr": 0.0009941301319160117,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 2.4015469551086426,
+   "energy_ha": -31.66971599582456,
+   "scf_iterations": 8,
+   "h_vectors": 2761,
+   "provenance": "warm_transfer",
+   "index": 7,
+   "elapsed_s": 20.339118242263794,
+   "max_force_norm_ha_bohr": 0.0007260330579314585,
+   "max_force_component_ha_bohr": 0.0006709908499654037,
+   "accepted": true
+  },
+  {
+   "role": "candidate",
+   "wall_s": 2.3647780418395996,
+   "energy_ha": -31.66972051545821,
+   "scf_iterations": 8,
+   "h_vectors": 2732,
+   "provenance": "warm_transfer",
+   "index": 8,
+   "elapsed_s": 22.703936100006104,
+   "max_force_norm_ha_bohr": 0.0001306633054427339,
+   "max_force_component_ha_bohr": 0.00012137828033001436,
+   "accepted": true
+  }
+ ]
+}

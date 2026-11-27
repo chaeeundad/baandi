@@ -1,6 +1,8 @@
 //! Fixed-cell ionic driver. SCF kernels and derivative ownership stay in engine.
 pub(crate) mod cell;
 pub mod optimizer;
+pub(crate) mod precon;
+mod precon_driver;
 use crate::{
     config::Config,
     run::{RunError, sha256},
@@ -20,6 +22,10 @@ pub enum Method {
     #[default]
     Bfgs,
     Fire,
+    /// Preconditioned L-BFGS with a bond-spring model Hessian and an Armijo
+    /// line search (PRELAX-P2, ADR 0058); ions mode only, opt-in.
+    #[serde(rename = "precon_lbfgs")]
+    PreconLbfgs,
 }
 /// Force measure of the stop rule (ADR 0056). `Norm`: the largest Cartesian
 /// force norm |F_i| over atoms after constraint projection (ASE `fmax`, VASP
@@ -297,10 +303,23 @@ impl Settings {
                 "relax: positive finite tolerances/radii/FIRE time steps (fire_dt <= fire_dt_max), positive max_steps and valid zero-based fixed atom indices required",
             ));
         }
+        if self.method == Method::PreconLbfgs && self.mode != cell::Mode::Ions {
+            return Err(error(
+                1,
+                "relax: method = \"precon_lbfgs\" supports mode = \"ions\" only (ADR 0058)",
+            ));
+        }
         Ok(())
     }
-    /// Optimizer state with this input's FIRE time steps.
+    /// Optimizer state with this input's FIRE time steps. The preconditioned
+    /// L-BFGS keeps its memory in `Restart::precon`, so its dense BFGS/FIRE
+    /// state is empty.
     fn optimizer(&self, n: usize) -> optimizer::Optimizer {
+        let n = if self.method == Method::PreconLbfgs {
+            0
+        } else {
+            n
+        };
         optimizer::Optimizer::with_fire(n, self.trust_radius_bohr, self.fire_dt, self.fire_dt_max)
     }
     /// Force measure of `frame` used by the stop rule.
@@ -414,6 +433,11 @@ struct Frame {
     /// path, whose forces rest on the strict certificate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verification: Option<Value>,
+    /// Preconditioned L-BFGS record of this accepted step (ADR 0058): global
+    /// evaluation index, mu, line-search trials, rebuild event; absent for
+    /// BFGS/FIRE.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    optimizer: Option<Value>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -429,6 +453,13 @@ struct Restart {
     /// C3 predictor history (at most three entries); empty when extrapolation is off.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     extrapolation: Vec<HistoryEntry>,
+    /// Preconditioned L-BFGS memory (ADR 0058); absent for BFGS/FIRE.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    precon: Option<precon::State>,
+    /// Evaluated line-search trials that were not accepted (ADR 0058), in
+    /// evaluation order; each is a full SCF and counts as an evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rejected: Vec<Value>,
 }
 /// Frame, converged density and (C3) the atomic superposition at its positions.
 type Evaluated = (Frame, Vec<f64>, Option<Vec<f64>>);
@@ -894,6 +925,7 @@ impl Context {
             start_fallback,
             start_clipped_fraction,
             verification: verification_summary(&state, &self.opts),
+            optimizer: None,
         };
         if reference && settings.warm_start {
             *self.reference_seed.borrow_mut() = Some((
@@ -992,11 +1024,23 @@ fn load(path: &Path, identity: &str, n: usize) -> Result<Restart, RunError> {
     let mut value: Value = serde_json::from_str(payload).map_err(|e| error(1, e))?;
     bits(&mut value, false)?;
     let state: Restart = serde_json::from_value(value).map_err(|e| error(1, e))?;
+    let memory_shape_ok = match &state.precon {
+        // Preconditioned L-BFGS: empty dense state, pairs and build geometry of length n.
+        Some(p) => {
+            state.optimizer.h.is_empty()
+                && state.optimizer.velocity.is_empty()
+                && p.build_positions.len() == n
+                && p.s.len() == p.y.len()
+                && p.s.iter().chain(&p.y).all(|v| v.len() == n)
+                && p.mu.is_finite()
+                && p.mu > 0.
+        }
+        None => state.optimizer.h.len() == n * n && state.optimizer.velocity.len() == n,
+    };
     if state.version != 1
         || state.identity != identity
         || state.frames.is_empty()
-        || state.optimizer.h.len() != n * n
-        || state.optimizer.velocity.len() != n
+        || !memory_shape_ok
         || state.frames.iter().any(|f| {
             f.positions.len() != n || f.fractional.len() * 3 != n || f.forces_ha_bohr.len() * 3 != n
         })
@@ -1173,6 +1217,12 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     let n = ctx.config.system.atoms.len() * 3;
     let extrapolate = settings.warm_start && settings.start_extrapolation != Extrapolation::None;
     let restart_path = out.join("restart.json");
+    // ADR 0058: the model (element radii, free coordinates) is checked before any SCF.
+    let precon_model = if settings.method == Method::PreconLbfgs {
+        Some(precon_driver::model(&ctx, &settings)?)
+    } else {
+        None
+    };
     let mut state = if resume {
         load(&restart_path, &identity, n)?
     } else {
@@ -1209,25 +1259,44 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         };
         let mut extrapolation = Vec::new();
         push_history(&mut extrapolation, &frame.positions, &density, n_at);
+        let positions_for_model = frame.positions.clone();
+        let evaluations = 1 + failures.len();
+        let mut frames0 = vec![frame];
         // ADR 0056: without the energy requirement an initial structure that
         // already meets the force test is converged after zero ionic steps.
-        let (consecutive, converged) = settings.ionic_stop(&frame, None, 0);
+        let (consecutive, converged) = settings.ionic_stop(&frames0[0], None, 0);
+        let precon = precon_model.as_ref().map(|m| {
+            precon_driver::initial_state(m, &positions_for_model, evaluations, &mut frames0)
+        });
         Restart {
             version: 1,
             identity,
             optimizer: settings.optimizer(n),
-            frames: vec![frame],
+            frames: frames0,
             density,
             consecutive,
             status: if converged { "converged" } else { "running" }.into(),
             failures,
             extrapolation,
+            precon,
+            rejected: vec![],
         }
     };
     ctx.position(&state.frames.last().unwrap().fractional);
     // Publish accepted state before derived outputs; resume regenerates outputs.
     save(&restart_path, &state)?;
     outputs(&ctx, &settings, &state, out)?;
+    if let Some(model) = &precon_model {
+        return precon_driver::run(
+            &mut ctx,
+            &settings,
+            &mut state,
+            model,
+            out,
+            &restart_path,
+            extrapolate,
+        );
+    }
     let rise_tol = settings.energy_rise_tol_ha(&ctx.opts);
     while state.frames.len() - 1 < settings.max_steps && state.status == "running" {
         // Wall of this ionic step (proposal, every attempt, outputs); printed on
@@ -1353,7 +1422,6 @@ fn outputs(
 ) -> Result<(), RunError> {
     outputs_with_wall(ctx, settings, state, out, None)
 }
-#[allow(clippy::needless_range_loop)] // Lattice vectors are columns, file vectors are rows.
 fn outputs_with_wall(
     ctx: &Context,
     settings: &Settings,
@@ -1361,8 +1429,23 @@ fn outputs_with_wall(
     out: &Path,
     wall: Option<std::time::Duration>,
 ) -> Result<(), RunError> {
+    write_outputs(ctx, settings, state, out, wall, None)
+}
+/// All derived outputs of the accepted state. `trial` (preconditioned L-BFGS,
+/// ADR 0058): a rejected line-search trial was just appended to
+/// `state.rejected`; the files are republished so that every attempted
+/// evaluation is visible at once, and a `trial ...` line replaces the step line.
+#[allow(clippy::needless_range_loop)] // Lattice vectors are columns, file vectors are rows.
+fn write_outputs(
+    ctx: &Context,
+    settings: &Settings,
+    state: &Restart,
+    out: &Path,
+    wall: Option<std::time::Duration>,
+    trial: Option<&Value>,
+) -> Result<(), RunError> {
     // UX1 progress stream (ADR 0053): one record per new frame or failure.
-    if let Some(f) = state.frames.last() {
+    if let Some(f) = state.frames.last().filter(|_| trial.is_none()) {
         crate::progress::relax_frame(
             state.frames.len(),
             f.energy_ha,
@@ -1403,8 +1486,14 @@ fn outputs_with_wall(
     // Cartesian component, max_force_norm_Ha_Bohr the largest atomic norm
     // (ADR 0056; the stop rule uses relaxation.stop_rule.force_criterion).
     let mut log = String::from(
-        "step energy_Ha max_force_Ha_Bohr step_length_Bohr scf_iterations provenance max_force_norm_Ha_Bohr\n",
+        "step energy_Ha max_force_Ha_Bohr step_length_Bohr scf_iterations provenance max_force_norm_Ha_Bohr",
     );
+    // ADR 0058: the preconditioned L-BFGS appends five columns (columns 1-7 unchanged).
+    let precon = settings.method == Method::PreconLbfgs;
+    if precon {
+        log.push_str(" mu_Ha_Bohr2 line_search_trials rejected_trials rebuilt evaluation");
+    }
+    log.push('\n');
     for (i, frame) in state.frames.iter().enumerate() {
         let lattice = frame.cell_columns_bohr.unwrap_or(lattice);
         writeln!(xyz, "{}", labels.len()).unwrap();
@@ -1448,6 +1537,22 @@ fn outputs_with_wall(
             frame.max_force_norm_ha_bohr
         )
         .unwrap();
+        if precon {
+            let o = frame.optimizer.clone().unwrap_or(Value::Null);
+            log.pop();
+            writeln!(
+                log,
+                " {} {} {} {} {}",
+                o["mu_ha_bohr2"]
+                    .as_f64()
+                    .map_or("-".into(), |m| format!("{m:.17e}")),
+                o["line_search_trials"].as_u64().unwrap_or(0),
+                o["rejected_trials"].as_u64().unwrap_or(0),
+                o["rebuilt"].as_bool().unwrap_or(false),
+                o["evaluation"].as_u64().unwrap_or(1),
+            )
+            .unwrap();
+        }
     }
     let last = state.frames.last().unwrap();
     let mut final_xyz = format!(
@@ -1543,6 +1648,10 @@ fn outputs_with_wall(
         "final_max_force_norm_ha_bohr":last.max_force_norm_ha_bohr,"stop_rule":stop_rule_json(settings, false),
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});
+    if let Some(p) = &state.precon {
+        result["relaxation"]["rejected_trials"] = json!(state.rejected);
+        result["relaxation"]["optimizer"] = precon_driver::summary(p, state);
+    }
     ctx.selection.record(&mut result);
     if let Some(d) = &ctx.config.dispersion {
         result["dispersion"] = json!({"method":d.method,
@@ -1564,6 +1673,16 @@ fn outputs_with_wall(
         ),
     ] {
         atomic(&out.join(name), text.as_bytes())?;
+    }
+    if let Some(t) = trial {
+        println!(
+            "trial step {} evaluation {} E={:.12e} Ha max|F|={:.6e} Ha/Bohr rejected",
+            state.frames.len(),
+            t["evaluation"],
+            t["energy_ha"].as_f64().unwrap_or(f64::NAN),
+            t["max_force_norm_ha_bohr"].as_f64().unwrap_or(f64::NAN),
+        );
+        return Ok(());
     }
     println!(
         "step {} E={:.12e} Ha maxF={:.6e} Ha/Bohr max|F|={:.6e} Ha/Bohr displacement={:.6e} Bohr SCF={} {}{}",
@@ -1706,6 +1825,7 @@ mod stop_rule_tests {
             start_fallback: None,
             start_clipped_fraction: None,
             verification: None,
+            optimizer: None,
         }
     }
     #[test]

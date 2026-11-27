@@ -1414,7 +1414,11 @@ and `verification_residual_bound_ha` (ONEPATH-1). The forces are computed with
 the same formulas as on the strict path, from the converged step's own state.
 `output.forces` with `verify = "off"` is an input error.
 
-Fixed-cell relaxation (`baandi relax`, `relax.mode = "ions"`, the default) runs
+Fixed-cell relaxation (`baandi relax`, `relax.mode = "ions"`, the default) offers
+`relax.method = "bfgs"` (default), `"fire"` and the opt-in `"precon_lbfgs"`
+(preconditioned L-BFGS with a bond-spring model Hessian and an Armijo line
+search, ions mode only; [ADR 0058](decisions/0058-precon-lbfgs-ionic-optimizer.md),
+details and records in [relaxation](user/relaxation.md)). It runs
 every ionic step on the standard path with the verification (ONEPATH-1, user
 decision 2026-11-16): a failed verification continues that step's SCF, warm
 starts and `start_extrapolation` are unchanged, and the relaxation

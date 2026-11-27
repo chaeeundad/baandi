@@ -437,10 +437,13 @@ impl Config {
         }
     }
     /// Band count of a Fermi-Dirac run (per spin channel and k point):
-    /// `scf.nbands` when given, otherwise `occupations.band_cap` (default
-    /// `DEFAULT_FD_BAND_CAP`). An explicit `band_cap` stays the documented cap:
-    /// `scf.nbands` above it is rejected instead of silently replaced.
-    pub fn fd_band_count(&self) -> Result<usize, ConfigError> {
+    /// `scf.nbands` when given, otherwise `occupations.band_cap`, otherwise
+    /// the default cap `max(DEFAULT_FD_BAND_CAP, BandGrowth::automatic_cap(n))`
+    /// for the largest channel electron target `n` (`fd_channel_target`; GB1:
+    /// the fixed 32 left no empty state above n >= 32, for example 75
+    /// electrons unpolarized). An explicit `band_cap` stays the documented
+    /// cap: `scf.nbands` above it is rejected instead of silently replaced.
+    pub fn fd_band_count(&self, channel_target: f64) -> Result<usize, ConfigError> {
         let cap = self.occupations.as_ref().and_then(|o| o.band_cap);
         match (self.scf.as_ref().and_then(|s| s.nbands), cap) {
             (Some(0), _) => Err(ConfigError::Invalid(
@@ -450,8 +453,23 @@ impl Config {
                 "scf.nbands = {n} exceeds occupations.band_cap = {c}; raise band_cap to at least {n} or lower scf.nbands"
             ))),
             (Some(n), _) => Ok(n),
-            (None, c) => Ok(c.unwrap_or(DEFAULT_FD_BAND_CAP)),
+            (None, Some(c)) => Ok(c),
+            (None, None) => Ok(DEFAULT_FD_BAND_CAP.max(
+                dft_engine::refscf::electronic::BandGrowth::automatic_cap(channel_target),
+            )),
         }
+    }
+    /// Largest channel electron target of a Fermi-Dirac run, as the reference
+    /// driver's automatic start uses it: N/2 unpolarized, (N + |m|)/2 at a
+    /// fixed moment, max(N/2, n_up, n_down) for a free-moment sector.
+    pub fn fd_channel_target(&self, electrons: f64) -> Result<f64, ConfigError> {
+        let half = electrons / 2.0;
+        if let dft_physics::occupations::Constraint::FixedMoment(m) = self.finite_constraint() {
+            return Ok((electrons + m.abs()) / 2.0);
+        }
+        Ok(self
+            .spin_sector(electrons)?
+            .map_or(half, |s| half.max(s.n_up.max(s.n_down) as f64)))
     }
     /// Reference FD band count: automatic growth from the engine's start rule
     /// up to `band_cap` (`fd_band_count`) unless `scf.nbands` is explicit,
@@ -1348,7 +1366,9 @@ impl Config {
             ));
         }
         if self.finite_temperature()?.is_some() {
-            self.fd_band_count()?;
+            // Validation of scf.nbands against band_cap only; the default cap
+            // (which needs the electron count) is resolved at preflight.
+            self.fd_band_count(0.0)?;
         }
         if let Some(relax) = &self.relax {
             relax
@@ -1433,6 +1453,41 @@ mod tests {
 
     use super::*;
     const EXAMPLE: &str = include_str!("../../../examples/si_lda.toml");
+    /// GB1: the default FD cap (no scf.nbands, no band_cap) is
+    /// max(32, automatic start + two growth steps) of the largest channel
+    /// target, so it always leaves empty states (odd or even N); explicit
+    /// counts and caps are unchanged.
+    #[test]
+    fn fd_default_cap_exceeds_channel_target() {
+        let fd = "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.005\n";
+        let parse = |tail: &str| Config::parse(&format!("{EXAMPLE}\n{fd}{tail}")).unwrap();
+        let auto = parse("");
+        // Cs2TcI6 (dev08): 75 electrons, n = 37.5; start 45, cap 65.
+        assert_eq!(auto.fd_channel_target(75.).unwrap(), 37.5);
+        assert_eq!(
+            dft_engine::refscf::electronic::BandGrowth::automatic_initial(37.5),
+            45
+        );
+        assert_eq!(auto.fd_band_count(37.5).unwrap(), 65);
+        for electrons in 1..=400 {
+            let n = auto.fd_channel_target(electrons as f64).unwrap();
+            let cap = auto.fd_band_count(n).unwrap();
+            assert!(
+                cap as f64 > n && cap >= DEFAULT_FD_BAND_CAP,
+                "N={electrons}"
+            );
+            assert!(
+                cap >= dft_engine::refscf::electronic::BandGrowth::automatic_initial(n),
+                "N={electrons}"
+            );
+        }
+        // n <= 17: the historical 32 (n = 18 gives 22 -> 27 -> 33).
+        assert_eq!(auto.fd_band_count(17.).unwrap(), 32);
+        assert_eq!(auto.fd_band_count(18.).unwrap(), 33);
+        assert_eq!(parse("band_cap=20\n").fd_band_count(37.5).unwrap(), 20);
+        let explicit = parse("[scf]\nnbands=45\n");
+        assert_eq!(explicit.fd_band_count(37.5).unwrap(), 45);
+    }
     #[test]
     fn density_group_contract_and_metadata() {
         let base = EXAMPLE.replace(

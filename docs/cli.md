@@ -1191,15 +1191,27 @@ positive. Kelvin uses the exact SI Boltzmann constant at the CLI boundary;
 the engine uses theta=k_B T in Ha. Gaussian, MP and cold schemes reject.
 Odd unpolarized electron counts are permitted only in FD mode.
 
-`band_cap` defaults to 32. The band count must fit every k basis. FD band
-count on the reference driver (per spin channel and k point):
+`band_cap` defaults to `max(32, next(next(start)))` with `start` the
+automatic start below and `next` one growth step, i.e. the start plus two
+growth steps (GB1, 2026-11-27; before that the constant 32, which left no
+empty state for N/2 >= 32, for example 75 electrons). The default is always
+above the largest channel electron target, odd or even N. The band count must
+fit every k basis. FD band count on the reference driver (per spin channel
+and k point):
 
 - `scf.nbands` explicit: the fixed count is `scf.nbands` (FD-FORCES,
   2026-11-26; before that `scf.nbands` was ignored in FD mode and the cap was
   always the band count). An `scf.nbands` above an explicit `band_cap` is
   rejected at preflight (`scf.nbands = N exceeds occupations.band_cap = C`).
-  Every one of these bands is prepared and solved; insufficient empty-state
-  coverage fails with an instruction to increase the count.
+  Every one of these bands is prepared and solved. The empty-state coverage
+  criterion (below) is checked hard on the delivered state only: the map that
+  meets the stop rule, its verification map, and the last map of an exhausted
+  budget; a miss there fails with
+  `occupations.bands: insufficient empty-state coverage at explicit cap; ...`
+  (numbers on stderr). Earlier SCF maps that miss it (an early density far from
+  the fixed point) are recorded, not refused: one stderr line `fd coverage:`
+  at the first miss and `band_count_growth.transient_coverage_misses`
+  (iteration, first-iteration redo, edge fraction, edge electrons).
   `band_count_growth.mode` is `fixed`.
 - `scf.nbands` omitted (automatic): the run starts at
   `max(ceil(n) + 4, ceil(1.2 n))` bands, n the largest channel electron target

@@ -536,13 +536,16 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         )
     })?;
     let bands = if finite {
-        config.fd_band_count().map_err(|e| {
-            fail(
-                "scf.nbands / occupations.band_cap",
-                e,
-                "set scf.nbands <= occupations.band_cap",
-            )
-        })?
+        config
+            .fd_channel_target(electrons as f64)
+            .and_then(|n| config.fd_band_count(n))
+            .map_err(|e| {
+                fail(
+                    "scf.nbands / occupations.band_cap",
+                    e,
+                    "set scf.nbands <= occupations.band_cap",
+                )
+            })?
     } else {
         options.bands.unwrap_or(default_bands)
     };

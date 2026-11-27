@@ -366,3 +366,76 @@ fn reference_fd_automatic_band_count() {
     fs::remove_dir_all(root).unwrap();
 }
 const FD_GROWTH: &str = "[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.02\nband_cap=12\n";
+
+/// GB1: odd electron count (one synthetic atom with Z = 3, no atomic start
+/// data, so the start is non-atomic), spin-unpolarized FD, neither
+/// `scf.nbands` nor `band_cap`: the default cap max(32, start + two growth
+/// steps) gives empty states, the automatic count runs; an explicit count
+/// equal to the delivered automatic count runs to the same free energy; an
+/// explicit count too small at the fixed point is refused at delivery with
+/// the unchanged message.
+#[test]
+fn reference_fd_odd_electrons_default_cap() {
+    let root = directory("fd-odd");
+    fs::write(
+        root.join("odd.xml"),
+        common::gaussian_with(3., 1.8, true, 161).replace("element=\"Xx\"", "element=\"Li\""),
+    )
+    .unwrap();
+    let base = "[system]\nname='GB1'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='Li'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nLi='odd.xml'\n[basis]\necutwfc_ry=6.0\nkgrid=[2,2,2]\nkshift=[0.5,0.5,0.5]\nktime_reversal=false\n[xc]\nfunctional='lda-pw'\nallow_functional_override=true\n[scf]\nmax_iterations=150\nstandard_threshold_ha=5e-13\ndriver='reference'\n[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.02\n";
+    let invoke = |name: &str, text: &str| {
+        fs::write(root.join(format!("{name}.toml")), text).unwrap();
+        let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+        for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("BAANDI_")) {
+            c.env_remove(k);
+        }
+        let output = c
+            .current_dir(&root)
+            .args(["run", &format!("{name}.toml"), "--output-dir", name])
+            .output()
+            .unwrap();
+        let doc = fs::read(root.join(name).join("results.json"))
+            .ok()
+            .map(|b| serde_json::from_slice::<Value>(&b).unwrap());
+        (output, doc)
+    };
+    let (output, doc) = invoke("auto", base);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let auto = doc.unwrap();
+    let growth = &auto["reference_scf"]["band_count_growth"];
+    assert_eq!(growth["mode"], "automatic", "{growth}");
+    // n = 1.5: start max(2 + 4, ceil(1.8)) = 6; default cap max(32, 6->10->14).
+    assert_eq!(growth["initial_bands"], 6);
+    assert_eq!(growth["band_cap"], 32);
+    assert_eq!(auto["convergence"]["converged"], true);
+    let bands = growth["final_bands"].as_u64().unwrap();
+    let explicit_input = base.replace("[scf]\n", &format!("[scf]\nnbands={bands}\n"));
+    let (output, doc) = invoke("explicit", &explicit_input);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let explicit = doc.unwrap();
+    let fixed = &explicit["reference_scf"]["band_count_growth"];
+    assert_eq!(fixed["mode"], "fixed");
+    assert_eq!(fixed["final_bands"], bands);
+    assert!(fixed["transient_coverage_misses"].is_array());
+    let f = |d: &Value| d["thermodynamics"]["free_energy_ha"].as_f64().unwrap();
+    eprintln!(
+        "GB1 odd: auto {growth}\nF auto {:.15} explicit {:.15} diff {:.3e}; misses {}",
+        f(&auto),
+        f(&explicit),
+        f(&auto) - f(&explicit),
+        fixed["transient_coverage_misses"]
+    );
+    assert!((f(&auto) - f(&explicit)).abs() <= 5e-9);
+    let (output, _) = invoke("short", &base.replace("[scf]\n", "[scf]\nnbands=2\n"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study\")")
+            && stderr.contains("fd coverage: delivered")
+            && !stderr.contains("band growth:"),
+        "{stderr}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

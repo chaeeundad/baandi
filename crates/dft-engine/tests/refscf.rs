@@ -9735,6 +9735,94 @@ fn fd_band_growth_matches_explicit_count_and_reports_cap() {
     assert_eq!(BandGrowth::next(38, 40), 40);
 }
 
+/// GB1: odd-electron (N = 3) FD metal, atomic start, theta 0.04 Ha, explicit
+/// band count. The coverage criterion is checked hard on the delivered state
+/// only. At 10 bands the first map misses it (edge electrons about 5.9e-10
+/// against the limit 3e-10) while the fixed point is covered: the run is
+/// accepted (it was refused at the first map before GB1), records the
+/// transient miss and matches a 14-band run. At 9 bands the fixed point
+/// itself misses the criterion: refused with the unchanged message.
+#[test]
+fn fd_explicit_count_checks_coverage_at_delivery() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        model::ScfError,
+        refscf::{
+            api::{Request, solve},
+            electronic::Policy,
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = common::potential_with_atomic_start(3., 1., false, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = vec![KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let run = |bands: usize| {
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(bands),
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha: 0.04,
+            band_cap: bands,
+        });
+        solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+    };
+    let electrons = 3.;
+    let sufficient = run(10).unwrap();
+    let wide = run(14).unwrap();
+    let edge = sufficient.occupations.unwrap();
+    eprintln!(
+        "GB1 10 bands: misses {:?} delivered edge ({:.3e}, {:.3e}); F 10 {:.15} 14 {:.15} diff {:.3e}",
+        sufficient.coverage_misses,
+        edge.edge_max_fraction,
+        edge.edge_electrons,
+        sufficient.thermodynamics.free_energy_ha,
+        wide.thermodynamics.free_energy_ha,
+        sufficient.thermodynamics.free_energy_ha - wide.thermodynamics.free_energy_ha,
+    );
+    assert!(sufficient.converged && wide.converged);
+    assert!(sufficient.band_growth.is_none());
+    assert!(!sufficient.coverage_misses.is_empty());
+    assert_eq!(sufficient.coverage_misses[0].iteration, 1);
+    for miss in &sufficient.coverage_misses {
+        assert!(miss.edge_max_fraction > 1e-8 || miss.edge_electrons > 1e-10 * electrons);
+    }
+    assert!(edge.edge_max_fraction <= 1e-8 && edge.edge_electrons <= 1e-10 * electrons);
+    assert!(wide.coverage_misses.is_empty());
+    // Standard accuracy class (5e-9 Ha) against the wider count.
+    assert!(
+        (sufficient.thermodynamics.free_energy_ha - wide.thermodynamics.free_energy_ha).abs()
+            <= 5e-9
+    );
+    let short = run(9).err().unwrap();
+    assert!(matches!(
+        short,
+        ScfError::InvalidInput(
+            "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study"
+        )
+    ));
+}
+
 /// FD buffer bands (2026-11-26): a cubic one-electron metal (atom at the
 /// origin, 3x3x3 mesh, theta 0.01 Ha) whose retained count 10 cuts an exact
 /// triplet at about 1.342 Ha. Without the buffer the two retained triplet

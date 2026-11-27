@@ -50,7 +50,10 @@ bound. This conservative policy allocates occupation scratch once, does not
 resize inside SCF, and records `prepare_explicit_cap` and the retained count.
 A cap larger than the plane-wave basis rejects; decrease it or increase cutoff.
 A cap without sufficient empty-state coverage rejects; increase it and repeat
-the band study. Every retained finite-T eigenpair is strict. No tuning of the
+the band study. (On the reference driver with a fixed count the check applies
+to the delivered state since GB1, 2026-11-27; transient maps are recorded,
+see `docs/design/reference-scf.md`, FD coverage at delivery. The CLI default
+cap is now `max(32, automatic start + two growth steps)`.) Every retained finite-T eigenpair is strict. No tuning of the
 legacy eigensolver buffer policy or default mixing is made.
 
 Both maximum top-band fraction <=1e-8 and weighted top-band electrons

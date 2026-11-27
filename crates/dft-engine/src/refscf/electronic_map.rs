@@ -298,6 +298,10 @@ pub(super) struct Map {
     pub xc_remainder_ha: f64,
     pub fd_number_slope_e_per_ha: f64,
     pub xc_mask_crossings: usize,
+    /// FD empty-state coverage numbers when this map misses the criterion
+    /// (fixed band count only; with automatic growth such a map is rejected
+    /// and solved again at more bands). `None` when covered or not FD.
+    pub coverage: Option<Shortfall>,
 }
 impl Map {
     pub fn entropy(&self) -> f64 {
@@ -488,10 +492,19 @@ pub(super) fn fields<K: Collective>(
     })
 }
 /// The FD empty-state coverage rejection (criterion: top-band occupation
-/// fraction above 1e-8 or edge electrons above 1e-10 N at any k).
+/// fraction above `EDGE_FRACTION` or edge electrons above `EDGE_ELECTRONS` N
+/// at any k). GB1 (2026-11-27): with a fixed (explicit) band count it is
+/// applied to the delivered state only (the stopped map, the verification
+/// map, the last map of an exhausted budget); a transient SCF map that misses
+/// it is recorded as a diagnostic. Automatic growth reacts to every map.
 pub(super) const COVERAGE: &str = "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study";
-/// Coverage numbers of a rejected FD map, reported by automatic band growth.
-#[derive(Clone, Copy, Debug, Default)]
+/// Top-band occupation fraction (f / channel capacity) limit of the coverage
+/// criterion: 1e-8, about 18.4 theta above the chemical potential.
+pub(super) const EDGE_FRACTION: f64 = 1e-8;
+/// Edge electrons (k-weighted top-band electrons) limit relative to max(N, 1).
+pub(super) const EDGE_ELECTRONS: f64 = 1e-10;
+/// Coverage numbers of an FD map that misses the criterion.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Shortfall {
     pub edge_max_fraction: f64,
     pub edge_electrons: f64,
@@ -683,6 +696,7 @@ pub(super) fn evaluate<K: Collective>(
         Some(pool) => share_blocks(comm, pool, solved, ns, bands)?,
     };
     let weights: Vec<_> = super::k_map::k_weights(&states[0]);
+    let mut coverage = None;
     let evaluation = if let Some((theta, constraint)) = policy.finite() {
         let energies: Vec<_> = blocks
             .iter()
@@ -703,22 +717,24 @@ pub(super) fn evaluate<K: Collective>(
                 &mut occupations,
             )
             .map_err(numerical)?;
-        if evaluation.edge_max_fraction > 1e-8
-            || evaluation.edge_electrons > 1e-10 * electrons.max(1.)
+        if evaluation.edge_max_fraction > EDGE_FRACTION
+            || evaluation.edge_electrons > EDGE_ELECTRONS * electrons.max(1.)
         {
-            // Automatic band growth keeps this map's solved orbitals as the
-            // warm start of the enlarged block; the criterion is unchanged.
-            if let Some(shortfall) = shortfall {
-                *shortfall = Shortfall {
-                    edge_max_fraction: evaluation.edge_max_fraction,
-                    edge_electrons: evaluation.edge_electrons,
-                };
-                for (state, channel) in states.iter_mut().zip(&blocks) {
-                    // GK9 pools: this rank's blocks are the global k `local()`.
-                    let first = state.pool.as_ref().map_or(0, |p| p.local().start);
-                    for (x, b) in state.orbitals.0.iter_mut().zip(channel.iter().skip(first)) {
-                        x.clone_from(b.warm_start());
-                    }
+            coverage = Some(Shortfall {
+                edge_max_fraction: evaluation.edge_max_fraction,
+                edge_electrons: evaluation.edge_electrons,
+            });
+        }
+        // Automatic band growth (`shortfall` given) rejects the map and keeps
+        // its solved orbitals as the warm start of the enlarged block; a fixed
+        // count keeps the map and records the miss (`Map::coverage`).
+        if let (Some(found), Some(shortfall)) = (coverage, shortfall) {
+            *shortfall = found;
+            for (state, channel) in states.iter_mut().zip(&blocks) {
+                // GK9 pools: this rank's blocks are the global k `local()`.
+                let first = state.pool.as_ref().map_or(0, |p| p.local().start);
+                for (x, b) in state.orbitals.0.iter_mut().zip(channel.iter().skip(first)) {
+                    x.clone_from(b.warm_start());
                 }
             }
             return Err(ScfError::InvalidInput(COVERAGE));
@@ -1034,6 +1050,7 @@ pub(super) fn evaluate<K: Collective>(
         xc_remainder_ha,
         fd_number_slope_e_per_ha,
         xc_mask_crossings,
+        coverage,
     })
 }
 /// GK9 pools: records arrive rank-major (each rank's channel-major block of

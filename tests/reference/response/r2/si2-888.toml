@@ -1,0 +1,28 @@
+# R2 dielectric case (protocol: README.md). Si 2-atom fcc, Si.pz-vbc.UPF (not committed),
+# 30 Ry, SCF on the 8x8x8 Gamma-centered mesh, response on the full 512-point mesh.
+[system]
+name = "R2 Si2 8x8x8 dielectric"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,5.1306064283589663,5.1306064283589663],[5.1306064283589663,0.0,5.1306064283589663],[5.1306064283589663,5.1306064283589663,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kgrid = [8,8,8]
+[xc]
+functional = "lda-pz"
+[response]
+ecut_chi_ha = 3.0
+bands = 100
+band_solver = "dense"
+k_mesh = [8,8,8]
+local_fields = true
+[response.frequency]
+points = 16
+omega0_ha = "auto"

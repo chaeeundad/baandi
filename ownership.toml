@@ -22,8 +22,10 @@ deps = ["dft-units"]
 deps = ["dft-units", "dft-geometry", "dft-numerics", "dft-basis", "dft-upf", "dft-solvers", "dft-mpi"]   # solvers only for the LinearOperator trait; dft-mpi for the distributed H (M2b)
 [crates.dft-solvers]    # eigensolvers, mixers, SCF driver pieces
 deps = ["dft-numerics"]
+[crates.dft-response]   # R2+ response core (rpa-crpa-plan 3.1): pair densities, chi0, velocity, dielectric; no I/O, serde or logging
+deps = ["dft-numerics", "dft-physics", "dft-basis", "dft-solvers", "dft-mpi"]   # dft-geometry, dft-units, dft-upf for tests only
 [crates.dft-engine]     # orchestration and energy audit
-deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf", "dft-numerics", "dft-mpi"]   # numerics only to name RealMatrix in the real Gamma bridge (P26E); dft-mpi for the communicator registry (ADR 0041)
+deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf", "dft-numerics", "dft-mpi", "dft-response", "dft-units"]   # numerics only to name RealMatrix in the real Gamma bridge (P26E); dft-mpi for the communicator registry (ADR 0041); dft-response and dft-units for the R2 response driver
 [crates.dft-dispersion] # D3 dispersion adapter (ADR 0048): simple-dftd3 C API opened at run time (libloading), feature `dftd3` only
 deps = []
 unsafe_allowed = true   # src/ffi.rs only

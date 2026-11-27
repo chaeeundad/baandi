@@ -91,6 +91,8 @@ mod atomic_start;
 pub mod refscf;
 /// Final-cutoff, explicitly selected distributed reference initialization.
 pub mod refstart;
+/// R2 dielectric response (chi0, head/wings, epsilon_M) on NSCF bands.
+pub mod response;
 
 #[cfg(test)]
 #[allow(dead_code)]

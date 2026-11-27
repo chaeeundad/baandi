@@ -169,6 +169,7 @@ The `[task]` table selects the job; it is the only selector:
 | `"bands"` | `baandi bands` | `[bands]` |
 | `"dos"` | `baandi dos` | |
 | `"nscf"` | `baandi nscf` | `[nscf]` |
+| `"dielectric"` | `baandi dielectric` | `[response]` (R2, ADR 0054) |
 
 Optional keys: `resume = true` (relax, cell-relax; continue from
 `restart.json`) and `checkpoint_dir = "DIR"` (nscf). A `[relax]` table never
@@ -965,6 +966,43 @@ directory resumes every matching unit after re-certifying its residuals, and
 rejects units whose fingerprint (input, UPF, SCF density, k list, solver
 settings, ranks, threads, platform, backend, code version), partition or
 checksum differs. QE oracle protocol: `tests/reference/response/r1/README.md`.
+
+## Dielectric tensor `baandi dielectric` (R2)
+
+```sh
+baandi dielectric input.toml [--output-dir DIR]
+```
+
+Reference SCF (verified), then the optical-limit (q -> 0) RPA dielectric
+tensor of an insulator (`docs/roadmap/rpa-crpa-plan.md` R2, ADR 0054):
+NSCF bands on the Gamma-centred full mesh (dense EVD by default, every band
+residual-certified), chi0(q -> 0, i omega) by the sum over states with k.p
+head and wings (velocity including the nonlocal commutator), eps_M with and
+without local fields at omega = 0 and on a mapped Gauss-Legendre imaginary
+grid. Metals, spin-polarized inputs and non-reference drivers reject.
+
+```toml
+[response]
+ecut_chi_ha = 3.0           # response sphere (Ha), <= 4 x ecutwfc
+bands = "auto"              # auto = N_G(ecut_chi) clamped to the smallest basis; or a count
+band_solver = "dense"       # dense (default) | chebyshev
+k_mesh = [8, 8, 8]          # Gamma-centred full mesh (no symmetry reduction)
+head = "kp"                 # kp only (finite q is an internal check)
+local_fields = true         # headline tensor; both are always written
+eigen_tolerance_ha = 1e-6   # NSCF residual certificate
+[response.frequency]
+grid = "gauss-legendre"     # only value (minimax later)
+points = 16
+omega0_ha = "auto"          # or a scale in Ha
+```
+
+Outputs: `epsilon.json` (settings, spectrum, eps_infinity tensors with and
+without local fields, per-frequency tensors, head tensor L in Bohr^-1 Ha^-1,
+units and conventions), `epsilon_M.csv` (`index,omega_ha,omega_ev,weight_ha,
+nlf_xx..nlf_yz,nlf_avg,lf_xx..lf_yz,lf_avg`), `epsilon_M.dat` (gnuplot:
+omega_ev, averages, lf diagonal), `chi0_head.dat` (L versus i omega) and
+`results.json` (= `epsilon.json`). Oracle protocol:
+`tests/reference/response/r2/README.md`.
 
 ## Full input preflight (P8G)
 

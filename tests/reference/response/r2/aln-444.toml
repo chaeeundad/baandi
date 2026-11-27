@@ -1,0 +1,35 @@
+# R2 dielectric oracle case: wurtzite AlN (a = 3.11 Angstrom, c/a = 1.601, u = 0.382), PseudoDojo PBE Al/N
+# (not committed), same structure as refscf_nscf_many::dojo_lif_and_aln; 60 Ry; Gamma-centred 4x4x3.
+[system]
+name = "R1 AlN wurtzite 4x4x3 dielectric"
+lattice_unit = "bohr"
+lattice_vectors = [[5.877,0.0,0.0],[-2.9385,5.089631298041145,0.0],[0.0,0.0,9.409077]]
+[[system.atoms]]
+species = "Al"
+fractional = [0.3333333333333333,0.6666666666666666,0.0]
+[[system.atoms]]
+species = "Al"
+fractional = [0.6666666666666666,0.3333333333333333,0.5]
+[[system.atoms]]
+species = "N"
+fractional = [0.3333333333333333,0.6666666666666666,0.382]
+[[system.atoms]]
+species = "N"
+fractional = [0.6666666666666666,0.3333333333333333,0.882]
+[pseudopotentials]
+Al = "Al.upf"
+N = "N.upf"
+[basis]
+ecutwfc_ry = 60
+kgrid = [4,4,3]
+[xc]
+functional = "pbe"
+[response]
+ecut_chi_ha = 3.0
+bands = 120
+band_solver = "dense"
+k_mesh = [4,4,3]
+local_fields = true
+[response.frequency]
+points = 16
+omega0_ha = "auto"

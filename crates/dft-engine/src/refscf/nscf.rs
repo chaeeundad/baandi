@@ -48,6 +48,11 @@ pub struct NscfResult {
     pub solver: BandSolver,
     /// Channel-major then k-major, like `channels`.
     pub stats: Vec<Vec<BandStats>>,
+    /// R2: the plane-wave basis of every k (global row order of
+    /// `Bands::rows`; Bloch vector wrapped to [-1/2, 1/2) as in the solve).
+    pub bases: Vec<dft_basis::PlaneWaveBasis>,
+    /// R2: FFT grid of the operators (the supplied density grid).
+    pub grid_dims: [usize; 3],
 }
 
 /// Eigensolver of the fixed-density band problem.
@@ -420,6 +425,8 @@ pub fn nscf_bands_with<K: Collective, S: BandStore<K>>(
         tolerance_hartree: eigen_tolerance,
         solver,
         stats,
+        bases: state.blocks.iter().map(|b| b.basis.clone()).collect(),
+        grid_dims: dims,
     })
 }
 

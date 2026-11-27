@@ -115,6 +115,37 @@ cover symmetry.
    2.2e-16 Ha. Engine-level `enable_symmetry` without a grid argument (oracle
    API) still rejects an incompatible grid.
 
+5. **Amendment GS1D (2026-11-27): what "preserves the grid" means, and the
+   Cl2 case.** An operation x -> R x + tau maps the grid {m_j / n_j} onto
+   itself iff (a) n_i R_ij / n_j is an integer for all i, j (the image of one
+   grid step along axis j must be a whole number of steps along every axis i)
+   and (b) n_i tau_i is an integer (to 1e-8). Both are necessary and together
+   sufficient; this is exactly the rule in use (`grid_rotation_compatible`,
+   `grid_translation_compatible`), and `results.json.symmetry.dropped_operations`
+   now splits the count into `rotation_count` and `translation_count`.
+   Cl2 (MP campaign entry 18, Cmca) on the explicit grid [40, 36, 80]: the
+   primitive cell has a1 = b_conv and a2 = (a_conv + b_conv)/2 with unequal
+   lengths, hence n1 = 40 != n2 = 36. The mirrors and two-fold axes normal to
+   x_conv or y_conv send a2 to +-(a1 - a2), i.e. R_12 = +-1, so a step of 1/36
+   along a2 becomes a step of 1/36 along a1, which is not a multiple of 1/40.
+   These four operations (two of them with a fractional translation) truly do
+   not map this grid onto itself and are dropped by rotation, not by
+   translation; every Cmca translation (halves) is commensurate. Fixture
+   `cl2_like_explicit_grid_drops_only_operations_that_do_not_map_the_grid`
+   reproduces 8 detected, 4 with translations, 4 kept, 4 dropped (rotation 4,
+   translation 0), and shows that any grid with n2 dividing n1 ([40,40,80],
+   [72,36,80]) keeps all eight. QE reports all 8 on [40,36,80], so it does not
+   require the rotation part (a); presumably its density symmetrization works in
+   reciprocal space, where any lattice rotation maps the G sphere onto itself.
+   Our engine keeps (a) because the XC energy and potential are evaluated on the
+   real-space grid: if a rotation does not permute the grid points, the discrete
+   XC quadrature is not invariant under it (aliasing of the nonlinear f(rho)),
+   so a reduced-k run would no longer reproduce the full-mesh run exactly.
+   Accepting such operations (QE-like) is a separate, measurable change: a
+   reciprocal-space density symmetrizer for non-grid-preserving rotations plus
+   a measured reduced-versus-full energy difference against the accuracy
+   classes. It is not made here.
+
 ## Alternatives considered
 
 - **Keep positions, symmetrize density, forces and stress only (QE-like).** The

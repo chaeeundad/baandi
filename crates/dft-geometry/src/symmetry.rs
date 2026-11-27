@@ -248,6 +248,11 @@ pub struct Symmetrized {
     /// Detected operations dropped because they do not permute the explicit
     /// FFT grid (GS1C); zero without an explicit grid.
     pub dropped_for_grid: usize,
+    /// Of those, operations whose rotation does not map the grid (GS1D).
+    pub dropped_for_grid_rotation: usize,
+    /// Of those, operations with a commensurate rotation but a translation
+    /// that is not a multiple of the grid spacing (GS1D).
+    pub dropped_for_grid_translation: usize,
     /// Largest Cartesian atom displacement, Bohr, measured in the input lattice.
     pub max_atom_displacement_bohr: f64,
     /// Largest lattice-vector change |a_i' - a_i|, Bohr.
@@ -416,12 +421,10 @@ pub fn symmetrize_for_grid(
         let worst = delta.iter().map(|d| (a * d).norm()).fold(0.0, f64::max);
         (delta, worst)
     };
+    let snapped_ops = snapped.map(|s| with_taus(&s)).filter(|ops| closes(ops));
     let mut candidates = Vec::new();
-    if let Some(s) = snapped {
-        let ops = with_taus(&s);
-        if closes(&ops) {
-            candidates.push((true, restrict(ops)));
-        }
+    if let Some(ops) = &snapped_ops {
+        candidates.push((true, restrict(ops.clone())));
     }
     candidates.push((false, restrict(with_taus(&estimated))));
     let (translations_snapped, kept, delta, displacement) = candidates
@@ -434,6 +437,28 @@ pub fn symmetrize_for_grid(
         .ok_or(SymmetryError(
             "atom symmetrization would exceed the tolerance",
         ))?;
+    let dropped_reasons = match grid {
+        Some(dims) if kept.len() < detected.len() => {
+            // Reasons for the operations not kept, with the chosen translations.
+            let chosen = if translations_snapped {
+                snapped_ops.clone().unwrap_or_default()
+            } else {
+                with_taus(&estimated)
+            };
+            let dropped: Vec<_> = chosen
+                .into_iter()
+                .filter(|o| {
+                    !kept.iter().any(|k| {
+                        k.rotation == o.rotation
+                            && (0..3)
+                                .all(|i| wrap(k.translation[i] - o.translation[i]).abs() <= 1e-12)
+                    })
+                })
+                .collect();
+            grid_drop_reasons(&dropped, dims)
+        }
+        _ => GridDropReasons::default(),
+    };
     // Lattice: Reynolds average of the metric over the kept rotations.
     let metric = a.transpose() * a;
     let averaged = kept.iter().fold(Matrix3::zeros(), |s, o| {
@@ -475,6 +500,8 @@ pub fn symmetrize_for_grid(
         operations_count: kept.len(),
         detected_operations_count: detected.len(),
         dropped_for_grid: detected.len() - kept.len(),
+        dropped_for_grid_rotation: dropped_reasons.rotation,
+        dropped_for_grid_translation: dropped_reasons.translation,
         max_atom_displacement_bohr: displacement,
         max_lattice_change_bohr: lattice_change,
         positions_changed,
@@ -646,19 +673,48 @@ pub fn reduce_mesh(
     })
 }
 
+/// Rotation part of grid preservation: the grid point m_j/n_j e_j maps to
+/// (R_ij m_j / n_j)_i, which lies on the grid for every m iff n_i R_ij / n_j
+/// is an integer for all i, j. Necessary for any rotation that mixes axes of
+/// unequal dimensions (GS1D).
+pub fn grid_rotation_compatible(dims: [usize; 3], o: &SymmetryOperation) -> bool {
+    !dims.contains(&0)
+        && (0..3).all(|i| {
+            (0..3).all(|j| (dims[i] as i128 * o.rotation[i][j] as i128) % dims[j] as i128 == 0)
+        })
+}
+/// Translation part: each n_i tau_i is an integer (to 1e-8).
+pub fn grid_translation_compatible(dims: [usize; 3], o: &SymmetryOperation) -> bool {
+    (0..3).all(|i| {
+        let t = dims[i] as f64 * o.translation[i];
+        (t - t.round()).abs() <= 1e-8
+    })
+}
+/// Number of operations that fail grid preservation, by first failing part
+/// (rotation checked first).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GridDropReasons {
+    pub rotation: usize,
+    pub translation: usize,
+}
+pub fn grid_drop_reasons(operations: &[SymmetryOperation], dims: [usize; 3]) -> GridDropReasons {
+    let mut r = GridDropReasons::default();
+    for o in operations {
+        if !grid_rotation_compatible(dims, o) {
+            r.rotation += 1;
+        } else if !grid_translation_compatible(dims, o) {
+            r.translation += 1;
+        }
+    }
+    r
+}
 /// Real-space quadrature must be permuted by x -> R*x+tau. Fourier phases
 /// alone do not make a nonlinear XC quadrature invariant on an arbitrary grid.
 pub fn preserves_fft_grid(dims: [usize; 3], operations: &[SymmetryOperation]) -> bool {
     !dims.contains(&0)
-        && operations.iter().all(|o| {
-            (0..3).all(|i| {
-                let t = dims[i] as f64 * o.translation[i];
-                (t - t.round()).abs() <= 1e-8
-                    && (0..3).all(|j| {
-                        (dims[i] as i128 * o.rotation[i][j] as i128) % dims[j] as i128 == 0
-                    })
-            })
-        })
+        && operations
+            .iter()
+            .all(|o| grid_rotation_compatible(dims, o) && grid_translation_compatible(dims, o))
 }
 /// Choose smooth dimensions at least as large as the alias-free density grid.
 /// First preserve anisotropic dimensions; if rotations mix incompatible axes,

@@ -637,7 +637,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             .as_ref()
             .filter(|r| r.dropped_for_grid > 0)
         {
-            warnings.push(format!("symmetry.fft_grid: explicit basis.fft_grid {:?} does not preserve {} of {} detected operations; using the {}-operation subgroup it preserves (omit basis.fft_grid for the full group)", prepared.grid.dims(), r.dropped_for_grid, r.detected_operations_count, r.operations_count));
+            warnings.push(format!("symmetry.fft_grid: explicit basis.fft_grid {:?} does not preserve {} of {} detected operations ({} by rotation, {} by translation); using the {}-operation subgroup it preserves (omit basis.fft_grid for the full group)", prepared.grid.dims(), r.dropped_for_grid, r.detected_operations_count, r.dropped_for_grid_rotation, r.dropped_for_grid_translation, r.operations_count));
         }
         warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} mesh-preserving spatial operations; tolerance={} Bohr; magnetic spin swap/time reversal disabled without proof",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),config.symmetry.tolerance_bohr));
     }

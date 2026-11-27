@@ -380,3 +380,76 @@ fn compatible_grids_and_exact_inputs_are_bit_identical() {
     let s = symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some([24, 24, 25])).unwrap();
     assert!(s.dropped_for_grid > 0 && !s.positions_changed && !s.lattice_changed);
 }
+
+// GS1D: Cl2-like Cmca (No. 64) in a primitive cell with unequal first two
+// vectors, a1 = b_conv, a2 = (a+b)/2, a3 = c (Angstrom a=6.145, b=4.395,
+// c=8.154; Cl on 8f (0,y,z), y=0.1015, z=0.0464), six-decimal coordinates.
+fn cl2_like() -> (Cell, Vec<Atom>) {
+    let (a, b, c) = (
+        6.145 * ANGSTROM_TO_BOHR,
+        4.395 * ANGSTROM_TO_BOHR,
+        8.154 * ANGSTROM_TO_BOHR,
+    );
+    let cell = Cell::from_user_rows_bohr([[0., b, 0.], [a / 2., b / 2., 0.], [0., 0., c]]).unwrap();
+    let (y, z) = (0.1015, 0.0464);
+    let r6 = |v: f64| (v * 1e6).round() / 1e6;
+    let atoms = [
+        [0., y, z],
+        [0., 0.5 - y, z + 0.5],
+        [0., y + 0.5, 0.5 - z],
+        [0., -y, -z],
+    ]
+    .iter()
+    .map(|p| {
+        let f = cell.cartesian_bohr_to_fractional([p[0] * a, p[1] * b, p[2] * c]);
+        Atom::new("Cl", f.map(|v| r6(v.rem_euclid(1.0))))
+    })
+    .collect();
+    (cell, atoms)
+}
+
+#[test]
+fn cl2_like_explicit_grid_drops_only_operations_that_do_not_map_the_grid() {
+    let (cell, atoms) = cl2_like();
+    let ops = detect(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+    assert_eq!(ops.len(), 8);
+    let s = symmetrize(&cell, &atoms, DEFAULT_TOLERANCE_BOHR).unwrap();
+    let exact_cell = Cell::from_matrix_columns_bohr(s.lattice_columns_bohr).unwrap();
+    let exact_atoms: Vec<_> = s.fractional.iter().map(|p| Atom::new("Cl", *p)).collect();
+    let ops = detect(&exact_cell, &exact_atoms, 1e-9).unwrap();
+    let translated = |o: &SymmetryOperation| o.translation.iter().any(|t| t.abs() > 1e-12);
+    assert_eq!(ops.iter().filter(|o| translated(o)).count(), 4);
+    let dims = [40, 36, 80];
+    for o in &ops {
+        let rotation_ok = grid_rotation_compatible(dims, o);
+        let translation_ok = grid_translation_compatible(dims, o);
+        // Independent check: map every unit grid step and test grid membership.
+        let maps_grid = (0..3).all(|j| {
+            (0..3).all(|i| {
+                let image = o.rotation[i][j] as f64 / dims[j] as f64 * dims[i] as f64;
+                (image - image.round()).abs() < 1e-12
+            })
+        });
+        assert_eq!(rotation_ok, maps_grid, "{o:?}");
+        // Every Cmca translation here is a half: commensurate with even dims.
+        assert!(translation_ok, "{o:?}");
+        println!(
+            "rotation {:?} translation {:?}: rotation maps grid {rotation_ok}",
+            o.rotation, o.translation
+        );
+    }
+    let kept = grid_subgroup(&exact_cell, &ops, dims, 1e-9);
+    assert_eq!(kept.len(), 4);
+    let reasons = grid_drop_reasons(&ops, dims);
+    assert_eq!((reasons.rotation, reasons.translation), (4, 0));
+    // The dropped rotations mix a1 and a2 (x -> -x maps a2 to a1 - a2): a grid
+    // step 1/36 along a2 becomes 1/36 along a1, not a multiple of 1/40. Any
+    // grid with n2 dividing n1 keeps all eight.
+    for dims in [[40, 40, 80], [72, 36, 80]] {
+        assert_eq!(grid_subgroup(&exact_cell, &ops, dims, 1e-9).len(), 8);
+    }
+    let gridded =
+        symmetrize_for_grid(&cell, &atoms, DEFAULT_TOLERANCE_BOHR, Some([40, 36, 80])).unwrap();
+    assert_eq!((gridded.operations_count, gridded.dropped_for_grid), (4, 4));
+    assert_eq!(gridded.dropped_for_grid_rotation, 4);
+}

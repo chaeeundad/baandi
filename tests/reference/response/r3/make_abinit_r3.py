@@ -119,9 +119,13 @@ def main():
             f"nband{d} {nb}",
             f"ecuteps{d} {fmt(c)}",
             f"ecutwfn{d} {fmt(m['cutoff_hartree'])}",
+            # gwrpacorr and nfreqim require gwcalctyp in [1,11,21] (Gauss-Legendre
+            # imaginary-axis mesh); nfreqre only applies to real-axis contour
+            # deformation, so it is not set (dev08 check against the ABINIT 10.8.3
+            # variable database, 2026-11-27).
+            f"gwcalctyp{d} 1",
             f"gwrpacorr{d} 1",
             f"nfreqim{d} {nfreq}",
-            f"nfreqre{d} 1",
             f"inclvkb{d} 2",
             "",
         ]

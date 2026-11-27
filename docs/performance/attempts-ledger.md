@@ -5198,3 +5198,19 @@ ranks, pools on/off) identical line for line between base `d63fd1ac` and the can
 `bench_scf` baselines and the `reference_identity`/`oracle_identity` goldens: see switch-retirement.md CL1
 validation. Lesson: a rounding-dependent observational fixture (G4G stall record) had pinned three rollback arms;
 retiring them required an input change of the fixture, not of any tolerance.
+
+## CL1B-BASELINE (2026-11-27): reference identity baseline refreshed (no speed claim)
+
+`docs/performance/baseline-reference.json` (R0, source 181275fb) had gone stale on main for the k cases: k222s and
+k222 density differed (dE 0 and 8.9e-16 Ha), Gamma unchanged. `git bisect --first-parent 2fa8a091..4c82db53` with
+`bench_scf.py --require-identical` as the test (7 Mac release builds): last good d2d7a3db, first bad **84e3058c
+(Merge GK10-BORDER-GRAM, border-only projected S/H in the complex reference Davidson, rounding class)**. The later
+rounding-class sprint changes (GK10B, GK14, GK16, ...) are included in the refresh. Regenerated on 4c82db53 with the
+documented command (`--cases gamma,k222s,k222 --threads 1 --repeats 3 --record`), Mac Apple Silicon, pure release.
+Old -> new: gamma E -7.295530466374794 Ha, density a0c76c8c... unchanged, 85 operator applications; k222s dE 0,
+density 67120c8a... -> d049f1f6..., operator applications 455 -> 391; k222 dE +8.9e-16 Ha, density 680dd071... ->
+68e4e756..., 744 -> 680; SCF iterations 7 everywhere. The baseline file carries a `refresh` block with these numbers.
+Check: `bench_scf.py --require-identical --baseline docs/performance/baseline-reference.json` exit 0 (all identical);
+`baseline-oracle.json` untouched and still identical (exit 0); `scripts/tests/test_bench_scf.py` 10 tests OK.
+Lesson: a rounding-class adoption on the k path must refresh the stored reference baseline in the same change, or the
+identity gate silently stops being usable for k cases.

@@ -3,6 +3,12 @@
 //! Release matrix (includes stress cutoff scans and ionic continuation):
 //! BAANDI_API_BASELINE_BINARY=/path/to/pre-r3/dft-cli cargo test --release
 //!   -p dft-cli --test api_identity -- --ignored --nocapture
+//! Baseline policy (I-API-GAMMA-LASTBITS): build the baseline with the same
+//! features and RUSTFLAGS as this test (a production binary built with
+//! `-C target-cpu=native` or `--features mkl` is not a valid baseline for a
+//! plain `cargo test --release` build), and from a commit whose results schema
+//! matches (RELAX-STOP-RULE added relaxation fields, so relax cases need a
+//! baseline at or after 0fd3ac96). Commit ids and switch help text are masked.
 #[allow(dead_code)]
 mod common;
 use serde_json::{Value, json};
@@ -68,6 +74,8 @@ fn normalize(value: &mut Value) {
         "/provenance/executable_sha256",
         "/timestamp",
         "/run/run_id",
+        "/run/source_commit",
+        "/tool/git_commit",
         "/run/binary/path",
         "/run/binary/sha256",
         "/run/binary/hash_cache/status",
@@ -76,6 +84,18 @@ fn normalize(value: &mut Value) {
     ] {
         if let Some(field) = value.pointer_mut(pointer) {
             *field = Value::Null;
+        }
+    }
+    // The switch catalog's help text (allowed choices, meaning) is
+    // documentation that grows with diagnostic choices; the effective
+    // value, source, default and request of every switch stay compared.
+    if let Some(Value::Object(switches)) = value.pointer_mut("/scf/switches") {
+        for entry in switches.values_mut() {
+            for key in ["allowed", "meaning"] {
+                if let Some(field) = entry.get_mut(key) {
+                    *field = Value::Null;
+                }
+            }
         }
     }
     if let Some(rss) = value.pointer_mut("/reference_scf/run/peak_rss_bytes_per_rank") {
@@ -187,6 +207,52 @@ fn execute(
     }
     (code, value, fs::read(out.join("density.bin")).ok())
 }
+/// Size of a density mismatch (density.bin is little-endian f64): differing
+/// values, first index, largest absolute and relative difference.
+fn density_difference(old: Option<&[u8]>, new: Option<&[u8]>) -> String {
+    let (Some(old), Some(new)) = (old, new) else {
+        return format!("present old={} new={}", old.is_some(), new.is_some());
+    };
+    if old.len() != new.len() || old.len() % 8 != 0 {
+        return format!("lengths old={} new={}", old.len(), new.len());
+    }
+    let values = |b: &[u8]| -> Vec<f64> {
+        b.as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| f64::from_le_bytes(*c))
+            .collect()
+    };
+    let (old, new) = (values(old), values(new));
+    let (mut count, mut first, mut abs, mut rel) = (0, None, 0f64, 0f64);
+    for (i, (a, b)) in old.iter().zip(&new).enumerate() {
+        if a.to_bits() != b.to_bits() {
+            count += 1;
+            first.get_or_insert(i);
+            abs = abs.max((a - b).abs());
+            rel = rel.max((a - b).abs() / a.abs().max(b.abs()));
+        }
+    }
+    format!(
+        "{count} of {} values differ, first index {first:?}, max |diff| {abs:e}, max relative {rel:e}",
+        old.len()
+    )
+}
+#[test]
+fn density_difference_reports_size() {
+    let bytes = |v: &[f64]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>();
+    let a = bytes(&[1., 2., 4.]);
+    let b = bytes(&[1., 2. * (1. + f64::EPSILON), 4.]);
+    let text = density_difference(Some(&a), Some(&b));
+    assert!(
+        text.starts_with("1 of 3 values differ, first index Some(1)"),
+        "{text}"
+    );
+    assert_eq!(
+        density_difference(Some(&a), None),
+        "present old=true new=false"
+    );
+}
 #[test]
 #[ignore = "release pre-refactor binary matrix; see module header"]
 fn cli_results_match_pre_facade_binary() {
@@ -260,7 +326,25 @@ fn cli_results_match_pre_facade_binary() {
             &out,
         );
         assert_eq!(old_code, new_code, "{name}: exit status");
-        assert_eq!(old_density, new_density, "{name}: density bytes");
+        // A baseline built with other features (mkl) takes other GEMM/EVD
+        // routes and differs in the last bits by construction; name that
+        // instead of reporting it as a density change. RUSTFLAGS are not
+        // recorded: build both executables with the same RUSTFLAGS.
+        if let (Some(a), Some(b)) = (
+            old.pointer("/execution/backend"),
+            new.pointer("/execution/backend"),
+        ) {
+            assert_eq!(
+                a, b,
+                "{name}: build backend differs; build the baseline with the same features and RUSTFLAGS as this test"
+            );
+        }
+        if old_density != new_density {
+            panic!(
+                "{name}: density bytes: {}",
+                density_difference(old_density.as_deref(), new_density.as_deref())
+            );
+        }
         if command == "relax" {
             let frames = new["relaxation"]["frames"].as_array().unwrap();
             assert_eq!(frames.len(), 3, "{name}: exercise two ionic continuations");

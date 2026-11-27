@@ -1,10 +1,49 @@
 # R2 oracle protocol: dielectric tensor (eps_M, chi0 head) against external codes (dev08)
 
-Status: inputs prepared 2026-11-27 (RPA-R2-CHI0); no external-code run
-recorded yet. Numbers count as "Yambo / BerkeleyGW / QE reference" only after
-a real dev08 run with the command, code version, input, UPF SHA-256 and
-machine stored here. No UPF is committed. Plan:
-`docs/roadmap/rpa-crpa-plan.md` ticket R2; conventions: ADR 0054.
+Status: **validated against Yambo 5.3.0 and ABINIT 10.8.3 on dev08,
+2026-11-28** (inputs prepared 2026-11-27, RPA-R2-CHI0). Records:
+`dev08-2026-11-28/summary.json` (matched run, BAANDI tree gen75 `be57c04c`,
+binary, Yambo/p2y/pw.x/ABINIT SHA-256, input and UPF SHA-256 per case,
+ABINIT input hashes) and `dev08-2026-11-27/summary.json` (first run, BAANDI
+`full` against Yambo, plus the BAANDI-only rank and Chebyshev checks). No
+UPF is committed. Plan: `docs/roadmap/rpa-crpa-plan.md` ticket R2;
+conventions: ADR 0054. BerkeleyGW was not run (Yambo plus ABINIT give two
+independent oracles); ph.x (ALDA) is not an R2 gate.
+
+Gate 0.5 % relative on eps_inf with and without local fields, every
+diagonal component. Matched results (max relative difference over x, y, z
+and LF / no LF):
+
+| Case | BAANDI `full` eps_inf LF / no LF | `full` vs Yambo (11-27) | `no-g0-all` vs Yambo | `no-g0` vs ABINIT | gate |
+| --- | --- | --- | --- | --- | --- |
+| Si2 4x4x4 | 22.6814 / 24.8945 | 1.1e-5 | 8.0e-6 | (ABINIT cannot read Si.pz-vbc) | pass |
+| Si2 8x8x8 | 13.4268 / 14.8668 | 1.8e-5 | not run | not run | pass (`full`) |
+| C 4x4x4 | 7.1525 / 7.4393 | 4.3e-5 | 6.9e-6 | not run | pass |
+| LiF 4x4x4 | 1.9988 / 2.0893 | 3.2e-3 | 1.9e-5 | 5.0e-5 | pass |
+| AlN 4x4x3, xx = yy / zz | 4.5744 / 4.9347, 4.5431 / 4.9010 | 5.2e-3 | 1.3e-5 | 1.4e-5 | pass |
+
+Convention (Gamma, k + G = 0 nonlocal velocity): Yambo drops the whole
+k + G = 0 plane wave from [V_NL, r], reproduced by BAANDI's diagnostic
+`BAANDI_RESPONSE_VELOCITY=no-g0-all`; ABINIT drops the l = 1 projector
+gradient there, reproduced by `no-g0`. BAANDI's default `full` keeps the
+term, which is part of the exact d H / d k (finite-difference proof at
+k = 0, section "Velocity at Gamma" below, R2-GAMMA-VEL), and is the
+physical result; the `full` LiF/AlN differences of 0.3 to 0.5 % are the
+oracles' Gamma treatment on these coarse meshes. ABINIT observable: its
+printed dielectric constant with / without local fields at q_red
+(1, 2, 3)e-5 (4 to 5 digits), against BAANDI's tensor projected on that
+direction. Diagnostics: BAANDI `full` dipoles equal Yambo `ndb.dipoles` to
+2e-5 at every k except Gamma; per-band eigenvalues against QE: LiF
+1.2e-5 Ha, AlN 2.4e-6 Ha. BAANDI-only (11-27): MPI np 1 bit-identical to
+threads, np 2/4/8 within 6.2e-14 relative, Chebyshev against dense
+7.0e-10 relative. The skewed Si2 4x4x4 case is rejected as noninsulating
+(gap -1.97e-4 Ha, decision D6), as expected.
+
+Source note: the ABINIT and Yambo conventions above were established from
+the numbers (sections below) and partly from the dev08 session's reading of
+the ABINIT source, for oracle matching only; this repository records them
+in prose, contains no oracle code, and nothing in BAANDI's default path was
+changed toward the oracles.
 
 ## Required oracle software (decision D3: built on dev08 in user space through the master session; none is assumed to exist)
 
@@ -176,7 +215,9 @@ relative (synthetic), 3.0e-6 (LiF), 1.6e-6 (AlN): the velocity is smooth
 through Gamma. BAANDI's Gamma velocity is d H / d k of its Hamiltonian;
 nothing is changed in the default path.
 
-What the oracles do (inferred from numbers only; no oracle source was read).
+What the oracles do (inferred from numbers only; no oracle source was read
+for this Mac analysis. Annotation 2026-11-28: the dev08 session later read
+parts of the ABINIT source for oracle matching only; see Status).
 `BAANDI_RESPONSE_VELOCITY=no-g0` drops the k+G = 0 projector gradient,
 `no-g0-all` drops the whole k+G = 0 plane wave from the commutator (also the
 l = 0 projector value there). Same inputs, UPFs and settings as above;

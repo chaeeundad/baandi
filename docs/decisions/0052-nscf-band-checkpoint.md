@@ -1,6 +1,6 @@
 # ADR 0052: Many-band NSCF solvers and the `nscf_bands_v1` checkpoint unit (R1)
 
-- Status: **Proposed** (ticket RPA-R1-MANY-BANDS, 2026-11-27; orchestrator review pending).
+- Status: **Accepted** 2026-11-28 (ticket RPA-R1-MANY-BANDS, proposed 2026-11-27). Evidence: QE 7.6 nscf on dev08, five cases within 8.1e-6 Ha (gate 2e-5), `tests/reference/response/r1/dev08-2026-11-27/summary.json`.
 - Scope: `refscf::nscf::nscf_bands_with` (engine), `dft_solvers::chebyshev_complex`,
   `DistributedComplexHamiltonian::{dense_matrix, spectral_upper_bound}`,
   `baandi nscf`, `docs/checkpoint-format.md` section "NSCF band units".

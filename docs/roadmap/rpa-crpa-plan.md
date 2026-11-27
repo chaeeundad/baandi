@@ -1,4 +1,11 @@
-# RPA and cRPA: design and validation plan (plan only, not implemented)
+# RPA and cRPA: design and validation plan (R1-R3 implemented and validated; R4 next)
+
+Progress 2026-11-28: R1, R2 and R3 are implemented and validated against
+real oracle runs on dev08 (status lines under each ticket in section 4;
+README "Validation results", RPA section). Next stage: R4 (R4a atomic
+projection with Loewdin, then R4b Wannier90 export/import), which leads to
+R5 cRPA. The text below is the original plan; the historical status line
+follows.
 
 Status 2026-11-26: proposal under scope decision U11 (AGENTS.md). No code before
 2026-12-01, and no stage starts before its ticket and the open decisions of
@@ -405,6 +412,12 @@ installed on dev08 without decision D3.
 
 ### R1: many-empty-band solve
 
+Status: **validated 2026-11-27** against QE 7.6 `pw.x` nscf on dev08, five
+cases, max aligned eigenvalue difference 8.1e-6 Ha (gate 2e-5), plane-wave
+counts equal at every k. Evidence:
+[`tests/reference/response/r1/dev08-2026-11-27/summary.json`](../../tests/reference/response/r1/dev08-2026-11-27/summary.json),
+protocol [`r1/README.md`](../../tests/reference/response/r1/README.md), ADR 0052.
+
 Scope: NSCF extension (buffer bands, locking, dense path, Chebyshev path,
 `nscf_bands_v1` checkpoint), result with all bands to N_b.
 Oracles: (i) internal dense EVD of the explicit H_k in the complete basis
@@ -420,6 +433,16 @@ dev08 cost: Si 8x8x8, 512 k, N_PW about 750, 400 bands, dense: under 5 min on
 8 cores; QE side similar.
 
 ### R2: chi0 and epsilon for semiconductors
+
+Status: **validated 2026-11-28** against Yambo 5.3.0 (Si, C, LiF, AlN) and
+ABINIT 10.8.3 (LiF, AlN) on dev08 at the oracles' Gamma k+G = 0 velocity
+convention: max relative eps_inf difference 1.9e-5 (Yambo) and 5.0e-5
+(ABINIT), gate 0.5 %. BAANDI's default keeps the exact k+G = 0 term
+(R2-GAMMA-VEL); its LiF/AlN differences to the oracles (0.3 to 0.5 %) are
+that convention. BerkeleyGW not run; ph.x ALDA check open. Evidence:
+[`r2/dev08-2026-11-28/summary.json`](../../tests/reference/response/r2/dev08-2026-11-28/summary.json),
+[`r2/dev08-2026-11-27/summary.json`](../../tests/reference/response/r2/dev08-2026-11-27/summary.json),
+protocol [`r2/README.md`](../../tests/reference/response/r2/README.md), ADR 0054.
 
 Scope: pair densities, chi0 with frequency grid, head/wings with nonlocal
 velocity, epsilon with and without local fields, epsilon_M tensor, MPI level 1.
@@ -448,6 +471,17 @@ complex MAC, seconds to minutes; the full set with convergence series about
 
 ### R3: RPA correlation energy for small systems
 
+Status: **validated 2026-11-28 (finite-q part)** against ABINIT 10.8.3
+`gwrpacorr` on dev08: Si (PseudoDojo), C, LiF at four cutoffs each, finite-q
+sum within 0.27 meV/atom (gate 1 meV/atom), BAANDI in the matched G-sphere,
+first-zone-image convention. The q = 0 term is reported separately: a
+convention difference that falls as 1/N_q (Si 6 Ha: -104.7 / -21.9 / -8.8
+meV/atom at 4x4x4 / 6x6x6 / 8x8x8). MPI rank series within 1.0e-13 Ha.
+Open within R3: extrapolated-cutoff comparison, Ne/Ar, N2 in a box, skewed
+Si, R3b. Evidence:
+[`r3/dev08-2026-11-28/summary.json`](../../tests/reference/response/r3/dev08-2026-11-28/summary.json),
+protocol [`r3/README.md`](../../tests/reference/response/r3/README.md), ADR 0055.
+
 Scope: ACFDT log det, q0 mini-BZ average, q symmetry weights, extrapolation in
 (E_cut^chi)^{-3/2}, checkpoint per q, spin channels for fixed-moment
 insulators. Optional R3b: EXX on KS orbitals and the EXX + RPA total energy.
@@ -468,6 +502,8 @@ complex MAC, 15 to 30 min on 8 cores per cutoff; a four-cutoff series and
 two k meshes about 4 to 8 h per material; ABINIT comparable.
 
 ### R4: projection and Wannier subspace
+
+Status 2026-11-28: next stage (ticket to be written; R1 is its prerequisite).
 
 R4a: atomic projection with Loewdin, band window, hoppings in real space.
 R4b: Wannier90 file export and import of gauge matrices.

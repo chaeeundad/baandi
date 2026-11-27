@@ -1,12 +1,54 @@
 # R3 oracle protocol: RPA correlation energy (ACFDT) against ABINIT (dev08)
 
-Status: inputs and scripts prepared 2026-11-27 (RPA-R3-ACFDT); no
-external-code run recorded yet. A number counts as "ABINIT reference" only
-after a real dev08 run with the command, code version and build options,
-input file, pseudopotential SHA-256 (UPF and, if converted, psp8) and machine
-stored here. No pseudopotential file is committed. Plan:
+Status: **finite-q part validated against ABINIT 10.8.3 on dev08,
+2026-11-28; q = 0 term reported separately and shown to be a convention
+that vanishes as 1/N_q** (inputs prepared 2026-11-27, RPA-R3-ACFDT; q image
+amendment R3-QIMAGE). Record: `dev08-2026-11-28/summary.json` (BAANDI tree
+gen75 `be57c04c` and binary SHA-256, ABINIT SHA-256, input, UPF and
+`case.abi` SHA-256 per case, commands; raw records on dev08 under
+`/scr/mino/rustdft/r75/r3`). No pseudopotential file is committed. Plan:
 `docs/roadmap/rpa-crpa-plan.md` ticket R3; conventions: ADR 0055 (on top of
 ADR 0054).
+
+Matched conventions: BAANDI `[rpa] response_sphere = "G"` (one |G| sphere
+for every q, v = 4 pi / |q+G|^2) with each mesh q evaluated at its
+first-Brillouin-zone image (ADR 0055 item 2), which is ABINIT's
+convention; ABINIT `gwcalctyp 1`, `nfreqim 32`, `ixc -101130` (libxc PBE),
+one dataset per (cutoff, IBZ q) for the per-q comparison. Si uses the
+PseudoDojo PBE file (`si2-dojo-444`), because ABINIT 10.8.3 cannot read
+Si.pz-vbc.UPF. The q = 0 term is not part of the gate: BAANDI averages the
+k.p head and wings over directions, ABINIT uses its auxiliary-function
+treatment (`gw_icutcoul 6`, default); ABINIT's own alternatives 3/7/16
+change its Si q = 0 term by at most 0.5 %, so the difference is not an
+ABINIT setting choice.
+
+Gate: finite-q sum (all q != 0) within 1 meV/atom at each matched cutoff.
+
+| Case | E_cut^chi (Ha) | finite-q sum diff (meV/atom) | largest single-q diff | q = 0 term diff, weight 1/N_q (meV/atom) |
+| --- | --- | --- | --- | --- |
+| Si2 dojo 4x4x4 | 6 / 8 / 10 / 12 | -0.004 / -0.006 / -0.010 / -0.014 | <= 0.004 | -104.69 at every cutoff |
+| LiF 4x4x4 | 4 / 5 / 6 / 8 | -0.065 / -0.062 / -0.063 / -0.063 | <= 0.025 | -9.15 to -9.53 |
+| C 4x4x4 | 4 / 5 / 6 / 8 | +0.273 / -0.005 / +0.037 / +0.010 | <= 0.112 | -62.82 to -63.61 |
+
+All twelve points pass. q mesh series, Si dojo 6 Ha (SCF 4x4x4 in both
+codes): total difference -104.7 / -21.9 / -8.8 meV/atom at 4x4x4 / 6x6x6 /
+8x8x8; difference x N_q = -0.49 / -0.35 / -0.33 Ha per cell, tending to
+about -0.33 Ha: the remaining difference falls as 1/N_q, a pure q = 0
+convention (ABINIT q = 0 terms at 6x6x6 and 8x8x8 inferred as total minus
+BAANDI's finite-q part, which matched to 0.014 meV/atom at 4x4x4).
+Frequency grid: ABINIT nfreqim 16/32/64 spread at 6 Ha below 0.001
+meV/atom. BAANDI-only MPI rank series (tree `03aab866`, Si.pz-vbc, 4 Ha,
+4x4x4): np 2/4/8 against np 1 within 1.0e-13 Ha (gate 1e-9 Ha). Not in
+this record: extrapolated-cutoff comparison (2 meV/atom gate), a BAANDI
+frequency series on these inputs (Mac series: `mac-2026-11-27/`), Ne/Ar,
+N2 in a box, skewed Si (later R3 items).
+
+Source note: the ABINIT conventions (G sphere, first-zone q image, q = 0
+treatment and `gw_icutcoul` choices) were established from numbers and
+partly from the dev08 session's reading of the ABINIT source, for oracle
+matching only; recorded here in prose, no oracle code in this repository.
+The README results block is generated from the summary by
+`scripts/make_readme_figures.py`.
 
 ## Required oracle software (decision D3: built on dev08 in user space through the master session; nothing is assumed to exist)
 

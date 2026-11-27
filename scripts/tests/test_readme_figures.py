@@ -222,6 +222,51 @@ class ReadmeIsCurrent(unittest.TestCase):
         got = text[text.index(m.STATUS_BEGIN): text.index(m.STATUS_END) + len(m.STATUS_END)]
         self.assertEqual(got, m.status_block(), "README status block is stale: run python3 -I scripts/make_readme_figures.py")
 
+    def test_rpa_evidence_changes_invalidate_generated_results(self):
+        m = load()
+        baseline = m.rpa_results()
+        fig = m.fig_rpa_q0()
+        original = m.load
+        changes = [
+            (m.RPA_R1, lambda d: d["cases"]["lif-222"].update(max_aligned_ha=1.23e-4)),
+            (m.RPA_R2_FULL, lambda d: d["yambo-aln-444"].update(max_rel=0.123)),
+            (m.RPA_R2, lambda d: d["cases"]["lif-444"]["no_g0_vs_abinit"]["LF"].__setitem__(2, 0.123)),
+            (m.RPA_R2, lambda d: d["cases"]["aln-444"]["full"]["LF_diag"].__setitem__(2, 1.23)),
+            (m.RPA_R3, lambda d: d["cases"]["c2-444"]["per_cutoff"]["4.0"].update(finite_q_sum_diff_mev_per_atom=1.5)),
+            (m.RPA_R3, lambda d: d["si2_dojo_mesh_6ha"]["rows"][-1].update(diff_times_Nq_ha=-0.123)),
+            (m.RPA_R3, lambda d: d["baandi_only_rank_series"]["max_abs_dEc_vs_np1_ha"].update(np8=1.23e-8)),
+        ]
+        for relative, mutate in changes:
+            def changed(path):
+                data = original(path)
+                if os.path.relpath(path, ROOT) == relative:
+                    mutate(data)
+                return data
+            with self.subTest(source=relative), patch.object(m, "load", side_effect=changed):
+                self.assertNotEqual(baseline, m.rpa_results())
+        def changed_mesh(path):
+            data = original(path)
+            if os.path.relpath(path, ROOT) == m.RPA_R3:
+                data["si2_dojo_mesh_6ha"]["rows"][0].update(diff_mev_per_atom=-50.0)
+            return data
+        with patch.object(m, "load", side_effect=changed_mesh):
+            self.assertNotEqual(fig, m.fig_rpa_q0())
+
+    def test_rpa_gates_conventions_and_sources(self):
+        import re
+        m = load()
+        text = "\n".join(m.rpa_results())
+        for phrase in ("Gate 2e-5 Ha", "Gate 0.5 % relative", "`no-g0-all` for Yambo", "`no-g0` for ABINIT",
+                       "BAANDI keeps it", "R2-GAMMA-VEL", "q = 0 term is reported separately",
+                       "within 1 meV/atom", "1/N_q", "not converged material values"):
+            self.assertIn(phrase, text)
+        self.assertNotIn("FAIL", text)
+        rows = [l for l in text.splitlines() if l.startswith("| ") and l.endswith(" |") and not l.startswith("| Case")
+                and not l.startswith("| q mesh")]
+        self.assertEqual(len(rows), 5 + 5 + 12 + 3)
+        for target in re.findall(r"\]\(([^)]+)\)", text):
+            self.assertTrue(Path(ROOT, target).is_file(), target)
+
     def test_figures_match_the_evidence_and_all_runs_pass(self):
         m = load()
         rows, kruns = m.cutoff_data(), m.kpoint_data()
@@ -229,6 +274,7 @@ class ReadmeIsCurrent(unittest.TestCase):
         gamma = {"e": abs(g["ours"] - g["qe"]) / 2, "eig": g["eig"], "iters": g["iters"]}
         for name, svg in (("cutoff-scan.svg", m.fig_cutoff(rows)), ("kpoint-comparison.svg", m.fig_kpoints(gamma, kruns)),
                           ("relaxation-forces.svg", m.fig_relaxation()), ("mpqe-wall-ratio.svg", m.fig_mpqe()),
+                          ("rpa-q0-convergence.svg", m.fig_rpa_q0()),
                           ("performance.svg", m.fig_perf(m.perf_data())), ("thread-scaling.svg", m.fig_threads(m.threads_data()))):
             self.assertEqual(Path(ROOT, "docs", "img", name).read_text(), svg, name + " is stale")
         self.assertTrue(all(k["ok"] for k in kruns))

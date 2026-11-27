@@ -9672,48 +9672,69 @@ fn fd_band_growth_matches_explicit_count_and_reports_cap() {
     };
     let explicit = run(Some(12), 12, None).unwrap();
     assert!(explicit.converged && explicit.band_growth.is_none());
-    let grown = run(None, 12, Some(BandGrowth::From(2))).unwrap();
-    assert!(grown.converged);
-    let report = grown.band_growth.as_ref().unwrap();
     let mu =
         |r: &dft_engine::refscf::electronic::Run| r.occupations.unwrap().roots[0].unwrap().mu_ha;
-    eprintln!(
-        "growth {report:?}\nF explicit {:.15} grown {:.15} diff {:.3e}\nE diff {:.3e} mu explicit {:.12} grown {:.12} diff {:.3e}\niterations explicit {} grown {}",
-        explicit.thermodynamics.free_energy_ha,
-        grown.thermodynamics.free_energy_ha,
-        grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha,
-        grown.thermodynamics.internal_energy_ha - explicit.thermodynamics.internal_energy_ha,
-        mu(&explicit),
-        mu(&grown),
-        mu(&grown) - mu(&explicit),
-        explicit.history.len(),
-        grown.history.len(),
-    );
-    assert_eq!(report.initial_bands, 2);
-    assert_eq!(report.band_cap, 12);
-    assert!(!report.events.is_empty());
-    for (i, e) in report.events.iter().enumerate() {
-        assert_eq!(e.to, BandGrowth::next(e.from, 12));
-        assert!(e.edge_max_fraction > 1e-8 || e.edge_electrons > 1e-10);
-        if i > 0 {
-            assert_eq!(e.from, report.events[i - 1].to);
+    for legacy in [true, false] {
+        let grown = {
+            let config = dft_numerics::switches::RunConfig::from_pairs(&[(
+                "fd_growth_at_stop",
+                if legacy { "off" } else { "on" },
+            )])
+            .unwrap();
+            let _scope = config.enter();
+            run(None, 12, Some(BandGrowth::From(2))).unwrap()
+        };
+        assert!(grown.converged);
+        let report = grown.band_growth.as_ref().unwrap();
+        eprintln!(
+            "legacy {legacy} growth {report:?}\nF explicit {:.15} grown {:.15} diff {:.3e}\nE diff {:.3e} mu explicit {:.12} grown {:.12} diff {:.3e}\niterations explicit {} grown {}",
+            explicit.thermodynamics.free_energy_ha,
+            grown.thermodynamics.free_energy_ha,
+            grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha,
+            grown.thermodynamics.internal_energy_ha - explicit.thermodynamics.internal_energy_ha,
+            mu(&explicit),
+            mu(&grown),
+            mu(&grown) - mu(&explicit),
+            explicit.history.len(),
+            grown.history.len(),
+        );
+        assert_eq!(report.initial_bands, 2);
+        assert_eq!(report.band_cap, 12);
+        assert!(!report.events.is_empty());
+        for (i, e) in report.events.iter().enumerate() {
+            assert_eq!(e.to, BandGrowth::next(e.from, 12));
+            assert!(e.edge_max_fraction > 1e-8 || e.edge_electrons > 1e-10);
+            if i > 0 {
+                assert_eq!(e.from, report.events[i - 1].to);
+            }
+        }
+        assert_eq!(report.final_bands, report.events.last().unwrap().to);
+        assert_eq!(grown.blocks[0][0].occupations.len(), report.final_bands);
+        let edge = grown.occupations.unwrap();
+        assert!(edge.edge_max_fraction <= 1e-8 && edge.edge_electrons <= 1e-10);
+        // Standard accuracy class (5e-9 Ha) on F and E.
+        assert!(
+            (grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha).abs()
+                <= 5e-9
+        );
+        assert!(
+            (grown.thermodynamics.internal_energy_ha - explicit.thermodynamics.internal_energy_ha)
+                .abs()
+                <= 5e-9
+        );
+        if legacy {
+            // Pre-GB2 rule: growth inside the first map, same trajectory.
+            assert!((mu(&grown) - mu(&explicit)).abs() <= 1e-7);
+        } else {
+            // GB2: growth only once the truncated run meets the stop rule
+            // (iteration 5 here); the delivered state is a different standard
+            // stop of the same fixed point. Energies stay in the class above;
+            // mu, a first-order quantity, measured 4.1e-7 Ha (ONEPATH-3 records
+            // first-order differences up to 7e-6 at the 5e-9 class).
+            assert!(report.events.iter().all(|e| e.iteration > 1));
+            assert!((mu(&grown) - mu(&explicit)).abs() <= 1e-6);
         }
     }
-    assert_eq!(report.final_bands, report.events.last().unwrap().to);
-    assert_eq!(grown.blocks[0][0].occupations.len(), report.final_bands);
-    let edge = grown.occupations.unwrap();
-    assert!(edge.edge_max_fraction <= 1e-8 && edge.edge_electrons <= 1e-10);
-    // Standard accuracy class (5e-9 Ha) on F and E.
-    assert!(
-        (grown.thermodynamics.free_energy_ha - explicit.thermodynamics.free_energy_ha).abs()
-            <= 5e-9
-    );
-    assert!(
-        (grown.thermodynamics.internal_energy_ha - explicit.thermodynamics.internal_energy_ha)
-            .abs()
-            <= 5e-9
-    );
-    assert!((mu(&grown) - mu(&explicit)).abs() <= 1e-7);
     // The cap is the ceiling: 2 -> 6, then 6 cannot grow at cap 6.
     let capped = run(None, 6, Some(BandGrowth::From(2))).err().unwrap();
     let ScfError::InvalidInput(message) = capped else {
@@ -9827,6 +9848,290 @@ fn fd_explicit_count_checks_coverage_at_delivery() {
             "occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study"
         )
     ));
+}
+
+/// GB2: odd-electron (N = 3) automatic growth from 10 bands, cap 14 (the
+/// GB1 fixture: the first map misses the coverage criterion, the fixed point
+/// at 10 bands meets it). Growth at the stopping map only: no growth, one
+/// recorded transient miss, delivered at 10 bands; the pre-GB2 rule
+/// (`FD_GROWTH_AT_STOP=off`) grows to the cap on that transient. Both are
+/// in the standard class of each other.
+#[test]
+fn fd_growth_ignores_transient_coverage_miss() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{
+            api::{Request, solve},
+            electronic::{BandGrowth, Policy},
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::KPoint};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = common::potential_with_atomic_start(3., 1., false, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = vec![KPoint {
+        fractional: [0.; 3],
+        weight: 1.,
+    }];
+    let run = |mode: &str| {
+        let config =
+            dft_numerics::switches::RunConfig::from_pairs(&[("fd_growth_at_stop", mode)]).unwrap();
+        let _scope = config.enter();
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha: 0.04,
+            band_cap: 14,
+        });
+        request.band_growth = Some(BandGrowth::From(10));
+        solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+        .unwrap()
+    };
+    let at_stop = run("on");
+    let legacy = run("off");
+    let (a, b) = (
+        at_stop.band_growth.as_ref().unwrap(),
+        legacy.band_growth.as_ref().unwrap(),
+    );
+    eprintln!(
+        "GB2 transient: at_stop {a:?} misses {:?} maps {} F {:.15}\nlegacy {b:?} maps {} F {:.15} dF {:.3e}",
+        at_stop.coverage_misses,
+        at_stop.history.len(),
+        at_stop.thermodynamics.free_energy_ha,
+        legacy.history.len(),
+        legacy.thermodynamics.free_energy_ha,
+        at_stop.thermodynamics.free_energy_ha - legacy.thermodynamics.free_energy_ha
+    );
+    assert!(at_stop.converged && legacy.converged);
+    assert!(a.events.is_empty() && a.final_bands == 10);
+    assert_eq!(at_stop.coverage_misses.len(), 1);
+    assert_eq!(at_stop.coverage_misses[0].iteration, 1);
+    assert_eq!(b.final_bands, 14);
+    assert!(b.events.iter().all(|e| e.iteration == 1));
+    let edge = at_stop.occupations.unwrap();
+    assert!(edge.edge_max_fraction <= 1e-8 && edge.edge_electrons <= 3e-10);
+    assert!(
+        (at_stop.thermodynamics.free_energy_ha - legacy.thermodynamics.free_energy_ha).abs()
+            <= 5e-9
+    );
+}
+
+/// GB2: collinear FD start from the atomic density scaled to the channel
+/// counts (`SPIN_FD_ATOMIC_DENSITY`) against the former uniform channel start,
+/// free and fixed moment, odd N = 3, two species-equal atoms, 2x2x2 mesh.
+/// Map counts are recorded; delivered F and moment agree in the standard
+/// class.
+#[test]
+fn spin_fd_atomic_channel_start() {
+    use dft_engine::{
+        Functional, GammaReal, ScfOptions, SpeciesPotential,
+        collinear::SpinSector,
+        refscf::{
+            api::{Request, solve},
+            electronic::Policy,
+        },
+        refstart::{DensityStartKind, StartInput},
+    };
+    use dft_geometry::{
+        Atom, Cell,
+        kpoints::{KPoint, monkhorst_pack},
+    };
+    use dft_physics::occupations::Constraint;
+    let small = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.1, 5.]]).unwrap();
+    let large = Cell::from_user_rows_bohr([[9., 0., 0.], [0.3, 8., 0.], [0., 0.2, 8.5]]).unwrap();
+    let one = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let two = [
+        Atom::new("Xx", [0.13, 0.21, 0.32]),
+        Atom::new("Xx", [0.61, 0.58, 0.77]),
+    ];
+    let pp = common::potential_with_atomic_start(3., 1., true, 161, "SLA PW");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points: Vec<KPoint> = monkhorst_pack([2; 3], [0.; 3]).unwrap();
+    let run = |cell: &Cell, atoms: &[Atom], bands: usize, constraint: Constraint, mode: &str| {
+        let config =
+            dft_numerics::switches::RunConfig::from_pairs(&[("spin_fd_atomic_density", mode)])
+                .unwrap();
+        let _scope = config.enter();
+        let options = ScfOptions {
+            functional: Functional::LdaPw,
+            cutoff_hartree: 2.5,
+            bands: Some(bands),
+            gamma_real: GammaReal::Off,
+            max_iterations: 200,
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::SpinFermiDirac {
+            sector: SpinSector {
+                n_up: atoms.len() + 1,
+                n_down: 2 * atoms.len() - 1,
+                axis_cartesian: [0., 0., 1.],
+                initial_moment_seed: Some(0.5),
+            },
+            theta_ha: 0.02,
+            constraint,
+            band_cap: bands,
+        });
+        solve(
+            StartInput {
+                cell,
+                atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+        .unwrap()
+    };
+    for (name, cell, atoms, bands, constraint) in [
+        ("small free", &small, &one[..], 12, Constraint::Total),
+        (
+            "small fixed",
+            &small,
+            &one[..],
+            12,
+            Constraint::FixedMoment(1.),
+        ),
+        ("large free", &large, &two[..], 24, Constraint::Total),
+        (
+            "large fixed",
+            &large,
+            &two[..],
+            24,
+            Constraint::FixedMoment(1.),
+        ),
+    ] {
+        let atomic = run(cell, atoms, bands, constraint, "on");
+        let uniform = run(cell, atoms, bands, constraint, "off");
+        eprintln!(
+            "GB2 spin-fd {name}: maps atomic {} uniform {}; verification attempts {} / {}; F {:.15} / {:.15} dF {:.3e}; M {:.9} / {:.9}",
+            atomic.history.len(),
+            uniform.history.len(),
+            atomic.verification.as_ref().map_or(0, |v| v.attempts.len()),
+            uniform
+                .verification
+                .as_ref()
+                .map_or(0, |v| v.attempts.len()),
+            atomic.thermodynamics.free_energy_ha,
+            uniform.thermodynamics.free_energy_ha,
+            atomic.thermodynamics.free_energy_ha - uniform.thermodynamics.free_energy_ha,
+            atomic.moment_mu_b,
+            uniform.moment_mu_b,
+        );
+        assert!(atomic.converged && uniform.converged);
+        assert_eq!(atomic.start_report.density, DensityStartKind::Atomic);
+        assert_eq!(uniform.start_report.density, DensityStartKind::Uniform);
+        assert!(
+            (atomic.thermodynamics.free_energy_ha - uniform.thermodynamics.free_energy_ha).abs()
+                <= 5e-9
+        );
+    }
+}
+
+/// GB2: the verification predictor on the FD driver. A slab-like cell
+/// (5 x 5 x 28 Bohr, two Z = 3 atoms, 2x2x1 mesh, theta 0.01 Ha) whose stops
+/// fail the unchanged verification criterion repeatedly (weakly screened
+/// long-wavelength mode: Coulomb error 494x and 3.9x the threshold at stop
+/// residuals 0.73x and 0.009x of it). With the predictor the second failing
+/// attempt is skipped (predicted 494 * 0.0124 = 6.1x the threshold); same
+/// map count, same delivered state, one verification map fewer. A tenfold
+/// tighter verification eigen tolerance left the errors unchanged (GB2
+/// exploration): the failures are the criterion, not Davidson noise.
+#[test]
+fn fd_verification_predictor_skips_repeated_failure() {
+    use dft_engine::{
+        ScfOptions, SpeciesPotential,
+        refscf::{
+            api::{Request, solve},
+            electronic::Policy,
+        },
+        refstart::StartInput,
+    };
+    use dft_geometry::{Atom, Cell, kpoints::monkhorst_pack};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0.2, 5., 0.], [0., 0.3, 28.]]).unwrap();
+    let atoms = [
+        Atom::new("Xx", [0.13, 0.21, 0.32]),
+        Atom::new("Xx", [0.61, 0.58, 0.77]),
+    ];
+    let pp = common::potential_with_atomic_start(3., 1., true, 161, "SLA PZ");
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let points = monkhorst_pack([2, 2, 1], [0.; 3]).unwrap();
+    let run = |mode: &str| {
+        let config =
+            dft_numerics::switches::RunConfig::from_pairs(&[("fd_verify_predictor", mode)])
+                .unwrap();
+        let _scope = config.enter();
+        let options = ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(24),
+            max_iterations: 200,
+            ..Default::default()
+        };
+        let mut request = Request::new(Profile::default(), points.clone());
+        request.policy = Some(Policy::FermiDirac {
+            theta_ha: 0.01,
+            band_cap: 24,
+        });
+        solve(
+            StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            request,
+        )
+        .and_then(|d| d.run.into_electronic())
+        .unwrap()
+    };
+    let on = run("on");
+    let off = run("off");
+    let attempts = |r: &dft_engine::refscf::electronic::Run| {
+        r.verification
+            .as_ref()
+            .unwrap()
+            .attempts
+            .iter()
+            .map(|a| (a.iteration, a.passed))
+            .collect::<Vec<_>>()
+    };
+    eprintln!(
+        "GB2 predictor: on maps {} attempts {:?}; off maps {} attempts {:?}; dF {:.3e}",
+        on.history.len(),
+        attempts(&on),
+        off.history.len(),
+        attempts(&off),
+        on.thermodynamics.free_energy_ha - off.thermodynamics.free_energy_ha
+    );
+    assert!(on.converged && off.converged);
+    assert_eq!(attempts(&off).len(), 3);
+    assert_eq!(attempts(&on).len(), 2);
+    assert!(on.history.len() <= off.history.len());
+    assert!((on.thermodynamics.free_energy_ha - off.thermodynamics.free_energy_ha).abs() <= 5e-9);
 }
 
 /// FD buffer bands (2026-11-26): a cubic one-electron metal (atom at the

@@ -1217,9 +1217,15 @@ and k point):
   `max(ceil(n) + 4, ceil(1.2 n))` bands, n the largest channel electron target
   (N/2 unpolarized), at most `band_cap`. When a map fails the empty-state
   coverage criterion (top-band occupation fraction above 1e-8 or edge electrons
-  above 1e-10 N at any k; unchanged), the count grows to
-  `max(bands + 4, ceil(1.2 bands))`, at most `band_cap`, and the same SCF
+  above 1e-10 N at any k; unchanged) and that map meets the stop rule, is the
+  last map of the iteration budget, or is a verification map, the count grows
+  to `max(bands + 4, ceil(1.2 bands))`, at most `band_cap`, and the same SCF
   iteration is solved again without restarting (density mixing history kept).
+  Earlier maps that miss the criterion are transient (an early density far
+  from the fixed point): they are recorded in
+  `band_count_growth.transient_coverage_misses` and do not grow the count
+  (GB2, 2026-11-27; `growth_trigger` names the rule;
+  `BAANDI_FD_GROWTH_AT_STOP=off` restores growth on every map).
   Each growth prints one stderr line (`band growth: ...`) and is recorded in
   `results.json.reference_scf.band_count_growth` (`mode`, `initial_bands`,
   `final_bands`, `band_cap`, `growth_rule`, `events[]` with iteration,

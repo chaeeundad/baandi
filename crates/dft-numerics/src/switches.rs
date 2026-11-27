@@ -394,6 +394,12 @@ table! {
         "GF2: the spin/FD reference Davidson solves max(4, ceil(n / 10)) buffer columns beyond the n retained bands (empty-band threshold, never required, not in the density); off solves exactly n columns (experiment only: on the GF2 Mac fixtures Au, Al, Sr, Ru the top retained bands then converge to wrong eigenpairs, missed states up to 0.36 Ha, and Sr converges to a free energy 2.7e-10 Ha away, outside the strict class); SCF trajectory change";
     COLLINEAR_TIME_REVERSAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "GT1 (ADR 0050): collinear spin runs accept basis.ktime_reversal (k ~ -k within each spin channel: each channel Hamiltonian has real local and nonlocal potentials without spin-orbit coupling, so H_s(-k) = conj H_s(k)); a k grid therefore reduces by time reversal by default as in unpolarized runs; off restores the former rejection (collinear input then needs basis.ktime_reversal = false)";
+    FD_GROWTH_AT_STOP: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GB2: automatic FD band growth reacts to an empty-state coverage miss only on a map that meets the stop rule, the last map of the budget or a verification map (grow, solve the same input density again, continue); earlier maps that miss are recorded as transient (reference_scf.band_count_growth.transient_coverage_misses); off restores growth on every map that misses (pre-GB2)";
+    FD_VERIFY_PREDICTOR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "GB2: the spin/FD driver uses the closed-shell verification predictor: after a verification attempt with Coulomb error e at stop residual r0, a later stop at residual r < r0 skips its attempt (an ordinary map instead) when e r / r0 >= the threshold, never twice in a row; the pass criterion is unchanged and a run with at most one failed attempt is unchanged; off verifies at every stop";
+    SPIN_FD_ATOMIC_DENSITY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "GB2: collinear Fermi-Dirac runs start each channel from the atomic start density scaled to the channel count (N +- m)/2 when that density is strictly positive on every grid point (otherwise, and for fixed sectors, uniform channel counts as before); off restores the uniform channel start; SCF trajectory change (accuracy class)";
 }
 
 struct Resolved {

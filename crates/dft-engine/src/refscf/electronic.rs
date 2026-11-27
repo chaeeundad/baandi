@@ -817,12 +817,23 @@ pub(super) async fn run_continuation<K: Collective>(
     let dv = volume / dims.iter().product::<usize>() as f64;
     // Legacy collinear starts from uniform channel counts. A positive seed
     // permits its common feasibility step without clipping atomic-density zeros.
+    // GB2 (`SPIN_FD_ATOMIC_DENSITY`, collinear FD only, default off): when
+    // the start has an atomic density, each channel starts from it scaled to
+    // its count (N +- m) / 2, the spin analogue of the unpolarized atomic
+    // start (zeros of the clipped atomic density are kept).
+    let atomic_channels = matches!(policy, Policy::SpinFermiDirac { .. })
+        && states[0].report.density == refstart::DensityStartKind::Atomic
+        && config.on(Id::SPIN_FD_ATOMIC_DENSITY);
     let mut n: Vec<Vec<f64>> = states
         .iter()
         .enumerate()
         .map(|(s, state)| {
             if policy.channels() == 1 {
                 state.density.clone()
+            } else if atomic_channels {
+                let scale = (electrons + if s == 0 { seed_moment } else { -seed_moment })
+                    / (2. * electrons);
+                state.density.iter().map(|v| v * scale).collect()
             } else {
                 vec![
                     (electrons + if s == 0 { seed_moment } else { -seed_moment }) / (2. * volume);
@@ -929,6 +940,12 @@ pub(super) async fn run_continuation<K: Collective>(
     let empty_rule = policy.finite().is_some() && config.choice(Id::FD_EMPTY_THRESHOLD) != "off";
     let mut previous_occupations: Option<Vec<Vec<Vec<f64>>>> = None;
     let empty_verify = empty_rule && config.on(Id::FD_EMPTY_VERIFY);
+    // GB2 (`FD_VERIFY_PREDICTOR`): the closed-shell verification predictor.
+    // After an attempt with error e at residual r0, a later stop at r skips
+    // its attempt (one ordinary map instead) when e r / r0 >= the threshold,
+    // never twice in a row. The pass criterion is unchanged.
+    let use_predictor = config.on(Id::FD_VERIFY_PREDICTOR);
+    let mut predictor = super::driver::VerificationPredictor::default();
     macro_rules! checkpoint_state {
         () => {
             |request: super::stepper::Visit<'_, '_>| -> Result<usize, ScfError> {
@@ -1038,6 +1055,11 @@ pub(super) async fn run_continuation<K: Collective>(
                 if empty_rule {
                     io.value(&mut previous_occupations)?;
                 }
+                // GB2: only with the predictor on (switch in the header hash).
+                if use_predictor {
+                    io.value(&mut predictor.observed)?;
+                    io.value(&mut predictor.skipped_last)?;
+                }
                 super::checkpoint::counters(
                     completed,
                     opts.max_iterations,
@@ -1063,6 +1085,12 @@ pub(super) async fn run_continuation<K: Collective>(
         }
     }
     let redo_kept = config.on(Id::SPIN_FD_REDO_KEPT_HX);
+    // GB2 (`FD_GROWTH_AT_STOP`, default on): automatic growth reacts to a
+    // coverage miss only at a stopping, budget-final or verification map;
+    // off restores the pre-GB2 growth on every map.
+    let legacy_growth = !config.on(Id::FD_GROWTH_AT_STOP);
+    let mut transient_shortfall = map::Shortfall::default();
+
     for iteration in completed + 1..=opts.max_iterations {
         if let Some(s) = &mut workspace.symmetry {
             s.iteration = iteration;
@@ -1081,56 +1109,44 @@ pub(super) async fn run_continuation<K: Collective>(
         let mut verification_grew = false;
         let (mut step, y, f, dr2) = loop {
             let xc_stage = dft_physics::xc::screening_scope("map", false, Some(electrons));
-            let mut shortfall = map::Shortfall::default();
-            let step = loop {
-                match map::evaluate(
-                    &mut workspace,
-                    &mut states,
-                    &mut kept,
-                    comm,
-                    input.cell,
-                    opts.functional,
-                    &n,
-                    &policy,
-                    ethr,
-                    iteration == 1 && !redo,
-                    diagnostic,
-                    trace.is_some(),
-                    growth.is_some().then_some(&mut shortfall),
-                    bands,
-                    previous_occupations.as_deref(),
-                ) {
-                    Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
-                        grow(
-                            &mut states,
-                            &mut kept,
-                            comm,
-                            &mut bands,
-                            cap,
-                            (iteration, false),
-                            shortfall,
-                            &mut growth_events,
-                        )?;
-                    }
-                    other => break other?,
+            // GB2: the ordinary map is never rejected for coverage; a miss is
+            // judged below once its residual is known (growth only at a
+            // stopping or budget-final map, a recorded transient otherwise).
+            let step = map::evaluate(
+                &mut workspace,
+                &mut states,
+                &mut kept,
+                comm,
+                input.cell,
+                opts.functional,
+                &n,
+                &policy,
+                ethr,
+                iteration == 1 && !redo,
+                diagnostic,
+                trace.is_some(),
+                (growth.is_some() && legacy_growth).then_some(&mut transient_shortfall),
+                bands,
+                previous_occupations.as_deref(),
+            );
+            let step = match step {
+                Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
+                    // GB2_TRANSIENT_GROWTH=off: the pre-GB2 rule (every map).
+                    drop(xc_stage);
+                    grow(
+                        &mut states,
+                        &mut kept,
+                        comm,
+                        &mut bands,
+                        cap,
+                        (iteration, false),
+                        transient_shortfall,
+                        &mut growth_events,
+                    )?;
+                    continue;
                 }
+                other => other?,
             };
-            if let Some(miss) = step.coverage {
-                // Fixed count: a transient map may miss the criterion (an
-                // early density far from the fixed point); delivery is checked.
-                if comm.rank() == 0 && coverage_misses.is_empty() {
-                    eprintln!(
-                        "fd coverage: iteration {iteration}: transient map misses the empty-state criterion at {bands} bands (edge fraction {:.3e}, edge electrons {:.3e}); checked again at delivery",
-                        miss.edge_max_fraction, miss.edge_electrons,
-                    );
-                }
-                coverage_misses.push(CoverageMiss {
-                    iteration,
-                    redo,
-                    edge_max_fraction: miss.edge_max_fraction,
-                    edge_electrons: miss.edge_electrons,
-                });
-            }
             collect_calls(&step, &mut calls);
             if empty_rule {
                 previous_occupations = Some(occupations_of(&step));
@@ -1170,6 +1186,42 @@ pub(super) async fn run_continuation<K: Collective>(
                     trace.records[trace.used - 1].rotation_fraction = Some(fraction);
                     trace.records[trace.used - 1].rotation_rank = rank;
                 }
+            }
+            if let Some(miss) = step.coverage {
+                let stopping = dr2 < profile.threshold_ry
+                    && (!guard || step.guard < profile.threshold_ry / 2.)
+                    && valid(&step, &policy, electrons);
+                if growth.is_some() && (stopping || iteration == opts.max_iterations) {
+                    // GB2: a map that would be delivered misses the criterion:
+                    // grow from its solved orbitals and solve the same input
+                    // density again (mixing history untouched).
+                    warm(&mut states, &step);
+                    grow(
+                        &mut states,
+                        &mut kept,
+                        comm,
+                        &mut bands,
+                        cap,
+                        (iteration, false),
+                        miss,
+                        &mut growth_events,
+                    )?;
+                    continue;
+                }
+                // A transient map may miss the criterion (an early density far
+                // from the fixed point); the delivered state is checked.
+                if comm.rank() == 0 && coverage_misses.is_empty() {
+                    eprintln!(
+                        "fd coverage: iteration {iteration}: transient map misses the empty-state criterion at {bands} bands (edge fraction {:.3e}, edge electrons {:.3e}); checked again at delivery",
+                        miss.edge_max_fraction, miss.edge_electrons,
+                    );
+                }
+                coverage_misses.push(CoverageMiss {
+                    iteration,
+                    redo,
+                    edge_max_fraction: miss.edge_max_fraction,
+                    edge_electrons: miss.edge_electrons,
+                });
             }
             if iteration == 1 && !redo && dr2 < ethr * electrons.max(1.) {
                 let report = StepReport::new(
@@ -1219,8 +1271,12 @@ pub(super) async fn run_continuation<K: Collective>(
             ethr,
             calls.iter().map(|(_, _, c)| c.h_columns).sum::<usize>() - reported_columns,
         );
-        let mut passed = stopped;
-        if stopped && let Some(report) = &mut verification {
+        let skipped = stopped
+            && use_predictor
+            && verification.is_some()
+            && predictor.skip(predictor.predict(dr2), profile.threshold_ry / 2.);
+        let mut passed = stopped && !skipped;
+        if passed && let Some(report) = &mut verification {
             boundary.emit(map_report).await;
             let start = Instant::now();
             warm(&mut states, &step);
@@ -1312,6 +1368,7 @@ pub(super) async fn run_continuation<K: Collective>(
             } else {
                 base_error
             };
+            predictor.observe(dr2, error);
             if let Some(trace) = trace.as_deref_mut() {
                 trace.records[trace.used - 1].stiffness_ha = stiffness_ha;
             }
@@ -1610,7 +1667,7 @@ pub(super) async fn run_continuation<K: Collective>(
                 start_report: refstart::StartReport {
                     // Collinear channels use uniform counts, irrespective of the
                     // atomic density used to prepare their initial orbital span.
-                    density: if states.len() == 2 {
+                    density: if states.len() == 2 && !atomic_channels {
                         refstart::DensityStartKind::Uniform
                     } else {
                         states[0].report.density

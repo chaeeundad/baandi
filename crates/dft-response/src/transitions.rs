@@ -96,6 +96,23 @@ impl Transitions {
         scale: f64,
         velocity_data: Option<Velocity<'_>>,
     ) -> Result<(), ResponseError> {
+        let b = self.block(fft, right, block, velocity_data)?;
+        if b.delta.is_empty() {
+            return Ok(());
+        }
+        accumulator.add(b.pairs, b.delta, scale, b.slopes)
+    }
+
+    /// The transition block without accumulation (R3: one block feeds the
+    /// accumulators of several response cutoffs). Columns are `n * count + t`
+    /// for occupied n and block member t; empty when `block` is empty.
+    pub fn block(
+        &mut self,
+        fft: &mut PairFft,
+        right: KOrbitals<'_>,
+        block: std::ops::Range<usize>,
+        velocity_data: Option<Velocity<'_>>,
+    ) -> Result<TransitionBlock<'_>, ResponseError> {
         let count = block.len();
         let occ = self.left_energies.len();
         if right.coefficients.rows() != self.right_plan.len()
@@ -105,7 +122,12 @@ impl Transitions {
             return Err(input("transitions: right orbital shapes"));
         }
         if count == 0 {
-            return Ok(());
+            self.delta.clear();
+            return Ok(TransitionBlock {
+                pairs: &self.pairs,
+                delta: &self.delta,
+                slopes: None,
+            });
         }
         self.right_plan
             .to_real(right.coefficients, block.clone(), &mut self.right_fields)?;
@@ -140,10 +162,23 @@ impl Transitions {
                     self.slopes.push(std::array::from_fn(|b| p[b][(n, t)] / d));
                 }
             }
-            Some(self.slopes.as_slice())
+            true
         } else {
-            None
+            false
         };
-        accumulator.add(&self.pairs, &self.delta, scale, slopes)
+        Ok(TransitionBlock {
+            pairs: &self.pairs,
+            delta: &self.delta,
+            slopes: slopes.then_some(self.slopes.as_slice()),
+        })
     }
+}
+
+/// One formed transition block: `pairs[(G, j)] = rho_j(q+G)` on the
+/// response sphere of the [`PairFft`], `delta[j] = e_occ - e_emp` (Ha) and,
+/// in the optical limit, the q-linear slopes (Bohr).
+pub struct TransitionBlock<'a> {
+    pub pairs: &'a ComplexMatrix,
+    pub delta: &'a [f64],
+    pub slopes: Option<&'a [[C; 3]]>,
 }

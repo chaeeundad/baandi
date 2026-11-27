@@ -8,6 +8,8 @@ mod dos;
 mod nscf;
 mod refscf_check;
 mod refscf_map;
+#[path = "rpa.rs"]
+mod rpa;
 use dft_cli::checkpoint_io;
 #[path = "pseudo.rs"]
 mod pseudo;
@@ -149,6 +151,18 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         output_dir: Option<PathBuf>,
+    },
+    /// SCF followed by the RPA correlation energy ([response] and [rpa]
+    /// tables; R3): ACFDT log det over the q mesh, q -> 0 direction
+    /// average, cutoff-series extrapolation.
+    Rpa {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        /// Per-q E_c records (rpa_q_v1); matching records are resumed,
+        /// mismatching records reject.
+        #[arg(long)]
+        checkpoint_dir: Option<PathBuf>,
     },
     /// SCF followed by a weighted fixed-density Gaussian density of states.
     Dos {
@@ -364,6 +378,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Bands { .. }
         | Command::Nscf { .. }
         | Command::Dielectric { .. }
+        | Command::Rpa { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -391,6 +406,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Bands { .. }
         | Command::Nscf { .. }
         | Command::Dielectric { .. }
+        | Command::Rpa { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -569,6 +585,11 @@ fn single_entry(cli: Cli, mpi: bool) -> Result<Resolved, String> {
             input,
             output_dir: None,
         },
+        task::TaskType::Rpa => Command::Rpa {
+            input,
+            output_dir: None,
+            checkpoint_dir: resolved.checkpoint_dir,
+        },
     };
     Ok(Resolved {
         command,
@@ -596,6 +617,9 @@ fn progress_session(
             input, output_dir, ..
         } => (input, output_dir.as_ref(), "nscf"),
         Command::Dielectric { input, output_dir } => (input, output_dir.as_ref(), "dielectric"),
+        Command::Rpa {
+            input, output_dir, ..
+        } => (input, output_dir.as_ref(), "rpa"),
         _ => return Ok(None),
     };
     if no_progress || dft_cli::parallel::rank() > 0 {
@@ -634,6 +658,7 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
         | Command::Bands { input, .. }
         | Command::Nscf { input, .. }
         | Command::Dielectric { input, .. }
+        | Command::Rpa { input, .. }
         | Command::Dos { input, .. }
         | Command::Run { input, .. }
         | Command::Validate { input, .. }
@@ -687,6 +712,15 @@ fn dispatch(command: Command) -> (u8, Option<String>) {
         Command::Dielectric { input, output_dir } => {
             Some(dielectric::execute(input, output_dir.as_deref()))
         }
+        Command::Rpa {
+            input,
+            output_dir,
+            checkpoint_dir,
+        } => Some(rpa::execute(
+            input,
+            output_dir.as_deref(),
+            checkpoint_dir.as_deref(),
+        )),
         Command::Nscf {
             input,
             output_dir,

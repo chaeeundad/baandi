@@ -170,9 +170,10 @@ The `[task]` table selects the job; it is the only selector:
 | `"dos"` | `baandi dos` | |
 | `"nscf"` | `baandi nscf` | `[nscf]` |
 | `"dielectric"` | `baandi dielectric` | `[response]` (R2, ADR 0054) |
+| `"rpa"` | `baandi rpa` | `[response]`, optional `[rpa]` (R3, ADR 0055) |
 
 Optional keys: `resume = true` (relax, cell-relax; continue from
-`restart.json`) and `checkpoint_dir = "DIR"` (nscf). A `[relax]` table never
+`restart.json`) and `checkpoint_dir = "DIR"` (nscf, rpa). A `[relax]` table never
 selects relaxation by itself, and every inconsistent combination is an input
 error (exit 1). Output goes to `[output] directory` (default `results`,
 relative to the working directory). The subcommands stay as aliases with
@@ -1003,6 +1004,48 @@ nlf_xx..nlf_yz,nlf_avg,lf_xx..lf_yz,lf_avg`), `epsilon_M.dat` (gnuplot:
 omega_ev, averages, lf diagonal), `chi0_head.dat` (L versus i omega) and
 `results.json` (= `epsilon.json`). Oracle protocol:
 `tests/reference/response/r2/README.md`.
+
+## RPA correlation energy `baandi rpa` (R3)
+
+```sh
+baandi rpa input.toml [--output-dir DIR] [--checkpoint-dir DIR]
+```
+
+Reference SCF (verified), then the RPA correlation energy of an insulator
+from the ACFDT on the imaginary axis (`docs/roadmap/rpa-crpa-plan.md` R3, ADR
+0055): `E_c = sum_q w_q (1/2pi) int dw Tr[ln(1 - v chi0(q, i w)) + v chi0]`,
+NSCF bands on the full `[response] k_mesh` (Gamma-centred), q on the same
+mesh reduced by the crystal group plus time reversal, `ln det` by Cholesky,
+the q = 0 term as the Lebedev direction average of the k.p head/wings limit,
+one pass over the pair densities for the whole cutoff series, and the
+`(E_cut^chi)^{-3/2}` extrapolation (plus a 1/N_G diagnostic fit). The
+`[response]` keys `bands`, `band_solver`, `k_mesh`, `eigen_tolerance_ha`
+and `[response.frequency]` apply as for `dielectric` (`bands = "auto"` ties
+the band count to N_G of each cutoff; an integer uses that count for every
+cutoff). Collinear `[spin]` inputs with an integer moment (insulating in
+each channel; functional lda-pw or pbe) give `chi0 = chi0_up + chi0_down`.
+Metals reject.
+
+```toml
+[rpa]
+ecut_chi_ha_series = [4.0, 5.0, 6.0, 8.0]   # default [response.ecut_chi_ha]; ascending, <= 4 x ecutwfc
+q0_directions = 26          # Lebedev order 6 | 14 | 26 | 50
+q_symmetry = "crystal"      # crystal (default) | time-reversal | none
+```
+
+Outputs: `rpa.json` (settings, spectrum, E_c per cutoff in Ha/cell and
+meV/atom, extrapolation with residuals and the plan-2.5 linearity check,
+per-q values, q = 0 direction-set check against a 24 x 48 product rule,
+frequency terms, Cholesky pivot and Hermiticity diagnostics),
+`rpa_q.csv` (`q_index,q1,q2,q3,weight,multiplicity,optical,ecut_chi_ha,
+response_size,e_c_q_ha,weighted_ha,min_pivot,hermiticity`),
+`rpa_extrapolation.csv` (`ecut_chi_ha,x,response_size_q0,bands,
+e_c_ha_per_cell,e_c_mev_per_atom,fit_ha_per_cell,residual_mev_per_atom`),
+`rpa_frequency.csv` (q-weighted integrand per frequency and cutoff) and
+`results.json` (= `rpa.json`). `--checkpoint-dir` writes one `rpa_q_v1`
+record per irreducible q (IEEE bits, fingerprint of the input and the SCF
+density) and resumes matching records; a mismatching record rejects. Oracle
+protocol: `tests/reference/response/r3/README.md`.
 
 ## Full input preflight (P8G)
 

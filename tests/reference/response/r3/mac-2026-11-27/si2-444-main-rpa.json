@@ -1,0 +1,693 @@
+{
+  "atoms": 2,
+  "code": "rust-dft",
+  "code_version": "0.1.0",
+  "conventions": "v = 4 pi / |q+G|^2; X = v^1/2 chi0 v^1/2 Hermitized; ln det(1 - X) by Cholesky; q weights sum to one; spin-unpolarized chi0 carries the factor 2, collinear chi0 = chi0_up + chi0_down",
+  "cutoff_hartree": 15.0,
+  "diagnostics": {
+    "max_relative_hermiticity_defect": 1.006500490041627e-16,
+    "min_cholesky_pivot": 1.000000194339543,
+    "transitions": 1429504
+  },
+  "e_c_hartree_per_cell": [
+    -0.42504179971378037,
+    -0.43433488959691025,
+    -0.4419158909550705,
+    -0.4499955129494454
+  ],
+  "e_c_mev_per_atom": [
+    -5782.9882913507745,
+    -5909.42722046504,
+    -6012.571998509169,
+    -6122.500855914427
+  ],
+  "extrapolation": {
+    "e_c_inf_hartree_per_cell": -0.4631204198677231,
+    "e_c_inf_mev_per_atom": -6301.074311712375,
+    "law": "E_c(ecut_chi) = E_inf + A ecut_chi^-1.5 (Harl and Kresse), least squares over the series",
+    "linearity_check": "failed (add cutoffs, plan 2.5)",
+    "max_residual_last3_mev_per_atom": 14.68437437280353,
+    "points": 4,
+    "protocol_note": "four or more cutoffs",
+    "residuals_mev_per_atom": [
+      -8.735392084936764,
+      14.68437437280353,
+      1.7370585217965275,
+      -7.686040809663293
+    ],
+    "slope_hartree_ha1_5": 0.30976527704050233
+  },
+  "extrapolation_inverse_ng": {
+    "e_c_inf_hartree_per_cell": -0.46699290364054835,
+    "e_c_inf_mev_per_atom": -6353.762137549208,
+    "law": "E_c = E_inf + B / N_G(q = 0) (discrete-shell form of the same law; diagnostic, not the headline)",
+    "max_residual_last3_mev_per_atom": 15.375153959249658,
+    "residuals_mev_per_atom": [
+      13.426237942255034,
+      -15.375153959249658,
+      -6.767207550835075,
+      8.716123567826678
+    ],
+    "slope_hartree_times_ng": 4.628965181237977
+  },
+  "frequencies_hartree": [
+    0.02078901061998794,
+    0.11121654535475944,
+    0.28103552227144385,
+    0.5437008647613588,
+    0.9216103049817325,
+    1.4504805318796823,
+    2.1872531873128325,
+    3.2248690044603774,
+    4.721337947493241,
+    6.961103769225354,
+    10.497001560388059,
+    16.5207532122325,
+    28.00381127430503,
+    54.17712424177999,
+    136.90136083517498,
+    732.3915834558537
+  ],
+  "frequency_terms": [
+    [
+      -6.957886537431259,
+      -5.552372659202442,
+      -3.1128690579330405,
+      -1.3851237041959932,
+      -0.5492036413362992,
+      -0.20492130016684312,
+      -0.07228446006024415,
+      -0.023516422425356686,
+      -0.0068387758700849365,
+      -0.0017308144064380826,
+      -0.00037021173520517914,
+      -0.00006353731852940013,
+      -7.882181760785076e-6,
+      -5.680542102233148e-7,
+      -1.3973471202400766e-8,
+      -1.7028430605009752e-11
+    ],
+    [
+      -7.00006146824847,
+      -5.5923406102798126,
+      -3.1476712858371956,
+      -1.4131405839278448,
+      -0.5699444171252477,
+      -0.21878441903464313,
+      -0.0803885459191705,
+      -0.027488129793879167,
+      -0.008408047698442786,
+      -0.0022192086146002833,
+      -0.0004884941784896454,
+      -0.00008523075688921429,
+      -0.000010659109712415494,
+      -7.707294139302603e-7,
+      -1.8978702403982294e-8,
+      -2.3145909833787255e-11
+    ],
+    [
+      -7.025002606210016,
+      -5.616407044969682,
+      -3.169605970745315,
+      -1.4320896658934534,
+      -0.5853441799734211,
+      -0.23029789518685978,
+      -0.08803282722431056,
+      -0.031790238438022395,
+      -0.01035907420408776,
+      -0.002903068283488141,
+      -0.000668934678538741,
+      -0.00012007096589338222,
+      -0.000015235922547812492,
+      -1.1083833585565208e-6,
+      -2.7345606852678302e-8,
+      -3.337007353801021e-11
+    ],
+    [
+      -7.044693183244883,
+      -5.635491928810102,
+      -3.187325566748852,
+      -1.4479921659158068,
+      -0.5991008438791396,
+      -0.24154663437170176,
+      -0.09643875724965459,
+      -0.03727428470459545,
+      -0.013310582246830207,
+      -0.004134594257127667,
+      -0.001045529608321586,
+      -0.00020048448518814103,
+      -0.00002639688021606303,
+      -1.9516477375414823e-6,
+      -4.840127791038083e-8,
+      -5.914596771173745e-11
+    ]
+  ],
+  "functional": "lda-pz",
+  "input_sha256": "0a205fa9b0658a179cba9a95f89d1ffb1a45273181628fe175b1d2152db29df8",
+  "kind": "baandi_rpa_r3",
+  "lattice_columns_bohr": [
+    [
+      0.0,
+      5.130606428358966,
+      5.130606428358966
+    ],
+    [
+      5.130606428358966,
+      0.0,
+      5.130606428358966
+    ],
+    [
+      5.130606428358966,
+      5.130606428358966,
+      0.0
+    ]
+  ],
+  "limitations": "insulators only (metals reject, D6); collinear spin for integer-moment insulators (functional lda-pw or pbe); full-mesh NSCF (no IBZ wavefunction rotation); q = 0 by the direction average of the q -> 0 limit (|q| dependence in the mini zone not integrated: O(1/N_q) error, measure with the k-mesh series); absolute NC-pseudopotential E_c lacks core-valence correlation: compare differences with literature, absolute values only with an oracle at matched settings",
+  "pseudopotentials": [
+    {
+      "functional": " SLA  PZ   NOGX NOGC",
+      "path": "Si.pz-vbc.UPF",
+      "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "species": "Si"
+    }
+  ],
+  "q0_direction_check": [
+    {
+      "body_only_e_c_q0_hartree": -0.2979614088239077,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.7996492357062366
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.7996492357062367
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.7996492357062368
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.7996492357062368
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.7996492357062377
+        }
+      ],
+      "ecut_chi_hartree": 4.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": 2.360211526739389e-13
+        },
+        {
+          "set": "lebedev-14",
+          "value": 2.1241903740654502e-13
+        },
+        {
+          "set": "lebedev-26",
+          "value": 1.8881692213915113e-13
+        },
+        {
+          "set": "lebedev-50",
+          "value": 1.8881692213915113e-13
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "body_only_e_c_q0_hartree": -0.30486300186855386,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.8065609835451754
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.8065609835451705
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.8065609835451732
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.8065609835451721
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.8065609835451648
+        }
+      ],
+      "ecut_chi_hartree": 5.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": -2.2422009504024198e-12
+        },
+        {
+          "set": "lebedev-14",
+          "value": -1.2037078786370884e-12
+        },
+        {
+          "set": "lebedev-26",
+          "value": -1.7937607603219358e-12
+        },
+        {
+          "set": "lebedev-50",
+          "value": -1.5577396076479968e-12
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "body_only_e_c_q0_hartree": -0.31302718499202165,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.8147341605718998
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.8147341605719004
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.8147341605719006
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.8147341605719007
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.8147341605718997
+        }
+      ],
+      "ecut_chi_hartree": 6.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": -2.3602115267393892e-14
+        },
+        {
+          "set": "lebedev-14",
+          "value": -1.4161269160436334e-13
+        },
+        {
+          "set": "lebedev-26",
+          "value": -1.8881692213915113e-13
+        },
+        {
+          "set": "lebedev-50",
+          "value": -2.1241903740654502e-13
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "body_only_e_c_q0_hartree": -0.32115044766188283,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.8228616307450145
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.8228616307449992
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.8228616307450054
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.8228616307450067
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.822861630745003
+        }
+      ],
+      "ecut_chi_hartree": 8.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": -2.4546199878089648e-12
+        },
+        {
+          "set": "lebedev-14",
+          "value": 8.024719190913924e-13
+        },
+        {
+          "set": "lebedev-26",
+          "value": -5.192465358826657e-13
+        },
+        {
+          "set": "lebedev-50",
+          "value": -8.024719190913924e-13
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    }
+  ],
+  "q_points": [
+    {
+      "e_c_q_hartree": [
+        -0.7996492357062368,
+        -0.8065609835451732,
+        -0.8147341605719006,
+        -0.8228616307450054
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 0,
+      "multiplicity": 1,
+      "optical": true,
+      "response_size": [
+        113,
+        137,
+        181,
+        283
+      ],
+      "transitions": 178688,
+      "weight": 0.015625
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4521044608181314,
+        -0.4619056639802163,
+        -0.46899296415563096,
+        -0.47719667090543605
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.25
+      ],
+      "index": 1,
+      "multiplicity": 8,
+      "optical": false,
+      "response_size": [
+        104,
+        150,
+        187,
+        296
+      ],
+      "transitions": 178688,
+      "weight": 0.125
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4055480072948082,
+        -0.41358149777197795,
+        -0.4213281460963458,
+        -0.4294476939802416
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.5
+      ],
+      "index": 2,
+      "multiplicity": 4,
+      "optical": false,
+      "response_size": [
+        108,
+        138,
+        180,
+        272
+      ],
+      "transitions": 178688,
+      "weight": 0.0625
+    },
+    {
+      "e_c_q_hartree": [
+        -0.44733969942556795,
+        -0.4575708268488525,
+        -0.46438761532305606,
+        -0.4730915195395628
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.25
+      ],
+      "index": 3,
+      "multiplicity": 6,
+      "optical": false,
+      "response_size": [
+        101,
+        149,
+        178,
+        303
+      ],
+      "transitions": 178688,
+      "weight": 0.09375
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4095740272243688,
+        -0.4185473028301211,
+        -0.42624328530511474,
+        -0.43431250119706205
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.5
+      ],
+      "index": 4,
+      "multiplicity": 24,
+      "optical": false,
+      "response_size": [
+        104,
+        143,
+        188,
+        290
+      ],
+      "transitions": 178688,
+      "weight": 0.375
+    },
+    {
+      "e_c_q_hartree": [
+        -0.41729818284207776,
+        -0.4277514121792804,
+        -0.4355027996776561,
+        -0.4434981098539709
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.75
+      ],
+      "index": 5,
+      "multiplicity": 12,
+      "optical": false,
+      "response_size": [
+        97,
+        144,
+        192,
+        295
+      ],
+      "transitions": 178688,
+      "weight": 0.1875
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4020655918097883,
+        -0.4108493297801613,
+        -0.4181806968663354,
+        -0.4263213852599451
+      ],
+      "fractional": [
+        0.0,
+        0.5,
+        0.5
+      ],
+      "index": 6,
+      "multiplicity": 3,
+      "optical": false,
+      "response_size": [
+        108,
+        150,
+        190,
+        302
+      ],
+      "transitions": 178688,
+      "weight": 0.046875
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4060680684631437,
+        -0.4141959138699283,
+        -0.4223143894883687,
+        -0.42974940581011545
+      ],
+      "fractional": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "index": 7,
+      "multiplicity": 6,
+      "optical": false,
+      "response_size": [
+        108,
+        144,
+        200,
+        280
+      ],
+      "transitions": 178688,
+      "weight": 0.09375
+    }
+  ],
+  "ranks": 1,
+  "scf": {
+    "driver": "reference",
+    "driver_reason": null,
+    "driver_source": "default"
+  },
+  "scf_density_sha256": "36a8a01514cab3fcb14fd5242be1b97aa9401df8ad72b7829f165a659f468f89",
+  "scf_energy_hartree": -7.919059558823834,
+  "scf_iterations": 6,
+  "scf_path": {
+    "adr": "0043",
+    "certified": false,
+    "effective_profile": "standard",
+    "standard_threshold_ha": 5e-9,
+    "switch": "BAANDI_REFERENCE_STRICT",
+    "verification": "fixed_point",
+    "verification_attempts": 1,
+    "verified": true
+  },
+  "schema_version": 1,
+  "settings": {
+    "band_block": 32,
+    "band_solver": "dense",
+    "bands_per_cutoff": [
+      113,
+      137,
+      181,
+      283
+    ],
+    "bands_rule": "auto = N_G(ecut_chi) at q = 0 per cutoff, clamped to the smallest k basis (plan 2.5)",
+    "checkpoint_dir": null,
+    "ecut_chi_series_hartree": [
+      4.0,
+      5.0,
+      6.0,
+      8.0
+    ],
+    "eigen_tolerance_hartree": 1e-6,
+    "fft_grid": [
+      25,
+      25,
+      25
+    ],
+    "frequency_grid": "gauss-legendre mapped w = w0 t / (1 - t)",
+    "frequency_points": 16,
+    "irreducible_q": 8,
+    "k_mesh": [
+      4,
+      4,
+      4
+    ],
+    "k_sampling": "Gamma-centred full mesh NSCF (no wavefunction rotation)",
+    "nscf_bands": 283,
+    "omega0_hartree": 3.9020118408909945,
+    "omega0_rule": "auto = mean(lowest direct transition, largest transition)",
+    "q0_directions": 26,
+    "q0_treatment": "direction average of the q -> 0 limit (k.p head and wings), Lebedev set",
+    "q_mesh": [
+      4,
+      4,
+      4
+    ],
+    "q_reduction": "crystal",
+    "q_symmetry": "crystal",
+    "response_size_q0": [
+      113,
+      137,
+      181,
+      283
+    ],
+    "response_sphere": "q+G: |q+G|^2/2 <= ecut_chi",
+    "resumed_q": 0
+  },
+  "spectrum": {
+    "basis_size_max": 754,
+    "basis_size_min": 729,
+    "conduction_minimum_hartree": 0.2469768772313195,
+    "electrons": 8.0,
+    "indirect_gap_ev": 0.6352286736775509,
+    "largest_transition_hartree": 7.710593513895288,
+    "lowest_direct_gap_ev": 2.542364385392517,
+    "max_residual_hartree": 1.5115907326745683e-13,
+    "occupied_bands_per_channel": [
+      4
+    ],
+    "valence_maximum_hartree": 0.2236326540471292
+  },
+  "structure": [
+    {
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "species": "Si"
+    },
+    {
+      "fractional": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "species": "Si"
+    }
+  ],
+  "theory": "RPA correlation energy from the ACFDT on the imaginary axis, E_c = sum_q w_q (1/2pi) int_0^inf dw Tr[ln(1 - v chi0(q, i w)) + v chi0(q, i w)], chi0 by the sum over states (Adler-Wiser, D1) on KS orbitals of the reference SCF density; q = 0 term as the Lebedev direction average of the k.p head/wings limit (velocity with the nonlocal commutator); no xc kernel, no EXX",
+  "threads": 4,
+  "title": "R3 Si2 4x4x4 RPA",
+  "units": {
+    "energy": "Hartree per cell unless stated; meV per atom where named",
+    "frequency": "Hartree on the imaginary axis",
+    "q": "fractional reciprocal coordinates"
+  },
+  "weights_hartree": [
+    0.05354058552379904,
+    0.1284792854222534,
+    0.2133607976037516,
+    0.31563359324266793,
+    0.4460134247510369,
+    0.6209866674655261,
+    0.8676010522813831,
+    1.2330379010853043,
+    1.805217087900165,
+    2.7612079800599796,
+    4.494026547821682,
+    7.995220626141504,
+    16.256997459215047,
+    41.13100844575432,
+    158.150830502169,
+    1886.221279488263
+  ]
+}

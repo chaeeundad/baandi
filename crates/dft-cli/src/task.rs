@@ -30,6 +30,8 @@ pub enum TaskType {
     Nscf,
     /// SCF followed by the optical-limit dielectric tensor (`baandi dielectric`, R2).
     Dielectric,
+    /// SCF followed by the RPA correlation energy (`baandi rpa`, R3).
+    Rpa,
 }
 impl TaskType {
     pub fn name(self) -> &'static str {
@@ -41,6 +43,7 @@ impl TaskType {
             Self::Dos => "dos",
             Self::Nscf => "nscf",
             Self::Dielectric => "dielectric",
+            Self::Rpa => "rpa",
         }
     }
     /// The alias subcommand that runs this task.
@@ -52,6 +55,7 @@ impl TaskType {
             Self::Dos => "dos",
             Self::Nscf => "nscf",
             Self::Dielectric => "dielectric",
+            Self::Rpa => "rpa",
         }
     }
 }
@@ -64,7 +68,8 @@ pub struct TaskTable {
     pub kind: TaskType,
     /// relax / cell-relax: continue from `restart.json` in the output directory.
     pub resume: bool,
-    /// nscf: per-k checkpoint directory (relative to the working directory).
+    /// nscf: per-k checkpoint directory; rpa: per-q checkpoint directory
+    /// (relative to the working directory).
     pub checkpoint_dir: Option<PathBuf>,
 }
 
@@ -134,6 +139,9 @@ pub fn resolve_text(input: &Path, text: &str) -> Result<Resolved, String> {
         TaskType::Dielectric if value.get("response").is_none() => {
             return Err("task.type = \"dielectric\" requires a [response] table".into());
         }
+        TaskType::Rpa if value.get("response").is_none() => {
+            return Err("task.type = \"rpa\" requires a [response] table".into());
+        }
         TaskType::Scf if relax.is_some() => {
             return Err(if explicit {
                 "task.type = \"scf\" with a [relax] table: remove [relax] or set task.type = \"relax\" / \"cell-relax\"".into()
@@ -146,8 +154,8 @@ pub fn resolve_text(input: &Path, text: &str) -> Result<Resolved, String> {
     if table.resume && !matches!(table.kind, TaskType::Relax | TaskType::CellRelax) {
         return Err("task.resume applies to relax and cell-relax only".into());
     }
-    if table.checkpoint_dir.is_some() && table.kind != TaskType::Nscf {
-        return Err("task.checkpoint_dir applies to nscf only".into());
+    if table.checkpoint_dir.is_some() && !matches!(table.kind, TaskType::Nscf | TaskType::Rpa) {
+        return Err("task.checkpoint_dir applies to nscf and rpa only".into());
     }
     Ok(Resolved {
         task: table.kind,
@@ -200,6 +208,11 @@ mod tests {
                 TaskType::Dielectric,
                 "dielectric",
             ),
+            (
+                "[task]\ntype='rpa'\n[response]\n[rpa]\n",
+                TaskType::Rpa,
+                "rpa",
+            ),
         ];
         for (extra, task, alias) in cases {
             let r = resolve(extra).unwrap_or_else(|e| panic!("{extra}: {e}"));
@@ -213,6 +226,8 @@ mod tests {
         assert_eq!(r.output_dir, PathBuf::from("out"));
         let r = resolve("[task]\ntype='nscf'\ncheckpoint_dir='ck'\n[nscf]\n").unwrap();
         assert_eq!(r.checkpoint_dir, Some(PathBuf::from("ck")));
+        let r = resolve("[task]\ntype='rpa'\ncheckpoint_dir='q'\n[response]\n").unwrap();
+        assert_eq!(r.checkpoint_dir, Some(PathBuf::from("q")));
     }
 
     #[test]
@@ -226,12 +241,16 @@ mod tests {
             ("[task]\ntype='bands'\n", "[bands]"),
             ("[task]\ntype='nscf'\n", "[nscf]"),
             ("[task]\ntype='dielectric'\n", "[response]"),
+            ("[task]\ntype='rpa'\n[rpa]\n", "[response]"),
             ("[task]\ntype='phonon'\n", "unknown variant"),
             (
                 "[task]\ntype='scf'\nresume=true\n",
                 "relax and cell-relax only",
             ),
-            ("[task]\ntype='dos'\ncheckpoint_dir='x'\n", "nscf only"),
+            (
+                "[task]\ntype='dos'\ncheckpoint_dir='x'\n",
+                "nscf and rpa only",
+            ),
             ("[task]\nkind='scf'\n", "unknown field"),
         ] {
             let e = resolve(extra).unwrap_err();

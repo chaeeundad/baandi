@@ -21,6 +21,7 @@
 //! - q -> 0: `rho_nm(q) = q . a_nm + O(q^2)`, `a_nm = <u_n| dH_k/dk |u_m> / (e_m - e_n)`,
 //!   head `chi0_00 = q^2 q^.L.q^`, wing `chi0_G0 = q q^.W_G`;
 //! - symmetrized `eps~ = 1 - v^1/2 chi0 v^1/2`, `v(q+G) = 4 pi / |q+G|^2`.
+pub mod acfdt;
 pub mod chi0;
 pub mod dielectric;
 pub mod frequency;

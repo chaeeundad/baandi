@@ -23,6 +23,25 @@
    (`crystal`, default; only mesh-preserving operations, exact orbits),
    or none. E_c(q) is invariant under these operations (unitary similarity
    of chi0 with a permutation of the response sphere).
+   G-sphere mode (`[rpa] response_sphere = "G"`, one Miller set
+   `|G|^2/2 <= E_cut^chi` for every q; amendment R3-QIMAGE, 2026-11-27).
+   There the set {q + G} is not invariant under q -> q - G0, so E_c(q) is a
+   function of the q VECTOR. Before the amendment the engine evaluated the
+   [-1/2, 1/2) reduced-coordinate wrap of the mesh value, which is not
+   rotation covariant (on fcc it is often a longer image than the first-zone
+   one) and is not what the record printed (the [0, 1) mesh value), so
+   symmetry stars split (Si dojo 4x4x4, 6 Ha, dev08: star (1/2,1/4,0)
+   -0.422000 / -0.421084 / -0.420111 Ha) and crystal differed from none by
+   1.1 meV/atom. Convention now: each mesh q is evaluated at its
+   first-Brillouin-zone image, the shortest q - G0 in the cell metric
+   (`first_zone_images`, ties at relative 1e-10 in |q|^2); a mesh q on a
+   zone face, edge or corner with t tied images contributes the mean over
+   them (t units of weight 1/(N_q t)). This definition is invariant under
+   every lattice rotation and time reversal, so the reductions group units
+   whose image vectors are related by S or -S without G0 (mesh-preserving
+   subgroup of `reduce_mesh`), and none, time reversal and crystal agree
+   to rounding. The stored q of a G-mode record is the evaluated vector.
+   The q+G mode (default) is unchanged bit for bit.
 3. Alias guard at finite q: product components `P = (M - G0) - G1` and the
    response sphere must not differ by a nonzero grid-superlattice vector; a
    candidate n is excluded by the Miller box ranges or by

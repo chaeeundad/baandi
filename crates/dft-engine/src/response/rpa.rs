@@ -6,7 +6,8 @@
 //! (Hartree per cell). Pipeline: fixed-density NSCF on the FULL Gamma-centred
 //! k mesh (`refscf::nscf`, every band residual-certified), q on the same mesh
 //! reduced by time reversal or by the mesh-preserving crystal group
-//! (`reduce_mesh`, exact orbits; E_c(q) is invariant), chi0(q, i w) for every
+//! (`reduce_mesh`, exact orbits; E_c(q) is invariant; with one |G| sphere
+//! for every q, q is the first-zone image, `g_sphere_q_units`), chi0(q, i w) for every
 //! irreducible q by the R2 sum over states with `k + q = k' + G0` umklapps,
 //! `ln det` by Cholesky of `1 - v^1/2 chi0 v^1/2`, the q = 0 term as the
 //! Lebedev direction average of the k.p head/wings limit
@@ -55,6 +56,8 @@ use std::collections::HashMap;
 
 /// Unit directions with weights summing to one.
 type Directions = Vec<([f64; 3], f64)>;
+/// (index, representative fractional q, weight, members) of one q orbit.
+type QEntry = (usize, [f64; 3], f64, usize);
 
 /// q-point reduction of the mesh sum.
 #[derive(Clone, Debug)]
@@ -100,7 +103,13 @@ pub struct RpaOptions {
     /// Response sphere at finite q: `false` (default) = {G : |q+G|^2/2 <=
     /// E_cut^chi} (ADR 0054); `true` = the q = 0 Miller set {|G|^2/2 <=
     /// E_cut^chi} for every q (oracle matching for codes that use one
-    /// G sphere for all q; v still uses |q+G|).
+    /// G sphere for all q; v still uses |q+G|). In this mode E_c(q)
+    /// depends on the q vector, not only on q modulo the reciprocal
+    /// lattice: each mesh q is evaluated at its first-Brillouin-zone
+    /// image(s) (mean over ties on zone faces, `first_zone_images`), the
+    /// stored `QContribution::fractional` is that evaluated vector, and the
+    /// reductions group (q, image) units related by S or -S without G0
+    /// (R3-QIMAGE, ADR 0055 item 2).
     pub sphere_at_gamma: bool,
 }
 impl RpaOptions {
@@ -145,10 +154,14 @@ pub struct QCutoff {
 #[derive(Clone, Debug, PartialEq)]
 pub struct QContribution {
     pub index: usize,
-    /// Representative q (fractional reciprocal coordinates of the mesh).
+    /// Representative q (fractional reciprocal coordinates of the mesh):
+    /// the mesh value in [0, 1) (q+G sphere; evaluated at its [-1/2, 1/2)
+    /// wrap, equivalent there), or the evaluated first-zone image (G sphere).
     pub fractional: [f64; 3],
-    /// Weight in the mesh sum (orbit size / N_q).
+    /// Weight in the mesh sum (orbit size / N_q; G sphere: sum over the
+    /// orbit's units of 1 / (N_q x images of the unit's mesh q)).
     pub weight: f64,
+    /// Members of the orbit (mesh points, or (q, image) units in G mode).
     pub multiplicity: usize,
     pub optical: bool,
     pub transitions: u64,
@@ -343,6 +356,142 @@ fn identity(atoms: usize) -> SymmetryOperation {
     }
 }
 
+/// Relative tolerance of equal |q| among the images of one mesh q (a
+/// floating-point zero: images of a mesh point on a zone face have exactly
+/// equal length; other image lengths differ by O(|B|^2 / N_k)).
+const IMAGE_TIE: f64 = 1e-10;
+
+/// First-Brillouin-zone images of the mesh point `index` (integer mesh
+/// coordinates, `fractional = index / mesh`): every q = index / mesh - G0
+/// of minimal |q| (Cartesian metric of the cell), as integer numerators
+/// over `mesh`, ascending lexicographically. One image inside the zone;
+/// two or more on a zone face, edge or corner (ties).
+pub fn first_zone_images(
+    cell: &dft_geometry::Cell,
+    mesh: [usize; 3],
+    index: [usize; 3],
+) -> Vec<[i64; 3]> {
+    let reciprocal = cell.reciprocal_columns_inverse_bohr();
+    let lattice = cell.lattice_columns_bohr();
+    let n: [i64; 3] = std::array::from_fn(|i| mesh[i] as i64);
+    let norm2 = |k: [i64; 3]| -> f64 {
+        (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| reciprocal[i][j] * (k[j] as f64 / n[j] as f64))
+                    .sum::<f64>()
+                    .powi(2)
+            })
+            .sum()
+    };
+    // Start from the [-1/2, 1/2) wrap; a shorter image q' = w - c has
+    // |c_i| = |a_i . (B w - B q')| / 2 pi <= |a_i| 2 |B w| / 2 pi.
+    let wrapped: [i64; 3] = std::array::from_fn(|i| {
+        let m = (index[i] as i64).rem_euclid(n[i]);
+        if 2 * m < n[i] { m } else { m - n[i] }
+    });
+    let length = norm2(wrapped).sqrt();
+    let reach: [i64; 3] = std::array::from_fn(|i| {
+        let a = (0..3).map(|c| lattice[c][i].powi(2)).sum::<f64>().sqrt();
+        (a * 2. * length / std::f64::consts::TAU * (1. + 1e-12)).floor() as i64
+    });
+    let mut candidates = Vec::new();
+    for c0 in -reach[0]..=reach[0] {
+        for c1 in -reach[1]..=reach[1] {
+            for c2 in -reach[2]..=reach[2] {
+                let c = [c0, c1, c2];
+                let k: [i64; 3] = std::array::from_fn(|i| wrapped[i] - c[i] * n[i]);
+                candidates.push((norm2(k), k));
+            }
+        }
+    }
+    let shortest = candidates.iter().map(|c| c.0).fold(f64::INFINITY, f64::min);
+    let mut images: Vec<[i64; 3]> = candidates
+        .into_iter()
+        .filter(|c| c.0 <= shortest * (1. + IMAGE_TIE))
+        .map(|c| c.1)
+        .collect();
+    images.sort_unstable();
+    images
+}
+
+/// q units of the G-sphere mode (`sphere_at_gamma`). With one |G| sphere for
+/// every q, E_c(q) is a function of the vector q, not of q modulo the
+/// reciprocal lattice: q and q - G0 see different sets {q + G}. Convention:
+/// the mesh point q contributes the mean over its first-Brillouin-zone
+/// images (`first_zone_images`; one image except on zone faces), i.e. one
+/// unit (q, image) of weight 1 / (N_q x images). This definition is
+/// invariant under every lattice rotation and time reversal (they map the
+/// |G| sphere onto itself and the image set of q onto that of S q), so the
+/// units are reduced exactly by `group` (mesh-preserving operations with
+/// their antiunitary partners, or the identity): an orbit is a set of
+/// units whose image vectors are related by S without any G0. Returns
+/// (orbit index, representative image, orbit weight, units in the orbit).
+fn g_sphere_q_units(
+    cell: &dft_geometry::Cell,
+    mesh: [usize; 3],
+    group: &[SymmetryOperation],
+) -> Result<Vec<QEntry>, ScfError> {
+    let total = mesh.iter().product::<usize>() as f64;
+    let mut units: Vec<([i64; 3], f64)> = Vec::new();
+    for i in 0..mesh[0] {
+        for j in 0..mesh[1] {
+            for l in 0..mesh[2] {
+                let images = first_zone_images(cell, mesh, [i, j, l]);
+                let w = 1. / (total * images.len() as f64);
+                units.extend(images.into_iter().map(|k| (k, w)));
+            }
+        }
+    }
+    let lookup: HashMap<[i64; 3], usize> = units
+        .iter()
+        .enumerate()
+        .map(|(u, (k, _))| (*k, u))
+        .collect();
+    let fractional =
+        |k: [i64; 3]| -> [f64; 3] { std::array::from_fn(|i| k[i] as f64 / mesh[i] as f64) };
+    let mut assigned = vec![false; units.len()];
+    let mut out = Vec::new();
+    for u in 0..units.len() {
+        if assigned[u] {
+            continue;
+        }
+        let q = fractional(units[u].0);
+        let mut members: Vec<usize> = Vec::with_capacity(group.len());
+        for op in group {
+            let image = op.reciprocal_action(q);
+            let mut key = [0_i64; 3];
+            for i in 0..3 {
+                let x = image[i] * mesh[i] as f64;
+                if (x - x.round()).abs() > 1e-6 {
+                    return Err(numerical("rpa q units: operation leaves the q mesh"));
+                }
+                key[i] = x.round() as i64;
+            }
+            let m = *lookup.get(&key).ok_or_else(|| {
+                numerical("rpa q units: rotated first-zone image is not a first-zone image")
+            })?;
+            if !members.contains(&m) {
+                members.push(m);
+            }
+        }
+        if !members.contains(&u) {
+            return Err(numerical("rpa q units: the operations lack the identity"));
+        }
+        let mut weight = 0.;
+        members.sort_unstable();
+        for &m in &members {
+            if assigned[m] {
+                return Err(numerical("rpa q units: overlapping orbits"));
+            }
+            assigned[m] = true;
+            weight += units[m].1;
+        }
+        out.push((out.len(), q, weight, members.len()));
+    }
+    Ok(out)
+}
+
 /// Response sphere at q: the largest cutoff's sphere and, per cutoff, its
 /// rows in that sphere and |q+G|.
 struct Sphere {
@@ -526,12 +675,8 @@ pub fn rpa_with<K: Collective, S: QStore<K>>(
     let (atoms, potentials) = (input.atoms, input.potentials);
     let natoms = atoms.len();
     // q reduction (exact orbits of the mesh).
-    let q_list: Vec<(usize, [f64; 3], f64, usize)> = match &options.q_symmetry {
-        QSymmetry::Full => points
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (i, p.fractional, p.weight, 1))
-            .collect(),
+    let reduction = match &options.q_symmetry {
+        QSymmetry::Full => None,
         symmetry => {
             let ops: Vec<SymmetryOperation> = match symmetry {
                 QSymmetry::Crystal(ops) => ops
@@ -541,18 +686,38 @@ pub fn rpa_with<K: Collective, S: QStore<K>>(
                     .collect(),
                 _ => vec![identity(natoms)],
             };
-            let map = reduce_mesh(&points, &ops, true, false)
-                .map_err(|e| ScfError::Numerical(format!("rpa q reduction: {e}")))?;
-            let mut multiplicity = vec![0; map.points.len()];
-            for e in &map.entries {
-                multiplicity[e.representative_id] += 1;
-            }
-            map.points
+            Some(
+                reduce_mesh(&points, &ops, true, false)
+                    .map_err(|e| ScfError::Numerical(format!("rpa q reduction: {e}")))?,
+            )
+        }
+    };
+    let q_list: Vec<QEntry> = if options.sphere_at_gamma {
+        // One |G| sphere for every q: E_c depends on the q vector itself, so
+        // q is the first-Brillouin-zone image (convention in `g_sphere_q_units`).
+        let group = reduction
+            .as_ref()
+            .map_or_else(|| vec![identity(natoms)], |m| m.operations.clone());
+        g_sphere_q_units(cell, mesh, &group)?
+    } else {
+        match reduction {
+            None => points
                 .iter()
-                .zip(multiplicity)
                 .enumerate()
-                .map(|(i, (p, m))| (i, p.fractional, p.weight, m))
-                .collect()
+                .map(|(i, p)| (i, p.fractional, p.weight, 1))
+                .collect(),
+            Some(map) => {
+                let mut multiplicity = vec![0; map.points.len()];
+                for e in &map.entries {
+                    multiplicity[e.representative_id] += 1;
+                }
+                map.points
+                    .iter()
+                    .zip(multiplicity)
+                    .enumerate()
+                    .map(|(i, (p, m))| (i, p.fractional, p.weight, m))
+                    .collect()
+            }
         }
     };
     let weight_sum: f64 = q_list.iter().map(|q| q.2).sum();
@@ -685,8 +850,15 @@ pub fn rpa_with<K: Collective, S: QStore<K>>(
             q_points.push(record);
             continue;
         }
-        let q_wrapped =
-            dft_geometry::kpoints::wrap_fractional(fractional).map_err(|_| numerical("q wrap"))?;
+        // The evaluated q vector: the stored first-zone image in G-sphere
+        // mode (E_c depends on it), the [-1/2, 1/2) wrap in q+G mode (where
+        // the sphere follows q and every image gives the same chi0 up to a
+        // row permutation).
+        let q_wrapped = if options.sphere_at_gamma {
+            fractional
+        } else {
+            dft_geometry::kpoints::wrap_fractional(fractional).map_err(|_| numerical("q wrap"))?
+        };
         let sph = sphere(cell, series, q_wrapped, options.sphere_at_gamma)?;
         for m in &sph.miller {
             dft_basis::FftGridSpec::map_miller(*m, dims)

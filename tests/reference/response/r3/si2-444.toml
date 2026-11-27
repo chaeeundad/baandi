@@ -1,0 +1,31 @@
+# R3 RPA correlation case (protocol: README.md). Si 2-atom fcc, Si.pz-vbc.UPF (not committed),
+# 30 Ry, SCF on the 4x4x4 Gamma-centered mesh, NSCF and q on the full 4x4x4 mesh.
+[system]
+name = "R3 Si2 4x4x4 RPA"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,5.1306064283589663,5.1306064283589663],[5.1306064283589663,0.0,5.1306064283589663],[5.1306064283589663,5.1306064283589663,0.0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kgrid = [4,4,4]
+[xc]
+functional = "lda-pz"
+[response]
+ecut_chi_ha = 12.0
+bands = "auto"
+band_solver = "dense"
+k_mesh = [4,4,4]
+[response.frequency]
+points = 32
+omega0_ha = "auto"
+[rpa]
+ecut_chi_ha_series = [6.0, 8.0, 10.0, 12.0]
+q0_directions = 26
+q_symmetry = "crystal"

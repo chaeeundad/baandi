@@ -626,6 +626,81 @@ fn owned(a: faer::MatRef<'_, Complex64>) -> Result<ComplexMatrix, LinalgError> {
     Ok(result)
 }
 
+/// Cholesky factor `A = L L^H` of a Hermitian positive definite matrix
+/// (R3 ACFDT log det and Schur complements). Sequential faer calls.
+#[derive(Debug, Clone)]
+pub struct HermitianCholesky {
+    lower: Mat<Complex64>,
+}
+/// `Ok(None)` when `a` is not numerically positive definite (a pivot fails
+/// or is not positive); `Err` for non-square, non-finite or non-Hermitian
+/// input (same entrywise tolerance as [`hermitian_eigh`]).
+pub fn hermitian_cholesky(a: &ComplexMatrix) -> Result<Option<HermitianCholesky>, LinalgError> {
+    use faer::linalg::cholesky::llt::factor;
+    ComplexOverlapFactor::check(a)?;
+    let n = a.rows;
+    if (0..n).any(|i| a[(i, i)].re <= 0.) {
+        return Ok(None);
+    }
+    let mut lower = backend(a);
+    let scratch = factor::cholesky_in_place_scratch::<Complex64>(n, Par::Seq, Default::default());
+    let mut buffer = faer::dyn_stack::MemBuffer::new(scratch);
+    if n > 0
+        && factor::cholesky_in_place(
+            lower.as_mut(),
+            Default::default(),
+            Par::Seq,
+            faer::dyn_stack::MemStack::new(&mut buffer),
+            Default::default(),
+        )
+        .is_err()
+    {
+        return Ok(None);
+    }
+    if (0..n).any(|i| {
+        let d = lower[(i, i)];
+        !(d.re.is_finite() && d.re > 0.)
+    }) {
+        return Ok(None);
+    }
+    Ok(Some(HermitianCholesky { lower }))
+}
+impl HermitianCholesky {
+    pub fn order(&self) -> usize {
+        self.lower.nrows()
+    }
+    /// `ln det A = 2 sum_i ln L_ii`.
+    pub fn log_det(&self) -> f64 {
+        2. * (0..self.order())
+            .map(|i| self.lower[(i, i)].re.ln())
+            .sum::<f64>()
+    }
+    /// Smallest squared pivot `min_i L_ii^2`.
+    pub fn min_pivot(&self) -> f64 {
+        (0..self.order())
+            .map(|i| self.lower[(i, i)].re.powi(2))
+            .fold(f64::INFINITY, f64::min)
+    }
+    /// Overwrite `b` (rows = order) with `A^-1 b`.
+    pub fn solve_in_place(&self, b: &mut ComplexMatrix) -> Result<(), LinalgError> {
+        use faer::linalg::triangular_solve::{
+            solve_lower_triangular_in_place, solve_upper_triangular_in_place,
+        };
+        let n = self.order();
+        if b.rows != n {
+            return Err(LinalgError::Dimension);
+        }
+        if n == 0 || b.cols == 0 {
+            return Ok(());
+        }
+        let cols = b.cols;
+        let mut view = faer::MatMut::from_column_major_slice_mut(b.as_mut_slice(), n, cols);
+        solve_lower_triangular_in_place(self.lower.as_ref(), view.as_mut(), Par::Seq);
+        solve_upper_triangular_in_place(self.lower.as_ref().adjoint(), view, Par::Seq);
+        b.validate_finite()
+    }
+}
+
 /// Eigenvalues ascending, eigenvectors in corresponding columns. Empty square matrices are allowed.
 pub fn hermitian_eigh(a: &ComplexMatrix) -> Result<(Vec<f64>, ComplexMatrix), LinalgError> {
     if a.rows != a.cols {

@@ -1,0 +1,579 @@
+{
+  "atoms": 2,
+  "code": "rust-dft",
+  "code_version": "0.1.0",
+  "conventions": "v = 4 pi / |q+G|^2; X = v^1/2 chi0 v^1/2 Hermitized; ln det(1 - X) by Cholesky; q weights sum to one; spin-unpolarized chi0 carries the factor 2, collinear chi0 = chi0_up + chi0_down",
+  "cutoff_hartree": 15.0,
+  "diagnostics": {
+    "max_relative_hermiticity_defect": 1.2925614678999004e-16,
+    "min_cholesky_pivot": 1.0000000150465573,
+    "transitions": 794624
+  },
+  "e_c_hartree_per_cell": [
+    -0.4250557148839424,
+    -0.4500094267411488
+  ],
+  "e_c_mev_per_atom": [
+    -5783.177616885753,
+    -6122.690162694521
+  ],
+  "extrapolation": {
+    "e_c_inf_hartree_per_cell": -0.4636570649321816,
+    "e_c_inf_mev_per_atom": -6308.375739775366,
+    "law": "E_c(ecut_chi) = E_inf + A ecut_chi^-1.5 (Harl and Kresse), least squares over the series",
+    "linearity_check": "not available (fewer than three cutoffs)",
+    "max_residual_last3_mev_per_atom": null,
+    "points": 2,
+    "protocol_note": "plan 2.5 asks for at least four cutoffs spanning a factor >= 2",
+    "residuals_mev_per_atom": [
+      0.0,
+      0.0
+    ],
+    "slope_hartree_ha1_5": 0.3088108003859138
+  },
+  "extrapolation_inverse_ng": {
+    "e_c_inf_hartree_per_cell": -0.4665963057991742,
+    "e_c_inf_mev_per_atom": -6348.36614902623,
+    "law": "E_c = E_inf + B / N_G(q = 0) (discrete-shell form of the same law; diagnostic, not the headline)",
+    "max_residual_last3_mev_per_atom": null,
+    "residuals_mev_per_atom": [
+      0.0,
+      0.0
+    ],
+    "slope_hartree_times_ng": 4.694086773421197
+  },
+  "frequencies_hartree": [
+    0.005345534791657439,
+    0.028275446630138132,
+    0.069982052817238,
+    0.13127110696466285,
+    0.21333732243646794,
+    0.31782180593661735,
+    0.4468843148263148,
+    0.6033017732787321,
+    0.790601480934348,
+    1.0132405562662514,
+    1.2768481719892397,
+    1.5885546452678623,
+    1.95744281432797,
+    2.3951746870179655,
+    2.9168740241581417,
+    3.5423901578888084,
+    4.298142137885717,
+    5.219867666670286,
+    6.356820856941246,
+    7.778360775091567,
+    9.584622380985937,
+    11.924437642991617,
+    15.026734088259923,
+    19.25837071347186,
+    25.23728104379214,
+    34.07077827820184,
+    47.90639321170421,
+    71.36911737976715,
+    115.98665356385064,
+    217.56572997674525,
+    538.4776624615654,
+    2848.3018069989294
+  ],
+  "frequency_terms": [
+    [
+      -7.042168534693945,
+      -6.887503863977082,
+      -6.283138491207757,
+      -5.199293305299722,
+      -3.923898725521828,
+      -2.7536760072820035,
+      -1.8335457670299478,
+      -1.1770429019343849,
+      -0.7369189773647759,
+      -0.4533465535504275,
+      -0.2750863193300831,
+      -0.16473730805364342,
+      -0.09718203837020926,
+      -0.05627835375216717,
+      -0.03185843055680575,
+      -0.01755439250900259,
+      -0.009378789603926007,
+      -0.004842034448671688,
+      -0.0024078240089065736,
+      -0.001149123982704269,
+      -0.0005238494379888163,
+      -0.00022660325066527925,
+      -0.0000921367926620362,
+      -0.00003474028787904662,
+      -0.000011913753630425437,
+      -3.612543584747058e-6,
+      -9.28232183301409e-7,
+      -1.8891042791204884e-7,
+      -2.7115012426843578e-8,
+      -2.1913683298944673e-9,
+      -5.83623436811448e-11,
+      -6.541896936145432e-14
+    ],
+    [
+      -7.129197666188118,
+      -6.974128897055868,
+      -6.368221538142859,
+      -5.28139445230966,
+      -4.001754837539286,
+      -2.82635448736235,
+      -1.900395270715327,
+      -1.237610678307278,
+      -0.7909078287069118,
+      -0.5005977294952595,
+      -0.31557477724822236,
+      -0.19857800960863903,
+      -0.12464568956918726,
+      -0.07780727350969205,
+      -0.04806789901828552,
+      -0.029207119767971267,
+      -0.017329344698984183,
+      -0.009960099409603636,
+      -0.005498461176217645,
+      -0.0028901233992676524,
+      -0.0014336812175971545,
+      -0.0006651214898992642,
+      -0.000285682007945621,
+      -0.00011218951845883915,
+      -0.000039588944731619975,
+      -0.000012233775014464437,
+      -3.1806114402625833e-6,
+      -6.516869990375862e-7,
+      -9.386460454549406e-8,
+      -7.597444227401454e-9,
+      -2.0254397924688222e-10,
+      -2.2443458919482752e-13
+    ]
+  ],
+  "functional": "lda-pz",
+  "input_sha256": "0a1814e23f0258c263080593f926b5002796574cdd15c82f96ff75f756b253e7",
+  "kind": "baandi_rpa_r3",
+  "lattice_columns_bohr": [
+    [
+      0.0,
+      5.130606428358966,
+      5.130606428358966
+    ],
+    [
+      5.130606428358966,
+      0.0,
+      5.130606428358966
+    ],
+    [
+      5.130606428358966,
+      5.130606428358966,
+      0.0
+    ]
+  ],
+  "limitations": "insulators only (metals reject, D6); collinear spin for integer-moment insulators (functional lda-pw or pbe); full-mesh NSCF (no IBZ wavefunction rotation); q = 0 by the direction average of the q -> 0 limit (|q| dependence in the mini zone not integrated: O(1/N_q) error, measure with the k-mesh series); absolute NC-pseudopotential E_c lacks core-valence correlation: compare differences with literature, absolute values only with an oracle at matched settings",
+  "pseudopotentials": [
+    {
+      "functional": " SLA  PZ   NOGX NOGC",
+      "path": "Si.pz-vbc.UPF",
+      "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "species": "Si"
+    }
+  ],
+  "q0_direction_check": [
+    {
+      "body_only_e_c_q0_hartree": -0.29797406236504526,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.8004256436351906
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.8004256436351908
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.800425643635191
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.800425643635191
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.8004256436351934
+        }
+      ],
+      "ecut_chi_hartree": 4.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": 5.900528816848473e-13
+        },
+        {
+          "set": "lebedev-14",
+          "value": 5.664507664174534e-13
+        },
+        {
+          "set": "lebedev-26",
+          "value": 5.192465358826657e-13
+        },
+        {
+          "set": "lebedev-50",
+          "value": 5.192465358826657e-13
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "body_only_e_c_q0_hartree": -0.32116318705138736,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.8236381259907266
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.8236381259907269
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.8236381259907478
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.8236381259907202
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.8236381259907168
+        }
+      ],
+      "ecut_chi_hartree": 8.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": -2.0769861435306627e-12
+        },
+        {
+          "set": "lebedev-14",
+          "value": -2.1477924893328443e-12
+        },
+        {
+          "set": "lebedev-26",
+          "value": -6.5849901596028955e-12
+        },
+        {
+          "set": "lebedev-50",
+          "value": -7.080634580218167e-13
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    }
+  ],
+  "q_points": [
+    {
+      "e_c_q_hartree": [
+        -0.800425643635191,
+        -0.8236381259907478
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 0,
+      "multiplicity": 1,
+      "optical": true,
+      "response_size": [
+        113,
+        283
+      ],
+      "transitions": 99328,
+      "weight": 0.015625
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4521080664381643,
+        -0.47720033366634856
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.25
+      ],
+      "index": 1,
+      "multiplicity": 8,
+      "optical": false,
+      "response_size": [
+        104,
+        296
+      ],
+      "transitions": 99328,
+      "weight": 0.125
+    },
+    {
+      "e_c_q_hartree": [
+        -0.40554075332706147,
+        -0.42944043912425933
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.5
+      ],
+      "index": 2,
+      "multiplicity": 4,
+      "optical": false,
+      "response_size": [
+        108,
+        272
+      ],
+      "transitions": 99328,
+      "weight": 0.0625
+    },
+    {
+      "e_c_q_hartree": [
+        -0.447325996916904,
+        -0.4730777533759525
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.25
+      ],
+      "index": 3,
+      "multiplicity": 6,
+      "optical": false,
+      "response_size": [
+        101,
+        303
+      ],
+      "transitions": 99328,
+      "weight": 0.09375
+    },
+    {
+      "e_c_q_hartree": [
+        -0.40957043000232135,
+        -0.43430886875490593
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.5
+      ],
+      "index": 4,
+      "multiplicity": 24,
+      "optical": false,
+      "response_size": [
+        104,
+        290
+      ],
+      "transitions": 99328,
+      "weight": 0.375
+    },
+    {
+      "e_c_q_hartree": [
+        -0.41731594327801064,
+        -0.443515926106549
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.75
+      ],
+      "index": 5,
+      "multiplicity": 12,
+      "optical": false,
+      "response_size": [
+        97,
+        295
+      ],
+      "transitions": 99328,
+      "weight": 0.1875
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4020391451385787,
+        -0.4262948223207185
+      ],
+      "fractional": [
+        0.0,
+        0.5,
+        0.5
+      ],
+      "index": 6,
+      "multiplicity": 3,
+      "optical": false,
+      "response_size": [
+        108,
+        302
+      ],
+      "transitions": 99328,
+      "weight": 0.046875
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4060929179690939,
+        -0.4297743015001249
+      ],
+      "fractional": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "index": 7,
+      "multiplicity": 6,
+      "optical": false,
+      "response_size": [
+        108,
+        280
+      ],
+      "transitions": 99328,
+      "weight": 0.09375
+    }
+  ],
+  "ranks": 1,
+  "scf": {
+    "driver": "reference",
+    "driver_reason": null,
+    "driver_source": "default"
+  },
+  "scf_density_sha256": "36a8a01514cab3fcb14fd5242be1b97aa9401df8ad72b7829f165a659f468f89",
+  "scf_energy_hartree": -7.919059558823834,
+  "scf_iterations": 6,
+  "scf_path": {
+    "adr": "0043",
+    "certified": false,
+    "effective_profile": "standard",
+    "standard_threshold_ha": 5e-9,
+    "switch": "BAANDI_REFERENCE_STRICT",
+    "verification": "fixed_point",
+    "verification_attempts": 1,
+    "verified": true
+  },
+  "schema_version": 1,
+  "settings": {
+    "band_block": 32,
+    "band_solver": "dense",
+    "bands_per_cutoff": [
+      113,
+      283
+    ],
+    "bands_rule": "auto = N_G(ecut_chi) at q = 0 per cutoff, clamped to the smallest k basis (plan 2.5)",
+    "checkpoint_dir": null,
+    "ecut_chi_series_hartree": [
+      4.0,
+      8.0
+    ],
+    "eigen_tolerance_hartree": 1e-6,
+    "fft_grid": [
+      25,
+      25,
+      25
+    ],
+    "frequency_grid": "gauss-legendre mapped w = w0 t / (1 - t)",
+    "frequency_points": 32,
+    "irreducible_q": 8,
+    "k_mesh": [
+      4,
+      4,
+      4
+    ],
+    "k_sampling": "Gamma-centred full mesh NSCF (no wavefunction rotation)",
+    "nscf_bands": 283,
+    "omega0_hartree": 3.9020118408909945,
+    "omega0_rule": "auto = mean(lowest direct transition, largest transition)",
+    "q0_directions": 26,
+    "q0_treatment": "direction average of the q -> 0 limit (k.p head and wings), Lebedev set",
+    "q_mesh": [
+      4,
+      4,
+      4
+    ],
+    "q_reduction": "crystal",
+    "q_symmetry": "crystal",
+    "response_size_q0": [
+      113,
+      283
+    ],
+    "response_sphere": "q+G: |q+G|^2/2 <= ecut_chi",
+    "resumed_q": 0
+  },
+  "spectrum": {
+    "basis_size_max": 754,
+    "basis_size_min": 729,
+    "conduction_minimum_hartree": 0.2469768772313195,
+    "electrons": 8.0,
+    "indirect_gap_ev": 0.6352286736775509,
+    "largest_transition_hartree": 7.710593513895288,
+    "lowest_direct_gap_ev": 2.542364385392517,
+    "max_residual_hartree": 1.5115907326745683e-13,
+    "occupied_bands_per_channel": [
+      4
+    ],
+    "valence_maximum_hartree": 0.2236326540471292
+  },
+  "structure": [
+    {
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "species": "Si"
+    },
+    {
+      "fractional": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "species": "Si"
+    }
+  ],
+  "theory": "RPA correlation energy from the ACFDT on the imaginary axis, E_c = sum_q w_q (1/2pi) int_0^inf dw Tr[ln(1 - v chi0(q, i w)) + v chi0(q, i w)], chi0 by the sum over states (Adler-Wiser, D1) on KS orbitals of the reference SCF density; q = 0 term as the Lebedev direction average of the k.p head/wings limit (velocity with the nonlocal commutator); no xc kernel, no EXX",
+  "threads": 4,
+  "title": "R3 Si2 4x4x4 RPA",
+  "units": {
+    "energy": "Hartree per cell unless stated; meV per atom where named",
+    "frequency": "Hartree on the imaginary axis",
+    "q": "fractional reciprocal coordinates"
+  },
+  "weights_hartree": [
+    0.01373089360468786,
+    0.03221327351854515,
+    0.0513329936333042,
+    0.07144335767163086,
+    0.09296140400592531,
+    0.11636589978124443,
+    0.14221974536855492,
+    0.17120010256480345,
+    0.2041381843911327,
+    0.24207275890389734,
+    0.2863234581258753,
+    0.33859303634059995,
+    0.40111254747117914,
+    0.4768512159580318,
+    0.5698256824029486,
+    0.6855651746378575,
+    0.8318272223108543,
+    1.0197268139037814,
+    1.265568549838751,
+    1.5939153281052727,
+    2.042917694914347,
+    2.673964138452393,
+    3.5900289971263932,
+    4.972630239869195,
+    7.161631698300691,
+    10.842934626420291,
+    17.54023936439972,
+    31.098981080830878,
+    63.12490362352452,
+    159.588062683558,
+    613.4696456399175,
+    7316.336080532008
+  ]
+}

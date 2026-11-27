@@ -1,0 +1,381 @@
+{
+  "atoms": 2,
+  "code": "rust-dft",
+  "code_version": "0.1.0",
+  "conventions": "v = 4 pi / |q+G|^2; X = v^1/2 chi0 v^1/2 Hermitized; ln det(1 - X) by Cholesky; q weights sum to one; spin-unpolarized chi0 carries the factor 2, collinear chi0 = chi0_up + chi0_down",
+  "cutoff_hartree": 15.0,
+  "diagnostics": {
+    "max_relative_hermiticity_defect": 7.8319455124685e-17,
+    "min_cholesky_pivot": 1.0000122602361403,
+    "transitions": 223232
+  },
+  "e_c_hartree_per_cell": [
+    -0.4251291888810942
+  ],
+  "e_c_mev_per_atom": [
+    -5784.177281543521
+  ],
+  "extrapolation": null,
+  "extrapolation_inverse_ng": null,
+  "frequencies_hartree": [
+    0.04199822302577936,
+    0.2346341766645724,
+    0.6448146040427926,
+    1.4305282039810319,
+    3.0047135717715654,
+    6.665989700535,
+    18.31927288004851,
+    102.34546129881306
+  ],
+  "frequency_terms": [
+    [
+      -6.7206009617453475,
+      -3.6459890192502167,
+      -1.0552476146057528,
+      -0.2117209340045137,
+      -0.02915223468615087,
+      -0.0020272213066555625,
+      -0.0000423110452803026,
+      -4.47170525103261e-8
+    ]
+  ],
+  "functional": "lda-pz",
+  "input_sha256": "f040e3fc8508f2d1b7b172b14ed2f5c42776209b253f9a94ac8e2656524ff55c",
+  "kind": "baandi_rpa_r3",
+  "lattice_columns_bohr": [
+    [
+      0.0,
+      5.130606428358966,
+      5.130606428358966
+    ],
+    [
+      5.130606428358966,
+      0.0,
+      5.130606428358966
+    ],
+    [
+      5.130606428358966,
+      5.130606428358966,
+      0.0
+    ]
+  ],
+  "limitations": "insulators only (metals reject, D6); collinear spin for integer-moment insulators (functional lda-pw or pbe); full-mesh NSCF (no IBZ wavefunction rotation); q = 0 by the direction average of the q -> 0 limit (|q| dependence in the mini zone not integrated: O(1/N_q) error, measure with the k-mesh series); absolute NC-pseudopotential E_c lacks core-valence correlation: compare differences with literature, absolute values only with an oracle at matched settings",
+  "pseudopotentials": [
+    {
+      "functional": " SLA  PZ   NOGX NOGC",
+      "path": "Si.pz-vbc.UPF",
+      "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "species": "Si"
+    }
+  ],
+  "q0_direction_check": [
+    {
+      "body_only_e_c_q0_hartree": -0.29800644715546104,
+      "e_c_q0_hartree": [
+        {
+          "set": "lebedev-6",
+          "value": -0.8054357796259587
+        },
+        {
+          "set": "lebedev-14",
+          "value": -0.805435779625959
+        },
+        {
+          "set": "lebedev-26",
+          "value": -0.805435779625959
+        },
+        {
+          "set": "lebedev-50",
+          "value": -0.8054357796259587
+        },
+        {
+          "set": "product-24x48",
+          "value": -0.8054357796259606
+        }
+      ],
+      "ecut_chi_hartree": 4.0,
+      "weighted_spread_vs_product_mev_per_atom": [
+        {
+          "set": "lebedev-6",
+          "value": 4.012359595456962e-13
+        },
+        {
+          "set": "lebedev-14",
+          "value": 3.304296137435145e-13
+        },
+        {
+          "set": "lebedev-26",
+          "value": 3.304296137435145e-13
+        },
+        {
+          "set": "lebedev-50",
+          "value": 4.012359595456962e-13
+        },
+        {
+          "set": "product-24x48",
+          "value": 0.0
+        }
+      ]
+    }
+  ],
+  "q_points": [
+    {
+      "e_c_q_hartree": [
+        -0.805435779625959
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 0,
+      "multiplicity": 1,
+      "optical": true,
+      "response_size": [
+        113
+      ],
+      "transitions": 27904,
+      "weight": 0.015625
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4519804251494524
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.25
+      ],
+      "index": 1,
+      "multiplicity": 8,
+      "optical": false,
+      "response_size": [
+        104
+      ],
+      "transitions": 27904,
+      "weight": 0.125
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4057065236605863
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.5
+      ],
+      "index": 2,
+      "multiplicity": 4,
+      "optical": false,
+      "response_size": [
+        108
+      ],
+      "transitions": 27904,
+      "weight": 0.0625
+    },
+    {
+      "e_c_q_hartree": [
+        -0.44698711853597245
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.25
+      ],
+      "index": 3,
+      "multiplicity": 6,
+      "optical": false,
+      "response_size": [
+        101
+      ],
+      "transitions": 27904,
+      "weight": 0.09375
+    },
+    {
+      "e_c_q_hartree": [
+        -0.40962503147378815
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.5
+      ],
+      "index": 4,
+      "multiplicity": 24,
+      "optical": false,
+      "response_size": [
+        104
+      ],
+      "transitions": 27904,
+      "weight": 0.375
+    },
+    {
+      "e_c_q_hartree": [
+        -0.41735823480912265
+      ],
+      "fractional": [
+        0.0,
+        0.25,
+        0.75
+      ],
+      "index": 5,
+      "multiplicity": 12,
+      "optical": false,
+      "response_size": [
+        97
+      ],
+      "transitions": 27904,
+      "weight": 0.1875
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4018671224261596
+      ],
+      "fractional": [
+        0.0,
+        0.5,
+        0.5
+      ],
+      "index": 6,
+      "multiplicity": 3,
+      "optical": false,
+      "response_size": [
+        108
+      ],
+      "transitions": 27904,
+      "weight": 0.046875
+    },
+    {
+      "e_c_q_hartree": [
+        -0.4062231935585664
+      ],
+      "fractional": [
+        0.25,
+        0.5,
+        0.75
+      ],
+      "index": 7,
+      "multiplicity": 6,
+      "optical": false,
+      "response_size": [
+        108
+      ],
+      "transitions": 27904,
+      "weight": 0.09375
+    }
+  ],
+  "ranks": 1,
+  "scf": {
+    "driver": "reference",
+    "driver_reason": null,
+    "driver_source": "default"
+  },
+  "scf_density_sha256": "36a8a01514cab3fcb14fd5242be1b97aa9401df8ad72b7829f165a659f468f89",
+  "scf_energy_hartree": -7.919059558823834,
+  "scf_iterations": 6,
+  "scf_path": {
+    "adr": "0043",
+    "certified": false,
+    "effective_profile": "standard",
+    "standard_threshold_ha": 5e-9,
+    "switch": "BAANDI_REFERENCE_STRICT",
+    "verification": "fixed_point",
+    "verification_attempts": 1,
+    "verified": true
+  },
+  "schema_version": 1,
+  "settings": {
+    "band_block": 32,
+    "band_solver": "dense",
+    "bands_per_cutoff": [
+      113
+    ],
+    "bands_rule": "auto = N_G(ecut_chi) at q = 0 per cutoff, clamped to the smallest k basis (plan 2.5)",
+    "checkpoint_dir": null,
+    "ecut_chi_series_hartree": [
+      4.0
+    ],
+    "eigen_tolerance_hartree": 1e-6,
+    "fft_grid": [
+      25,
+      25,
+      25
+    ],
+    "frequency_grid": "gauss-legendre mapped w = w0 t / (1 - t)",
+    "frequency_points": 8,
+    "irreducible_q": 8,
+    "k_mesh": [
+      4,
+      4,
+      4
+    ],
+    "k_sampling": "Gamma-centred full mesh NSCF (no wavefunction rotation)",
+    "nscf_bands": 113,
+    "omega0_hartree": 2.073240822795029,
+    "omega0_rule": "auto = mean(lowest direct transition, largest transition)",
+    "q0_directions": 26,
+    "q0_treatment": "direction average of the q -> 0 limit (k.p head and wings), Lebedev set",
+    "q_mesh": [
+      4,
+      4,
+      4
+    ],
+    "q_reduction": "crystal",
+    "q_symmetry": "crystal",
+    "response_size_q0": [
+      113
+    ],
+    "response_sphere": "q+G: |q+G|^2/2 <= ecut_chi",
+    "resumed_q": 0
+  },
+  "spectrum": {
+    "basis_size_max": 754,
+    "basis_size_min": 729,
+    "conduction_minimum_hartree": 0.2469768772313195,
+    "electrons": 8.0,
+    "indirect_gap_ev": 0.6352286736775509,
+    "largest_transition_hartree": 4.053051477703358,
+    "lowest_direct_gap_ev": 2.542364385392517,
+    "max_residual_hartree": 7.004582050144114e-14,
+    "occupied_bands_per_channel": [
+      4
+    ],
+    "valence_maximum_hartree": 0.2236326540471292
+  },
+  "structure": [
+    {
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "species": "Si"
+    },
+    {
+      "fractional": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "species": "Si"
+    }
+  ],
+  "theory": "RPA correlation energy from the ACFDT on the imaginary axis, E_c = sum_q w_q (1/2pi) int_0^inf dw Tr[ln(1 - v chi0(q, i w)) + v chi0(q, i w)], chi0 by the sum over states (Adler-Wiser, D1) on KS orbitals of the reference SCF density; q = 0 term as the Lebedev direction average of the k.p head/wings limit (velocity with the nonlocal commutator); no xc kernel, no EXX",
+  "threads": 4,
+  "title": "R3 Si2 4x4x4 RPA",
+  "units": {
+    "energy": "Hartree per cell unless stated; meV per atom where named",
+    "frequency": "Hartree on the imaginary axis",
+    "q": "fractional reciprocal coordinates"
+  },
+  "weights_hartree": [
+    0.10923004667037758,
+    0.285655482651248,
+    0.558934078175533,
+    1.0737899340476122,
+    2.255412496646823,
+    5.778170632358794,
+    22.302806908863726,
+    266.18267890307374
+  ]
+}

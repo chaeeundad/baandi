@@ -1,0 +1,32 @@
+# R3 RPA correlation oracle case (protocol: README.md): LiF rock salt (a = 4.03 Angstrom), PseudoDojo PBE Li/F (not committed),
+# same structure as refscf_nscf_many::dojo_lif_and_aln; 60 Ry (oracle comparison, not a converged cutoff).
+[system]
+name = "R3 LiF 4x4x4 RPA"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,3.80785,3.80785],[3.80785,0.0,3.80785],[3.80785,3.80785,0.0]]
+[[system.atoms]]
+species = "Li"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "F"
+fractional = [0.5,0.5,0.5]
+[pseudopotentials]
+Li = "Li.upf"
+F = "F.upf"
+[basis]
+ecutwfc_ry = 60
+kgrid = [4,4,4]
+[xc]
+functional = "pbe"
+[response]
+ecut_chi_ha = 4.0
+bands = "auto"
+band_solver = "dense"
+k_mesh = [4,4,4]
+[response.frequency]
+points = 32
+omega0_ha = "auto"
+[rpa]
+ecut_chi_ha_series = [4.0, 5.0, 6.0, 8.0]
+q0_directions = 26
+q_symmetry = "crystal"

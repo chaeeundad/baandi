@@ -70,6 +70,8 @@ pub struct Config {
     pub nscf: Option<Nscf>,
     /// R2: dielectric response (`baandi dielectric`, docs/cli.md).
     pub response: Option<Response>,
+    /// R3: RPA correlation energy (`baandi rpa`; uses `[response]` too).
+    pub rpa: Option<Rpa>,
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
     /// D3-DISPERSION (ADR 0048): Grimme D3 correction evaluated once per
@@ -1913,6 +1915,24 @@ pub struct Response {
     /// NSCF residual certificate (Ha), default 1e-6.
     pub eigen_tolerance_ha: Option<f64>,
     pub frequency: Option<ResponseFrequency>,
+}
+/// `[rpa]` (R3, `docs/roadmap/rpa-crpa-plan.md` 3.6, ADR 0055), minimal key
+/// set; the k mesh, bands, band solver, tolerance and frequency grid come
+/// from `[response]`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Rpa {
+    /// Response cutoffs (Ha), ascending, each <= 4 x the wavefunction
+    /// cutoff; default `[response.ecut_chi_ha]`. Two or more give the
+    /// `(E_cut^chi)^{-3/2}` extrapolation.
+    pub ecut_chi_ha_series: Option<Vec<f64>>,
+    /// Lebedev order of the q -> 0 direction average: 6, 14, 26 (default) or 50.
+    pub q0_directions: Option<usize>,
+    /// q reduction: "crystal" (default), "time-reversal" or "none".
+    pub q_symmetry: Option<String>,
+    /// Response sphere at finite q: "q+G" (default, |q+G|^2/2 <= ecut_chi)
+    /// or "G" (one Miller set |G|^2/2 <= ecut_chi for every q; oracle matching).
+    pub response_sphere: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

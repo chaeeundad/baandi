@@ -1,5 +1,25 @@
 # Optimization log (newest first)
 
+## GF2-FD-SCF-COST — occupation-weighted empty-band threshold on the spin/FD map (2026-11-27; Mac evidence, dev08 pending)
+
+Baseline main a5c291a1 (gen61), baseline binary sha256 fc824fa2... (Mac release, pure). Profile/count that motivated
+it: H columns attributed by band class from the recorded Ritz changes (Au fcc: 26 % of the SCF H columns on retained
+bands with occupation < 1e-5, 21 % on the buffer; TaZn13: 16 % / 10.5 %), see ledger GF2-FD-SCF-COST. Plan item GK13;
+the `percent` arm and the 1 % notion come from the QE study notes (qe-scf-cycle.md, qe-solvers-and-subspace.md:
+derived from those notes); the default `weighted` cut is this project's own density-error argument.
+Change: `FD_EMPTY_THRESHOLD` (default weighted) passes the previous map's occupations to the spin/FD map, which
+sets the Davidson's occupied-threshold count per (channel, k) to the bands up to the last one whose occupation
+fraction exceeds sqrt(thr / max(5 thr, 5e-6)); the rest use the existing empty-band threshold. `FD_EMPTY_VERIFY`
+(default off) applies the same rule in the verification map. `FD_BUFFER` (default on) can drop the buffer columns
+(rejected as default: missed top states). Files: crates/dft-engine/src/refscf/electronic_map.rs (rule, unit tests),
+electronic.rs (state, checkpoint field when on), dft-numerics switches (87 -> 90).
+Before/after (Mac, serial, one run per arm, H columns exact, walls not evidence): see the ledger table; H -7 to -20 %
+at the default threshold on Au, Al, Sr, Ru and an Al slab, -12 % on a fixed-moment spin/FD Fe case, -2 % on a
+131-band one-k case (its H columns are dominated by the forced first Davidson iteration); delivered free energies
+inside both classes, same fixed point at 1e-13. Rejected: `FD_BUFFER=off` (wrong top eigenpairs, Sr outside the strict class). Not measured: dev08
+walls, MPI pools, Hg/Ta6Zn7 real inputs. Commands: GF2-FD-SCF-COST-runs/arms.sh <case>.toml <tag> <threshold>
+(sibling scratch directory of the worktree), cmp.py / summ.py there.
+
 ## GD1-DERIV-SPEED — post-SCF forces and frozen-Miller stress at QE-like cost (2026-11-27; Mac evidence, dev08 pending)
 
 Trigger (relayed, dev08 MPI8 gen57, FD metals, BAANDI vs QE, seconds): forces 4-9 s vs <=0.11 s and stress 18.7-33.4 s

@@ -919,6 +919,11 @@ pub(super) async fn run_continuation<K: Collective>(
     let guard = config.on(Id::STANDARD_RESIDUAL_GUARD);
     let diagnostic = config.on(Id::DAVIDSON_STAGES);
     let mut completed = 0usize;
+    // GF2 (`FD_EMPTY_THRESHOLD`): occupations of the last SCF map per
+    // (channel, global k), the empty-band rule's input for the next map.
+    let empty_rule = policy.finite().is_some() && config.choice(Id::FD_EMPTY_THRESHOLD) != "off";
+    let mut previous_occupations: Option<Vec<Vec<Vec<f64>>>> = None;
+    let empty_verify = empty_rule && config.on(Id::FD_EMPTY_VERIFY);
     macro_rules! checkpoint_state {
         () => {
             |request: super::stepper::Visit<'_, '_>| -> Result<usize, ScfError> {
@@ -1022,6 +1027,12 @@ pub(super) async fn run_continuation<K: Collective>(
                 io.value(&mut history)?;
                 io.value(&mut verification)?;
                 io.value(&mut verification_calls)?;
+                // GF2: only with the rule on (the switch is in the header's
+                // agreement hash); with `FD_EMPTY_THRESHOLD=off` and for
+                // fixed-sector policies the format is the former one.
+                if empty_rule {
+                    io.value(&mut previous_occupations)?;
+                }
                 super::checkpoint::counters(
                     completed,
                     opts.max_iterations,
@@ -1082,6 +1093,7 @@ pub(super) async fn run_continuation<K: Collective>(
                     trace.is_some(),
                     growth.is_some().then_some(&mut shortfall),
                     bands,
+                    previous_occupations.as_deref(),
                 ) {
                     Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
                         grow(
@@ -1115,6 +1127,9 @@ pub(super) async fn run_continuation<K: Collective>(
                 });
             }
             collect_calls(&step, &mut calls);
+            if empty_rule {
+                previous_occupations = Some(occupations_of(&step));
+            }
             let y = transform(&mut plan, comm, &step.density, &policy, electrons, volume)?;
             let f: Vec<_> = y.iter().zip(&x).map(|(a, b)| a - b).collect();
             let base_dr2 = metric.norm(comm, &f)?;
@@ -1232,6 +1247,14 @@ pub(super) async fn run_continuation<K: Collective>(
                     trace.is_some(),
                     growth.is_some().then_some(&mut shortfall),
                     bands,
+                    // GF2: verification maps keep every retained band at the
+                    // occupied threshold unless FD_EMPTY_VERIFY=on (the
+                    // verification criterion itself is unchanged).
+                    if empty_verify {
+                        previous_occupations.as_deref()
+                    } else {
+                        None
+                    },
                 ) {
                     Err(ScfError::InvalidInput(m)) if growth.is_some() && m == map::COVERAGE => {
                         grow(
@@ -1725,6 +1748,13 @@ fn collect_calls(step: &Map, out: &mut Vec<(usize, usize, SolveRecord)>) {
             out.extend(b.calls.iter().cloned().map(|call| (s, k, call)));
         }
     }
+}
+/// GF2: per (channel, global k) occupations of the retained bands of a map.
+fn occupations_of(step: &Map) -> Vec<Vec<Vec<f64>>> {
+    step.blocks
+        .iter()
+        .map(|channel| channel.iter().map(|b| b.occupations.clone()).collect())
+        .collect()
 }
 fn warm(states: &mut [refstart::KStartState], step: &Map) {
     for (state, channel) in states.iter_mut().zip(&step.blocks) {

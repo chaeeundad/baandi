@@ -4839,3 +4839,85 @@ Remaining per-pass costs (not changed): the PBE XC re-evaluation and GGA stress 
 ~0.02-0.06 s here), the per-k basis rebuild, the kinetic stress copy of the orbitals.
 Lesson: post-SCF derivatives inherited per-k operator builds and per-G scalar loops from the first correct version;
 the band sum belongs in GEMMs and the strain/position derivative should contract a band-summed field, not each band.
+
+## GF2-FD-SCF-COST — FD SCF engine cost: decomposition, occupation-weighted empty-band threshold (GK13), buffer test (2026-11-27; rounding/trajectory class, dev08 pending)
+
+Trigger (relayed dev08 MPI8 gen60, engine s vs QE electrons s): Ru 64 k 6.47 vs 5.69; Hg 76 k 59.9 (verification ~7)
+vs 44.3; Ta6Zn7 34 k 409.9 (verification ~21.7, setup 17) vs 216.8 (QE nsym 12, nks 26; c_bands 194.4 = cegterg 179.4
+of which h_psi 106.1, calbec 20.1; sum_band 22.1); Au 366 k 14.9 vs 10.6; Sr 24 k 9.3 vs 4.6.
+Decomposition (C = code, O = Mac observation, E = estimate on relayed numbers):
+- Work per Davidson call (C): every call corrects ALL solved columns in its first iteration, and the FD map solves
+  n retained + max(4, ceil(n/10)) buffer columns, with every retained band at the occupied Ritz threshold (only the
+  buffer used the empty-band threshold). QE solves nbnd columns with bands of occupation below 1 % at its empty
+  threshold. Column surcharge of the buffer alone: Au 18/14 (1.29), Sr 13+4, Ru 21+4 (1.19), Hg 48+5, Ta6Zn7 145/131.
+- H columns by band class (O, release, serial, PseudoDojo PBE, verify off, default 5e-9 Ha, attribution from the
+  recorded Ritz changes; sums equal the recorded H columns): Au fcc 6x6x6 (16 k, 14 bands): occupation >= 1 % 52 %,
+  retained bands with occupation < 1e-5 26 %, buffer 21 %; TaZn13 synthetic (one generic k, 131 bands, npw 11.6k,
+  60^3): 73.5 % / 7 % (1e-5..1e-2) / 9 % (< 1e-5) / 10.5 % buffer.
+- Davidson stage split (O, `BAANDI_DAVIDSON_STAGES=on`, faer GEMMs on the Mac, loaded host, shares only): TaZn13
+  apply_h 47 %, border/Gram 22 %, restart rotations 12 %, return rotation 8 %, corrections 8 %, reduced eigen 2.2 %,
+  factor 0.2 %; Au apply_h 68 %, border 13 %, reduced eigen 3 %.
+- GEMM backend (C): every complex Davidson product (Gram, border, rotate, restart) and the k-operator nonlocal
+  projections go through `GemmWorkspace` = one sequential `cblas_zgemm` per logical product on `mkl` builds (no
+  change needed). The reduced problem (Cholesky, two triangular solves, full Hermitian EVD of order up to 2n with all
+  eigenvectors, back substitution) is faer on every build: 2-3 % of the Davidson time on the Mac (backlog item).
+- Pool imbalance (C/E): `auto` (GK9B, L = 1024) picks npool 8 for Ta6Zn7 (T(8) = 5 x 17.4k = 87.0k rows vs T(4) =
+  9 x (8.7k + 1024) = 87.6k): critical rank 5 k vs mean 4.25 (1.18); a remainder layout (4 whole k per rank plus the
+  2 remainder k split over 4 ranks each) would be about 76k rows (E -12 % of the k loop). Hg 10 vs 9.5 k (1.05);
+  Ru, Sr, Au balanced.
+- k count (R): BAANDI 34 irreducible k against QE 26 for Ta6Zn7 (1.31x; at MPI8 5 against 4 k on the critical rank,
+  1.25x): the largest single factor of that case if the group or the mesh reduction differs; not resolvable on the
+  Mac (no input); dev08 should report `reference_scf.symmetry` and the preflight symmetry warning.
+Changes (switch table 87 -> 90):
+1. `FD_EMPTY_THRESHOLD` (default `weighted`; plan GK13): in ordinary spin/FD SCF maps after the first solve, a
+   retained band whose previous-map occupation fraction f (occupation / channel capacity) is at or below a cut uses
+   the empty-band Ritz threshold max(5 thr, 5e-6 Ha) of `ref_davidson::Options::band_threshold` (the bands stay
+   required). `weighted`: cut = sqrt(thr / empty threshold), so f sqrt(empty / gap) <= sqrt(thr / gap): the band's
+   density error stays at or below that of a fully occupied band at thr (cut 0.45 at early maps, 4.5e-3 at thr
+   1e-10 Ha); `percent`: cut 0.01 (QE's rule, from the QE study notes); `off`: former behaviour, bit-identical. The
+   cut is applied per (channel, k) as a prefix count (all bands up to the last one above the cut stay occupied).
+   First map, fixed-sector policies and verification maps unchanged; the occupations are checkpointed when on.
+2. `FD_EMPTY_VERIFY` (default off): the verification map uses the same rule with the occupations of the map it
+   verifies; the verification criterion (Coulomb-metric error of the fresh output density) is unchanged. Left off
+   pending an orchestrator/user decision on whether verification-map eigen thresholds may follow the rule.
+3. `FD_BUFFER` (default on; `off` = solve exactly n columns): REJECTED as a default (see below), kept as an
+   experiment switch.
+Evidence (O/C, Mac release serial, one run per arm; reference = baseline binary fc824fa2 at standard_threshold_ha
+1e-13; |dF| = free energy against it; H = SCF H columns):
+- Bit identity: `FD_EMPTY_THRESHOLD=off` reproduces the baseline binary (density hash and F equal; Au at 5e-9,
+  1e-10, 1e-13).
+- weighted vs baseline, H ratio at 5e-9 / 1e-10 / 1e-13 and |dF| at 5e-9 / 1e-10: Au 0.926 / 0.917 / 0.978,
+  2.8e-9 / 1.2e-11 (base 2.85e-9 / 1.4e-11); Al fcc 8^3 shifted (6 bands) 0.861 / 0.850 / 0.829, 2.8e-9 / 2.1e-11
+  (base 1.1e-9 / 9.9e-12); Sr fcc 6^3 (13 bands) 0.840 / 0.840 / 0.847, 3.6e-11 / 3.6e-11 (base 2.3e-11);
+  Ru hcp 6x6x4 (60 Ry) 0.917 / 0.917 / 0.926, 1.5e-9 / 2.1e-12 (base 1.1e-9 / 2.3e-13); Al(001) 4-layer skewed slab
+  6x6x1 0.797 / 0.840 / 0.835, 1.6e-9 / 1.1e-11 (base 1.1e-9 / 1.2e-11). All inside standard 5e-9 / strict 1e-10.
+  At 5e-9 only (reference 1e-12): TaZn13 synthetic one-k (131 bands) 0.981, 23 vs 22 maps, 1.2e-9 (base 3.0e-9);
+  Fe bcc fixed-moment collinear spin/FD (M = 2.2, 3x3x3 shifted full mesh, 2 channels) 0.882, 15 vs 16 maps,
+  5.2e-10 (base 1.3e-10), moment exact.
+  Same fixed point: at 1e-13 weighted ends within 4e-14 .. 1.7e-12 Ha of the baseline; eigenvalues of every band
+  agree to <= 1.1e-7 Ha (loose bands) and <= 6e-10 Ha for occupation > 1e-3 (Sr, Ru, Al). Maps equal except Au 1e-13
+  (10 vs 9) and slab 5e-9 (10 vs 11). `percent` behaves the same within noise.
+- With verification on (default 5e-9, fixed_point), SCF + verification H: Au 4549 -> 3476 (verification on the
+  baseline failed once and needed a second attempt; weighted passed first), Sr 3425 -> 3269, Al 6120 -> 6151
+  (verification H rises 957 -> 1708: the loose bands are tightened there); with `FD_EMPTY_VERIFY=on` 3248, 2824,
+  5199 (-29 / -18 / -15 %), every verification passed at the first attempt.
+- `FD_BUFFER=off`: largest H saving (with weighted: Au 0.756, Al 0.595, Sr 0.673, Ru 0.929, slab 0.728 at 5e-9) but
+  the top retained bands converge to wrong eigenpairs (missed states; max |de| 0.024 Au, 0.076 Al, 0.36 Sr, 0.12 Ru
+  Ha) and Sr converges to a different fixed point (|dF| 2.7e-10 Ha at 1e-13 in every buffer-off arm, outside the
+  strict class) because some of those bands carry occupation 1e-9. Rejected as default (the A17 reason again: the
+  buffer is what keeps the top retained Ritz pairs right); off with every band strict (`nb`) also needs more
+  Davidson iterations on the top band (H 0.85-1.27 of the baseline).
+- Not applicable: free-moment collinear FD with PBE routes to the strict oracle driver (G4D), so a free-moment Fe
+  case does not exercise this path (the fixed-moment case above does).
+- Why the large-band case gains little (TaZn13 -2 %): every Davidson call corrects every solved column in its first
+  iteration; that forced iteration is 62-93 % of the SCF H columns (maps >= 2: Au 0.73, Ru 0.74, Sr 0.93, slab
+  0.62, TaZn13 0.86), and the empty-band rule only trims later iterations (backlog: residual-screened first
+  iteration).
+- Tests: `scripts/check.sh` (CHECK_SCCACHE=0) exit 0, 1010 passed, 0 failed, 238 ignored (weighted default on);
+  release `--include-ignored` `refscf_fd_kept` (5 passed) and `refscf_k_pools` (11 passed, incl. the FD/spin pooled
+  P = 2, 3, 8 rows) with the default on; new unit tests `gf2_empty_threshold_tests` (rule cuts, buffer width).
+dev08 request (GF2 report): MPI8 socket 0, Au/Ru/Sr/Hg/Ta6Zn7, arms off / weighted / percent / weighted +
+FD_EMPTY_VERIFY, verify off and on, maps, H columns, engine and verification seconds, |dF| against a tight run.
+Lesson: the FD map spent a quarter to a half of its H columns on retained bands with negligible occupation and on the
+buffer; the occupation-weighted threshold removes most of the first part without moving the fixed point, while the
+buffer itself is load-bearing for the correctness of the top Ritz pairs.

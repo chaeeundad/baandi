@@ -47,6 +47,41 @@ fn two_dimensional_linear_fixed_point_closed_form() {
     assert!((next[1].re - 1.).abs() < 1e-14);
 }
 #[test]
+fn reduced_residual_is_the_metric_least_squares_remainder() {
+    // GM1: F~ = F - gamma dF. Without history F~ = F; with history it is
+    // metric-orthogonal to every retained dF (normal equations).
+    let p = Profile {
+        beta: 0.5,
+        ..Default::default()
+    };
+    let g2 = [1., 2., 4.];
+    let mut mix = Broyden::new(p, &g2, &[true; 3], 1., 2.).unwrap();
+    let mut metric = metric(&g2, &[true; 3]);
+    let f1 = [c(2.), c(-1.), C::new(0.5, 0.25)];
+    let mut x = vec![c(0.); 3];
+    let mut next = x.clone();
+    mix.update(&Serial, &mut metric, &x, &f1, &mut next)
+        .unwrap();
+    assert_eq!(mix.reduced_residual(), &f1[..]);
+    x = next.clone();
+    let f2 = [c(0.3), c(0.7), C::new(-0.2, 0.1)];
+    mix.update(&Serial, &mut metric, &x, &f2, &mut next)
+        .unwrap();
+    let df: Vec<_> = f1.iter().zip(&f2).map(|(a, b)| a - b).collect();
+    let gamma = mix.gamma()[0];
+    let mut out = [0.; 2];
+    let reduced = mix.reduced_residual().to_vec();
+    for j in 0..3 {
+        assert!((reduced[j] - (f2[j] - gamma * df[j])).norm() < 1e-15);
+    }
+    metric
+        .batch(&Serial, &[(&df, &reduced), (&reduced, &reduced)], &mut out)
+        .unwrap();
+    let f2_norm = metric.norm(&Serial, &f2).unwrap();
+    assert!(out[0].abs() < 1e-14 * f2_norm.max(1.), "{out:?}");
+    assert!(out[1] <= f2_norm);
+}
+#[test]
 fn ring_eviction_keeps_only_last_two_secants() {
     let mut mix = Broyden::new(
         Profile {

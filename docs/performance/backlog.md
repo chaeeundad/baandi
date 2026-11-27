@@ -334,3 +334,17 @@ Gap is cost per unit of work, not H columns (IrI3: 0.50x QE's H columns, 0.81x i
 
 ### GS1D-B (2026-11-27): reciprocal-space density symmetrization for grid-incompatible rotations
 QE keeps rotations that do not map a non-cubic explicit FFT grid onto itself (Cl2 on [40,36,80]: QE 8 ops / 42 k, BAANDI 4 ops / 68 k). BAANDI requires grid-mapping rotations because XC is evaluated on the real-space grid. Option: a switch that keeps such rotations and symmetrizes the density in reciprocal space; adopt only if reduced-vs-full-mesh energies stay within strict 1e-10 / standard 5e-9 Ha on several cells. Deferred: affects explicit non-cubic grids only.
+
+## After GM1 (GM1-FD-MIXING, 2026-11-27; ledger GM1-FD-MIXING)
+- dev08 A/B of `SCF_ETHR_GUARD` off / forecast / redo (verify on) on Cs2TcI6, Ta6Zn7, TiGa, Au, Ru, Fe; wall and maps.
+  Insulators on the fixed-occupation k driver are not affected by the switch (control rows only).
+- Sensitivity on the QE side: QE Cs2TcI6 with mixing_beta 0.69 / 0.71 or diago_thr_init changed by 2x; if QE's map
+  count also moves by 2-4, the 15 vs 11 gap is trajectory noise, not a BAANDI deficit.
+- Cs2TcI6 it1 dr2 0.405 (BAANDI) vs 0.253 Ry (QE): check the start density (QE "starting charge" line, negative
+  atomic charge, radial cutoff of PP_RHOATOM) and the band count/cutoff identity; the Mac model says map noise is
+  not the reason.
+- Overshoot after large drops (dr2 x3-30 on new strongly responding directions): candidates are an adaptive scalar
+  initial inverse Jacobian from the newest secant (beta_k = min(beta, -<dx,dF>/<dF,dF>)) or an energy-based adaptive
+  damping (Herbst and Levitt 2022); both are research items that need the full FD and insulator class matrix.
+- Start-symmetry check with clipped atomic densities (side finding GM1): compare within the density sphere or after
+  the same sphere projection, or clip after projection; the model Cs2TcI6 at 30 Ry is refused today.

@@ -227,13 +227,13 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::SPIN_FD_ATOMIC_DENSITY), Value::Choice("off"));
     assert_eq!(value(Id::FD_VERIFY_PREDICTOR), Value::Choice("on"));
     assert_eq!(value(Id::K_REDUCTION), Value::Choice("pointwise"));
-    assert_eq!(TABLE.len(), 95);
+    assert_eq!(TABLE.len(), 96);
     // Default off since 2026-11-27 (FD/spin only; dev08 gen59 arm D).
     assert_eq!(
         switches::resolve(switches::switch(Id::STANDARD_RESIDUAL_GUARD), None).0,
         Value::Choice("off")
     );
-    assert_eq!(TABLE.len(), 95);
+    assert_eq!(TABLE.len(), 96);
 }
 
 #[test]

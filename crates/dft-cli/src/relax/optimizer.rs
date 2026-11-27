@@ -194,7 +194,7 @@ mod tests {
     }
     #[test]
     fn fire_time_scale_matches_codata_units() {
-        // sqrt(27.211386 eV) / 0.52917721 Angstrom = 9.8576...; its square is
+        // sqrt(Hartree in eV) / (Bohr in Angstrom) = 9.8576...; its square is
         // the displacement ratio 97.17 of the audit (PRELAX-P0, 2.2).
         let s = fire_time_scale();
         assert!((s * s - 97.1736).abs() < 1e-3, "{}", s * s);

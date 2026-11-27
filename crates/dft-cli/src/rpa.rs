@@ -30,7 +30,6 @@ const OUTPUTS: [&str; 5] = [
     "results.json",
 ];
 /// Ha -> meV.
-const MEV: f64 = 27_211.386_245_988;
 
 /// Per-q JSON records in a directory; floats stored as IEEE bits (exact
 /// resume) next to readable values. Rank 0 writes; every rank reads.
@@ -326,7 +325,7 @@ pub fn execute(
     )
     .map_err(|e| err(4, e))?;
     let natoms = result.atoms as f64;
-    let per_atom_mev = |e: f64| e * MEV / natoms;
+    let per_atom_mev = |e: f64| dft_units::from_hartree(e, dft_units::EnergyUnit::MilliElectronVolt) / natoms;
 
     let mut q_csv = String::from(
         "# baandi rpa (R3): per-q RPA correlation contribution E_c(q) = (1/2pi) int dw Tr[ln(1 - v chi0) + v chi0], Hartree per cell (not q-weighted); weighted_ha = weight * E_c(q); q in fractional reciprocal coordinates; q = 0 uses the direction average of the k.p head/wings limit\nq_index,q1,q2,q3,weight,multiplicity,optical,ecut_chi_ha,response_size,e_c_q_ha,weighted_ha,min_pivot,hermiticity\n",

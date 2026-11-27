@@ -346,8 +346,14 @@ fn real_si_and_mgo() {
         }
         let half = a / 2.;
         let displaced = t + 0.03 / a;
+        // RELAX-GATE-FIXES (2026-11-28): energy_tol 1e-9 Ha and the 1e-9 Ha
+        // monotonicity check below need an SCF that resolves 1e-9 Ha; at the
+        // 5e-9 Ha default threshold (ONEPATH-1) MgO's late warm SCFs (1-2
+        // iterations) scattered the forces by ~2e-4 Ha/Bohr and the energy by
+        // 1.3e-9 Ha (the pre-ADR-0056 binary fails the same check). 5e-12 Ha
+        // (energy_tol/200): MgO converges in 57 monotone steps.
         let text = format!(
-            "[system]\nname='{material}'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,{half},{half}],[{half},0.0,{half}],[{half},{half},0.0]]\n[[system.atoms]]\nspecies='{}'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='{}'\nfractional=[{displaced},{displaced},{displaced}]\n[pseudopotentials]\n{pp}[basis]\necutwfc_ry={cutoff}\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\n[scf]\nmax_iterations=300\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{{atom=0}}]\n",
+            "[system]\nname='{material}'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,{half},{half}],[{half},0.0,{half}],[{half},{half},0.0]]\n[[system.atoms]]\nspecies='{}'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='{}'\nfractional=[{displaced},{displaced},{displaced}]\n[pseudopotentials]\n{pp}[basis]\necutwfc_ry={cutoff}\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\n[scf]\nmax_iterations=300\nstandard_threshold_ha=5e-12\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{{atom=0}}]\n",
             labels[0], labels[1]
         );
         fs::write(dir.join("input.toml"), text).unwrap();
@@ -515,7 +521,14 @@ fn fire_converges_from_displaced_structure() {
         common::gaussian_with(1., 1.5, false, 801).replace("element=\"Xx\"", "element=\"H\""),
     )
     .unwrap();
-    fs::write(dir.join("input.toml"),input().replace("[0.27,0.23,0.19]","[0.4,0.4,0.4]")+"\n[relax]\nmethod='fire'\nmax_steps=2000\nforce_tol_ha_bohr=1e-7\nenergy_tol_ha=1e-10\nfixed=[{atom=0}]\n").unwrap();
+    // RELAX-GATE-FIXES (2026-11-28): force_tol 1e-7 Ha/Bohr and energy_tol
+    // 1e-10 Ha lie below the SCF noise of the 5e-9 Ha default threshold (ONEPATH-1;
+    // forces near the minimum scatter 1e-7..6e-7 Ha/Bohr with 1-iteration warm
+    // SCFs). The Hartree-unit FIRE crept under it with 1e-5 Bohr steps; the
+    // ASE-unit FIRE (ADR 0056) takes 1e-4 Bohr steps and cycled at the noise
+    // floor for 2000 steps. The SCF threshold follows the requested accuracy
+    // (energy_tol/200, as the energy-scan test above): 67 steps on the Mac.
+    fs::write(dir.join("input.toml"),input().replace("[0.27,0.23,0.19]","[0.4,0.4,0.4]").replace("[scf]","[scf]\nstandard_threshold_ha=5e-13")+"\n[relax]\nmethod='fire'\nmax_steps=2000\nforce_tol_ha_bohr=1e-7\nenergy_tol_ha=1e-10\nfixed=[{atom=0}]\n").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
         .current_dir(&dir)
         .args(["relax", "input.toml", "--output-dir", "out"])

@@ -324,6 +324,25 @@ impl Settings {
     /// when given, otherwise twice the SCF energy accuracy (the standard
     /// threshold, or the strict energy tolerance), which equals the former
     /// default 1e-8 Ha at the default 5e-9 Ha threshold.
+    /// Warning text when the requested energy-change tolerance is below what
+    /// the SCF resolves (twice its energy accuracy): such a test then depends
+    /// on SCF noise, which also limits the forces (RELAX-GATE-FIXES: the
+    /// gate cases used 1e-9 and 1e-10 Ha with the 5e-9 Ha default threshold).
+    fn energy_tol_warning(&self, opts: &ScfOptions) -> Option<String> {
+        let tol = if self.mode == cell::Mode::Ions {
+            self.energy_tol_ha?
+        } else {
+            self.cell_energy_tol_ha()
+        };
+        let accuracy = opts
+            .standard
+            .map_or(opts.energy_tolerance, |p| p.threshold_ha);
+        (tol < 2. * accuracy).then(|| {
+            format!(
+                "relax energy_tol_ha {tol:e} Ha is below twice the SCF energy accuracy {accuracy:e} Ha; the energy test and the forces near convergence are limited by SCF noise. Tighten scf.standard_threshold_ha (for example to energy_tol_ha/200)"
+            )
+        })
+    }
     fn energy_rise_tol_ha(&self, opts: &ScfOptions) -> f64 {
         self.energy_tol_ha.unwrap_or_else(|| {
             2. * opts
@@ -1069,6 +1088,10 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             "relax requires SCF tolerances no looser than the force preconditions (energy 1e-8 Ha, eigen 1e-8 Ha, density 1e-7)",
         ));
     }
+    if let Some(message) = settings.energy_tol_warning(&opts) {
+        eprintln!("warning: {message}");
+        crate::progress::warning("relax", &message);
+    }
     let identity = sha256(&identity_bytes);
     fs::create_dir_all(out)?;
     let names = [
@@ -1783,6 +1806,15 @@ mod stop_rule_tests {
         let standard = ScfOptions::default();
         let threshold = standard.standard.unwrap().threshold_ha;
         assert_eq!(off.energy_rise_tol_ha(&standard), 2. * threshold);
+        // An energy tolerance the SCF cannot resolve warns (default threshold
+        // 5e-9 Ha: 1e-8 is resolvable, 1e-9 is not); unset never warns in ions mode.
+        assert!(off.energy_tol_warning(&standard).is_none());
+        assert!(on.energy_tol_warning(&standard).is_none());
+        let fine = Settings {
+            energy_tol_ha: Some(1e-9),
+            ..Settings::default()
+        };
+        assert!(fine.energy_tol_warning(&standard).is_some());
         // Cell modes keep their energy rule (default 1e-8 Ha).
         assert_eq!(off.cell_energy_tol_ha(), 1e-8);
         assert_eq!(on.cell_energy_tol_ha(), 1e-8);

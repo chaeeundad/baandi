@@ -7491,7 +7491,10 @@ fn g6_symmetry_geometry_guard_and_small_map() {
         .is_err()
     );
     // Clipping an under-resolved atomic start introduces out-of-sphere
-    // components. Both drivers must reject it at the same invariant check.
+    // components. SYM-START-CHECK: the start is pointwise invariant, and both
+    // drivers compare the projection with the sphere-filtered start, so both
+    // now accept it (they rejected it before); genuinely asymmetric starts are
+    // still rejected (refscf::api and dft-physics symmetry unit tests).
     let narrow = common::potential_with_atomic_start(2., 1., true, 81, "SLA PZ");
     let narrow_potentials = [SpeciesPotential {
         label: "Xx",
@@ -7502,7 +7505,7 @@ fn g6_symmetry_geometry_guard_and_small_map() {
         start_density: dft_engine::StartDensity::Atomic,
         ..options.clone()
     };
-    let bad = k_driver::run_prepared(
+    let clipped = k_driver::run_prepared(
         StartInput {
             cell: &cell,
             atoms: &atoms,
@@ -7512,9 +7515,8 @@ fn g6_symmetry_geometry_guard_and_small_map() {
         Profile::default(),
         &prepared,
     );
-    assert!(
-        matches!(bad,Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("symmetry.density"))
-    );
+    // One-map budget: the reference driver delivers the unconverged map.
+    assert!(!clipped.unwrap().outcome.converged);
     let mut old = dft_engine::ScfProblem::with_kpoints(
         &cell,
         &atoms,
@@ -7531,9 +7533,10 @@ fn g6_symmetry_geometry_guard_and_small_map() {
     )
     .unwrap();
     old.enable_symmetry(&full, 1e-7, true).unwrap();
-    assert!(
-        matches!(old.run(),Err(dft_engine::ScfError::InvalidInput(message)) if message.contains("symmetry.density"))
-    );
+    assert!(matches!(
+        old.run(),
+        Err(dft_engine::ScfError::NotConverged { .. })
+    ));
     for ranks in [1, 3, 8] {
         dft_mpi::simulate(ranks, |comm| {
             let run = k_driver::run_prepared_with(

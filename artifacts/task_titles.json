@@ -250,5 +250,6 @@
  "GD2-DERIV-XC": "힘·응력의 교환상관·코어 항 고속화, 작은 금속 고정 비용 줄이기",
  "GR1-README-MP": "README 검증 결과에 MP 29개 QE 비교 결과 추가",
  "CL1-SWITCH-CONSOLIDATE": "스위치 정리: 효과 확인된 것 기본값으로 굳히고 되돌리기·실험 스위치 제거",
- "RPA-R1-MANY-BANDS": "RPA 1단계: 빈 밴드 수백~수천 개 풀기(NSCF 확장, 밀집 경로, Chebyshev)"
+ "RPA-R1-MANY-BANDS": "RPA 1단계: 빈 밴드 수백~수천 개 풀기(NSCF 확장, 밀집 경로, Chebyshev)",
+ "PRELAX-P0": "이온 이완 가속(전처리): 0단계 현재 구현 감사, 1단계 DFT 벤치 설계"
 }

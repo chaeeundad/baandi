@@ -196,7 +196,19 @@ impl Config {
     }
     pub fn symmetry_json(&self) -> Result<Option<serde_json::Value>, ConfigError> {
         let density_ops = self.density_operations()?;
+        let crystal_count = self
+            .prepared_symmetry()?
+            .map_or(0, |p| p.density_operations(true).len());
         Ok(self.symmetry_map()?.map(|m| serde_json::json!({
+            "k_reduction": {
+                "requested": dft_numerics::switches::choice(dft_numerics::switches::Id::K_REDUCTION),
+                "applied": m.reduction.label(),
+                "crystal_operations_count": crystal_count,
+                "mesh_preserving_operations_count": m.mesh_preserving_operations,
+                "irreducible_k_count": m.points.len(),
+                "full_k_count": m.entries.len(),
+                "policy": "ADR 0051: pointwise_crystal = orbits star(k) on the mesh under every crystal operation (and k ~ -k when time reversal is on), weights orbit size / mesh size, density, forces, stress and relaxation symmetrized with the crystal group; exact for the full mesh with crystal projection, a k-quadrature change (group average of the mesh) against the unsymmetrized full mesh when the mesh is not invariant; mesh_subgroup = the mesh-preserving subgroup only (exact for the unsymmetrized full mesh); a mesh every operation preserves is reduced identically by both",
+            },
             "density_group": if self.symmetry.density_group == DensityGroup::Crystal { "crystal" } else { "mesh" },
             "density_operations_count": density_ops.len(),
             "density_operations": density_ops.iter().map(|o| serde_json::json!({"rotation":o.rotation,"translation":o.translation,"atom_permutation":o.atom_permutation,"antiunitary":o.antiunitary})).collect::<Vec<_>>(),
@@ -1538,7 +1550,26 @@ mod tests {
         let c = crystal.symmetry_json().unwrap().unwrap();
         assert_eq!(m["operations"], c["operations"]);
         assert_eq!(m["orbit_map"], c["orbit_map"]);
-        assert_eq!(m["density_operations_count"], 12);
+        // GT2 (ADR 0051): the point-wise default reduces with all 48
+        // operations (12 preserve the shifted mesh; the orbits and hence the
+        // 10 k are the same), so the "mesh" density group is the crystal group.
+        assert_eq!(m["density_operations_count"], 48);
+        assert_eq!(m["k_reduction"]["applied"], "pointwise_crystal");
+        assert_eq!(m["k_reduction"]["mesh_preserving_operations_count"], 12);
+        assert_eq!(m["k_reduction"]["irreducible_k_count"], 10);
+        {
+            let _mesh = dft_numerics::switches::RunConfig::from_pairs(&[("k_reduction", "mesh")])
+                .unwrap()
+                .enter();
+            let old = parse("[symmetry]\nmode='auto'");
+            let o = old.symmetry_json().unwrap().unwrap();
+            assert_eq!(o["density_operations_count"], 12);
+            assert_eq!(o["k_reduction"]["applied"], "mesh_subgroup");
+            assert_eq!(
+                old.resolved_points().unwrap(),
+                mesh.resolved_points().unwrap()
+            );
+        }
         assert_eq!(c["density_operations_count"], 48);
         assert_eq!(c["density_operations"].as_array().unwrap().len(), 48);
         assert_eq!(c["density_group"], "crystal");

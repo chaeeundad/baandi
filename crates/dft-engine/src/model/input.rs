@@ -24,6 +24,19 @@ pub struct PreparedSymmetry {
     grid: Option<[usize; 3]>,
     /// Detected operations dropped because they do not permute `grid`.
     dropped_for_grid: usize,
+    /// Requested k reduction policy (GT2, `K_REDUCTION`); `map().reduction`
+    /// records the one applied.
+    requested: dft_geometry::symmetry::KReduction,
+}
+/// The `K_REDUCTION` switch of the calling thread's configuration (GT2,
+/// ADR 0051).
+pub fn requested_k_reduction() -> dft_geometry::symmetry::KReduction {
+    use dft_geometry::symmetry::KReduction;
+    match dft_numerics::switches::choice(dft_numerics::switches::Id::K_REDUCTION) {
+        "mesh" => KReduction::MeshSubgroup,
+        "unreduced" => KReduction::Unreduced,
+        _ => KReduction::Pointwise,
+    }
 }
 impl PreparedSymmetry {
     pub fn new(
@@ -54,9 +67,14 @@ impl PreparedSymmetry {
             }
         };
         let dropped_for_grid = detected.len() - crystal_operations.len();
-        let map =
-            dft_geometry::symmetry::reduce_mesh(full, &crystal_operations, time_reversal, false)
-                .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let requested = requested_k_reduction();
+        let map = dft_geometry::symmetry::reduce_mesh_with(
+            full,
+            &crystal_operations,
+            time_reversal,
+            requested,
+        )
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
         Ok(Self {
             lattice: cell.lattice_columns_bohr(),
             atoms: atoms.to_vec(),
@@ -67,6 +85,7 @@ impl PreparedSymmetry {
             crystal_operations,
             grid,
             dropped_for_grid,
+            requested,
         })
     }
     /// Detected operations dropped for the explicit FFT grid (GS1C).
@@ -83,7 +102,9 @@ impl PreparedSymmetry {
         time_reversal: bool,
         grid: Option<[usize; 3]>,
     ) -> bool {
-        self.grid == grid && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
+        self.grid == grid
+            && self.requested == requested_k_reduction()
+            && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
     }
     /// Public configurations may change during relaxation. Reuse only for the
     /// exact geometry, mesh and detection settings that produced this record.
@@ -96,6 +117,7 @@ impl PreparedSymmetry {
         time_reversal: bool,
     ) -> bool {
         self.grid.is_none()
+            && self.requested == requested_k_reduction()
             && self.matches_geometry(cell, atoms, full, tolerance_bohr, time_reversal)
     }
     /// Geometry, mesh and detection settings only (any grid restriction).

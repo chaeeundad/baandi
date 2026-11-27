@@ -1294,11 +1294,24 @@ After this projection every detection (including each relaxation geometry) runs
 at `min(tolerance_bohr, 1e-9)` Bohr (`detection_tolerance_bohr` in results), so
 relaxations keep the start group (ADR 0049 amendment GS1B).
 
-`auto` detects species-aware spatial operations, uses the subgroup preserving
-`basis.kgrid`/`kshift`, and reports irreducible eigenvalues, weights and integer
-multiplicities in an additive `results.json.symmetry` block. It includes the
-operation list and complete full-to-irreducible orbit map. `off` skips spatial
-reduction, retaining the separate `basis.ktime_reversal` setting.
+`auto` detects species-aware spatial operations and reduces `basis.kgrid`/
+`kshift` point by point with the whole crystal group (ADR 0051, switch
+`BAANDI_K_REDUCTION`, default `pointwise`): a mesh point and every image of it
+that lands on the mesh form one orbit, weight = orbit size / mesh size, and
+the density, forces, stress and relaxation projectors use the whole crystal
+group. On a mesh that every operation maps onto itself this is the former
+reduction bit for bit. On other meshes (for example a shifted 4x4x4 mesh in the
+fcc primitive cell, or a 6x6x3 mesh in a Materials Project rhombohedral cell)
+the k quadrature becomes the crystal-group average of the mesh, as in QE; it is
+exactly the full mesh with the crystal projection, not the unsymmetrized full
+mesh. `BAANDI_K_REDUCTION=mesh` restores the former mesh-preserving-subgroup
+reduction (exactly the unsymmetrized full mesh), `unreduced` runs the full mesh
+with the crystal projection (oracle). `results.json.symmetry.k_reduction`
+records the requested and applied policy and the crystal, mesh-preserving,
+irreducible and full counts. The block also reports irreducible eigenvalues,
+weights and integer multiplicities, the operation list and complete
+full-to-irreducible orbit map. `off` skips spatial reduction, retaining the
+separate `basis.ktime_reversal` setting.
 
 Density is symmetrized on the full FFT grid, with fractional-translation phases.
 Explicit `basis.fft_grid` dimensions are always used exactly. When some detected

@@ -97,7 +97,11 @@ fn silicon_full_group_oracles() {
     for shift in [0., 0.5] {
         let full = monkhorst_pack([4; 3], [shift; 3]).unwrap();
         let map = reduce_mesh(&full, &ops, true, false).unwrap();
-        let run = |crystal| {
+        let run = |crystal, reduction: &str| {
+            let _scope =
+                dft_numerics::switches::RunConfig::from_pairs(&[("k_reduction", reduction)])
+                    .unwrap()
+                    .enter();
             let mut p = ScfProblem::with_kpoints(
                 &cell,
                 &atoms,
@@ -121,8 +125,22 @@ fn silicon_full_group_oracles() {
             p.enable_symmetry(&full, 1e-7, true).unwrap();
             p.run().unwrap()
         };
-        let mesh = run(false);
-        let crystal = run(true);
+        // The mesh-subgroup reduction (K_REDUCTION=mesh) with its mesh and
+        // crystal density groups, and the GT2 point-wise default (ADR 0051),
+        // whose star(k) orbits on this mesh are the subgroup orbits, so its
+        // k set is the same and it must equal the crystal arm exactly.
+        let mesh = run(false, "mesh");
+        let crystal = run(true, "mesh");
+        let pointwise = run(false, "pointwise");
+        let dp = (pointwise.energy.total_hartree() - crystal.energy.total_hartree()).abs();
+        let dpn = pointwise
+            .density
+            .iter()
+            .zip(&crystal.density)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0., f64::max);
+        println!("shift={shift} pointwise-crystal |dE|={dp:e} Ha max|dn|={dpn:e}");
+        assert!(dp < 1e-12 && dpn < 1e-12, "{dp:e} {dpn:e}");
         let mut outside = Vec::new();
         let mut max_crystal = 0.0_f64;
         for op in &ops {

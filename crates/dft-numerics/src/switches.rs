@@ -400,6 +400,8 @@ table! {
         "GB2: the spin/FD driver uses the closed-shell verification predictor: after a verification attempt with Coulomb error e at stop residual r0, a later stop at residual r < r0 skips its attempt (an ordinary map instead) when e r / r0 >= the threshold, never twice in a row; the pass criterion is unchanged and a run with at most one failed attempt is unchanged; off verifies at every stop";
     SPIN_FD_ATOMIC_DENSITY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "GB2: collinear Fermi-Dirac runs start each channel from the atomic start density scaled to the channel count (N +- m)/2 when that density is strictly positive on every grid point (otherwise, and for fixed sectors, uniform channel counts as before); off restores the uniform channel start; SCF trajectory change (accuracy class)";
+    K_REDUCTION: Kind::Choice { allowed: &["pointwise", "mesh", "unreduced"], default: "pointwise" }, "pointwise", "pointwise, mesh, unreduced",
+        "GT2 (ADR 0051): symmetry.mode=auto k reduction. pointwise = orbits under every crystal operation, k and S k merged whenever S k lies on the mesh (QE-like); density, forces, stress and relaxation projectors use the whole crystal group; on a mesh that every operation preserves this is the mesh value bit for bit; on other meshes the k quadrature becomes the crystal-group average of the mesh (exactly the full mesh with crystal projection). mesh = orbits under the mesh-preserving subgroup only (former behaviour; exactly the unsymmetrized full mesh). unreduced = full mesh with the crystal-group projection (oracle of pointwise; no k saving)";
 }
 
 struct Resolved {

@@ -1,0 +1,5 @@
+shift=0 pointwise-crystal |dE|=0e0 Ha max|dn|=0e0
+shift=0 delta_E=0.00000000000000000e0 Ha max_density_difference=0e0 electrons/Bohr^3 crystal_invariance=6.938893903907228e-17 nonmesh_errors=[]
+shift=0.5 pointwise-crystal |dE|=0e0 Ha max|dn|=0e0
+shift=0.5 delta_E=-1.55389894578306098e-5 Ha max_density_difference=1.5894455175267802e-3 electrons/Bohr^3 crystal_invariance=4.85722573273506e-17 nonmesh_errors=36 x 0.0021268811757474693
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 144 filtered out; finished in 7.68s

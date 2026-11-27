@@ -654,7 +654,21 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             (true, false) => "time reversal on (k ~ -k)",
             (true, true) => "time reversal on within each spin channel (k ~ -k; ADR 0050)",
         };
-        warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} of {} crystal operations preserve the k mesh and reduce it; {}; tolerance={} Bohr; spin swaps and spin-flipping magnetic operations disabled",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),crystal,time_reversal,config.symmetry.tolerance_bohr));
+        // GT2 (ADR 0051): name the reduction applied.
+        let reduction = match map.reduction {
+            dft_geometry::symmetry::KReduction::MeshSubgroup => format!(
+                "{} of {crystal} crystal operations preserve the k mesh and reduce it (mesh_subgroup)",
+                map.mesh_preserving_operations
+            ),
+            dft_geometry::symmetry::KReduction::Pointwise => format!(
+                "all {crystal} crystal operations reduce point by point (pointwise_crystal; {} preserve the whole mesh; k quadrature = crystal-group average of the mesh, ADR 0051)",
+                map.mesh_preserving_operations
+            ),
+            dft_geometry::symmetry::KReduction::Unreduced => format!(
+                "no k reduction, density projected with all {crystal} crystal operations (unreduced_crystal oracle)"
+            ),
+        };
+        warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {reduction}; {}; tolerance={} Bohr; spin swaps and spin-flipping magnetic operations disabled",map.entries.len(),map.points.len(),time_reversal,config.symmetry.tolerance_bohr));
     }
     let mut counts = Vec::new();
     for point in &points {

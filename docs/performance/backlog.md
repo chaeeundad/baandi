@@ -370,3 +370,8 @@ QE keeps rotations that do not map a non-cubic explicit FFT grid onto itself (Cl
   dr2 ~2e-4 Ry for 100 maps on the reference k driver (not converged); with symmetry auto 4x4x4 shifted it is refused
   at start ("symmetry.density: input breaks the selected symmetry", the GM1 side finding). Si8 with +-0.05 A
   displacements at Gamma needs 47 maps (perfect Si8 10): near-degenerate Gamma HOMO with fixed occupations.
+
+## Relax SCF threshold follow-ups (from RELAX-FORCE-NOISE, ADR 0057, 2026-11-28)
+
+- Progressive (QE-upscale-style) SCF threshold in relaxations: loose far from the minimum, tight (force_tol^2/3200) only near convergence, to recover most of the 18-33 % extra SCF iterations the force-tied default costs.
+- SCF correction force term (Chan-Bohnen-Ho style) so force errors become second order in the density residual for every run, not only relaxations; needs its own ADR. Motivation: ZnO PBE cold SCF at 5e-9 Ha already has force errors 7.7e-5 Ha/Bohr (C = 5.5 in |dF| = C sqrt(2 eps)).

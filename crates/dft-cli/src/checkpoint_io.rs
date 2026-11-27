@@ -13,9 +13,9 @@ use std::{
 };
 
 pub type Error = Box<dyn std::error::Error>;
-const MAGIC: &[u8; 8] = b"BAANDICP";
-const MAX_FILE: usize = 512 * 1024 * 1024;
-const MAX_HEADER: usize = 32 * 1024 * 1024;
+pub(crate) const MAGIC: &[u8; 8] = b"BAANDICP";
+pub(crate) const MAX_FILE: usize = 512 * 1024 * 1024;
+pub(crate) const MAX_HEADER: usize = 32 * 1024 * 1024;
 fn invalid(s: &str) -> Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, s).into()
 }
@@ -267,7 +267,7 @@ pub fn write(path: &Path, cp: &Checkpoint) -> Result<(), Error> {
     let bytes = encode(cp)?;
     publish_bytes(path, &bytes)
 }
-fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -2382,7 +2382,7 @@ impl ReferenceFile {
         })
     }
 }
-fn envelope(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
+pub(crate) fn envelope(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     if bytes.len() < 56 || bytes.len() > MAX_FILE || &bytes[..8] != MAGIC {
         return Err(invalid("checkpoint magic/size"));
     }
@@ -2396,7 +2396,7 @@ fn envelope(bytes: &[u8]) -> Result<(&[u8], &[u8]), Error> {
     }
     Ok((&bytes[24..24 + h], &bytes[24 + h..24 + h + b]))
 }
-fn file_bytes(path: &Path) -> Result<Vec<u8>, Error> {
+pub(crate) fn file_bytes(path: &Path) -> Result<Vec<u8>, Error> {
     let f = fs::File::open(path)?;
     if !f.metadata()?.is_file() || f.metadata()?.len() > MAX_FILE as u64 {
         return Err(invalid("checkpoint file quota/type"));

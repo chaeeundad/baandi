@@ -23,6 +23,9 @@ modules are top-level, not children of the legacy `scf` facade. Use the referenc
 Shared `ScfOptions` alone does not select a driver. Verification defaults on;
 strict certification is a different oracle contract. `refscf::nscf` solves the
 fixed-density band problem; it does not reuse legacy SCF orchestration.
+`nscf_bands_with` (R1, ADR 0052) adds the dense complete-EVD and Chebyshev
+many-band solvers and the per-k `BandStore` hook; `nscf_with` stays the
+unchanged Davidson path. Every solver's bands get a fresh residual certificate.
 
 The CLI has Reference or StrictOracle routing, strict precedence and the sole
 G4D free-moment PBE fallback. Do not add hidden fallback after an engine error.

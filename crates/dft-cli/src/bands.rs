@@ -32,11 +32,11 @@ pub(crate) fn ev(ha: f64) -> f64 {
 /// Output-only records: retain the density's spin axis, never reinterpret a
 /// collinear state as a scalar SCF state. Numerical work stays in the engine.
 pub(crate) struct Scf {
-    density: Vec<dft_physics::data::Array3<f64>>,
-    occupied: Vec<usize>,
-    energy: f64,
-    iterations: usize,
-    path: Value,
+    pub(crate) density: Vec<dft_physics::data::Array3<f64>>,
+    pub(crate) occupied: Vec<usize>,
+    pub(crate) energy: f64,
+    pub(crate) iterations: usize,
+    pub(crate) path: Value,
 }
 impl Scf {
     fn scalar(result: ScfResult, options: &ScfOptions) -> Self {

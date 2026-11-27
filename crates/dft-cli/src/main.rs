@@ -2,6 +2,8 @@
 mod bands;
 #[path = "dos.rs"]
 mod dos;
+#[path = "nscf.rs"]
+mod nscf;
 mod refscf_check;
 mod refscf_map;
 use dft_cli::checkpoint_io;
@@ -88,6 +90,17 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         output_dir: Option<PathBuf>,
+    },
+    /// SCF followed by a many-band fixed-density solve ([nscf] table; R1):
+    /// dense, Chebyshev or Davidson bands with certified residuals.
+    Nscf {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        /// Per-k nscf_bands_v1 checkpoint units; existing matching units are
+        /// resumed (re-certified), mismatching units reject.
+        #[arg(long)]
+        checkpoint_dir: Option<PathBuf>,
     },
     /// SCF followed by a weighted fixed-density Gaussian density of states.
     Dos {
@@ -292,6 +305,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
+        | Command::Nscf { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -316,6 +330,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
+        | Command::Nscf { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -407,6 +422,7 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
         | Command::Checkpoint { input, .. }
         | Command::Restart { input, .. }
         | Command::Bands { input, .. }
+        | Command::Nscf { input, .. }
         | Command::Dos { input, .. }
         | Command::Run { input, .. }
         | Command::Validate { input, .. }
@@ -431,6 +447,15 @@ fn real_main(cli: Cli) -> ExitCode {
         } => Some(dft_cli::relax::execute(input, output_dir, *resume)),
         Command::Bands { input, output_dir } => Some(bands::execute(input, output_dir.as_deref())),
         Command::Dos { input, output_dir } => Some(dos::execute(input, output_dir.as_deref())),
+        Command::Nscf {
+            input,
+            output_dir,
+            checkpoint_dir,
+        } => Some(nscf::execute(
+            input,
+            output_dir.as_deref(),
+            checkpoint_dir.as_deref(),
+        )),
         _ => None,
     };
     if let Some(result) = post {

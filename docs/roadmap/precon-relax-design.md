@@ -5,6 +5,18 @@ measurable DFT benefit, Phase 2 (native Rust optimizer). Binding requirements:
 [user specification](precon-relax-spec.md). Current-code facts: [audit](precon-relax-audit.md).
 Nothing here changes production code.
 
+Status 2026-11-28 (PRELAX-P2): Phase 1 met the decision rule of Section 7 on
+dev08 (A3 + L-BFGS 0.21-0.41x native BFGS evaluations, no extra failures, no
+different minima). Phase 2 is implemented as the opt-in `[relax] method =
+"precon_lbfgs"` (ions mode), [ADR 0058](../decisions/0058-precon-lbfgs-ionic-optimizer.md):
+the A3 model shape (Section 4) with mu estimated from secant pairs instead of the
+fixed 5 eV/A^2, block-Jacobi CG instead of a dense inverse, rebuild at 0.1 of
+the shortest bond with pairs kept, Armijo with an SCF-accuracy noise allowance.
+Choices that differ from Section 6 and their measurements are in the ADR. The
+harness has the native arm `baandi-precon` (Section 10). Default discussion
+waits for the dev08 rerun of stages 1-3 and the oxide and molecule/surface
+generality cases.
+
 ## 1. Problem statement in one paragraph
 
 Ionic relaxation minimises E(R) with forces F = -dE/dR from a verified SCF per
@@ -318,3 +330,28 @@ stop (spec acceptance clause).
 - Outputs: `tests/reference/relax-precon/results/dev08-1core-<date>/` raw JSON,
   `summarize.py --baseline baandi-bfgs:warm` and `--baseline baandi-bfgs:cold`
   summaries; the decision rule of Section 7.
+
+## 10. Phase 2 rerun on dev08 (native arm, PRELAX-P2)
+
+- Executable: release build of the PRELAX-P2 merge commit (contains ADR 0057,
+  so the SCF threshold matters): every arm gets the same explicit
+  `scf.standard_threshold_ha` through `run_bench.py --scf-threshold-ha`
+  (default `force-tied` = (0.02 eV/A in Ha/Bohr)^2 / 3200 = 4.73e-11 Ha, the
+  production relaxation default; `run_matrix.sh` passes `$SCF_THRESHOLD`,
+  default force-tied). Without it the native arms, whose own stop is disabled by
+  a 1e-9 Ha/Bohr force tolerance, would get the 5e-14 Ha floor through ADR 0057
+  while the `baandi run` arms keep 5e-9 Ha. `--scf-threshold-ha none` reproduces
+  the Phase 1 inputs (only meaningful with a pre-ADR-0057 executable).
+- Arms per case: `baandi-precon:warm`, `baandi-precon:cold`,
+  `baandi-bfgs:warm`, `baandi-bfgs:cold`, `a3-lbfgs:cold`, `ase-lbfgs:cold`,
+  `ase-precon-lbfgs:cold` (the others of Phase 1 are not needed again).
+- Stages 1-3 as in Section 9 (si8-lda-k222-a0.2 seeds 1-10, si8-lda-k222-a0.05
+  seeds 1-10, si8_AlP-pbe-k222 starts 1-3, si_alp_vac-pbe-g48 and
+  si_alp_vac2-pbe-g48 starts 1-2), one core per run, for example
+  `LAUNCHER="taskset -c 3" sh run_matrix.sh $PY $EXE $PSEUDO 1 /scratch/rp2 results/dev08-p2-1core 200 cases/si8_AlP-pbe-k222.json "1 2 3" "baandi-precon:warm baandi-precon:cold baandi-bfgs:warm baandi-bfgs:cold a3-lbfgs:cold ase-lbfgs:cold ase-precon-lbfgs:cold"`.
+- Summaries: `summarize.py results/dev08-p2-1core --baseline baandi-bfgs:warm`
+  (evaluations; wall within warm) and `--baseline a3-lbfgs:cold` (native
+  precon against the Python A3, evaluations; wall cold against cold only).
+- Before any default discussion (ticket item 2): an ionic oxide (for example
+  MgO or ZnO rattled cells of ADR 0057) and a molecule/surface case
+  (TiO2(110)+CH3OH, Section 5) with the same arms.

@@ -512,6 +512,206 @@ fn force_only_stop_rule_converges_at_the_initial_structure() {
 }
 
 #[test]
+fn precon_lbfgs_records_and_rejects_cell_modes() {
+    // ADR 0058 at CLI level with the 3 Ry synthetic H2 (two or three SCFs):
+    // the optimizer block, per-frame records and the extra relax.log columns;
+    // cell modes reject before any SCF.
+    let dir = std::env::temp_dir().join(format!("prelax-p2-cli-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("syn.xml"),
+        common::gaussian_with(1., 1.5, false, 801).replace("element=\"Xx\"", "element=\"H\""),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("cell.toml"),
+        input() + "\n[relax]\nmethod='precon_lbfgs'\nmode='ions_cell'\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .current_dir(&dir)
+        .args(["relax", "cell.toml", "--output-dir", "cell"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("precon_lbfgs"));
+    assert!(!dir.join("cell/results.json").exists());
+    fs::write(
+        dir.join("input.toml"),
+        input() + "\n[relax]\nmethod='precon_lbfgs'\nmax_steps=1\nfixed=[{atom=0}]\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .current_dir(&dir)
+        .args(["relax", "input.toml", "--output-dir", "out"])
+        .output()
+        .unwrap();
+    let code = output.status.code();
+    assert!(
+        code == Some(0) || code == Some(3),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
+    let r = &result["relaxation"];
+    assert_eq!(r["settings"]["method"], "precon_lbfgs");
+    let o = &r["optimizer"];
+    assert_eq!(o["method"], "precon_lbfgs");
+    assert_eq!(o["adr"], "0058");
+    let frames = r["frames"].as_array().unwrap();
+    // Every attempted evaluation is counted: frames + rejected trials + failures.
+    let attempted = frames.len()
+        + r["rejected_trials"].as_array().unwrap().len()
+        + r["failures"].as_array().unwrap().len();
+    assert_eq!(
+        o["attempted_evaluations"].as_u64().unwrap() as usize,
+        attempted
+    );
+    assert_eq!(frames[0]["optimizer"]["evaluation"], 1);
+    assert!(frames[0]["optimizer"]["mu_ha_bohr2"].as_f64().unwrap() > 0.);
+    // Frozen atom 0 never moves; the free atom moved on the accepted step.
+    for f in frames {
+        for k in 0..3 {
+            assert_eq!(f["positions"][k], frames[0]["positions"][k]);
+        }
+    }
+    if frames.len() > 1 {
+        assert!(
+            frames[1]["optimizer"]["line_search_trials"]
+                .as_u64()
+                .unwrap()
+                >= 1
+        );
+        assert_ne!(frames[1]["positions"][3], frames[0]["positions"][3]);
+    }
+    let log = fs::read_to_string(dir.join("out/relax.log")).unwrap();
+    let header = log.lines().next().unwrap();
+    assert!(header.ends_with(
+        "max_force_norm_Ha_Bohr mu_Ha_Bohr2 line_search_trials rejected_trials rebuilt evaluation"
+    ));
+    for line in log.lines().skip(1) {
+        assert_eq!(line.split_whitespace().count(), 12, "{line}");
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+#[ignore = "two Si8 DFT relaxations (about 1 min); DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-cli --test all relaxation::precon_lbfgs_needs_fewer -- --ignored --nocapture"]
+fn precon_lbfgs_needs_fewer_evaluations_than_bfgs() {
+    // ADR 0058 DFT check: Si8 (cubic diamond cell, 10.2612 Bohr, LDA-PZ 24 Ry,
+    // k 2x2x2, the PRELAX Phase 1 settings) with every atom displaced by a
+    // fixed pseudo-random pattern of up to 0.2 Bohr per axis. Attempted
+    // evaluations (frames + rejected trials + failures) to the default
+    // 0.02 eV/A atomic-norm tolerance with BFGS and with the preconditioned
+    // L-BFGS; the end structures must agree to 0.05 Bohr after removing the
+    // rigid translation and the energies to 1e-5 Ha (both are stopped at
+    // 3.9e-4 Ha/Bohr, so the remaining energy error is about F^2/k, < 1e-5 Ha).
+    let upf = std::env::var("DFT_SI_UPF").expect("set DFT_SI_UPF to Si.pz-vbc.UPF");
+    let dir = std::env::temp_dir().join(format!("prelax-p2-dft-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let a = 10.261212856717933;
+    let base = [
+        [0., 0., 0.],
+        [0., 0.5, 0.5],
+        [0.5, 0., 0.5],
+        [0.5, 0.5, 0.],
+        [0.25, 0.25, 0.25],
+        [0.25, 0.75, 0.75],
+        [0.75, 0.25, 0.75],
+        [0.75, 0.75, 0.25],
+    ];
+    // 64-bit LCG (Knuth MMIX constants) in [-0.2, 0.2) Bohr per axis.
+    let mut state = 12345u64;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        0.4 * ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.2
+    };
+    let mut system = format!(
+        "[system]\nname='Si8 precon'\nlattice_unit='bohr'\nlattice_vectors=[[{a},0.0,0.0],[0.0,{a},0.0],[0.0,0.0,{a}]]\n"
+    );
+    for f in base {
+        let p: Vec<f64> = f.iter().map(|x| x + next() / a).collect();
+        system += &format!(
+            "[[system.atoms]]\nspecies='Si'\nfractional=[{},{},{}]\n",
+            p[0], p[1], p[2]
+        );
+    }
+    system += &format!(
+        "[pseudopotentials]\nSi={upf:?}\n[basis]\necutwfc_ry=24.0\nkgrid=[2,2,2]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=20\nmax_iterations=100\n"
+    );
+    let mut counts = Vec::new();
+    let mut finals = Vec::new();
+    for method in ["bfgs", "precon_lbfgs"] {
+        fs::write(
+            dir.join(format!("{method}.toml")),
+            system.clone() + &format!("[relax]\nmethod='{method}'\nmax_steps=60\n"),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .current_dir(&dir)
+            .args(["relax", &format!("{method}.toml"), "--output-dir", method])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{method}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join(method).join("results.json")).unwrap())
+                .unwrap();
+        let r = &result["relaxation"];
+        let attempted = r["frames"].as_array().unwrap().len()
+            + r["failures"].as_array().unwrap().len()
+            + r["rejected_trials"].as_array().map_or(0, |v| v.len());
+        let last = r["frames"].as_array().unwrap().last().unwrap().clone();
+        println!(
+            "{method}: attempted evaluations {attempted}, final E {} Ha, max|F| {} Ha/Bohr",
+            last["energy_ha"], r["final_max_force_norm_ha_bohr"]
+        );
+        counts.push(attempted);
+        let x: Vec<f64> = last["positions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        finals.push((last["energy_ha"].as_f64().unwrap(), x));
+    }
+    let (e0, x0) = &finals[0];
+    let (e1, x1) = &finals[1];
+    let shift: Vec<f64> = (0..3)
+        .map(|c| (0..8).map(|i| x1[3 * i + c] - x0[3 * i + c]).sum::<f64>() / 8.)
+        .collect();
+    let dx = (0..8)
+        .map(|i| {
+            (0..3)
+                .map(|c| (x1[3 * i + c] - x0[3 * i + c] - shift[c]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        })
+        .fold(0., f64::max);
+    println!(
+        "same minimum: dE {:e} Ha, max dx {dx:e} Bohr",
+        (e1 - e0).abs()
+    );
+    assert!(
+        dx < 0.05 && (e1 - e0).abs() < 1e-5,
+        "different end structures"
+    );
+    assert!(
+        counts[1] < counts[0],
+        "precon {} vs bfgs {}",
+        counts[1],
+        counts[0]
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 #[ignore = "FIRE trajectory with many small ionic steps; run release"]
 fn fire_converges_from_displaced_structure() {
     let dir = std::env::temp_dir().join(format!("p21-fire-{}", std::process::id()));

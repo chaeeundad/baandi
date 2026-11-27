@@ -363,6 +363,8 @@ pub(super) fn execute(
                 status: "running".into(),
                 failures: initial_failures,
                 extrapolation: Vec::new(),
+                precon: None,
+                rejected: vec![],
             },
         }
     };
@@ -776,6 +778,7 @@ mod tests {
                 start_fallback: None,
                 start_clipped_fraction: None,
                 verification: None,
+                optimizer: None,
             }
         };
         for dofs in [Dofs::Full, Dofs::Isotropic, Dofs::XyzDiagonal] {

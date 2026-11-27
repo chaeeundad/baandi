@@ -455,6 +455,24 @@ Stored baseline comparisons (reference driver, not QE):
 
 Baseline: `docs/performance/baseline-reference.json`, 3 repeats, 1 thread. The complex-policy records retain matching numerical rejections as well as converged identity results. CLI agent endpoint status: unavailable (Operation not permitted (os error 1)); socket-pair tests are separate. Reference budget-extension recovery is unsupported; the stored self-healing records reject the legacy budget policy and make no recovery claim. No native MPI timing or numerical-instability healing is established. This runtime evidence does not establish v2 runtime-audit restoration. See [runtime contract](docs/design/reference-scf.md#runtime-control).
 
+### Materials Project structures against Quantum ESPRESSO 7.6
+
+Campaign: MPQE gen66 (Materials Project structures vs Quantum ESPRESSO 7.6); BAANDI commit `fb419f49`, 2026-11-27. Reference: Quantum ESPRESSO 7.6 run on dev08, QE with MPI 8 ranks; PseudoDojo norm-conserving, PBE pseudopotentials; one structure per entry from Materials Project (MPQE 01-30, 09 skipped). BAANDI ran with verification, forces and stress on; single runs. Provenance: relayed from dev08 /data/sig-dft/mpqe/RESULT-gen66.md; dev08 not reachable from the Mac when this file was written. Evidence [`tests/reference/mpqe/gen66-summary.json`](tests/reference/mpqe/gen66-summary.json).
+
+29 entries, 40 compared rows, 40 verified, 0 flagged, 0 failures.
+
+| Largest absolute difference over all rows | Value | Entry |
+|---|---:|---|
+| Free energy per atom (Ha) | 7.2e-06 | Au |
+| Force component (Ha/Bohr) | 5.5e-05 | Na4IrO4 |
+| Stress component (Ha/Bohr^3) | 2.8e-07 | |
+| Fermi energy (eV) | 5.0e-05 | |
+| Band gap (eV) | 5.5e-05 | |
+
+![Wall time ratio per entry](docs/img/mpqe-wall-ratio.svg)
+
+Wall times are informational and compare only entries with equal k sets (26 of 29; 13 Ti2MnIr, 23 NaCl, 26 LiAlGe excluded because QE detects a smaller symmetry group at its own tolerance, so the k sets differ). Totals: BAANDI 2335.2 s against QE 2004.8 s (x1.165). BAANDI split: verification 179.1 s (QE has none), SCF only about 1995.7 s against QE electrons 1875.4 s, forces 48.1 s plus stress 98.5 s against QE forces plus stress 74.6 s. Per-entry ratios range from 0.82 to 1.95; BAANDI is faster for Si, B, Na4IrO4. Entries 02, 16, 17, 20, 21, 22, 27, 29 used symmetry tolerance 1e-7 to match QE's k set. Limits: single runs, full BAANDI runs including verification against QE's default layout, not QE's best configuration; the speed target is judged separately on verify-off runs against QE's best layout. Structures and pseudopotentials are one set of Materials Project entries, not a general accuracy guarantee.
+
 Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.
 
 <!-- validation:end -->

@@ -1,0 +1,208 @@
+{
+  "campaign": "MPQE gen66 (Materials Project structures vs Quantum ESPRESSO 7.6)",
+  "baandi_commit": "fb419f49",
+  "date": "2026-11-27",
+  "host": "dev08, QE with MPI 8 ranks",
+  "qe_version": "7.6",
+  "pseudopotentials": "PseudoDojo norm-conserving, PBE",
+  "inputs": "one structure per entry from Materials Project (MPQE 01-30, 09 skipped)",
+  "baandi_settings": {
+    "verify": true,
+    "forces": true,
+    "stress": true
+  },
+  "qe_layout": "QE default layout (not QE's best configuration)",
+  "runs": "single runs",
+  "provenance": "relayed from dev08 /data/sig-dft/mpqe/RESULT-gen66.md; dev08 not reachable from the Mac when this file was written",
+  "entries": 29,
+  "compared_rows": 40,
+  "verified": 40,
+  "flagged": 0,
+  "failures": 0,
+  "max_abs": {
+    "dF_per_atom_ha": {
+      "value": 7.2e-06,
+      "entry": "Au"
+    },
+    "dForce_ha_bohr": {
+      "value": 5.5e-05,
+      "entry": "Na4IrO4"
+    },
+    "dStress_ha_bohr3": {
+      "value": 2.8e-07
+    },
+    "dEF_ev": {
+      "value": 5e-05
+    },
+    "dgap_ev": {
+      "value": 5.5e-05
+    }
+  },
+  "equal_k": {
+    "entries": 26,
+    "excluded": [
+      {
+        "entry": "13 Ti2MnIr"
+      },
+      {
+        "entry": "23 NaCl"
+      },
+      {
+        "entry": "26 LiAlGe"
+      }
+    ],
+    "excluded_reason": "QE detects a smaller symmetry group at its own tolerance, so the k sets differ",
+    "wall_s": {
+      "baandi_total": 2335.2,
+      "qe_total": 2004.8,
+      "baandi_verification": 179.1,
+      "baandi_scf_only": 1995.7,
+      "qe_electrons": 1875.4,
+      "baandi_forces": 48.1,
+      "baandi_stress": 98.5,
+      "qe_forces_stress": 74.6
+    }
+  },
+  "symmetry_tolerance_1e-7_entries": [
+    "02",
+    "16",
+    "17",
+    "20",
+    "21",
+    "22",
+    "27",
+    "29"
+  ],
+  "wall_ratio": [
+    {
+      "id": "01",
+      "name": "Ru",
+      "baandi_over_qe": 1.08
+    },
+    {
+      "id": "02",
+      "name": "Au",
+      "baandi_over_qe": 1.2
+    },
+    {
+      "id": "03",
+      "name": "Hf",
+      "baandi_over_qe": 1.24
+    },
+    {
+      "id": "04",
+      "name": "Sr",
+      "baandi_over_qe": 1.78
+    },
+    {
+      "id": "05",
+      "name": "Hg",
+      "baandi_over_qe": 1.41
+    },
+    {
+      "id": "06",
+      "name": "KB6",
+      "baandi_over_qe": 1.95
+    },
+    {
+      "id": "07",
+      "name": "TiGa",
+      "baandi_over_qe": 1.41
+    },
+    {
+      "id": "08",
+      "name": "CaAs3",
+      "baandi_over_qe": 1.27
+    },
+    {
+      "id": "10",
+      "name": "Ta6Zn7",
+      "baandi_over_qe": 1.5
+    },
+    {
+      "id": "11",
+      "name": "YSiAu",
+      "baandi_over_qe": 1.27
+    },
+    {
+      "id": "12",
+      "name": "ZrNiH3",
+      "baandi_over_qe": 1.26
+    },
+    {
+      "id": "14",
+      "name": "Hf6Al2Pt",
+      "baandi_over_qe": 1.05
+    },
+    {
+      "id": "15",
+      "name": "Y3SiS2",
+      "baandi_over_qe": 1.14
+    },
+    {
+      "id": "16",
+      "name": "Si",
+      "baandi_over_qe": 0.82
+    },
+    {
+      "id": "17",
+      "name": "B",
+      "baandi_over_qe": 0.84
+    },
+    {
+      "id": "18",
+      "name": "Cl2",
+      "baandi_over_qe": 1.31
+    },
+    {
+      "id": "19",
+      "name": "Br",
+      "baandi_over_qe": 1.12
+    },
+    {
+      "id": "20",
+      "name": "F2",
+      "baandi_over_qe": 1.19
+    },
+    {
+      "id": "21",
+      "name": "GeTe",
+      "baandi_over_qe": 1.05
+    },
+    {
+      "id": "22",
+      "name": "CaO",
+      "baandi_over_qe": 1.02
+    },
+    {
+      "id": "24",
+      "name": "SnBr2",
+      "baandi_over_qe": 1.12
+    },
+    {
+      "id": "25",
+      "name": "IrI3",
+      "baandi_over_qe": 1.12
+    },
+    {
+      "id": "27",
+      "name": "Sr(CuO)2",
+      "baandi_over_qe": 1.0
+    },
+    {
+      "id": "28",
+      "name": "Na4IrO4",
+      "baandi_over_qe": 0.86
+    },
+    {
+      "id": "29",
+      "name": "Sr(MgAs)2",
+      "baandi_over_qe": 1.46
+    },
+    {
+      "id": "30",
+      "name": "Cs2TcI6",
+      "baandi_over_qe": 1.8
+    }
+  ]
+}

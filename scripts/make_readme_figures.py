@@ -655,6 +655,56 @@ def reference_runtime_results():
     return lines
 
 
+def fig_mpqe():
+    d = load(os.path.join(REF, "mpqe", "gen66-summary.json"))
+    rows = d["wall_ratio"]
+    w, h = 760, 70 + 17 * len(rows) + 50
+    s = svg_open(w, h, "BAANDI wall time divided by Quantum ESPRESSO 7.6 wall time per Materials Project entry")
+    s += txt(20, 25, "Materials Project entries: BAANDI wall / QE 7.6 wall (informational)", 14, weight="bold")
+    x0, x1, top = 140, 720, 50
+    vmax = 2.0
+    def px(v): return x0 + v / vmax * (x1 - x0)
+    for t in (0.5, 1.0, 1.5, 2.0):
+        s += f'<line x1="{px(t):.1f}" y1="{top}" x2="{px(t):.1f}" y2="{h - 45}" stroke="{C_TOL if t == 1.0 else GRID}"/>' + txt(px(t), h - 30, f"{t:g}", 11, "middle", MUTED)
+    for i, r in enumerate(rows):
+        y = top + 4 + i * 17
+        s += txt(x0 - 8, y + 11, f"{r['id']} {r['name']}", 11, "end")
+        s += f'<rect x="{x0}" y="{y}" width="{px(r["baandi_over_qe"]) - x0:.1f}" height="13" fill="{C_OURS}"/>' + txt(px(r["baandi_over_qe"]) + 5, y + 11, f"{r['baandi_over_qe']:.2f}", 11)
+    s += txt((x0 + x1) / 2, h - 12, "BAANDI (verification, forces, stress on) / QE default layout; source: tests/reference/mpqe/gen66-summary.json", 11, "middle", MUTED)
+    return s + "</svg>\n"
+
+
+def mpqe_results():
+    path = "tests/reference/mpqe/gen66-summary.json"
+    d = load(os.path.join(ROOT, path))
+    a, e, wl = d["max_abs"], d["equal_k"], d["equal_k"]["wall_s"]
+    ratios = [r["baandi_over_qe"] for r in d["wall_ratio"]]
+    faster = [r["name"] for r in d["wall_ratio"] if r["baandi_over_qe"] < 1.0]
+    return ["### Materials Project structures against Quantum ESPRESSO 7.6", "",
+            f"Campaign: {d['campaign']}; BAANDI commit `{d['baandi_commit']}`, {d['date']}. "
+            f"Reference: Quantum ESPRESSO {d['qe_version']} run on {d['host']}; {d['pseudopotentials']} pseudopotentials; "
+            f"{d['inputs']}. BAANDI ran with verification, forces and stress on; {d['runs']}. "
+            f"Provenance: {d['provenance']}. Evidence {evidence_link(path)}.", "",
+            f"{d['entries']} entries, {d['compared_rows']} compared rows, {d['verified']} verified, {d['flagged']} flagged, {d['failures']} failures.", "",
+            "| Largest absolute difference over all rows | Value | Entry |", "|---|---:|---|",
+            f"| Free energy per atom (Ha) | {a['dF_per_atom_ha']['value']:.1e} | {a['dF_per_atom_ha']['entry']} |",
+            f"| Force component (Ha/Bohr) | {a['dForce_ha_bohr']['value']:.1e} | {a['dForce_ha_bohr']['entry']} |",
+            f"| Stress component (Ha/Bohr^3) | {a['dStress_ha_bohr3']['value']:.1e} | |",
+            f"| Fermi energy (eV) | {a['dEF_ev']['value']:.1e} | |",
+            f"| Band gap (eV) | {a['dgap_ev']['value']:.1e} | |", "",
+            "![Wall time ratio per entry](docs/img/mpqe-wall-ratio.svg)", "",
+            f"Wall times are informational and compare only entries with equal k sets ({e['entries']} of {d['entries']}; "
+            + ", ".join(x["entry"] for x in e["excluded"]) + f" excluded because {e['excluded_reason']}). "
+            f"Totals: BAANDI {wl['baandi_total']:.1f} s against QE {wl['qe_total']:.1f} s (x{wl['baandi_total'] / wl['qe_total']:.3f}). "
+            f"BAANDI split: verification {wl['baandi_verification']:.1f} s (QE has none), SCF only about {wl['baandi_scf_only']:.1f} s against QE electrons {wl['qe_electrons']:.1f} s, "
+            f"forces {wl['baandi_forces']:.1f} s plus stress {wl['baandi_stress']:.1f} s against QE forces plus stress {wl['qe_forces_stress']:.1f} s. "
+            f"Per-entry ratios range from {min(ratios):.2f} to {max(ratios):.2f}; BAANDI is faster for {', '.join(faster)}. "
+            f"Entries {', '.join(d['symmetry_tolerance_1e-7_entries'])} used symmetry tolerance 1e-7 to match QE's k set. "
+            "Limits: single runs, full BAANDI runs including verification against QE's default layout, not QE's best configuration; "
+            "the speed target is judged separately on verify-off runs against QE's best layout. "
+            "Structures and pseudopotentials are one set of Materials Project entries, not a general accuracy guarantee.", ""]
+
+
 def block(rows, kruns, gamma, perf=None):
     if not show_perf():
         perf = None
@@ -751,6 +801,7 @@ def block(rows, kruns, gamma, perf=None):
               "[Reproduce and inspect provenance](docs/demos/self-healing-scf.md#executed-p11e-demo) "
               "with `scripts/demo_self_healing.sh`.", ""]
     lines += reference_runtime_results()
+    lines += mpqe_results()
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
               "fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.", "", END]
@@ -794,6 +845,8 @@ def main():
         f.write(fig_kpoints(gamma, kruns))
     with open(os.path.join(IMG, "relaxation-forces.svg"), "w") as f:
         f.write(fig_relaxation())
+    with open(os.path.join(IMG, "mpqe-wall-ratio.svg"), "w") as f:
+        f.write(fig_mpqe())
     readme = os.path.join(ROOT, "README.md")
     text = open(readme).read()
     new = block(rows, kruns, gamma, perf)

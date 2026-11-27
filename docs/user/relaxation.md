@@ -66,7 +66,7 @@ from its verified state, and the stress cutoff scans are verified standard runs
 `scf.standard_threshold_ha` they default to 5e-11 Ha (stress default,
 provisional), while the ions mode keeps 5e-9 Ha. Tighten `standard_threshold_ha` to resolve a
 small ionic energy threshold or tight force tolerance (for example 5e-11 Ha, or
-5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically.
+5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically. A warning (stderr and `progress.jsonl`) is printed when `energy_tol_ha` is below twice the SCF threshold, where the energy test and the forces near convergence are limited by SCF noise (RELAX-GATE-FIXES: MgO PBE at 5e-9 Ha scattered forces by about 2e-4 Ha/Bohr in 1-iteration warm SCFs).
 Legacy `spectral_guard` and `xc.density_floor` input keys were removed in R10c.
 No tolerances are automatically loosened.
 

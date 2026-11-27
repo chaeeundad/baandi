@@ -87,7 +87,24 @@ pub fn potential_with_atomic_start(
     points: usize,
     functional: &str,
 ) -> Pseudopotential {
-    let text = build_text(z, rc, nonlocal, points, functional, true);
+    potential_with_atomic_start_dij(z, rc, nonlocal, points, functional, DEFAULT_DIJ)
+}
+const DEFAULT_DIJ: &str = "2 0.4 0 0.4 4 0 0 0 6";
+/// As `potential_with_atomic_start` with explicit row-major PP_DIJ (Ry) of
+/// the three projectors (l = 0, 0, 1).
+#[allow(dead_code)]
+pub fn potential_with_atomic_start_dij(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+    functional: &str,
+    dij: &str,
+) -> Pseudopotential {
+    let text = build_text(z, rc, nonlocal, points, functional, true).replace(
+        &format!("<PP_DIJ>{DEFAULT_DIJ}</PP_DIJ>"),
+        &format!("<PP_DIJ>{dij}</PP_DIJ>"),
+    );
     let pp = parse_upf(&text).unwrap();
     let chi = |l: i32, a: f64| {
         array(

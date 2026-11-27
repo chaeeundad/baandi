@@ -28,6 +28,8 @@ pub enum TaskType {
     Dos,
     /// SCF followed by a many-band fixed-density solve (`baandi nscf`).
     Nscf,
+    /// SCF followed by the optical-limit dielectric tensor (`baandi dielectric`, R2).
+    Dielectric,
 }
 impl TaskType {
     pub fn name(self) -> &'static str {
@@ -38,6 +40,7 @@ impl TaskType {
             Self::Bands => "bands",
             Self::Dos => "dos",
             Self::Nscf => "nscf",
+            Self::Dielectric => "dielectric",
         }
     }
     /// The alias subcommand that runs this task.
@@ -48,6 +51,7 @@ impl TaskType {
             Self::Bands => "bands",
             Self::Dos => "dos",
             Self::Nscf => "nscf",
+            Self::Dielectric => "dielectric",
         }
     }
 }
@@ -127,6 +131,9 @@ pub fn resolve_text(input: &Path, text: &str) -> Result<Resolved, String> {
         TaskType::Nscf if value.get("nscf").is_none() => {
             return Err("task.type = \"nscf\" requires an [nscf] table".into());
         }
+        TaskType::Dielectric if value.get("response").is_none() => {
+            return Err("task.type = \"dielectric\" requires a [response] table".into());
+        }
         TaskType::Scf if relax.is_some() => {
             return Err(if explicit {
                 "task.type = \"scf\" with a [relax] table: remove [relax] or set task.type = \"relax\" / \"cell-relax\"".into()
@@ -188,6 +195,11 @@ mod tests {
             ("[task]\ntype='bands'\n[bands]\n", TaskType::Bands, "bands"),
             ("[task]\ntype='dos'\n", TaskType::Dos, "dos"),
             ("[task]\ntype='nscf'\n[nscf]\n", TaskType::Nscf, "nscf"),
+            (
+                "[task]\ntype='dielectric'\n[response]\n",
+                TaskType::Dielectric,
+                "dielectric",
+            ),
         ];
         for (extra, task, alias) in cases {
             let r = resolve(extra).unwrap_or_else(|e| panic!("{extra}: {e}"));
@@ -213,6 +225,7 @@ mod tests {
             ("[task]\ntype='cell-relax'\n[relax]\n", "needs relax.mode"),
             ("[task]\ntype='bands'\n", "[bands]"),
             ("[task]\ntype='nscf'\n", "[nscf]"),
+            ("[task]\ntype='dielectric'\n", "[response]"),
             ("[task]\ntype='phonon'\n", "unknown variant"),
             (
                 "[task]\ntype='scf'\nresume=true\n",

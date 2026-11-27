@@ -1,5 +1,7 @@
 #[path = "bands.rs"]
 mod bands;
+#[path = "dielectric.rs"]
+mod dielectric;
 #[path = "dos.rs"]
 mod dos;
 #[path = "nscf.rs"]
@@ -139,6 +141,14 @@ enum Command {
         /// resumed (re-certified), mismatching units reject.
         #[arg(long)]
         checkpoint_dir: Option<PathBuf>,
+    },
+    /// SCF followed by the optical-limit dielectric tensor ([response]
+    /// table; R2): chi0 by the sum over states, eps_M with and without
+    /// local fields on the imaginary axis.
+    Dielectric {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
     },
     /// SCF followed by a weighted fixed-density Gaussian density of states.
     Dos {
@@ -353,6 +363,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
         | Command::Nscf { .. }
+        | Command::Dielectric { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -379,6 +390,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
         | Command::Nscf { .. }
+        | Command::Dielectric { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -553,6 +565,10 @@ fn single_entry(cli: Cli, mpi: bool) -> Result<Resolved, String> {
             output_dir: None,
             checkpoint_dir: resolved.checkpoint_dir,
         },
+        task::TaskType::Dielectric => Command::Dielectric {
+            input,
+            output_dir: None,
+        },
     };
     Ok(Resolved {
         command,
@@ -579,6 +595,7 @@ fn progress_session(
         Command::Nscf {
             input, output_dir, ..
         } => (input, output_dir.as_ref(), "nscf"),
+        Command::Dielectric { input, output_dir } => (input, output_dir.as_ref(), "dielectric"),
         _ => return Ok(None),
     };
     if no_progress || dft_cli::parallel::rank() > 0 {
@@ -616,6 +633,7 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
         | Command::Restart { input, .. }
         | Command::Bands { input, .. }
         | Command::Nscf { input, .. }
+        | Command::Dielectric { input, .. }
         | Command::Dos { input, .. }
         | Command::Run { input, .. }
         | Command::Validate { input, .. }
@@ -666,6 +684,9 @@ fn dispatch(command: Command) -> (u8, Option<String>) {
         } => Some(dft_cli::relax::execute(input, output_dir, *resume)),
         Command::Bands { input, output_dir } => Some(bands::execute(input, output_dir.as_deref())),
         Command::Dos { input, output_dir } => Some(dos::execute(input, output_dir.as_deref())),
+        Command::Dielectric { input, output_dir } => {
+            Some(dielectric::execute(input, output_dir.as_deref()))
+        }
         Command::Nscf {
             input,
             output_dir,

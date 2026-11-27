@@ -587,6 +587,167 @@ pub fn nonlocal_k_derivatives(
     Ok((forces, out))
 }
 
+/// R2 (`docs/roadmap/rpa-crpa-plan.md` 2.2): the KB projector table of
+/// [`NonlocalOperator::new`] at the Bloch vector of `basis` together with its
+/// gradient with respect to k, for the velocity operator d H_k / d k.
+#[derive(Debug, Clone)]
+pub struct ProjectorKGradient {
+    /// `beta_c(k+G)`, rows in `basis.momenta()` order, channels in the atom
+    /// order and channel order of [`NonlocalOperator::new`] (same formula:
+    /// `(-i)^l Y_lm(q) R_i(|q|) / sqrt(Omega) exp(-i q.tau)`, q = k+G).
+    pub values: ComplexMatrix,
+    /// Cartesian `d/dk_b` of the radial-angular factor times the same phase
+    /// (Bohr^-1 per column unit). The phase gradient `-i tau beta` is omitted:
+    /// it cancels in every atom-diagonal product `beta D beta^H`, so
+    /// `d V_NL / dk_b = sum_atom G_b D B^H + B D G_b^H` exactly.
+    pub gradients: [ComplexMatrix; 3],
+    /// Channels per atom, in column order.
+    pub channels: Vec<usize>,
+    /// Row-major `D` (Ha) per atom.
+    pub couplings: Vec<Vec<f64>>,
+}
+
+/// Projectors and their k gradients on the full basis (rows of every
+/// momentum). Radial values and slopes come from the quadratures
+/// `Pseudopotential::projector_transform` and [`projector_transform_slope`]
+/// (no interpolation table), one evaluation per distinct |k+G|. At k+G = 0
+/// only l = 1 has a nonzero gradient, `R'(0) Y_1m(e_b)`.
+pub fn projector_k_gradient(
+    basis: &PlaneWaveBasis,
+    volume_bohr3: f64,
+    species: &[Species<'_>],
+) -> Result<ProjectorKGradient, HamiltonianError> {
+    if !volume_bohr3.is_finite() || volume_bohr3 <= 0. {
+        return Err(HamiltonianError::Volume);
+    }
+    let ng = basis.momenta().len();
+    let total: usize = species
+        .iter()
+        .map(|s| {
+            s.positions_bohr.len()
+                * s.potential
+                    .projectors()
+                    .iter()
+                    .map(|p| 2 * p.l() + 1)
+                    .sum::<usize>()
+        })
+        .sum();
+    let shape = |_| HamiltonianError::Shape;
+    let mut values = ComplexMatrix::zeros(ng, total).map_err(shape)?;
+    let mut gradients = [
+        ComplexMatrix::zeros(ng, total).map_err(shape)?,
+        ComplexMatrix::zeros(ng, total).map_err(shape)?,
+        ComplexMatrix::zeros(ng, total).map_err(shape)?,
+    ];
+    let mut channels_out = Vec::new();
+    let mut couplings = Vec::new();
+    let mut column = 0;
+    for s in species {
+        let pp = s.potential;
+        let np = pp.projectors().len();
+        for i in 0..np {
+            for j in 0..np {
+                if pp.projectors()[i].l() != pp.projectors()[j].l()
+                    && pp.dij_hartree()[i * np + j] != 0.
+                {
+                    return Err(HamiltonianError::AngularCoupling);
+                }
+            }
+        }
+        let channels: Vec<_> = pp
+            .projectors()
+            .iter()
+            .enumerate()
+            .flat_map(|(i, p)| (-(p.l() as isize)..=p.l() as isize).map(move |m| (i, p.l(), m)))
+            .collect();
+        let nc = channels.len();
+        if channels.iter().any(|c| c.1 > 3) {
+            return Err(RadialError::Argument("projector l > 3").into());
+        }
+        // Per-species factors without the phase: value and three gradients.
+        let mut factor = vec![Complex64::default(); 4 * nc * ng];
+        let mut cache: std::collections::HashMap<u64, (Vec<f64>, Vec<f64>)> =
+            std::collections::HashMap::new();
+        for (ig, g) in basis.momenta().iter().enumerate() {
+            let q = g.norm_squared.sqrt();
+            let (radial, slope) = match cache.entry(g.norm_squared.to_bits()) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    let mut v = vec![0.; np];
+                    let mut p = vec![0.; np];
+                    for i in 0..np {
+                        v[i] = pp.projector_transform(i, q)?;
+                        p[i] = projector_transform_slope(pp, i, q)?;
+                    }
+                    e.insert((v, p))
+                }
+            };
+            let direction = if g.norm_squared == 0. {
+                [0., 0., 1.]
+            } else {
+                g.cartesian
+            };
+            for (c, &(i, l, m)) in channels.iter().enumerate() {
+                let prefactor = Complex64::new(0., -1.).powu(l as u32);
+                factor[c * ng + ig] = prefactor
+                    * dft_upf::radial::real_spherical_harmonic(l, m, direction)?
+                    * radial[i]
+                    / volume_bohr3.sqrt();
+                for b in 0..3 {
+                    let d = if g.norm_squared == 0. {
+                        if l == 1 {
+                            let mut e = [0.; 3];
+                            e[b] = 1.;
+                            slope[i] * harmonic(1, m, e).0
+                        } else {
+                            0.
+                        }
+                    } else {
+                        let (y, dy) = harmonic(l, m, g.cartesian);
+                        slope[i] * y * g.cartesian[b] / q + radial[i] * dy[b]
+                    };
+                    factor[((1 + b) * nc + c) * ng + ig] = prefactor * d / volume_bohr3.sqrt();
+                }
+            }
+        }
+        let mut coupling = vec![0.; nc * nc];
+        for (a, &(i, l, m)) in channels.iter().enumerate() {
+            for (b, &(j, ll, mm)) in channels.iter().enumerate() {
+                if l == ll && m == mm {
+                    coupling[a * nc + b] = pp.dij_hartree()[i * np + j];
+                }
+            }
+        }
+        for &r in s.positions_bohr {
+            let phases = basis
+                .momenta()
+                .iter()
+                .map(|g| structure_factor(g.cartesian, std::slice::from_ref(&r)))
+                .collect::<Result<Vec<_>, _>>()?;
+            for c in 0..nc {
+                for (ig, phase) in phases.iter().enumerate() {
+                    values[(ig, column + c)] = factor[c * ng + ig] * phase;
+                    for (b, grad) in gradients.iter_mut().enumerate() {
+                        grad[(ig, column + c)] = factor[((1 + b) * nc + c) * ng + ig] * phase;
+                    }
+                }
+            }
+            column += nc;
+            channels_out.push(nc);
+            couplings.push(coupling.clone());
+        }
+    }
+    if values.validate_finite().is_err() || gradients.iter().any(|g| g.validate_finite().is_err()) {
+        return Err(HamiltonianError::NonFinite);
+    }
+    Ok(ProjectorKGradient {
+        values,
+        gradients,
+        channels: channels_out,
+        couplings,
+    })
+}
+
 /// Full KB strain derivative, all radial channels and Hermitian D couplings.
 pub fn nonlocal(
     basis: &PlaneWaveBasis,

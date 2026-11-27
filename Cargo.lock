@@ -610,6 +610,7 @@ dependencies = [
  "dft-mpi",
  "dft-numerics",
  "dft-physics",
+ "dft-response",
  "dft-solvers",
  "dft-units",
  "dft-upf",
@@ -668,6 +669,22 @@ dependencies = [
  "num-complex",
  "thiserror 2.0.21",
  "xcx",
+]
+
+[[package]]
+name = "dft-response"
+version = "0.1.0"
+dependencies = [
+ "dft-basis",
+ "dft-geometry",
+ "dft-mpi",
+ "dft-numerics",
+ "dft-physics",
+ "dft-solvers",
+ "dft-units",
+ "dft-upf",
+ "num-complex",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

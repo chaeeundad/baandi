@@ -24,5 +24,6 @@ gen dft-upf      "UPF v2 norm-conserving reading and validation layer, radial-to
 gen dft-physics  "Kinetic, local ionic, nonlocal KB, Hartree, LDA XC, density; matrix-free H*psi." "Hartree G=0 convention; XC v = d(n*eps)/dn finite-difference test; H Hermitian; density integrates to N_valence."
 gen dft-solvers  "Eigensolvers (dense baseline, then Davidson/LOBPCG), mixers (linear, then Pulay), convergence checks." "Residual and orthonormality reported; convergence needs density, energy and eigen residual, never energy alone."
 gen dft-engine   "Orchestrates SCF, occupations, total energy and its audit (ion-ion/Ewald, double counting)." "Every energy term has a unit test and appears in results; no hidden constants."
+gen dft-response "Response core (R2+ of docs/roadmap/rpa-crpa-plan.md): pair densities, chi0(q, i w) by the sum over states, head/wings with the nonlocal velocity, dielectric matrix and eps_M. No I/O, serde or logging." "Pair FFT equals the convolution sum; chi0(i w) Hermitian negative semidefinite; k.p head equals finite-q extrapolation; one rank bit-identical to threads."
 gen dft-cli      "CLI, TOML input, output files. No numerical logic." "run/validate/inspect-upf subcommands; nonzero exit with cause on failure; outputs carry reproducibility metadata."
 echo "generated: $(ls crates/*/AGENTS.md | wc -l) guides"

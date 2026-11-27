@@ -1,0 +1,29 @@
+# R2 dielectric oracle case: LiF rock salt (a = 4.03 Angstrom), PseudoDojo PBE Li/F (not committed),
+# same structure as refscf_nscf_many::dojo_lif_and_aln; 60 Ry (oracle comparison, not a converged cutoff).
+[system]
+name = "R1 LiF 4x4x4 dielectric"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,3.80785,3.80785],[3.80785,0.0,3.80785],[3.80785,3.80785,0.0]]
+[[system.atoms]]
+species = "Li"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "F"
+fractional = [0.5,0.5,0.5]
+[pseudopotentials]
+Li = "Li.upf"
+F = "F.upf"
+[basis]
+ecutwfc_ry = 60
+kgrid = [4,4,4]
+[xc]
+functional = "pbe"
+[response]
+ecut_chi_ha = 3.0
+bands = 60
+band_solver = "dense"
+k_mesh = [4,4,4]
+local_fields = true
+[response.frequency]
+points = 16
+omega0_ha = "auto"

@@ -1,0 +1,28 @@
+# R2 dielectric oracle case: diamond C (a = 3.567 Angstrom), PseudoDojo PBE C (nc-sr-04 standard,
+# not committed); 80 Ry (oracle comparison, not a converged cutoff); Gamma-centred 4x4x4.
+[system]
+name = "R2 C diamond 4x4x4 dielectric"
+lattice_unit = "bohr"
+lattice_vectors = [[0.0,3.37032,3.37032],[3.37032,0.0,3.37032],[3.37032,3.37032,0.0]]
+[[system.atoms]]
+species = "C"
+fractional = [0.0,0.0,0.0]
+[[system.atoms]]
+species = "C"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+C = "C.upf"
+[basis]
+ecutwfc_ry = 80
+kgrid = [4,4,4]
+[xc]
+functional = "pbe"
+[response]
+ecut_chi_ha = 4.0
+bands = 100
+band_solver = "dense"
+k_mesh = [4,4,4]
+local_fields = true
+[response.frequency]
+points = 16
+omega0_ha = "auto"

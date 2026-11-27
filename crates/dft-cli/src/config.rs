@@ -68,6 +68,8 @@ pub struct Config {
     pub bands: Option<Bands>,
     /// R1: many-band fixed-density solve (`baandi nscf`, docs/cli.md).
     pub nscf: Option<Nscf>,
+    /// R2: dielectric response (`baandi dielectric`, docs/cli.md).
+    pub response: Option<Response>,
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
     /// D3-DISPERSION (ADR 0048): Grimme D3 correction evaluated once per
@@ -1889,6 +1891,38 @@ pub struct Nscf {
     pub filter_degree: Option<usize>,
     /// Chebyshev only: sweeps before failure (default 300).
     pub max_iterations: Option<usize>,
+}
+/// `[response]` (R2, `docs/roadmap/rpa-crpa-plan.md` 3.6), minimal key set:
+/// the optical-limit dielectric tensor on a Gamma-centred full k mesh.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Response {
+    /// Response sphere |G|^2/2 <= ecut_chi_ha (Ha), at most 4 x the
+    /// wavefunction cutoff.
+    pub ecut_chi_ha: f64,
+    /// "auto" (= N_G(ecut_chi), clamped to the smallest k basis) or a count.
+    pub bands: Option<toml::Value>,
+    /// "dense" (default) | "chebyshev".
+    pub band_solver: Option<String>,
+    pub k_mesh: [usize; 3],
+    /// "kp" (default and only production value).
+    pub head: Option<String>,
+    /// Headline tensor with (default) or without local fields; both are
+    /// always written.
+    pub local_fields: Option<bool>,
+    /// NSCF residual certificate (Ha), default 1e-6.
+    pub eigen_tolerance_ha: Option<f64>,
+    pub frequency: Option<ResponseFrequency>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseFrequency {
+    /// "gauss-legendre" (default and only value; minimax later).
+    pub grid: Option<String>,
+    /// Gauss-Legendre points (default 16).
+    pub points: Option<usize>,
+    /// "auto" (default) or a scale in Ha.
+    pub omega0_ha: Option<toml::Value>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-26",
+ "updated": "2026-11-28",
  "legend": {
   "done": "Works today",
   "progress": "Being built now",
@@ -163,10 +163,22 @@
    "note": "Opt-in k-point reduction and density symmetrization; full/reduced, spin and finite-temperature checks. Magnetic spin swaps unsupported; comparison with QE pending. [Evidence](tests/reference/symmetry/evidence.json)."
   },
   {
+   "status": "done",
+   "area": "Response",
+   "feature": "Many-band NSCF, dielectric response and ACFDT–RPA correlation energy",
+   "note": "Experimental `nscf`, `dielectric` and `rpa` workflows. The [R1–R3 comparisons](#rpa-building-blocks-many-bands-dielectric-constant-correlation-energy) apply to the tested settings and conventions."
+  },
+  {
+   "status": "done",
+   "area": "Localized orbitals",
+   "feature": "Atomic-orbital projection and Wannier90 file exchange",
+   "note": "`subspace` projects plane-wave states onto localized orbitals and exports real-space hoppings. `wannier-export` writes inputs for external Wannier90, whose gauge can be read by `subspace`. [External comparison](tests/reference/response/r4/README.md) is pending."
+  },
+  {
    "status": "planned",
-   "area": "Physics",
-   "feature": "RPA and cRPA correlation (research stage)",
-   "note": "Design only; no implementation yet."
+   "area": "Response",
+   "feature": "cRPA screened interaction parameters",
+   "note": "The localized subspace is a building block. Screened U and J are not yet available. See the [RPA/cRPA roadmap](docs/roadmap/rpa-crpa-plan.md)."
   },
   {
    "status": "planned",
@@ -175,10 +187,22 @@
    "note": "Design in docs/roadmap/esle.md; starts after the baseline is complete."
   },
   {
+   "status": "progress",
+   "area": "Electrostatics",
+   "feature": "Self-consistent continuum solvation",
+   "note": "The [standalone feasibility report](docs/research/extensible-dft/feasibility-report.md) and [integration design](docs/decisions/0061-typed-electrostatics-and-solvation-seam.md) are on main. An experimental SCF integration and synthetic test suite are on the [Gate 4 research branch](https://github.com/chaeeundad/baandi/tree/research/track-b-gate4-scf); solvation is not a main-branch feature."
+  },
+  {
+   "status": "planned",
+   "area": "Basis sets",
+   "feature": "Mixed plane-wave and atomic-orbital (PW+AO) solver",
+   "note": "The joint variational solver is [planned](docs/research/extensible-dft/decision-log.md#d-004--defer-track-a-mixed-basis--pwao--alb-behind-track-b--track-c-2026-11-28). Atomic-orbital projection works on plane-wave solutions; it does not change the SCF basis."
+  },
+  {
    "status": "planned",
    "area": "Method",
-   "feature": "Coupling to outside environments (embedding, solvent, QM/MM, applied electric fields) through typed interfaces",
-   "note": "Design in docs/architecture/scientific-coupling.md."
+   "feature": "External environments and multiscale coupling",
+   "note": "Electrostatic embedding, QM/MM, MLIP coupling, explicit solvent and external fields are [design directions](docs/architecture/scientific-coupling.md)."
   },
   {
    "status": "done",

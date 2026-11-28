@@ -93,8 +93,15 @@ fn ok(o: &std::process::Output) {
     );
 }
 
+struct ParsedHr {
+    num_wann: usize,
+    nrpts: usize,
+    degs: Vec<usize>,
+    mats: BTreeMap<[i32; 3], Vec<Complex64>>,
+}
+
 /// Independent parser of Wannier90 `seedname_hr.dat` per public format spec.
-fn parse_hr_dat(path: &Path) -> (usize, usize, Vec<usize>, BTreeMap<[i32; 3], Vec<Complex64>>) {
+fn parse_hr_dat(path: &Path) -> ParsedHr {
     let text = fs::read_to_string(path).unwrap();
     let mut lines = text.lines();
     let _header = lines.next().expect("header line");
@@ -134,7 +141,12 @@ fn parse_hr_dat(path: &Path) -> (usize, usize, Vec<usize>, BTreeMap<[i32; 3], Ve
     }
     assert_eq!(row_count, nrpts * num_wann * num_wann);
     assert_eq!(matrices.len(), nrpts);
-    (num_wann, nrpts, degs, matrices)
+    ParsedHr {
+        num_wann,
+        nrpts,
+        degs,
+        mats: matrices,
+    }
 }
 
 #[test]
@@ -176,7 +188,12 @@ fn subspace_outputs_hr_dat_single_entry_and_guards() {
     assert_eq!(meta["projector_fingerprint"].as_str().unwrap().len(), 64);
 
     // Independent parse of subspace_hr.dat: WS partition of unity and on-site value vs JSON.
-    let (num_wann, nrpts, degs, mats) = parse_hr_dat(&out_dir.join("subspace_hr.dat"));
+    let ParsedHr {
+        num_wann,
+        nrpts,
+        degs,
+        mats,
+    } = parse_hr_dat(&out_dir.join("subspace_hr.dat"));
     assert_eq!(num_wann, 1);
     let sum_inv_g: f64 = degs.iter().map(|&g| 1.0 / g as f64).sum();
     assert!((sum_inv_g - 8.0).abs() < 1e-12, "sum 1/g = {sum_inv_g}");

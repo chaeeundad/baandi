@@ -179,6 +179,11 @@ path = "tests/response_r3.rs"
 required-features = ["strict-oracle"]
 
 [[test]]
+name = "response_r4a"
+path = "tests/response_r4a.rs"
+required-features = ["strict-oracle"]
+
+[[test]]
 name = "response_velocity_hf"
 path = "tests/response_velocity_hf.rs"
 required-features = ["strict-oracle"]

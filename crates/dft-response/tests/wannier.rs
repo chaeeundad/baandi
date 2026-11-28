@@ -175,13 +175,11 @@ fn spreads_omega_i_is_gauge_invariant_and_center_tracks_translation() {
         id_gauges.push(u);
     }
     let rep_id = evaluate_spreads(&bset, &neighbors, &overlaps, &id_gauges).unwrap();
-    for n in 0..2 {
-        for a in 0..3 {
+    for (n, (got_c, exp_c)) in rep_id.centers_bohr.iter().zip(&r_true).enumerate() {
+        for (a, (&got, &expected)) in got_c.iter().zip(exp_c).enumerate() {
             assert!(
-                (rep_id.centers_bohr[n][a] - r_true[n][a]).abs() < 1e-12,
-                "center ({n},{a}): got {}, expected {}",
-                rep_id.centers_bohr[n][a],
-                r_true[n][a]
+                (got - expected).abs() < 1e-12,
+                "center ({n},{a}): got {got}, expected {expected}"
             );
         }
     }

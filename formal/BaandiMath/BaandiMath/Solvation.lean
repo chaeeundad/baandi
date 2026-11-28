@@ -2,14 +2,17 @@ import Mathlib.Basic.Real.Basic
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Analysis.SpecialFunctions.ExpDeriv
 import Mathlib.Analysis.SpecialFunctions.Log.Basic
+import Mathlib.Analysis.SpecialFunctions.Log.Deriv
 import Mathlib.Analysis.SpecialFunctions.Trigonometric.Basic
+import Mathlib.Analysis.SpecialFunctions.Trigonometric.Deriv
 import Mathlib.Tactic
 
 /-!
 # BAANDI Track B (Implicit Solvation & GC-DFT) — Formal Mathematical Verification
 
 Machine-checked Lean 4 + Mathlib proofs of the core Level-1 theoretical theorems in
-`docs/research/extensible-dft/implicit-solvation-theory.md` (Section 4):
+`docs/research/extensible-dft/implicit-solvation-theory.md` (Section 4) and Gate 3–4
+SCF invariants:
 
 1. Weighted grid inner product & strict positive definiteness (SPD) of the discrete
    generalized Poisson / linearized Poisson–Boltzmann (GP/LPB) operator built from
@@ -21,9 +24,13 @@ Machine-checked Lean 4 + Mathlib proofs of the core Level-1 theoretical theorems
    both neutral and charged cells.
 4. Harris–Foulkes Bregman remainder & Grand Canonical (`Omega = E - TS - mu * N_out`)
    Bregman identity.
-5. Cavity switching monotonicity (`VASPsol` `erfc` and `SCCS` log-sine) and non-negativity
-   (repulsive sign) of the dielectric (`V_diel`, both linear-`eps` and log-`eps`) and
-   electrolyte screening (`V_scr`) Kohn–Sham potentials.
+5. Analytic `HasDerivAt` cavity switching derivatives & monotonicity (`VASPsol` `erfc`
+   via `HasDerivAt.comp` and `SCCS` log-sine directly from `Real.log` and `Real.sin`)
+   and non-negativity (repulsive sign) of the dielectric (`V_diel`, both linear-`eps`
+   and log-`eps`) and electrolyte screening (`V_scr`) Kohn–Sham potentials.
+6. Gate 3–4 SCF invariants: electrostatic sign involution (`U_el = -phi`),
+   spin-polarized solvation Gateaux chain rule and double-counting identity, and
+   non-negative triangle bound for `EnergyAudit::functional_difference_bound`.
 
 All theorems are proved with zero `sorry` and zero custom `axiom` declarations.
 -/
@@ -461,7 +468,7 @@ theorem grand_canonical_bregman_exact
   ring
 
 /-!
-## Section 5: Cavity Switching Monotonicity & Repulsive Dielectric/Screening Potentials
+## Section 5: Analytic Cavity Switching Derivatives, Monotonicity & Repulsive Potentials
 -/
 
 /-- Monotonicity of VASPsol `erfc` cavity switching: `S'_VASPsol(n) ≤ 0`. -/
@@ -485,6 +492,134 @@ theorem sccs_deriv_nonpos (n rho_min rho_max t : ℝ)
   have hlog : 0 < Real.log (rho_max / rho_min) := Real.log_pos hratio
   have hden : 0 ≤ n * Real.log (rho_max / rho_min) := le_of_lt (mul_pos hn hlog)
   exact div_nonpos_of_nonpos_of_nonneg hnum hden
+
+/-- Explicit Andreussi et al. (2012) SCCS logarithmic-sine cavity switching function
+on `(rhoMin, rhoMax)`. -/
+noncomputable def sccsSwitch (rhoMin rhoMax n : ℝ) : ℝ :=
+  let t := (Real.log n - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin)
+  1 - (t - Real.sin (2 * Real.pi * t) / (2 * Real.pi))
+
+/-- Analytic derivative of `sccsSwitch` on `(rhoMin, rhoMax)` machine-checked via
+Lean's `HasDerivAt` calculus library. -/
+theorem sccsSwitch_hasDerivAt (rhoMin rhoMax n : ℝ)
+    (hmin : 0 < rhoMin) (hn_lo : rhoMin < n) (hn_hi : n < rhoMax) :
+    HasDerivAt (sccsSwitch rhoMin rhoMax)
+      (-(1 - Real.cos (2 * Real.pi *
+          ((Real.log n - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin)))) /
+        (n * Real.log (rhoMax / rhoMin))) n := by
+  have hn : 0 < n := lt_trans hmin hn_lo
+  have hlt : rhoMin < rhoMax := lt_trans hn_lo hn_hi
+  have hmax : 0 < rhoMax := lt_trans hn hn_hi
+  have hlog_eq : Real.log (rhoMax / rhoMin) = Real.log rhoMax - Real.log rhoMin :=
+    Real.log_div (ne_of_gt hmax) (ne_of_gt hmin)
+  have hlog_pos : 0 < Real.log (rhoMax / rhoMin) :=
+    Real.log_pos ((one_lt_div hmin).mpr hlt)
+  have hL_ne : Real.log rhoMax - Real.log rhoMin ≠ 0 := by
+    rw [← hlog_eq]
+    exact ne_of_gt hlog_pos
+  have h2pi_ne : 2 * Real.pi ≠ 0 := mul_ne_zero (by norm_num) (ne_of_gt Real.pi_pos)
+  have ht : HasDerivAt
+      (fun x => (Real.log x - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin))
+      (n⁻¹ / (Real.log rhoMax - Real.log rhoMin)) n :=
+    ((Real.hasDerivAt_log (ne_of_gt hn)).sub_const (Real.log rhoMin)).div_const
+      (Real.log rhoMax - Real.log rhoMin)
+  have h2pit : HasDerivAt
+      (fun x => 2 * Real.pi *
+        ((Real.log x - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin)))
+      (2 * Real.pi * (n⁻¹ / (Real.log rhoMax - Real.log rhoMin))) n :=
+    ht.const_mul (2 * Real.pi)
+  have hsin : HasDerivAt
+      (fun x => Real.sin (2 * Real.pi *
+        ((Real.log x - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin))))
+      (Real.cos (2 * Real.pi *
+          ((Real.log n - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin))) *
+        (2 * Real.pi * (n⁻¹ / (Real.log rhoMax - Real.log rhoMin)))) n :=
+    (Real.hasDerivAt_sin _).comp n h2pit
+  have hsin_div : HasDerivAt
+      (fun x => Real.sin (2 * Real.pi *
+        ((Real.log x - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin))) /
+        (2 * Real.pi))
+      ((Real.cos (2 * Real.pi *
+          ((Real.log n - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin))) *
+        (2 * Real.pi * (n⁻¹ / (Real.log rhoMax - Real.log rhoMin)))) / (2 * Real.pi)) n :=
+    hsin.div_const (2 * Real.pi)
+  have hS : HasDerivAt (sccsSwitch rhoMin rhoMax)
+      (-(n⁻¹ / (Real.log rhoMax - Real.log rhoMin) -
+        (Real.cos (2 * Real.pi *
+            ((Real.log n - Real.log rhoMin) / (Real.log rhoMax - Real.log rhoMin))) *
+          (2 * Real.pi * (n⁻¹ / (Real.log rhoMax - Real.log rhoMin)))) /
+          (2 * Real.pi))) n :=
+    (ht.sub hsin_div).const_sub 1
+  convert hS using 1
+  rw [hlog_eq]
+  have hn_ne : n ≠ 0 := ne_of_gt hn
+  field_simp [hn_ne, hL_ne, h2pi_ne]
+
+/-- The analytic `HasDerivAt` derivative of `sccsSwitch` is everywhere non-positive
+on `(rhoMin, rhoMax)`. -/
+theorem sccsSwitch_hasDerivAt_nonpos (rhoMin rhoMax n : ℝ)
+    (hmin : 0 < rhoMin) (hn_lo : rhoMin < n) (hn_hi : n < rhoMax) :
+    ∃ d : ℝ, HasDerivAt (sccsSwitch rhoMin rhoMax) d n ∧ d ≤ 0 := by
+  refine ⟨_, sccsSwitch_hasDerivAt rhoMin rhoMax n hmin hn_lo hn_hi, ?_⟩
+  exact sccs_deriv_nonpos n rhoMin rhoMax _ (lt_trans hmin hn_lo) hmin (lt_trans hn_lo hn_hi)
+
+/-- VASPsol (Mathew et al. 2014) switching function parameterized by `erfc`:
+`S_VASPsol(n) = (1 / 2) * erfc (log (n / n_c) / (sigma * sqrt 2))`. -/
+noncomputable def vaspsolSwitch (erfc : ℝ → ℝ) (n_c sigma n : ℝ) : ℝ :=
+  (1 / 2 : ℝ) * erfc (Real.log (n / n_c) / (sigma * Real.sqrt 2))
+
+/-- Analytic chain-rule derivative of `vaspsolSwitch` machine-checked via Lean's
+`HasDerivAt.comp` through `u(n) = log (n / n_c) / (sigma * sqrt 2)`. -/
+theorem vaspsolSwitch_hasDerivAt (erfc : ℝ → ℝ) (n_c sigma n : ℝ)
+    (hn_c : 0 < n_c) (hsigma : 0 < sigma) (hn : 0 < n)
+    (herfc : HasDerivAt erfc
+      (-(2 / Real.sqrt Real.pi) *
+        Real.exp (-((Real.log (n / n_c) / (sigma * Real.sqrt 2)) ^ 2)))
+      (Real.log (n / n_c) / (sigma * Real.sqrt 2))) :
+    HasDerivAt (vaspsolSwitch erfc n_c sigma)
+      (-(Real.exp (-((Real.log (n / n_c) / (sigma * Real.sqrt 2)) ^ 2))) /
+        (n * sigma * Real.sqrt (2 * Real.pi))) n := by
+  have hdiv : HasDerivAt (fun x => x / n_c) (1 / n_c) n :=
+    (hasDerivAt_id n).div_const n_c
+  have hdiv_ne : n / n_c ≠ 0 := div_ne_zero (ne_of_gt hn) (ne_of_gt hn_c)
+  have hlog : HasDerivAt (fun x => Real.log (x / n_c)) ((n / n_c)⁻¹ * (1 / n_c)) n :=
+    (Real.hasDerivAt_log hdiv_ne).comp n hdiv
+  have hu : HasDerivAt (fun x => Real.log (x / n_c) / (sigma * Real.sqrt 2))
+      (((n / n_c)⁻¹ * (1 / n_c)) / (sigma * Real.sqrt 2)) n :=
+    hlog.div_const (sigma * Real.sqrt 2)
+  have hcomp : HasDerivAt
+      (fun x => erfc (Real.log (x / n_c) / (sigma * Real.sqrt 2)))
+      ((-(2 / Real.sqrt Real.pi) *
+          Real.exp (-((Real.log (n / n_c) / (sigma * Real.sqrt 2)) ^ 2))) *
+        (((n / n_c)⁻¹ * (1 / n_c)) / (sigma * Real.sqrt 2))) n :=
+    herfc.comp n hu
+  have hS : HasDerivAt (vaspsolSwitch erfc n_c sigma)
+      ((1 / 2 : ℝ) *
+        ((-(2 / Real.sqrt Real.pi) *
+            Real.exp (-((Real.log (n / n_c) / (sigma * Real.sqrt 2)) ^ 2))) *
+          (((n / n_c)⁻¹ * (1 / n_c)) / (sigma * Real.sqrt 2)))) n :=
+    hcomp.const_mul (1 / 2 : ℝ)
+  convert hS using 1
+  have hsqrt_mul : Real.sqrt (2 * Real.pi) = Real.sqrt 2 * Real.sqrt Real.pi :=
+    Real.sqrt_mul (by norm_num) Real.pi
+  have hsqrt2_ne : Real.sqrt 2 ≠ 0 := ne_of_gt (Real.sqrt_pos.mpr (by norm_num))
+  have hsqrtpi_ne : Real.sqrt Real.pi ≠ 0 := ne_of_gt (Real.sqrt_pos.mpr Real.pi_pos)
+  rw [hsqrt_mul]
+  field_simp [ne_of_gt hn, ne_of_gt hn_c, ne_of_gt hsigma, hsqrt2_ne, hsqrtpi_ne]
+
+/-- The analytic chain-rule derivative of `vaspsolSwitch` is everywhere non-positive
+for `n > 0`. -/
+theorem vaspsolSwitch_hasDerivAt_nonpos (erfc : ℝ → ℝ) (n_c sigma n : ℝ)
+    (hn_c : 0 < n_c) (hsigma : 0 < sigma) (hn : 0 < n)
+    (herfc : HasDerivAt erfc
+      (-(2 / Real.sqrt Real.pi) *
+        Real.exp (-((Real.log (n / n_c) / (sigma * Real.sqrt 2)) ^ 2)))
+      (Real.log (n / n_c) / (sigma * Real.sqrt 2))) :
+    ∃ d : ℝ, HasDerivAt (vaspsolSwitch erfc n_c sigma) d n ∧ d ≤ 0 := by
+  refine ⟨_, vaspsolSwitch_hasDerivAt erfc n_c sigma n hn_c hsigma hn herfc, ?_⟩
+  have hsqrt_pos : 0 < Real.sqrt (2 * Real.pi) :=
+    Real.sqrt_pos.mpr (mul_pos (by norm_num) Real.pi_pos)
+  exact vaspsol_deriv_nonpos n sigma (Real.sqrt (2 * Real.pi)) _ hn hsigma hsqrt_pos
 
 /-- Repulsive sign (non-negativity) of the dielectric potential `V_diel` (both
 linear-`eps` and SCCS log-`eps` variants) and the electrolyte screening potential
@@ -534,6 +669,99 @@ theorem diel_and_screening_potentials_nonneg
     exact mul_nonneg hpref (sq_nonneg phi)
 
 /-!
+## Section 6: Gate 3–4 SCF Invariants (Sign Involution, Spin Chain Rule, Bregman Bound)
+-/
+
+/-- Electron potential energy sign convention (ADR 0017): `U_el(phi) = -phi`. -/
+def electronPotential {n : ℕ} (phi : Fin n → ℝ) (i : Fin n) : ℝ :=
+  -phi i
+
+/-- ADR 0017 electrostatic sign involution: `U_el(phi) = -phi` is an involution
+preserving both the pointwise energy density `(-n) * phi = n * U_el(phi)` and the
+weighted grid inner product `⟨-n, phi⟩ = ⟨n, U_el(phi)⟩`. -/
+theorem electrostatic_sign_involution {n : ℕ} (dv : ℝ) (rho_e phi : Fin n → ℝ) :
+    (∀ i, electronPotential (electronPotential phi) i = phi i) ∧
+    (∀ i, (-rho_e i) * phi i = rho_e i * electronPotential phi i) ∧
+    wdot dv (fun i => -rho_e i) phi = wdot dv rho_e (electronPotential phi) := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro i
+    unfold electronPotential
+    ring
+  · intro i
+    unfold electronPotential
+    ring
+  · unfold wdot electronPotential
+    congr 1
+    apply Finset.sum_congr rfl
+    intro i _
+    ring
+
+/-- Spin-polarized solvation Gateaux chain rule: for any Gateaux-differentiable
+total-density functional `E[n_up + n_dn]` with derivative `V_solv[n_tot]`, the partial
+directional derivatives w.r.t. `n_up` and `n_dn` are identical (`V_solv[n_tot]`), the
+joint directional derivative is `⟨V, dn_up⟩ + ⟨V, dn_dn⟩`, and the spin-summed
+double-counting equals `⟨n_up + n_dn, V⟩`. -/
+theorem spin_polarized_solvation_chain_rule {n : ℕ} (dv : ℝ)
+    (E : (Fin n → ℝ) → ℝ) (n_up n_dn V : Fin n → ℝ)
+    (hgateaux : ∀ dn : Fin n → ℝ,
+      HasDerivAt (fun t : ℝ => E (fun i => (n_up i + n_dn i) + t * dn i))
+        (wdot dv V dn) 0) :
+    (∀ dn : Fin n → ℝ,
+      HasDerivAt (fun t : ℝ => E (fun i => (n_up i + t * dn i) + n_dn i))
+        (wdot dv V dn) 0) ∧
+    (∀ dn : Fin n → ℝ,
+      HasDerivAt (fun t : ℝ => E (fun i => n_up i + (n_dn i + t * dn i)))
+        (wdot dv V dn) 0) ∧
+    (∀ dn_up dn_dn : Fin n → ℝ,
+      HasDerivAt
+        (fun t : ℝ => E (fun i => (n_up i + t * dn_up i) + (n_dn i + t * dn_dn i)))
+        (wdot dv V dn_up + wdot dv V dn_dn) 0) ∧
+    wdot dv n_up V + wdot dv n_dn V = wdot dv (fun i => n_up i + n_dn i) V := by
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · intro dn
+    have hfun : (fun t : ℝ => E (fun i => (n_up i + t * dn i) + n_dn i)) =
+        (fun t : ℝ => E (fun i => (n_up i + n_dn i) + t * dn i)) := by
+      funext t
+      congr 1
+      funext i
+      ring
+    rw [hfun]
+    exact hgateaux dn
+  · intro dn
+    have hfun : (fun t : ℝ => E (fun i => n_up i + (n_dn i + t * dn i))) =
+        (fun t : ℝ => E (fun i => (n_up i + n_dn i) + t * dn i)) := by
+      funext t
+      congr 1
+      funext i
+      ring
+    rw [hfun]
+    exact hgateaux dn
+  · intro dn_up dn_dn
+    have hfun :
+        (fun t : ℝ => E (fun i => (n_up i + t * dn_up i) + (n_dn i + t * dn_dn i))) =
+        (fun t : ℝ => E (fun i => (n_up i + n_dn i) + t * (dn_up i + dn_dn i))) := by
+      funext t
+      congr 1
+      funext i
+      ring
+    rw [hfun, ← wdot_add_right]
+    exact hgateaux (fun i => dn_up i + dn_dn i)
+  · exact (wdot_add_left dv n_up n_dn V).symm
+
+/-- Non-negative triangle inequality bound for `EnergyAudit::functional_difference_bound`:
+`0 ≤ |R_H| + |R_xc| + |R_solv|` and `|R_H + R_xc + R_solv| ≤ |R_H| + |R_xc| + |R_solv|`. -/
+theorem bregman_bound_nonneg_triangle (R_H R_xc R_solv : ℝ) :
+    0 ≤ |R_H| + |R_xc| + |R_solv| ∧
+    |R_H + R_xc + R_solv| ≤ |R_H| + |R_xc| + |R_solv| := by
+  refine ⟨?_, ?_⟩
+  · linarith [abs_nonneg R_H, abs_nonneg R_xc, abs_nonneg R_solv]
+  · calc
+      |R_H + R_xc + R_solv|
+        ≤ |R_H + R_xc| + |R_solv| := abs_add_le (R_H + R_xc) R_solv
+      _ ≤ (|R_H| + |R_xc|) + |R_solv| := by linarith [abs_add_le R_H R_xc]
+      _ = |R_H| + |R_xc| + |R_solv| := by ring
+
+/-!
 ## Proof Axiom Cleanliness Audit
 -/
 
@@ -544,6 +772,8 @@ theorem diel_and_screening_potentials_nonneg
 #print axioms dualEnergy_on_shell
 #print axioms dualEnergy_perturb_exact
 #print axioms dualEnergy_global_max
+#print axioms gpOp_vacuum_eq
+#print axioms gpOp_apply_zero
 #print axioms polarization_rhs_vanishes_in_vacuum
 #print axioms zero_double_counting_cancellation
 #print axioms width_invariance_arbitrary_charge
@@ -551,6 +781,13 @@ theorem diel_and_screening_potentials_nonneg
 #print axioms grand_canonical_bregman_exact
 #print axioms vaspsol_deriv_nonpos
 #print axioms sccs_deriv_nonpos
+#print axioms sccsSwitch_hasDerivAt
+#print axioms sccsSwitch_hasDerivAt_nonpos
+#print axioms vaspsolSwitch_hasDerivAt
+#print axioms vaspsolSwitch_hasDerivAt_nonpos
 #print axioms diel_and_screening_potentials_nonneg
+#print axioms electrostatic_sign_involution
+#print axioms spin_polarized_solvation_chain_rule
+#print axioms bregman_bound_nonneg_triangle
 
 end BaandiMath.Solvation

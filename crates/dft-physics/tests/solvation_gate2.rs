@@ -752,37 +752,38 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
         "Debye-Huckel increment (0.4 vs 0.2) failed monotonic < 1% convergence: L24 err={rel_dh_l24:.3e}, L32 err={rel_dh_l32:.3e}"
     );
 
-    // (b) At eps_b = 10.0, verify kappa = 0.2 extra screening against the exact 1D smooth LPB ODE.
+    // (b) At eps_b = 10.0, verify kappa = 0.3 extra screening against the exact 1D smooth LPB ODE
+    //     (kappa = 0.3 keeps periodic Yukawa image tails e^{-0.3 * 32} = 6.8e-5 negligible).
     let model_10 = BornModel {
         eps_b: 10.0,
         ..model
     };
     let (_, quad_solv_10, _) = exact_smooth_born_continuum(q, a, r_cav, width, model_10.eps_b);
     let dh10_exact =
-        exact_smooth_lpb_continuum(model_10, 0.2) - exact_smooth_lpb_continuum(model_10, 0.0);
+        exact_smooth_lpb_continuum(model_10, 0.3) - exact_smooth_lpb_continuum(model_10, 0.0);
     let dh10_at = |l_box: f64, n_box: usize| {
         let shift_solv_10 = -MADELUNG_SC * q * q / (2.0 * model_10.eps_b * l_box)
             - 0.5 * q * quad_solv_10 / (l_box * l_box * l_box);
         let de10_k0 = solve_born_box(l_box, n_box, model_10, 0.0);
-        let de10_k02 = solve_born_box(l_box, n_box, model_10, 0.2);
+        let de10_k03 = solve_born_box(l_box, n_box, model_10, 0.3);
         let de10_inf_k0 = de10_k0 - (shift_solv_10 - shift_vac(l_box));
-        let de10_inf_k02 = de10_k02 + shift_vac(l_box);
-        (de10_inf_k02, de10_inf_k0, de10_inf_k02 - de10_inf_k0)
+        let de10_inf_k03 = de10_k03 + shift_vac(l_box);
+        (de10_inf_k03, de10_inf_k0, de10_inf_k03 - de10_inf_k0)
     };
     let (_, _, dh10_l24) = dh10_at(24.0, 48);
-    let (de10_inf_k02, de10_inf_k0, dh10_l32) = dh10_at(32.0, 64);
+    let (de10_inf_k03, de10_inf_k0, dh10_l32) = dh10_at(32.0, 64);
     let rel_dh10_l24 = (dh10_l24 - dh10_exact).abs() / dh10_exact.abs();
     let rel_dh10_l32 = (dh10_l32 - dh10_exact).abs() / dh10_exact.abs();
     println!(
-        "[Debye-Huckel eps_b=10.0 k=0.2 vs 0] 1d_exact={dh10_exact:.6}, L24={dh10_l24:.6} ({rel_dh10_l24:.3e}), L32={dh10_l32:.6} ({rel_dh10_l32:.3e})"
+        "[Debye-Huckel eps_b=10.0 k=0.3 vs 0] 1d_exact={dh10_exact:.6}, L24={dh10_l24:.6} ({rel_dh10_l24:.3e}), L32={dh10_l32:.6} ({rel_dh10_l32:.3e})"
     );
     assert!(
-        de10_inf_k02 < de10_inf_k0,
-        "eps_b=10 kappa=0.2 must screen more strongly than kappa=0: {de10_inf_k02:.6} vs {de10_inf_k0:.6}"
+        de10_inf_k03 < de10_inf_k0,
+        "eps_b=10 kappa=0.3 must screen more strongly than kappa=0: {de10_inf_k03:.6} vs {de10_inf_k0:.6}"
     );
     assert!(
         rel_dh10_l32 < rel_dh10_l24 && rel_dh10_l32 < 0.01,
-        "eps_b=10 kappa=0.2 Debye-Huckel failed monotonic < 1% convergence: L24 err={rel_dh10_l24:.3e}, L32 err={rel_dh10_l32:.3e}"
+        "eps_b=10 kappa=0.3 Debye-Huckel failed monotonic < 1% convergence: L24 err={rel_dh10_l24:.3e}, L32 err={rel_dh10_l32:.3e}"
     );
 }
 
@@ -863,7 +864,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
 
     let cfg = SolverConfig {
         kind: SolverKind::DirectPcg,
-        tolerance: 1.0e-13,
+        tolerance: 1.0e-14,
         max_iterations: 400,
         diis_history: 8,
         warm_start: false,
@@ -904,9 +905,9 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 // keeps both truncation O((h/n_i)^4) and f64 rounding below 1e-11 Ha
                 // while staying strictly inside SCCS piecewise-smooth intervals.
                 let h = if n_i < 5.0e-5 {
-                    (0.05 * n_i).min(5.0e-6)
+                    (0.20 * n_i).min(5.0e-6)
                 } else {
-                    (2.0e-3 * n_i).min(5.0e-6)
+                    (5.0e-3 * n_i).min(5.0e-6)
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
@@ -1007,9 +1008,9 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             for &idx in &probes {
                 let n_i = base_n[idx];
                 let h = if n_i < 5.0e-5 {
-                    (0.05 * n_i).min(5.0e-6)
+                    (0.20 * n_i).min(5.0e-6)
                 } else {
-                    (2.0e-3 * n_i).min(5.0e-6)
+                    (5.0e-3 * n_i).min(5.0e-6)
                 };
                 assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
 
@@ -1098,7 +1099,7 @@ fn ionic_forces_match_central_finite_differences_and_width_invariance() {
     };
     let cfg = SolverConfig {
         kind: SolverKind::DirectPcg,
-        tolerance: 1.0e-13,
+        tolerance: 1.0e-14,
         max_iterations: 400,
         diis_history: 8,
         warm_start: false,
@@ -1148,17 +1149,19 @@ fn ionic_forces_match_central_finite_differences_and_width_invariance() {
         }
     });
 
-    // Part B: Gaussian ionic width invariance (`r_c = 0.45` vs `0.55` Bohr) on BOTH
+    // Part B: Gaussian ionic width invariance (`r_c = 0.65` vs `0.80` Bohr) on BOTH
     // a neutral dipolar cell (kappa = 0) AND a charged ion cell (Q = 5, N_e = 4, kappa = 0.2,
     // verifying `E_es + E_bg,corr` cancellation) to the pre-declared `< 1e-6 Ha` tolerance.
+    // Grid spacing `dx = 0.333 Bohr` (`r_c / dx >= 1.95`) resolves both Gaussians to `< 1e-8`,
+    // while `sigma = 1.45 Bohr` places the SCCS cavity edge well outside both ionic cores.
     let w_cell = cubic_cell(12.0);
-    let w_dims = [32, 32, 32];
+    let w_dims = [36, 36, 36];
     let w_global_n = build_global_gaussian_density(
         &w_cell,
         w_dims,
         &[
-            ([0.45, 0.50, 0.50], 2.6, 1.15),
-            ([0.57, 0.50, 0.50], 1.4, 1.15),
+            ([0.45, 0.50, 0.50], 2.6, 1.45),
+            ([0.57, 0.50, 0.50], 1.4, 1.45),
         ],
         4.0,
         1.0e-5,
@@ -1178,41 +1181,41 @@ fn ionic_forces_match_central_finite_differences_and_width_invariance() {
                 tau_ha_bohr2: 0.0,
                 ..SolvationParams::sccs_water()
             };
-            let ion_45 = [IonicPseudoCharge {
+            let ion_65 = [IonicPseudoCharge {
                 charge: q_ion,
                 fractional_position: [0.45, 0.50, 0.50],
-                width_bohr: 0.45,
+                width_bohr: 0.65,
             }];
-            let ion_55 = [IonicPseudoCharge {
+            let ion_80 = [IonicPseudoCharge {
                 charge: q_ion,
                 fractional_position: [0.45, 0.50, 0.50],
-                width_bohr: 0.55,
+                width_bohr: 0.80,
             }];
 
-            let e45 = ws
-                .evaluate(comm, &local_n, &ion_45, &w_params, &cfg)
+            let e65 = ws
+                .evaluate(comm, &local_n, &ion_65, &w_params, &cfg)
                 .unwrap();
-            let e55 = ws
-                .evaluate(comm, &local_n, &ion_55, &w_params, &cfg)
+            let e80 = ws
+                .evaluate(comm, &local_n, &ion_80, &w_params, &cfg)
                 .unwrap();
-            let diff = (e45.total_ha - e55.total_ha).abs();
+            let diff = (e65.total_ha - e80.total_ha).abs();
             println!(
-                "[WidthInvariance {label}] E(0.45)={:.10} (bg={:.6}), E(0.55)={:.10} (bg={:.6}), |dE|={diff:.3e} Ha",
-                e45.total_ha,
-                e45.background_correction_ha,
-                e55.total_ha,
-                e55.background_correction_ha
+                "[WidthInvariance {label}] E(0.65)={:.10} (bg={:.6}), E(0.80)={:.10} (bg={:.6}), |dE|={diff:.3e} Ha",
+                e65.total_ha,
+                e65.background_correction_ha,
+                e80.total_ha,
+                e80.background_correction_ha
             );
             assert!(
-                e45.total_ha.abs() > 1.0e-4,
+                e65.total_ha.abs() > 1.0e-4,
                 "{label}: expected non-trivial solvation energy, got {:.3e}",
-                e45.total_ha
+                e65.total_ha
             );
             assert!(
                 diff < 1.0e-6,
-                "{label} width invariance violated: E(0.45)={:.10}, E(0.55)={:.10}, diff={diff:.3e} Ha",
-                e45.total_ha,
-                e55.total_ha
+                "{label} width invariance violated: E(0.65)={:.10}, E(0.80)={:.10}, diff={diff:.3e} Ha",
+                e65.total_ha,
+                e80.total_ha
             );
         }
     });
@@ -1343,7 +1346,7 @@ fn mpi_rank_independence_and_mirror_vs_greedy_parity() {
     };
     let cfg = SolverConfig {
         kind: SolverKind::DirectPcg,
-        tolerance: 1.0e-13,
+        tolerance: 1.0e-14,
         max_iterations: 400,
         diis_history: 8,
         warm_start: false,

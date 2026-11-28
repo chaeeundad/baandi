@@ -1,5 +1,5 @@
 //! Track B Gate 2 release benchmark comparing `DirectPcg`, `FisicaroPcg`, and
-//! `PolarizationDiis` across smooth MMS and sharp VASPsol water cavities,
+//! `PolarizationDiis` across smooth MMS and sharp VASPsol-erfc water cavities,
 //! cold vs warm-start (`1e-3` and `1e-5` perturbations), and `dft_mpi::simulate`
 //! multi-rank parity & timing (`P = 1, 2, 4`).
 //!
@@ -445,7 +445,9 @@ fn main() {
 
     println!("# Track B Gate 2 Solvation Solver Benchmark");
     println!();
-    println!("## Solver Arms: Smooth MMS vs Sharp VASPsol Water (`eps_b = 78.4`, `tol = 1e-10`)");
+    println!(
+        "## Solver Arms: Smooth MMS vs Sharp VASPsol-erfc Water (`eps_b = 78.4`, `tol = 1e-10`)"
+    );
     println!();
     println!(
         "| Grid | Case | `kappa` | Solver | Mode | Status | Iters | FFTs | Wall (ms) | `||r||_2` | Rel Res | Warm |"

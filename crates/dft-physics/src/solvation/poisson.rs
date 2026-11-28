@@ -2259,7 +2259,11 @@ impl SolvationWorkspace {
         comm.tree_sum_f64(&[es_loc], &mut es_glob)?;
         let electrostatic_ha = 0.5 * self.solver.engine.volume * es_glob[0];
 
-        let bg_pot_shift = if has_kappa { sum_alpha_z_sm } else { 0.0 };
+        // Unconstrained variational derivative of E_bg,corr = (Q_ion - N_e) * sum_I alpha_Z,I^sm
+        // with respect to n(r) is -sum_I alpha_Z,I^sm for both kappa = 0 and kappa > 0.
+        // At fixed N_e (kappa = 0), this uniform constant shifts KS eigenvalues without
+        // altering orbitals or density while making dE_total/dn and Bregman remainders exact.
+        let bg_pot_shift = sum_alpha_z_sm;
         let mut v_es_planes = vec![0.0; pp];
         let mut v_diel_planes = vec![0.0; pp];
         let mut v_scr_planes = vec![0.0; pp];

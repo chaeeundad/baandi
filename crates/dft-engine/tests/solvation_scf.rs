@@ -194,14 +194,14 @@ fn vacuum_solvation() -> SolvationConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    // Conservative Broyden beta = 0.25 (matching VASPsol AMIX = 0.2 / Environ
-    // mixing_beta = 0.2-0.3) avoids linear overshoot into negative density across
-    // the sharp n_c = 0.0025 cavity wall while converging to machine precision.
+    // Thomas-Fermi (Kerker) preconditioned Broyden with beta = 0.3 damps
+    // long-wavelength charge sloshing across the sharp dielectric cavity wall
+    // (mirroring VASPsol AMIX = 0.2 / Environ Kerker mixing recommendations).
     Profile {
-        beta: 0.25,
+        beta: 0.3,
         history: 6,
         threshold_ry: 2.0 * threshold_ha,
-        preconditioning: Preconditioning::Plain,
+        preconditioning: Preconditioning::ThomasFermi,
     }
     .validate()
     .unwrap()
@@ -267,7 +267,7 @@ fn l3_1_off_path_bit_identity() {
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
-    let profile = solvation_profile(threshold_ha);
+    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
 
     // 1. Gamma real path
     {

@@ -2220,7 +2220,7 @@ impl SolvationWorkspace {
         }
 
         // Fast exact vacuum path when all physical solvation couplings are off and neutral.
-        if params.is_vacuum() && (q_ion - n_el).abs() < 1.0e-14 {
+        if params.is_vacuum() && (q_ion - n_el).abs() < 1.0e-12 {
             self.eval.phi_pol_g.fill(Complex64::default());
             self.solver.engine.inverse_to_real(
                 comm,

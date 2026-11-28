@@ -905,9 +905,9 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 // keeps both truncation O((h/n_i)^4) and f64 rounding below 1e-11 Ha
                 // while staying strictly inside SCCS piecewise-smooth intervals.
                 let h = if n_i < 5.0e-5 {
-                    (0.20 * n_i).min(5.0e-6)
+                    (0.20 * n_i).min(4.0e-6)
                 } else {
-                    (2.0e-2 * n_i).min(5.0e-6)
+                    2.5e-6
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
@@ -1008,9 +1008,9 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             for &idx in &probes {
                 let n_i = base_n[idx];
                 let h = if n_i < 5.0e-5 {
-                    (0.20 * n_i).min(5.0e-6)
+                    (0.20 * n_i).min(4.0e-6)
                 } else {
-                    (2.0e-2 * n_i).min(5.0e-6)
+                    2.5e-6
                 };
                 assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
 

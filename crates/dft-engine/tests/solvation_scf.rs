@@ -195,6 +195,13 @@ fn vacuum_solvation() -> SolvationConfig {
     }
 }
 
+fn test_run_config() -> RunConfig {
+    // Coarse synthetic LDA fixture contract (matching `refscf.rs:6750`); production
+    // `xc_screen_negative = on` is exercised by `l3_1_off_path_bit_identity` and
+    // Level-4 real H2O PBE benchmarks.
+    RunConfig::from_pairs(&[("xc_screen_negative", "off")]).unwrap()
+}
+
 fn solvation_profile(threshold_ha: f64) -> Profile {
     Profile::from_standard_ha(threshold_ha).unwrap()
 }
@@ -255,7 +262,7 @@ fn install_comm(comm: Option<Arc<dyn Collective + Send + Sync>>) -> CommGuard {
 /// eigenvalues, forces, and stress across Gamma, k-point, and Fermi-Dirac runs.
 #[test]
 fn l3_1_off_path_bit_identity() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
@@ -432,7 +439,7 @@ fn l3_1_off_path_bit_identity() {
 /// reduces to pure-PW SCF across Gamma, k-point, Fermi-Dirac, and collinear spin.
 #[test]
 fn l3_2_vacuum_limit_scf_reduction() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
     let vac = Some(vacuum_solvation());
@@ -588,7 +595,7 @@ fn l3_2_vacuum_limit_scf_reduction() {
 /// `tau = 2e-5`) across Gamma and k-point drivers.
 #[test]
 fn l3_3_harris_foulkes_and_band_form_identity() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
@@ -649,7 +656,7 @@ fn l3_3_harris_foulkes_and_band_form_identity() {
 /// VASPsol-erfc water (`eps_b = 78.4, kappa = 0.15, tau = 2e-5`).
 #[test]
 fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::skewed("SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
@@ -777,7 +784,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 /// full SCF when the dielectric cavity lies well outside the ionic cores.
 #[test]
 fn l3_5_ionic_width_invariance_in_full_scf() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
@@ -826,7 +833,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
 /// `kappa in [0.0, 0.15, 0.30]`.
 #[test]
 fn l3_6_dielectric_and_screening_monotonicity() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
@@ -884,7 +891,7 @@ fn l3_6_dielectric_and_screening_monotonicity() {
 /// Fermi-Dirac, and spin-polarized Fermi-Dirac SCF with solvation.
 #[test]
 fn l3_7_collinear_spin_and_fermi_dirac_scf() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PW");
     let species = fixture.species();
     let threshold_ha = 5.0e-11;
@@ -974,7 +981,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
 /// implicit solvent (`symmetry` enabled vs disabled).
 #[test]
 fn l3_8_crystal_symmetry_invariance() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let length_bohr = 8.5;
     let cell = Cell::from_user_rows_bohr([
         [length_bohr, 0.0, 0.0],
@@ -1059,7 +1066,7 @@ fn l3_8_crystal_symmetry_invariance() {
 /// Gamma and k-point drivers.
 #[test]
 fn l3_9_mpi_rank_independence_full_scf() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
@@ -1081,7 +1088,7 @@ fn l3_9_mpi_rank_independence_full_scf() {
 
         let run_for_ranks = |ranks: usize| -> Vec<(f64, Vec<[f64; 3]>)> {
             simulate(ranks, |comm: &SimRank| {
-                let _s = RunConfig::from_pairs(&[]).unwrap().enter();
+                let _s = test_run_config().enter();
                 let _comm_guard = install_comm(Some(Arc::new(comm.clone())));
                 let mut req = Request::new(profile, points.clone());
                 req.derivatives.forces = true;
@@ -1137,7 +1144,7 @@ fn l3_9_mpi_rank_independence_full_scf() {
 /// at force validation, and invalid solvation parameters.
 #[test]
 fn l3_10_fail_closed_stress_and_model_identity() {
-    let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
+    let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-11;

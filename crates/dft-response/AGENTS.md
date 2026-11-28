@@ -56,6 +56,11 @@ Diagnostic switch `BAANDI_RESPONSE_VELOCITY=full|local|sp|no-g0|no-g0-all` (engi
   `Transitions::block` exposes a formed transition block so one pass over
   the pair densities feeds the accumulators of a whole cutoff series
   (`dft-engine::response::rpa`).
+- `subspace` (R4a, ADR 0059): atomic-orbital projection onto a band window,
+  Loewdin orthonormalization `U = A (A^H A)^{-1/2}`, per-band subspace weights
+  `p_mk`, projected populations, exact Wigner-Seitz supercell lattice points
+  and degeneracies for arbitrary skewed cells, real-space hoppings `H(R)` and
+  Wannier band interpolation. Internal oracles: `cargo test -p dft-response --test subspace`.
 
 Pair fields, products, the scaled GEMM operand and the N_G^2 product are
 reused scratch; the velocity matrices and the frequency worker threads are

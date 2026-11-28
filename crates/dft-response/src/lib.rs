@@ -26,6 +26,7 @@ pub mod chi0;
 pub mod dielectric;
 pub mod frequency;
 pub mod pair;
+pub mod subspace;
 pub mod transitions;
 pub mod velocity;
 

@@ -10,6 +10,8 @@ mod refscf_check;
 mod refscf_map;
 #[path = "rpa.rs"]
 mod rpa;
+#[path = "subspace.rs"]
+mod subspace;
 use dft_cli::checkpoint_io;
 #[path = "pseudo.rs"]
 mod pseudo;
@@ -163,6 +165,14 @@ enum Command {
         /// mismatching records reject.
         #[arg(long)]
         checkpoint_dir: Option<PathBuf>,
+    },
+    /// SCF followed by atomic-orbital subspace projection ([subspace] table;
+    /// R4a): Loewdin orthonormalization, populations, subspace weights p_nk
+    /// and Wigner-Seitz real-space hoppings H(R).
+    Subspace {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
     },
     /// SCF followed by a weighted fixed-density Gaussian density of states.
     Dos {
@@ -379,6 +389,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Nscf { .. }
         | Command::Dielectric { .. }
         | Command::Rpa { .. }
+        | Command::Subspace { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -407,6 +418,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Nscf { .. }
         | Command::Dielectric { .. }
         | Command::Rpa { .. }
+        | Command::Subspace { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -590,6 +602,10 @@ fn single_entry(cli: Cli, mpi: bool) -> Result<Resolved, String> {
             output_dir: None,
             checkpoint_dir: resolved.checkpoint_dir,
         },
+        task::TaskType::Subspace => Command::Subspace {
+            input,
+            output_dir: None,
+        },
     };
     Ok(Resolved {
         command,
@@ -620,6 +636,7 @@ fn progress_session(
         Command::Rpa {
             input, output_dir, ..
         } => (input, output_dir.as_ref(), "rpa"),
+        Command::Subspace { input, output_dir } => (input, output_dir.as_ref(), "subspace"),
         _ => return Ok(None),
     };
     if no_progress || dft_cli::parallel::rank() > 0 {
@@ -659,6 +676,7 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
         | Command::Nscf { input, .. }
         | Command::Dielectric { input, .. }
         | Command::Rpa { input, .. }
+        | Command::Subspace { input, .. }
         | Command::Dos { input, .. }
         | Command::Run { input, .. }
         | Command::Validate { input, .. }
@@ -721,6 +739,9 @@ fn dispatch(command: Command) -> (u8, Option<String>) {
             output_dir.as_deref(),
             checkpoint_dir.as_deref(),
         )),
+        Command::Subspace { input, output_dir } => {
+            Some(subspace::execute(input, output_dir.as_deref()))
+        }
         Command::Nscf {
             input,
             output_dir,

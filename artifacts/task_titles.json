@@ -261,5 +261,6 @@
  "R3-QIMAGE": "RPA 3단계: G 구 모드에서 대칭 동치 q의 상관에너지가 다른 문제 수정",
  "RELAX-FORCE-NOISE": "이완 중 SCF가 1~2회만 돌 때 힘 잡음(최대 2e-4 Ha/Bohr) 원인 조사와 일반 규칙 수정",
  "API-SEED-GRID": "엔진 API 시드 재사용 시 FFT 격자가 달라지는 기존 버그 수정",
- "PRELAX-P2": "이온 이완 가속 2단계: 결합 기반 전처리 L-BFGS를 Rust로 직접 구현 (선택 옵션, 기본값 아님)"
+ "PRELAX-P2": "이온 이완 가속 2단계: 결합 기반 전처리 L-BFGS를 Rust로 직접 구현 (선택 옵션, 기본값 아님)",
+ "RPA-R4A-ATOMIC-PROJECTION": "RPA 4a단계: UPF 원자 오비탈 투영·Löwdin 직교화·실공간 호핑 H(R)·Wannier 보간 구현"
 }

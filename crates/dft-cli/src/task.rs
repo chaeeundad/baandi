@@ -32,6 +32,8 @@ pub enum TaskType {
     Dielectric,
     /// SCF followed by the RPA correlation energy (`baandi rpa`, R3).
     Rpa,
+    /// SCF followed by atomic-orbital subspace projection (`baandi subspace`, R4a).
+    Subspace,
 }
 impl TaskType {
     pub fn name(self) -> &'static str {
@@ -44,6 +46,7 @@ impl TaskType {
             Self::Nscf => "nscf",
             Self::Dielectric => "dielectric",
             Self::Rpa => "rpa",
+            Self::Subspace => "subspace",
         }
     }
     /// The alias subcommand that runs this task.
@@ -56,6 +59,7 @@ impl TaskType {
             Self::Nscf => "nscf",
             Self::Dielectric => "dielectric",
             Self::Rpa => "rpa",
+            Self::Subspace => "subspace",
         }
     }
 }
@@ -142,6 +146,9 @@ pub fn resolve_text(input: &Path, text: &str) -> Result<Resolved, String> {
         TaskType::Rpa if value.get("response").is_none() => {
             return Err("task.type = \"rpa\" requires a [response] table".into());
         }
+        TaskType::Subspace if value.get("subspace").is_none() => {
+            return Err("task.type = \"subspace\" requires a [subspace] table".into());
+        }
         TaskType::Scf if relax.is_some() => {
             return Err(if explicit {
                 "task.type = \"scf\" with a [relax] table: remove [relax] or set task.type = \"relax\" / \"cell-relax\"".into()
@@ -213,6 +220,11 @@ mod tests {
                 TaskType::Rpa,
                 "rpa",
             ),
+            (
+                "[task]\ntype='subspace'\n[subspace]\n",
+                TaskType::Subspace,
+                "subspace",
+            ),
         ];
         for (extra, task, alias) in cases {
             let r = resolve(extra).unwrap_or_else(|e| panic!("{extra}: {e}"));
@@ -242,6 +254,7 @@ mod tests {
             ("[task]\ntype='nscf'\n", "[nscf]"),
             ("[task]\ntype='dielectric'\n", "[response]"),
             ("[task]\ntype='rpa'\n[rpa]\n", "[response]"),
+            ("[task]\ntype='subspace'\n", "[subspace]"),
             ("[task]\ntype='phonon'\n", "unknown variant"),
             (
                 "[task]\ntype='scf'\nresume=true\n",

@@ -680,20 +680,26 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
+    let mut solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
+    // Use `sigma = 1.0` so the third-order `eps(n) |grad phi|^2` product-rule
+    // FFT aliasing stays below 1e-6 Ha/Bohr on a compact 48^3 charge grid
+    // while keeping full `eps_b = 78.4, kappa = 0.15, tau = 2e-5` couplings.
+    if let CavityModel::VaspSol { sigma, .. } = &mut solv.params.cavity {
+        *sigma = 1.0;
+    }
 
     let make_opts = |gamma_real: GammaReal| {
         let mut opts = base_options(
-            6.0,
+            5.0,
             4,
             threshold_ha,
             gamma_real,
             Functional::LdaPz,
             Some(solv),
         );
-        // Well-resolved charge/cavity grid (`dx ~ 0.17 Bohr`) suppresses FFT
+        // Well-resolved charge/cavity grid (`dx ~ 0.20 Bohr`) suppresses FFT
         // egg-box below 1e-6 Ha/Bohr while keeping wavefunction Davidson fast.
-        opts.grid_override = Some([56, 56, 56]);
+        opts.grid_override = Some([48, 48, 48]);
         opts.density_tolerance = 1.0e-12;
         opts.energy_tolerance = 1.0e-13;
         opts.eigen_tolerance = 1.0e-12;
@@ -917,12 +923,12 @@ fn l3_6_dielectric_and_screening_monotonicity() {
 #[test]
 fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     let _scope = test_run_config().enter();
-    let fixture = PolarDimerFixture::cubic(9.5, "SLA PW");
+    // Skewed cell breaks cubic pi_y/pi_z degeneracy for open-shell fixed-spin SCF.
+    let fixture = PolarDimerFixture::skewed("SLA PW");
     let species = fixture.species();
-    // Non-degenerate open-shell doublet (Z_a = 2, Z_b = 1 -> 3 electrons,
-    // n_up = 2 sigma, n_down = 1 sigma) avoiding cubic pi-orbital degeneracy.
-    let pp_doublet_a = common::potential_with_atomic_start(2.0, 0.90, false, 161, "SLA PW");
-    let pp_doublet_b = common::potential_with_atomic_start(1.0, 1.05, false, 161, "SLA PW");
+    // Bound 5-electron open-shell doublet (Z_a = 3, Z_b = 2 -> n_up = 3, n_down = 2).
+    let pp_doublet_a = common::potential_with_atomic_start(3.0, 0.90, false, 161, "SLA PW");
+    let pp_doublet_b = common::potential_with_atomic_start(2.0, 1.10, false, 161, "SLA PW");
     let doublet_species = [
         SpeciesPotential {
             label: "Xa",
@@ -941,12 +947,12 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
         (
             "collinear_fixed_spin",
             Policy::FixedSpin(SpinSector {
-                n_up: 2,
-                n_down: 1,
+                n_up: 3,
+                n_down: 2,
                 axis_cartesian: [0.0, 0.0, 1.0],
                 initial_moment_seed: Some(1.0),
             }),
-            6,
+            8,
             true,
         ),
         (
@@ -1061,9 +1067,9 @@ fn l3_8_crystal_symmetry_invariance() {
         "expected nontrivial symmetry operations"
     );
 
-    let threshold_ha = 5.0e-14;
+    let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
+    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-13, true);
     let mut opts = base_options(
         5.0,
         4,

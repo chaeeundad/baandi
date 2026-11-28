@@ -916,7 +916,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                         } => {
                             if n_i > rho_min_bohr3 && n_i < rho_max_bohr3 {
                                 let margin = (n_i - rho_min_bohr3).min(rho_max_bohr3 - n_i);
-                                (1.6e-3 * n_i).min(2.0e-6).min(0.40 * margin)
+                                (1.0e-3 * n_i).min(2.0e-6).min(0.40 * margin)
                             } else {
                                 let margin = (n_i - rho_min_bohr3)
                                     .abs()

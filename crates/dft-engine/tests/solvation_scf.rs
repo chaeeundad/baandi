@@ -742,7 +742,9 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
         //    -dE_tot/d(delta_rigid) to < 1e-6 Ha/Bohr (proving zero missing
         //    solvation force terms), and grid refinement from 32^3 -> 48^3 must
         //    sharply suppress the third-order `eps(n) |grad phi|^2` FFT egg-box.
-        let rigid_frac = fixture.cell.cartesian_bohr_to_fractional([h_bohr, 0.0, 0.0]);
+        let rigid_frac = fixture
+            .cell
+            .cartesian_bohr_to_fractional([h_bohr, 0.0, 0.0]);
         let eval_rigid = |sign: f64| -> f64 {
             let mut shifted = fixture.atoms.clone();
             for atom in &mut shifted {
@@ -1145,12 +1147,7 @@ fn l3_8_crystal_symmetry_invariance() {
         f_nosym.maximum_absolute_component > 1.0e-4,
         "expected nontrivial dimer bond force"
     );
-    let net_nosym = f_nosym
-        .net_force
-        .iter()
-        .map(|c| c * c)
-        .sum::<f64>()
-        .sqrt();
+    let net_nosym = f_nosym.net_force.iter().map(|c| c * c).sum::<f64>().sqrt();
     assert!(
         net_nosym < 1.0e-6,
         "symmetric solvated dimer |sum_I F_I| = {net_nosym:.3e} Ha/Bohr >= 1e-6"

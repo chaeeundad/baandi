@@ -165,8 +165,7 @@ fn build_mms_fields(
     with_screening: bool,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
     let b_cols = cell.reciprocal_columns_inverse_bohr();
-    let b_vecs: [[f64; 3]; 3] =
-        std::array::from_fn(|j| [b_cols[0][j], b_cols[1][j], b_cols[2][j]]);
+    let b_vecs: [[f64; 3]; 3] = std::array::from_fn(|j| [b_cols[0][j], b_cols[1][j], b_cols[2][j]]);
     let g_metric: [[f64; 3]; 3] =
         std::array::from_fn(|i| std::array::from_fn(|j| dot3(b_vecs[i], b_vecs[j])));
 
@@ -202,11 +201,8 @@ fn build_mms_fields(
 
         // Low-frequency periodic potential (harmonics |m_k| <= 1, so eps * grad phi
         // has |m_k| <= 2 < min(dims)/2, strictly alias-free on all tested grids).
-        let p = dc
-            + 0.7 * t0.cos()
-            - 0.5 * t1.sin()
-            + 0.4 * (t0 + t2).cos()
-            + 0.3 * (t1 - t2).sin();
+        let p =
+            dc + 0.7 * t0.cos() - 0.5 * t1.sin() + 0.4 * (t0 + t2).cos() + 0.3 * (t1 - t2).sin();
 
         let dp = [
             -0.7 * t0.sin() - 0.4 * (t0 + t2).sin(),
@@ -700,11 +696,9 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
 
     // Exact Makov-Payne (1/L Madelung + 1/L^3 quadrupole) periodic zero-mode
     // correction removes finite-box image shifts for the charged ion.
-    let shift_solv = |l: f64| {
-        -MADELUNG_SC * q * q / (2.0 * eps_b * l) - 0.5 * q * quad_solv / (l * l * l)
-    };
-    let shift_vac =
-        |l: f64| -MADELUNG_SC * q * q / (2.0 * l) - 0.5 * q * quad_vac / (l * l * l);
+    let shift_solv =
+        |l: f64| -MADELUNG_SC * q * q / (2.0 * eps_b * l) - 0.5 * q * quad_solv / (l * l * l);
+    let shift_vac = |l: f64| -MADELUNG_SC * q * q / (2.0 * l) - 0.5 * q * quad_vac / (l * l * l);
 
     let de_inf_l1 = de_l1_k0 - (shift_solv(l1) - shift_vac(l1));
     let de_inf_l2 = de_l2_k0 - (shift_solv(l2) - shift_vac(l2));
@@ -819,8 +813,8 @@ fn pick_variational_probe_indices(density: &[f64]) -> Vec<usize> {
 /// cavitation isolation (L2).
 #[test]
 fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
-    let cell = Cell::from_user_rows_bohr([[9.6, 0.7, -0.3], [0.4, 10.2, 0.6], [-0.2, 0.5, 9.8]])
-        .unwrap();
+    let cell =
+        Cell::from_user_rows_bohr([[9.6, 0.7, -0.3], [0.4, 10.2, 0.6], [-0.2, 0.5, 9.8]]).unwrap();
     let dims = [12, 14, 12];
     let dv = cell.volume_bohr3() / (dims[0] * dims[1] * dims[2]) as f64;
 
@@ -879,10 +873,11 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 ..SolvationParams::vaspsol_water()
             };
 
-            let eval0 = ws
-                .evaluate(comm, &base_n, &ions, &params, &cfg)
-                .unwrap();
-            assert!(eval0.report.converged, "{label} base solve did not converge");
+            let eval0 = ws.evaluate(comm, &base_n, &ions, &params, &cfg).unwrap();
+            assert!(
+                eval0.report.converged,
+                "{label} base solve did not converge"
+            );
             assert!(
                 max_abs(&eval0.v_diel_planes) > 1.0e-5
                     && max_abs(&eval0.v_scr_planes) > 1.0e-7
@@ -905,26 +900,17 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
                 perturbed[idx] = n_i + 2.0 * h;
-                let ep2 = ws
-                    .evaluate(comm, &perturbed, &ions, &params, &cfg)
-                    .unwrap();
+                let ep2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i + h;
-                let ep1 = ws
-                    .evaluate(comm, &perturbed, &ions, &params, &cfg)
-                    .unwrap();
+                let ep1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i - h;
-                let em1 = ws
-                    .evaluate(comm, &perturbed, &ions, &params, &cfg)
-                    .unwrap();
+                let em1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i - 2.0 * h;
-                let em2 = ws
-                    .evaluate(comm, &perturbed, &ions, &params, &cfg)
-                    .unwrap();
+                let em2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i;
 
-                let v_fd =
-                    (-ep2.total_ha + 8.0 * ep1.total_ha - 8.0 * em1.total_ha + em2.total_ha)
-                        / (12.0 * h * dv);
+                let v_fd = (-ep2.total_ha + 8.0 * ep1.total_ha - 8.0 * em1.total_ha + em2.total_ha)
+                    / (12.0 * h * dv);
                 let v_ana = eval0.v_total_planes[idx];
                 let abs_err = (v_fd - v_ana).abs();
                 let tol = 1.0e-9_f64.max(1.0e-8 * v_ana.abs());
@@ -1070,12 +1056,8 @@ fn ionic_forces_match_central_finite_differences_and_width_invariance() {
                 *m -= d;
             }
 
-            let ep = ws
-                .evaluate(comm, &local_n, &ions_p, &params, &cfg)
-                .unwrap();
-            let em = ws
-                .evaluate(comm, &local_n, &ions_m, &params, &cfg)
-                .unwrap();
+            let ep = ws.evaluate(comm, &local_n, &ions_p, &params, &cfg).unwrap();
+            let em = ws.evaluate(comm, &local_n, &ions_m, &params, &cfg).unwrap();
             let f_fd = -(ep.total_ha - em.total_ha) / (2.0 * h);
             let err = (f_fd - f_ana[axis]).abs();
             assert!(
@@ -1200,7 +1182,9 @@ fn run_mpi_eval(
         assert!(
             (eval.background_correction_ha - ref_eval.background_correction_ha).abs() < 1.0e-13
         );
-        assert!(max_force_diff(&eval.ionic_forces_ha_bohr, &ref_eval.ionic_forces_ha_bohr) < 1.0e-13);
+        assert!(
+            max_force_diff(&eval.ionic_forces_ha_bohr, &ref_eval.ionic_forces_ha_bohr) < 1.0e-13
+        );
 
         for (slot, &g_idx) in owned.iter().enumerate() {
             assert!(!seen[g_idx], "duplicate real-space owner for idx={g_idx}");
@@ -1209,7 +1193,10 @@ fn run_mpi_eval(
             phi_pol_global[g_idx] = eval.phi_pol_planes[slot];
         }
     }
-    assert!(seen.iter().all(|&s| s), "missing owned real-space grid point");
+    assert!(
+        seen.iter().all(|&s| s),
+        "missing owned real-space grid point"
+    );
 
     ReassembledRun {
         total_ha: ref_eval.total_ha,
@@ -1227,8 +1214,8 @@ fn run_mpi_eval(
 /// partition parity (L2).
 #[test]
 fn mpi_rank_independence_and_mirror_vs_greedy_parity() {
-    let cell = Cell::from_user_rows_bohr([[10.2, 0.8, -0.3], [0.5, 10.8, 0.6], [-0.4, 0.5, 9.6]])
-        .unwrap();
+    let cell =
+        Cell::from_user_rows_bohr([[10.2, 0.8, -0.3], [0.5, 10.8, 0.6], [-0.4, 0.5, 9.6]]).unwrap();
     let dims = [14, 16, 12];
     let ions = [
         IonicPseudoCharge {
@@ -1389,8 +1376,8 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
         .enumerate()
         .map(|(idx, &val)| {
             let [u, v, w] = grid_frac(idx, dims);
-            let mod_fn =
-                0.5 * (2.0 * PI * u).cos() - 0.3 * (2.0 * PI * v).sin() + 0.2 * (2.0 * PI * w).cos();
+            let mod_fn = 0.5 * (2.0 * PI * u).cos() - 0.3 * (2.0 * PI * v).sin()
+                + 0.2 * (2.0 * PI * w).cos();
             val * (1.0 + 1.0e-3 * mod_fn)
         })
         .collect();

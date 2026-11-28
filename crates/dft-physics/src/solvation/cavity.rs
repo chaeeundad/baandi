@@ -504,9 +504,15 @@ mod tests {
             }
         }
 
-        let analytic =
-            ionic_solvation_forces(&Comm::Single, &cell, dims, &all_positions, &ions, &phi_pol_g)
-                .unwrap();
+        let analytic = ionic_solvation_forces(
+            &Comm::Single,
+            &cell,
+            dims,
+            &all_positions,
+            &ions,
+            &phi_pol_g,
+        )
+        .unwrap();
 
         // Central finite-difference check of E = Omega * sum_G Re(conj(phi_pol(G)) * rho_ion(G))
         // with respect to Cartesian displacements of each ion.

@@ -3,7 +3,7 @@
 //! allocations and deterministic `Collective::tree_sum_f64` reductions.
 
 use super::{
-    IonicPseudoCharge, SolveReport, SolvationError, SolvationEvaluation, SolvationParams,
+    IonicPseudoCharge, SolvationError, SolvationEvaluation, SolvationParams, SolveReport,
     SolverConfig, SolverKind, cavity,
 };
 use dft_geometry::Cell;
@@ -286,16 +286,14 @@ impl FftEngine {
         //   u0 = (i gx - gy) * x_g  =>  Re(u0) = D_x x, Im(u0) = D_y x
         //   u1 = i (gz + 1) * x_g   =>  Re(u1) = D_z x, Im(u1) = x
         let (b0, b1) = self.batch_g[..2 * ll].split_at_mut(ll);
-        for (((d0, d1), &[gx, gy, gz]), &x) in b0
-            .iter_mut()
-            .zip(b1.iter_mut())
-            .zip(&self.g_cart)
-            .zip(x_g)
+        for (((d0, d1), &[gx, gy, gz]), &x) in
+            b0.iter_mut().zip(b1.iter_mut()).zip(&self.g_cart).zip(x_g)
         {
             *d0 = Complex64::new(-gy, gx) * x;
             *d1 = Complex64::new(0.0, gz + 1.0) * x;
         }
-        self.fft.begin_to_real_batch(comm, &self.batch_g[..2 * ll], 2)?;
+        self.fft
+            .begin_to_real_batch(comm, &self.batch_g[..2 * ll], 2)?;
 
         let slab_len = self.fft.rows() * self.dims[2];
         let plane_count = self.fft.plane_count();
@@ -410,8 +408,11 @@ impl FftEngine {
                     self.fft.to_reciprocal_plane_in(3, np_out, i)?;
                 }
             }
-            self.fft
-                .finish_to_reciprocal_batch(comm, &mut self.batch_out_g[..np_out * ll], np_out)?;
+            self.fft.finish_to_reciprocal_batch(
+                comm,
+                &mut self.batch_out_g[..np_out * ll],
+                np_out,
+            )?;
 
             let ax = &self.batch_out_g[..ll];
             let ay = &self.batch_out_g[ll..2 * ll];
@@ -462,7 +463,8 @@ impl FftEngine {
             *d1 = Complex64::new(0.0, gz + 1.0) * ps;
             *d2 = pp;
         }
-        self.fft.begin_to_real_batch(comm, &self.batch_g[..3 * ll], 3)?;
+        self.fft
+            .begin_to_real_batch(comm, &self.batch_g[..3 * ll], 3)?;
 
         let slab_len = self.fft.rows() * self.dims[2];
         for i in 0..self.fft.plane_count() {
@@ -512,16 +514,14 @@ impl FftEngine {
     ) -> Result<f64, SolvationError> {
         let ll = self.local_len();
         let (b0, b1) = self.batch_g[..2 * ll].split_at_mut(ll);
-        for (((d0, d1), &[gx, gy, gz]), &s) in b0
-            .iter_mut()
-            .zip(b1.iter_mut())
-            .zip(&self.g_cart)
-            .zip(s_g)
+        for (((d0, d1), &[gx, gy, gz]), &s) in
+            b0.iter_mut().zip(b1.iter_mut()).zip(&self.g_cart).zip(s_g)
         {
             *d0 = Complex64::new(-gy, gx) * s;
             *d1 = Complex64::new(0.0, gz) * s;
         }
-        self.fft.begin_to_real_batch(comm, &self.batch_g[..2 * ll], 2)?;
+        self.fft
+            .begin_to_real_batch(comm, &self.batch_g[..2 * ll], 2)?;
 
         let plane_count = self.fft.plane_count();
         let delta2 = delta_s * delta_s;
@@ -744,8 +744,10 @@ impl PdeSolver {
         }
         let ll = self.engine.local_len();
         let max_forms = cap * (cap + 1) / 2 + cap;
-        self.diis_dx.resize_with(cap, || vec![Complex64::default(); ll]);
-        self.diis_df.resize_with(cap, || vec![Complex64::default(); ll]);
+        self.diis_dx
+            .resize_with(cap, || vec![Complex64::default(); ll]);
+        self.diis_df
+            .resize_with(cap, || vec![Complex64::default(); ll]);
         self.diis_gram = RealMatrix::zeros(cap, cap)?;
         self.diis_q = RealMatrix::zeros(cap, cap)?;
         self.diis_lambda.resize(cap, 0.0);
@@ -862,9 +864,7 @@ impl PdeSolver {
             out_phi_g.fill(Complex64::default());
             if matches!(
                 config.kind,
-                SolverKind::DirectPcg
-                    | SolverKind::FisicaroPcg
-                    | SolverKind::HybridFisicaroDirect
+                SolverKind::DirectPcg | SolverKind::FisicaroPcg | SolverKind::HybridFisicaroDirect
             ) {
                 self.save_warm_start(out_phi_g, has_kappa);
             }
@@ -984,10 +984,7 @@ impl PdeSolver {
                 *phi = prev_phi + bulk_pre * (rhs - prev_rhs);
             }
         } else {
-            for ((phi, &pre), &rhs) in out_phi_g
-                .iter_mut()
-                .zip(&self.precond)
-                .zip(&self.rhs_eff_g)
+            for ((phi, &pre), &rhs) in out_phi_g.iter_mut().zip(&self.precond).zip(&self.rhs_eff_g)
             {
                 *phi = pre * rhs;
             }
@@ -1265,16 +1262,12 @@ impl PdeSolver {
         //   work_r2 = b(r) / sqrt(eps)
         //   r_g     = b_tilde_g = F(b / sqrt(eps))
         let mut kap_over_eps_loc = 0.0_f64;
-        for ((r0, &e), &k2) in self
-            .work_r0
-            .iter_mut()
-            .zip(eps_planes)
-            .zip(kappa2_planes)
-        {
+        for ((r0, &e), &k2) in self.work_r0.iter_mut().zip(eps_planes).zip(kappa2_planes) {
             *r0 = e.sqrt();
             kap_over_eps_loc += k2 / e;
         }
-        self.engine.forward_real(comm, &self.work_r0, &mut self.aux_g)?;
+        self.engine
+            .forward_real(comm, &self.work_r0, &mut self.aux_g)?;
         let mut fft_count = 1usize;
 
         // Paired single inverse FFT: Re = -L_0 sqrt(eps) = +nabla^2 sqrt(eps), Im = b(r).
@@ -1308,7 +1301,8 @@ impl PdeSolver {
         }
         fft_count += 1;
 
-        self.engine.forward_real(comm, &self.work_r2, &mut self.r_g)?;
+        self.engine
+            .forward_real(comm, &self.work_r2, &mut self.r_g)?;
         fft_count += 1;
 
         // Global s_norm2 = ||sqrt(eps)||_2^2 and mean(kappa2 / eps).
@@ -1432,12 +1426,7 @@ impl PdeSolver {
                 fft_count += 2;
 
                 let mut pap_loc = 0.0_f64;
-                for ((w_dst, &g2), &p) in self
-                    .w_g
-                    .iter_mut()
-                    .zip(&self.engine.g2)
-                    .zip(&self.p_g)
-                {
+                for ((w_dst, &g2), &p) in self.w_g.iter_mut().zip(&self.engine.g2).zip(&self.p_g) {
                     let w = *w_dst + g2 * p;
                     *w_dst = w;
                     pap_loc += p.re * w.re + p.im * w.im;
@@ -1573,12 +1562,7 @@ impl PdeSolver {
         // Setup (4 FFTs):
         //   work_r0 = D_x(ln eps), work_r1 = D_y(ln eps), work_r2 = D_z(ln eps), work_r3 = b / eps
         let mut kap_over_eps_loc = 0.0_f64;
-        for ((r0, &e), &k2) in self
-            .work_r0
-            .iter_mut()
-            .zip(eps_planes)
-            .zip(kappa2_planes)
-        {
+        for ((r0, &e), &k2) in self.work_r0.iter_mut().zip(eps_planes).zip(kappa2_planes) {
             *r0 = e.ln();
             kap_over_eps_loc += k2 / e;
         }
@@ -1586,7 +1570,8 @@ impl PdeSolver {
         comm.tree_sum_f64(&[kap_over_eps_loc], &mut kap_glob)?;
         let kappa2_eff_bar = kap_glob[0] / self.engine.total_points as f64;
 
-        self.engine.forward_real(comm, &self.work_r0, &mut self.aux_g)?;
+        self.engine
+            .forward_real(comm, &self.work_r0, &mut self.aux_g)?;
         let mut fft_count = 1usize;
 
         // Paired np = 2 inverse FFT:
@@ -1640,14 +1625,11 @@ impl PdeSolver {
         fft_count += 2;
 
         // Forward FFT of b / eps for initial guess (L_0 + kappa2_eff_bar)^-1 (b / eps).
-        self.engine.forward_real(comm, &self.work_r3, &mut self.aux_g)?;
+        self.engine
+            .forward_real(comm, &self.work_r3, &mut self.aux_g)?;
         fft_count += 1;
 
-        for ((phi, &g2), &aux) in out_phi_g
-            .iter_mut()
-            .zip(&self.engine.g2)
-            .zip(&self.aux_g)
-        {
+        for ((phi, &g2), &aux) in out_phi_g.iter_mut().zip(&self.engine.g2).zip(&self.aux_g) {
             *phi = if !has_kappa && g2 == 0.0 {
                 Complex64::default()
             } else {
@@ -2033,7 +2015,9 @@ impl SolvationWorkspace {
         coeff_g: &[Complex64],
         out_planes: &mut [f64],
     ) -> Result<(), SolvationError> {
-        self.solver.engine.inverse_to_real(comm, coeff_g, out_planes)
+        self.solver
+            .engine
+            .inverse_to_real(comm, coeff_g, out_planes)
     }
 
     /// Clears retained warm-start state so the next `DirectPcg` solve cold-starts.
@@ -2183,9 +2167,11 @@ impl SolvationWorkspace {
         // Fast exact vacuum path when all physical solvation couplings are off and neutral.
         if params.is_vacuum() && (q_ion - n_el).abs() < 1.0e-14 {
             self.eval.phi_pol_g.fill(Complex64::default());
-            self.solver
-                .engine
-                .inverse_to_real(comm, &self.eval.phi_vac_g, &mut self.eval.phi_solv)?;
+            self.solver.engine.inverse_to_real(
+                comm,
+                &self.eval.phi_vac_g,
+                &mut self.eval.phi_solv,
+            )?;
             self.eval.phi_pol.fill(0.0);
             return Ok(SolvationEvaluation {
                 electrostatic_ha: 0.0,

@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use dft_geometry::Cell;
 use dft_physics::solvation::{
-    IonicPseudoCharge, SolveReport, SolvationError, SolvationParams, SolvationWorkspace,
+    IonicPseudoCharge, SolvationError, SolvationParams, SolvationWorkspace, SolveReport,
     SolverConfig, SolverKind,
 };
 use num_complex::Complex64;
@@ -41,11 +41,7 @@ fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn build_global_molecular_density(
-    cell: &Cell,
-    dims: [usize; 3],
-    target_ne: f64,
-) -> Vec<f64> {
+fn build_global_molecular_density(cell: &Cell, dims: [usize; 3], target_ne: f64) -> Vec<f64> {
     let n_grid = dims[0] * dims[1] * dims[2];
     let dv = cell.volume_bohr3() / n_grid as f64;
     let lobes = [
@@ -85,8 +81,8 @@ fn perturb_density(base: &[f64], owned_indices: &[usize], dims: [usize; 3], amp:
         .zip(owned_indices)
         .map(|(&val, &idx)| {
             let [u, v, w] = grid_frac(idx, dims);
-            let wave =
-                0.5 * (2.0 * PI * u).cos() - 0.3 * (2.0 * PI * v).sin() + 0.2 * (2.0 * PI * w).cos();
+            let wave = 0.5 * (2.0 * PI * u).cos() - 0.3 * (2.0 * PI * v).sin()
+                + 0.2 * (2.0 * PI * w).cos();
             val * (1.0 + amp * wave)
         })
         .collect()

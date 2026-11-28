@@ -35,7 +35,9 @@ pub enum SolvationError {
     NonFinite,
     #[error("solvation solver breakdown: {0}")]
     Breakdown(&'static str),
-    #[error("solvation solver did not converge in {iterations} iterations (residual {residual_norm:.3e})")]
+    #[error(
+        "solvation solver did not converge in {iterations} iterations (residual {residual_norm:.3e})"
+    )]
     NotConverged {
         iterations: usize,
         residual_norm: f64,

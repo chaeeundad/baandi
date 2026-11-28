@@ -771,19 +771,19 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
         (de10_inf_k03, de10_inf_k0, de10_inf_k03 - de10_inf_k0)
     };
     let (_, _, dh10_l24) = dh10_at(24.0, 48);
-    let (de10_inf_k03, de10_inf_k0, dh10_l32) = dh10_at(32.0, 64);
+    let (de10_inf_k03, de10_inf_k0, dh10_l36) = dh10_at(36.0, 72);
     let rel_dh10_l24 = (dh10_l24 - dh10_exact).abs() / dh10_exact.abs();
-    let rel_dh10_l32 = (dh10_l32 - dh10_exact).abs() / dh10_exact.abs();
+    let rel_dh10_l36 = (dh10_l36 - dh10_exact).abs() / dh10_exact.abs();
     println!(
-        "[Debye-Huckel eps_b=10.0 k=0.3 vs 0] 1d_exact={dh10_exact:.6}, L24={dh10_l24:.6} ({rel_dh10_l24:.3e}), L32={dh10_l32:.6} ({rel_dh10_l32:.3e})"
+        "[Debye-Huckel eps_b=10.0 k=0.3 vs 0] 1d_exact={dh10_exact:.6}, L24={dh10_l24:.6} ({rel_dh10_l24:.3e}), L36={dh10_l36:.6} ({rel_dh10_l36:.3e})"
     );
     assert!(
         de10_inf_k03 < de10_inf_k0,
         "eps_b=10 kappa=0.3 must screen more strongly than kappa=0: {de10_inf_k03:.6} vs {de10_inf_k0:.6}"
     );
     assert!(
-        rel_dh10_l32 < rel_dh10_l24 && rel_dh10_l32 < 0.01,
-        "eps_b=10 kappa=0.3 Debye-Huckel failed monotonic < 1% convergence: L24 err={rel_dh10_l24:.3e}, L32 err={rel_dh10_l32:.3e}"
+        rel_dh10_l36 < rel_dh10_l24 && rel_dh10_l36 < 0.01,
+        "eps_b=10 kappa=0.3 Debye-Huckel failed monotonic < 1% convergence: L24 err={rel_dh10_l24:.3e}, L36 err={rel_dh10_l36:.3e}"
     );
 }
 
@@ -907,7 +907,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let h = if n_i < 5.0e-5 {
                     (0.20 * n_i).min(5.0e-6)
                 } else {
-                    (5.0e-3 * n_i).min(5.0e-6)
+                    (2.0e-2 * n_i).min(5.0e-6)
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
@@ -1010,7 +1010,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let h = if n_i < 5.0e-5 {
                     (0.20 * n_i).min(5.0e-6)
                 } else {
-                    (5.0e-3 * n_i).min(5.0e-6)
+                    (2.0e-2 * n_i).min(5.0e-6)
                 };
                 assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
 

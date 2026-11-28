@@ -165,8 +165,10 @@ fn build_mms_fields(
     with_screening: bool,
 ) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
     let b_cols = cell.reciprocal_columns_inverse_bohr();
+    let b_vecs: [[f64; 3]; 3] =
+        std::array::from_fn(|j| [b_cols[0][j], b_cols[1][j], b_cols[2][j]]);
     let g_metric: [[f64; 3]; 3] =
-        std::array::from_fn(|i| std::array::from_fn(|j| dot3(b_cols[i], b_cols[j])));
+        std::array::from_fn(|i| std::array::from_fn(|j| dot3(b_vecs[i], b_vecs[j])));
 
     let n = owned_indices.len();
     let mut eps = Vec::with_capacity(n);
@@ -646,28 +648,55 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
         "unexpected deviation from sharp-wall Born scale: corr={de_inf_l2:.6} vs sharp={delta_g_born_sharp:.6}"
     );
 
-    // Debye-Huckel screening at kappa = 0.2 Bohr^-1 (and 0.4 Bohr^-1 for tighter exp(-kappa L)).
-    // At kappa > 0, phi_solv is pinned to 0 in bulk solvent (no Madelung/quadrupole offset),
-    // while phi_vac still carries `shift_vac(L)`.
-    for (kappa, rel_tol) in [(0.2_f64, 0.20_f64), (0.4_f64, 0.15_f64)] {
-        let de_l2_k = solve_born_box(l2, 32, model, kappa);
-        let de_inf_k = de_l2_k + shift_vac(l2);
-        let dh_extra_num = de_inf_k - de_inf_l2;
-        let dh_extra_analytic = -q * q / (2.0 * eps_b) * (kappa / (1.0 + kappa * r_eff));
-        let rel_dh = (dh_extra_num - dh_extra_analytic).abs() / dh_extra_analytic.abs();
+    // Debye-Huckel screening:
+    // (a) At eps_b = 78.4, compare kappa = 0.4 vs kappa = 0.2 directly so both
+    //     phi_vac and the kappa = 0 periodic zero-mode offset cancel identically.
+    let de_l2_k02 = solve_born_box(l2, 32, model, 0.2);
+    let de_l2_k04 = solve_born_box(l2, 32, model, 0.4);
+    let dh_inc_num = de_l2_k04 - de_l2_k02;
+    let dh_inc_analytic =
+        -q * q / (2.0 * eps_b) * (0.4 / (1.0 + 0.4 * r_eff) - 0.2 / (1.0 + 0.2 * r_eff));
+    let rel_dh_inc = (dh_inc_num - dh_inc_analytic).abs() / dh_inc_analytic.abs();
+    println!(
+        "[Debye-Huckel eps_b={eps_b} k=0.4-0.2] num={dh_inc_num:.6}, analytic={dh_inc_analytic:.6} (rel_err={rel_dh_inc:.3e})"
+    );
+    assert!(
+        de_l2_k04 < de_l2_k02,
+        "kappa=0.4 must screen more strongly than kappa=0.2: {de_l2_k04:.6} vs {de_l2_k02:.6}"
+    );
+    assert!(
+        rel_dh_inc < 0.10,
+        "Debye-Huckel increment (0.4 vs 0.2) {dh_inc_num:.6} vs analytic {dh_inc_analytic:.6} (rel_err={rel_dh_inc:.3e})"
+    );
 
-        println!(
-            "[Debye-Huckel kappa={kappa}] dh_extra_num={dh_extra_num:.6}, analytic(R_eff)={dh_extra_analytic:.6} (rel_err={rel_dh:.3e})"
-        );
-        assert!(
-            de_inf_k < de_inf_l2,
-            "kappa={kappa} must screen more strongly than kappa=0: {de_inf_k:.6} vs {de_inf_l2:.6}"
-        );
-        assert!(
-            rel_dh < rel_tol,
-            "kappa={kappa} Debye-Huckel extra screening {dh_extra_num:.6} vs analytic {dh_extra_analytic:.6} (rel_err={rel_dh:.3e})"
-        );
-    }
+    // (b) At eps_b = 10.0, the Debye-Huckel extra screening (~ -7.0e-3 Ha) is
+    //     8x larger than grid/quadrupole residuals, cleanly isolating kappa = 0.2 vs kappa = 0.
+    let model_10 = BornModel {
+        eps_b: 10.0,
+        ..model
+    };
+    let (_, quad_solv_10, r_eff_10) =
+        exact_smooth_born_continuum(q, a, r_cav, width, model_10.eps_b);
+    let shift_solv_10 = -MADELUNG_SC * q * q / (2.0 * model_10.eps_b * l2)
+        - 0.5 * q * quad_solv_10 / (l2 * l2 * l2);
+    let de10_k0 = solve_born_box(l2, 32, model_10, 0.0);
+    let de10_k02 = solve_born_box(l2, 32, model_10, 0.2);
+    let de10_inf_k0 = de10_k0 - (shift_solv_10 - shift_vac(l2));
+    let de10_inf_k02 = de10_k02 + shift_vac(l2);
+    let dh10_num = de10_inf_k02 - de10_inf_k0;
+    let dh10_analytic = -q * q / (2.0 * model_10.eps_b) * (0.2 / (1.0 + 0.2 * r_eff_10));
+    let rel_dh10 = (dh10_num - dh10_analytic).abs() / dh10_analytic.abs();
+    println!(
+        "[Debye-Huckel eps_b=10.0 k=0.2 vs 0] num={dh10_num:.6}, analytic(R_eff={r_eff_10:.3})={dh10_analytic:.6} (rel_err={rel_dh10:.3e})"
+    );
+    assert!(
+        de10_inf_k02 < de10_inf_k0,
+        "eps_b=10 kappa=0.2 must screen more strongly than kappa=0: {de10_inf_k02:.6} vs {de10_inf_k0:.6}"
+    );
+    assert!(
+        rel_dh10 < 0.10,
+        "eps_b=10 kappa=0.2 Debye-Huckel extra screening {dh10_num:.6} vs analytic {dh10_analytic:.6} (rel_err={rel_dh10:.3e})"
+    );
 }
 
 /// Picks 5 distinct owned real-space indices spanning inside the solute cavity,
@@ -782,32 +811,44 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             let mut perturbed = base_n.clone();
             for &idx in &probes {
                 let n_i = base_n[idx];
-                // Step chosen to keep both truncation O((delta/n_i)^2) and f64
-                // cancellation below 1e-9 Ha while staying inside SCCS intervals.
-                let delta = if n_i < 5.0e-5 {
-                    (0.05 * n_i).min(1.0e-6)
+                // 4th-order Richardson central difference:
+                //   (-E(+2h) + 8*E(+h) - 8*E(-h) + E(-2h)) / (12 * h * dv)
+                // keeps both truncation O((h/n_i)^4) and f64 rounding below 1e-11 Ha
+                // while staying strictly inside SCCS piecewise-smooth intervals.
+                let h = if n_i < 5.0e-5 {
+                    (0.05 * n_i).min(5.0e-6)
                 } else {
-                    (1.0e-4 * n_i).min(1.0e-6)
+                    (2.0e-3 * n_i).min(5.0e-6)
                 };
-                assert!(n_i - delta > params.density_floor_bohr3);
+                assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
-                perturbed[idx] = n_i + delta;
-                let ep = ws
+                perturbed[idx] = n_i + 2.0 * h;
+                let ep2 = ws
                     .evaluate(comm, &perturbed, &ions, &params, &cfg)
                     .unwrap();
-                perturbed[idx] = n_i - delta;
-                let em = ws
+                perturbed[idx] = n_i + h;
+                let ep1 = ws
+                    .evaluate(comm, &perturbed, &ions, &params, &cfg)
+                    .unwrap();
+                perturbed[idx] = n_i - h;
+                let em1 = ws
+                    .evaluate(comm, &perturbed, &ions, &params, &cfg)
+                    .unwrap();
+                perturbed[idx] = n_i - 2.0 * h;
+                let em2 = ws
                     .evaluate(comm, &perturbed, &ions, &params, &cfg)
                     .unwrap();
                 perturbed[idx] = n_i;
 
-                let v_fd = (ep.total_ha - em.total_ha) / (2.0 * delta * dv);
+                let v_fd =
+                    (-ep2.total_ha + 8.0 * ep1.total_ha - 8.0 * em1.total_ha + em2.total_ha)
+                        / (12.0 * h * dv);
                 let v_ana = eval0.v_total_planes[idx];
                 let abs_err = (v_fd - v_ana).abs();
                 let tol = 1.0e-9_f64.max(1.0e-8 * v_ana.abs());
                 assert!(
                     abs_err < tol,
-                    "{label} idx={idx} (n={n_i:.3e}, delta={delta:.3e}): v_ana={v_ana:.12e}, v_fd={v_fd:.12e}, abs_err={abs_err:.3e} (tol={tol:.3e})"
+                    "{label} idx={idx} (n={n_i:.3e}, h={h:.3e}): v_ana={v_ana:.12e}, v_fd={v_fd:.12e}, abs_err={abs_err:.3e} (tol={tol:.3e})"
                 );
             }
         }
@@ -831,22 +872,34 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
         let mut perturbed = base_n.clone();
         for &idx in &probes {
             let n_i = base_n[idx];
-            let delta = if n_i < 5.0e-5 {
-                (0.05 * n_i).min(1.0e-6)
+            let h = if n_i < 5.0e-5 {
+                (0.05 * n_i).min(5.0e-6)
             } else {
-                (1.0e-4 * n_i).min(1.0e-6)
+                (2.0e-3 * n_i).min(5.0e-6)
             };
-            perturbed[idx] = n_i + delta;
-            let ep = ws
+            assert!(n_i - 2.0 * h > cav_params.density_floor_bohr3);
+
+            perturbed[idx] = n_i + 2.0 * h;
+            let ep2 = ws
                 .evaluate(comm, &perturbed, &ions, &cav_params, &cfg)
                 .unwrap();
-            perturbed[idx] = n_i - delta;
-            let em = ws
+            perturbed[idx] = n_i + h;
+            let ep1 = ws
+                .evaluate(comm, &perturbed, &ions, &cav_params, &cfg)
+                .unwrap();
+            perturbed[idx] = n_i - h;
+            let em1 = ws
+                .evaluate(comm, &perturbed, &ions, &cav_params, &cfg)
+                .unwrap();
+            perturbed[idx] = n_i - 2.0 * h;
+            let em2 = ws
                 .evaluate(comm, &perturbed, &ions, &cav_params, &cfg)
                 .unwrap();
             perturbed[idx] = n_i;
 
-            let v_fd = (ep.cavitation_ha - em.cavitation_ha) / (2.0 * delta * dv);
+            let v_fd = (-ep2.cavitation_ha + 8.0 * ep1.cavitation_ha - 8.0 * em1.cavitation_ha
+                + em2.cavitation_ha)
+                / (12.0 * h * dv);
             let v_ana = eval_cav.v_cav_planes[idx];
             let abs_err = (v_fd - v_ana).abs();
             assert!(
@@ -1181,11 +1234,23 @@ fn mpi_rank_independence_and_mirror_vs_greedy_parity() {
         );
     }
 
-    // Explicit greedy vs mirror toggle on P = 2 (guard restores override to None).
-    let greedy = run_mpi_eval(2, Some(false), &problem);
-    let mirror = run_mpi_eval(2, Some(true), &problem);
-    assert!(!greedy.mirror_paired, "expected greedy partition to report mirror_paired = false");
-    assert!(mirror.mirror_paired, "expected mirror partition to report mirror_paired = true");
+    // Explicit greedy vs mirror toggle on P = 3 (where greedy round-robin genuinely
+    // splits conjugate mirror sticks across ranks; guard restores override to None).
+    let greedy = run_mpi_eval(3, Some(false), &problem);
+    let mirror = run_mpi_eval(3, Some(true), &problem);
+    assert!(
+        !greedy.mirror_paired,
+        "expected greedy partition on P=3 to report mirror_paired = false"
+    );
+    assert!(
+        mirror.mirror_paired,
+        "expected mirror partition on P=3 to report mirror_paired = true"
+    );
+    assert!(
+        (greedy.total_ha - p1.total_ha).abs() < 1.0e-12,
+        "P=3 greedy vs P=1 total_ha diff = {:.3e}",
+        (greedy.total_ha - p1.total_ha).abs()
+    );
     assert!(
         (greedy.total_ha - mirror.total_ha).abs() < 1.0e-12,
         "greedy vs mirror total_ha diff = {:.3e}",

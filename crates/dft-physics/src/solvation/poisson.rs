@@ -285,11 +285,15 @@ impl FftEngine {
         // G -> r leg (np = 2, valid on every stick partition):
         //   u0 = (i gx - gy) * x_g  =>  Re(u0) = D_x x, Im(u0) = D_y x
         //   u1 = i (gz + 1) * x_g   =>  Re(u1) = D_z x, Im(u1) = x
-        for k in 0..ll {
-            let [gx, gy, gz] = self.g_cart[k];
-            let x = x_g[k];
-            self.batch_g[k] = Complex64::new(-gy, gx) * x;
-            self.batch_g[ll + k] = Complex64::new(0.0, gz + 1.0) * x;
+        let (b0, b1) = self.batch_g[..2 * ll].split_at_mut(ll);
+        for (((d0, d1), &[gx, gy, gz]), &x) in b0
+            .iter_mut()
+            .zip(b1.iter_mut())
+            .zip(&self.g_cart)
+            .zip(x_g)
+        {
+            *d0 = Complex64::new(-gy, gx) * x;
+            *d1 = Complex64::new(0.0, gz + 1.0) * x;
         }
         self.fft.begin_to_real_batch(comm, &self.batch_g[..2 * ll], 2)?;
 
@@ -445,12 +449,18 @@ impl FftEngine {
         phi_pol_planes: &mut [f64],
     ) -> Result<(), SolvationError> {
         let ll = self.local_len();
-        for k in 0..ll {
-            let [gx, gy, gz] = self.g_cart[k];
-            let ps = phi_solv_g[k];
-            self.batch_g[k] = Complex64::new(-gy, gx) * ps;
-            self.batch_g[ll + k] = Complex64::new(0.0, gz + 1.0) * ps;
-            self.batch_g[2 * ll + k] = phi_pol_g[k];
+        let (b0, rest) = self.batch_g[..3 * ll].split_at_mut(ll);
+        let (b1, b2) = rest.split_at_mut(ll);
+        for ((((d0, d1), d2), &[gx, gy, gz]), (&ps, &pp)) in b0
+            .iter_mut()
+            .zip(b1.iter_mut())
+            .zip(b2.iter_mut())
+            .zip(&self.g_cart)
+            .zip(phi_solv_g.iter().zip(phi_pol_g))
+        {
+            *d0 = Complex64::new(-gy, gx) * ps;
+            *d1 = Complex64::new(0.0, gz + 1.0) * ps;
+            *d2 = pp;
         }
         self.fft.begin_to_real_batch(comm, &self.batch_g[..3 * ll], 3)?;
 
@@ -501,15 +511,18 @@ impl FftEngine {
         div_n_planes: &mut [f64],
     ) -> Result<f64, SolvationError> {
         let ll = self.local_len();
-        for k in 0..ll {
-            let [gx, gy, gz] = self.g_cart[k];
-            let s = s_g[k];
-            self.batch_g[k] = Complex64::new(-gy, gx) * s;
-            self.batch_g[ll + k] = Complex64::new(0.0, gz) * s;
+        let (b0, b1) = self.batch_g[..2 * ll].split_at_mut(ll);
+        for (((d0, d1), &[gx, gy, gz]), &s) in b0
+            .iter_mut()
+            .zip(b1.iter_mut())
+            .zip(&self.g_cart)
+            .zip(s_g)
+        {
+            *d0 = Complex64::new(-gy, gx) * s;
+            *d1 = Complex64::new(0.0, gz) * s;
         }
         self.fft.begin_to_real_batch(comm, &self.batch_g[..2 * ll], 2)?;
 
-        let slab_len = self.fft.rows() * self.dims[2];
         let plane_count = self.fft.plane_count();
         let delta2 = delta_s * delta_s;
         let mut local_area_sum = 0.0_f64;
@@ -533,16 +546,19 @@ impl FftEngine {
                 }
 
                 // Normalize (D_x S, D_y S, D_z S) by mag = sqrt(|D S|^2 + delta_S^2).
-                for j in 0..slab_len {
-                    let dx = self.slab_r0[j];
-                    let dy = self.slab_r1[j];
-                    let dz = self.slab_r2[j];
+                for ((r0, r1), r2) in self
+                    .slab_r0
+                    .iter_mut()
+                    .zip(&mut self.slab_r1)
+                    .zip(&mut self.slab_r2)
+                {
+                    let (dx, dy, dz) = (*r0, *r1, *r2);
                     let mag = (dx * dx + dy * dy + dz * dz + delta2).sqrt();
                     local_area_sum += mag - delta_s;
                     let inv_mag = 1.0 / mag;
-                    self.slab_r0[j] = dx * inv_mag;
-                    self.slab_r1[j] = dy * inv_mag;
-                    self.slab_r2[j] = dz * inv_mag;
+                    *r0 = dx * inv_mag;
+                    *r1 = dy * inv_mag;
+                    *r2 = dz * inv_mag;
                 }
 
                 // Pack nx + i*ny in slot 0, nz + i*0 in slot 1.
@@ -600,16 +616,19 @@ impl FftEngine {
                     }
                 }
 
-                for j in 0..slab_len {
-                    let dx = self.slab_r0[j];
-                    let dy = self.slab_r1[j];
-                    let dz = self.slab_r2[j];
+                for ((r0, r1), r2) in self
+                    .slab_r0
+                    .iter_mut()
+                    .zip(&mut self.slab_r1)
+                    .zip(&mut self.slab_r2)
+                {
+                    let (dx, dy, dz) = (*r0, *r1, *r2);
                     let mag = (dx * dx + dy * dy + dz * dz + delta2).sqrt();
                     local_area_sum += mag - delta_s;
                     let inv_mag = 1.0 / mag;
-                    self.slab_r0[j] = dx * inv_mag;
-                    self.slab_r1[j] = dy * inv_mag;
-                    self.slab_r2[j] = dz * inv_mag;
+                    *r0 = dx * inv_mag;
+                    *r1 = dy * inv_mag;
+                    *r2 = dz * inv_mag;
                 }
 
                 for (dst, &nx) in self.fft.plane_mut().iter_mut().zip(&self.slab_r0) {
@@ -643,6 +662,37 @@ impl FftEngine {
 
         self.inverse_to_real(comm, div_g_scratch, div_n_planes)?;
         Ok(local_area_sum)
+    }
+
+    /// Applies the strictly-SPD symmetric split preconditioner in place:
+    ///   v <- P_0 F[ inv_sqrt_eps * F^{-1}[ K * F[ inv_sqrt_eps * F^{-1}[ P_0 v ] ] ] ]
+    /// (with `P_0 = I` when `has_kappa == true`). Uses 4 FFTs and zero heap allocations.
+    fn apply_split_precond_in_place<K: Collective>(
+        &mut self,
+        comm: &K,
+        inv_sqrt_eps_planes: &[f64],
+        kernel_g: &[f64],
+        has_kappa: bool,
+        vec_g: &mut [Complex64],
+    ) -> Result<usize, SolvationError> {
+        if !has_kappa {
+            for &k in &self.zero_g2_indices {
+                vec_g[k] = Complex64::default();
+            }
+        }
+        self.fft
+            .apply_local_batch_planes(comm, vec_g, inv_sqrt_eps_planes, 1)?;
+        for (v, &k_val) in vec_g.iter_mut().zip(kernel_g) {
+            *v *= k_val;
+        }
+        self.fft
+            .apply_local_batch_planes(comm, vec_g, inv_sqrt_eps_planes, 1)?;
+        if !has_kappa {
+            for &k in &self.zero_g2_indices {
+                vec_g[k] = Complex64::default();
+            }
+        }
+        Ok(4)
     }
 }
 
@@ -858,6 +908,8 @@ impl PdeSolver {
                 eps_planes,
                 kappa2_planes,
                 has_kappa,
+                eps_min,
+                eps_max,
                 eps_bar,
                 kappa2_bar,
                 b_scale,
@@ -897,6 +949,8 @@ impl PdeSolver {
         eps_planes: &[f64],
         kappa2_planes: &[f64],
         has_kappa: bool,
+        eps_min: f64,
+        eps_max: f64,
         eps_bar: f64,
         kappa2_bar: f64,
         b_scale: f64,
@@ -904,26 +958,96 @@ impl PdeSolver {
         config: &SolverConfig,
         out_phi_g: &mut [Complex64],
     ) -> Result<SolveReport, SolvationError> {
-        let ll = self.engine.local_len();
         let volume = self.engine.volume;
+        let use_split = eps_max / eps_min > 1.0001;
 
-        for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
-            *p = if !has_kappa && g2 == 0.0 {
-                0.0
+        if use_split {
+            let mut kap_over_eps_loc = 0.0_f64;
+            for ((inv_s, &e), &k2) in self
+                .work_r0
+                .iter_mut()
+                .zip(eps_planes)
+                .zip(kappa2_planes)
+            {
+                *inv_s = 1.0 / e.sqrt();
+                kap_over_eps_loc += k2 / e;
+            }
+            let q_bar = if has_kappa {
+                let mut kap_glob = [0.0_f64];
+                comm.tree_sum_f64(&[kap_over_eps_loc], &mut kap_glob)?;
+                kap_glob[0] / self.engine.total_points as f64
             } else {
-                1.0 / (eps_bar * g2 + kappa2_bar)
+                0.0
             };
-        }
-
-        let warm_started = config.warm_start && self.has_prev && self.prev_has_kappa == has_kappa;
-        if warm_started {
-            for k in 0..ll {
-                out_phi_g[k] = self.prev_phi_g[k]
-                    + self.precond[k] * (self.rhs_eff_g[k] - self.prev_rhs_g[k]);
+            for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
+                *p = if !has_kappa && g2 == 0.0 {
+                    0.0
+                } else {
+                    1.0 / (g2 + q_bar)
+                };
             }
         } else {
-            for k in 0..ll {
-                out_phi_g[k] = self.precond[k] * self.rhs_eff_g[k];
+            for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
+                *p = if !has_kappa && g2 == 0.0 {
+                    0.0
+                } else {
+                    1.0 / (eps_bar * g2 + kappa2_bar)
+                };
+            }
+        }
+
+        let mut fft_count = 0usize;
+        let warm_started = config.warm_start && self.has_prev && self.prev_has_kappa == has_kappa;
+        if use_split {
+            if warm_started {
+                for ((dst, &rhs), &prev_rhs) in self
+                    .z_g
+                    .iter_mut()
+                    .zip(&self.rhs_eff_g)
+                    .zip(&self.prev_rhs_g)
+                {
+                    *dst = rhs - prev_rhs;
+                }
+                fft_count += self.engine.apply_split_precond_in_place(
+                    comm,
+                    &self.work_r0,
+                    &self.precond,
+                    has_kappa,
+                    &mut self.z_g,
+                )?;
+                for ((phi, &prev_phi), &delta_phi) in out_phi_g
+                    .iter_mut()
+                    .zip(&self.prev_phi_g)
+                    .zip(&self.z_g)
+                {
+                    *phi = prev_phi + delta_phi;
+                }
+            } else {
+                out_phi_g.copy_from_slice(&self.rhs_eff_g);
+                fft_count += self.engine.apply_split_precond_in_place(
+                    comm,
+                    &self.work_r0,
+                    &self.precond,
+                    has_kappa,
+                    out_phi_g,
+                )?;
+            }
+        } else if warm_started {
+            for (((phi, &prev_phi), &pre), (&rhs, &prev_rhs)) in out_phi_g
+                .iter_mut()
+                .zip(&self.prev_phi_g)
+                .zip(&self.precond)
+                .zip(self.rhs_eff_g.iter().zip(&self.prev_rhs_g))
+            {
+                *phi = prev_phi + pre * (rhs - prev_rhs);
+            }
+        } else {
+            for ((phi, &pre), &rhs) in out_phi_g
+                .iter_mut()
+                .zip(&self.precond)
+                .zip(&self.rhs_eff_g)
+            {
+                *phi = pre * rhs;
             }
         }
         if !has_kappa {
@@ -932,7 +1056,7 @@ impl PdeSolver {
             }
         }
 
-        let mut fft_count = self.engine.apply_operator(
+        fft_count += self.engine.apply_operator(
             comm,
             eps_planes,
             kappa2_planes,
@@ -946,21 +1070,77 @@ impl PdeSolver {
             }
         }
 
-        let mut r_norm2_loc = 0.0_f64;
-        let mut rz_loc = 0.0_f64;
-        for k in 0..ll {
-            let r = self.rhs_eff_g[k] - self.w_g[k];
-            let z = self.precond[k] * r;
-            self.r_g[k] = r;
-            self.z_g[k] = z;
-            self.p_g[k] = z;
-            r_norm2_loc += r.norm_sqr();
-            rz_loc += r.re * z.re + r.im * z.im;
-        }
         let mut sums = [0.0_f64; 2];
-        comm.tree_sum_f64(&[r_norm2_loc, rz_loc], &mut sums)?;
-        let mut r_norm = (volume * sums[0]).sqrt();
-        let mut rz = volume * sums[1];
+        let (mut r_norm, mut rz) = if use_split {
+            let mut r_norm2_loc = 0.0_f64;
+            for ((r_dst, &rhs), &w) in self
+                .r_g
+                .iter_mut()
+                .zip(&self.rhs_eff_g)
+                .zip(&self.w_g)
+            {
+                let r = rhs - w;
+                *r_dst = r;
+                r_norm2_loc += r.norm_sqr();
+            }
+            let mut r_glob = [0.0_f64];
+            comm.tree_sum_f64(&[r_norm2_loc], &mut r_glob)?;
+            let r_norm = (volume * r_glob[0]).sqrt();
+            if !r_norm.is_finite() {
+                return Err(SolvationError::NonFinite);
+            }
+            if r_norm <= tol_abs {
+                self.save_warm_start(out_phi_g, has_kappa);
+                return Ok(SolveReport {
+                    kind: SolverKind::DirectPcg,
+                    iterations: 0,
+                    converged: true,
+                    residual_norm: r_norm,
+                    relative_residual: r_norm / b_scale,
+                    fft_count,
+                    mirror_paired: self.engine.mirror_paired(),
+                    warm_started,
+                });
+            }
+            self.z_g.copy_from_slice(&self.r_g);
+            fft_count += self.engine.apply_split_precond_in_place(
+                comm,
+                &self.work_r0,
+                &self.precond,
+                has_kappa,
+                &mut self.z_g,
+            )?;
+            let mut rz_loc = 0.0_f64;
+            for ((p_dst, &r), &z) in self.p_g.iter_mut().zip(&self.r_g).zip(&self.z_g) {
+                *p_dst = z;
+                rz_loc += r.re * z.re + r.im * z.im;
+            }
+            let mut rz_glob = [0.0_f64];
+            comm.tree_sum_f64(&[rz_loc], &mut rz_glob)?;
+            (r_norm, volume * rz_glob[0])
+        } else {
+            let mut r_norm2_loc = 0.0_f64;
+            let mut rz_loc = 0.0_f64;
+            for ((((r_dst, z_dst), p_dst), (&rhs, &w)), &pre) in self
+                .r_g
+                .iter_mut()
+                .zip(&mut self.z_g)
+                .zip(&mut self.p_g)
+                .zip(self.rhs_eff_g.iter().zip(&self.w_g))
+                .zip(&self.precond)
+            {
+                let r = rhs - w;
+                let z = pre * r;
+                *r_dst = r;
+                *z_dst = z;
+                *p_dst = z;
+                r_norm2_loc += r.norm_sqr();
+                rz_loc += r.re * z.re + r.im * z.im;
+            }
+            comm.tree_sum_f64(&[r_norm2_loc, rz_loc], &mut sums)?;
+            ((volume * sums[0]).sqrt(), volume * sums[1])
+        };
+
         if !r_norm.is_finite() || !rz.is_finite() {
             return Err(SolvationError::NonFinite);
         }
@@ -978,7 +1158,7 @@ impl PdeSolver {
             });
         }
 
-        let mut pap_glob = [0.0_f64];
+        let mut scalar_glob = [0.0_f64];
         for iter in 1..=config.max_iterations {
             fft_count += self.engine.apply_operator(
                 comm,
@@ -990,13 +1170,11 @@ impl PdeSolver {
             )?;
 
             let mut pap_loc = 0.0_f64;
-            for k in 0..ll {
-                let p = self.p_g[k];
-                let w = self.w_g[k];
+            for (&p, &w) in self.p_g.iter().zip(&self.w_g) {
                 pap_loc += p.re * w.re + p.im * w.im;
             }
-            comm.tree_sum_f64(&[pap_loc], &mut pap_glob)?;
-            let pap = volume * pap_glob[0];
+            comm.tree_sum_f64(&[pap_loc], &mut scalar_glob)?;
+            let pap = volume * scalar_glob[0];
             if !pap.is_finite() || pap <= 0.0 {
                 return Err(SolvationError::Breakdown(
                     "direct PCG encountered non-positive p^T A p",
@@ -1009,20 +1187,78 @@ impl PdeSolver {
                 ));
             }
 
-            let mut r_norm2_loc = 0.0_f64;
-            let mut rz_new_loc = 0.0_f64;
-            for k in 0..ll {
-                out_phi_g[k] += alpha * self.p_g[k];
-                let r = self.r_g[k] - alpha * self.w_g[k];
-                let z = self.precond[k] * r;
-                self.r_g[k] = r;
-                self.z_g[k] = z;
-                r_norm2_loc += r.norm_sqr();
-                rz_new_loc += r.re * z.re + r.im * z.im;
-            }
-            comm.tree_sum_f64(&[r_norm2_loc, rz_new_loc], &mut sums)?;
-            r_norm = (volume * sums[0]).sqrt();
-            let rz_new = volume * sums[1];
+            let rz_new = if use_split {
+                let mut r_norm2_loc = 0.0_f64;
+                for ((phi, r_dst), (&p, &w)) in out_phi_g
+                    .iter_mut()
+                    .zip(&mut self.r_g)
+                    .zip(self.p_g.iter().zip(&self.w_g))
+                {
+                    *phi += alpha * p;
+                    let r = *r_dst - alpha * w;
+                    *r_dst = r;
+                    r_norm2_loc += r.norm_sqr();
+                }
+                comm.tree_sum_f64(&[r_norm2_loc], &mut scalar_glob)?;
+                r_norm = (volume * scalar_glob[0]).sqrt();
+                if !r_norm.is_finite() {
+                    return Err(SolvationError::NonFinite);
+                }
+                if r_norm <= tol_abs {
+                    if !has_kappa {
+                        for &k in &self.engine.zero_g2_indices {
+                            out_phi_g[k] = Complex64::default();
+                        }
+                    }
+                    self.save_warm_start(out_phi_g, has_kappa);
+                    return Ok(SolveReport {
+                        kind: SolverKind::DirectPcg,
+                        iterations: iter,
+                        converged: true,
+                        residual_norm: r_norm,
+                        relative_residual: r_norm / b_scale,
+                        fft_count,
+                        mirror_paired: self.engine.mirror_paired(),
+                        warm_started,
+                    });
+                }
+                self.z_g.copy_from_slice(&self.r_g);
+                fft_count += self.engine.apply_split_precond_in_place(
+                    comm,
+                    &self.work_r0,
+                    &self.precond,
+                    has_kappa,
+                    &mut self.z_g,
+                )?;
+                let mut rz_new_loc = 0.0_f64;
+                for (&r, &z) in self.r_g.iter().zip(&self.z_g) {
+                    rz_new_loc += r.re * z.re + r.im * z.im;
+                }
+                comm.tree_sum_f64(&[rz_new_loc], &mut scalar_glob)?;
+                volume * scalar_glob[0]
+            } else {
+                let mut r_norm2_loc = 0.0_f64;
+                let mut rz_new_loc = 0.0_f64;
+                for ((((phi, r_dst), z_dst), (&p, &w)), &pre) in out_phi_g
+                    .iter_mut()
+                    .zip(&mut self.r_g)
+                    .zip(&mut self.z_g)
+                    .zip(self.p_g.iter().zip(&self.w_g))
+                    .zip(&self.precond)
+                {
+                    *phi += alpha * p;
+                    let r = *r_dst - alpha * w;
+                    let z = pre * r;
+                    *r_dst = r;
+                    *z_dst = z;
+                    r_norm2_loc += r.norm_sqr();
+                    rz_new_loc += r.re * z.re + r.im * z.im;
+                }
+                comm.tree_sum_f64(&[r_norm2_loc, rz_new_loc], &mut sums)?;
+                r_norm = (volume * sums[0]).sqrt();
+                volume * sums[1]
+            };
+
             if !r_norm.is_finite() || !rz_new.is_finite() {
                 return Err(SolvationError::NonFinite);
             }
@@ -1050,8 +1286,8 @@ impl PdeSolver {
                 ));
             }
             let beta = rz_new / rz;
-            for k in 0..ll {
-                self.p_g[k] = self.z_g[k] + beta * self.p_g[k];
+            for (p, &z) in self.p_g.iter_mut().zip(&self.z_g) {
+                *p = z + beta * *p;
             }
             rz = rz_new;
         }
@@ -1076,7 +1312,6 @@ impl PdeSolver {
         out_phi_g: &mut [Complex64],
     ) -> Result<SolveReport, SolvationError> {
         let ll = self.engine.local_len();
-        let pp = self.engine.plane_points();
         let volume = self.engine.volume;
         let eps_max_sqrt = eps_max.sqrt();
         let tol_tilde = tol_abs / eps_max_sqrt;
@@ -1088,17 +1323,26 @@ impl PdeSolver {
         //   work_r2 = b(r) / sqrt(eps)
         //   r_g     = b_tilde_g = F(b / sqrt(eps))
         let mut kap_over_eps_loc = 0.0_f64;
-        for j in 0..pp {
-            self.work_r0[j] = eps_planes[j].sqrt();
-            kap_over_eps_loc += kappa2_planes[j] / eps_planes[j];
+        for ((r0, &e), &k2) in self
+            .work_r0
+            .iter_mut()
+            .zip(eps_planes)
+            .zip(kappa2_planes)
+        {
+            *r0 = e.sqrt();
+            kap_over_eps_loc += k2 / e;
         }
         self.engine.forward_real(comm, &self.work_r0, &mut self.aux_g)?;
         let mut fft_count = 1usize;
 
         // Paired single inverse FFT: Re = -L_0 sqrt(eps) = +nabla^2 sqrt(eps), Im = b(r).
-        for k in 0..ll {
-            self.engine.batch_g[k] = -self.engine.g2[k] * self.aux_g[k]
-                + Complex64::new(0.0, 1.0) * self.rhs_eff_g[k];
+        for (((dst, &g2), &aux), &rhs) in self.engine.batch_g[..ll]
+            .iter_mut()
+            .zip(&self.engine.g2)
+            .zip(&self.aux_g)
+            .zip(&self.rhs_eff_g)
+        {
+            *dst = -g2 * aux + Complex64::new(0.0, 1.0) * rhs;
         }
         self.engine
             .fft
@@ -1108,13 +1352,16 @@ impl PdeSolver {
             self.engine.fft.to_real_plane(i)?;
             let slab = self.engine.fft.plane();
             let off = i * slab_len;
-            for j in 0..slab_len {
-                let idx = off + j;
-                let s = self.work_r0[idx];
-                let lap_s = slab[j].re;
-                let b_r = slab[j].im;
-                self.work_r1[idx] = (lap_s + kappa2_planes[idx] / s) / s;
-                self.work_r2[idx] = b_r / s;
+            let range = off..off + slab_len;
+            for ((((r1, r2), &s), &k2), &sl) in self.work_r1[range.clone()]
+                .iter_mut()
+                .zip(&mut self.work_r2[range.clone()])
+                .zip(&self.work_r0[range.clone()])
+                .zip(&kappa2_planes[range])
+                .zip(slab)
+            {
+                *r1 = (sl.re + k2 / s) / s;
+                *r2 = sl.im / s;
             }
         }
         fft_count += 1;
@@ -1143,35 +1390,31 @@ impl PdeSolver {
         // Deflate b_tilde orthogonal to nullspace vector sqrt(eps) when kappa = 0.
         if !has_kappa && s_norm2 > 0.0 {
             let mut sb_loc = 0.0_f64;
-            for k in 0..ll {
-                let s = self.aux_g[k];
-                let b = self.r_g[k];
+            for (&s, &b) in self.aux_g.iter().zip(&self.r_g) {
                 sb_loc += s.re * b.re + s.im * b.im;
             }
             let mut sb_glob = [0.0_f64];
             comm.tree_sum_f64(&[sb_loc], &mut sb_glob)?;
             let coeff = (volume * sb_glob[0]) / s_norm2;
-            for k in 0..ll {
-                self.r_g[k] -= coeff * self.aux_g[k];
+            for (r, &s) in self.r_g.iter_mut().zip(&self.aux_g) {
+                *r -= coeff * s;
             }
         }
 
-        // Initial guess phi_tilde_0 = M_0^{-1} b_tilde, deflated orthogonal to sqrt(eps) when kappa = 0.
-        for k in 0..ll {
-            out_phi_g[k] = self.precond[k] * self.r_g[k];
+        // Initial guess phi_tilde_0 = M_0^{-1} b_tilde (deflated orth to sqrt(eps) if kappa=0).
+        for ((phi, &pre), &r) in out_phi_g.iter_mut().zip(&self.precond).zip(&self.r_g) {
+            *phi = pre * r;
         }
         if !has_kappa && s_norm2 > 0.0 {
             let mut sp_loc = 0.0_f64;
-            for k in 0..ll {
-                let s = self.aux_g[k];
-                let p = out_phi_g[k];
+            for (&s, &p) in self.aux_g.iter().zip(out_phi_g.iter()) {
                 sp_loc += s.re * p.re + s.im * p.im;
             }
             let mut sp_glob = [0.0_f64];
             comm.tree_sum_f64(&[sp_loc], &mut sp_glob)?;
             let coeff = (volume * sp_glob[0]) / s_norm2;
-            for k in 0..ll {
-                out_phi_g[k] -= coeff * self.aux_g[k];
+            for (phi, &s) in out_phi_g.iter_mut().zip(&self.aux_g) {
+                *phi -= coeff * s;
             }
         }
 
@@ -1181,18 +1424,22 @@ impl PdeSolver {
             .fft
             .apply_local_batch_planes(comm, &mut self.w_g, &self.work_r1, 1)?;
         fft_count += 2;
-        for k in 0..ll {
-            self.w_g[k] += self.engine.g2[k] * out_phi_g[k];
-            self.r_g[k] -= self.w_g[k];
-            self.z_g[k] = self.precond[k] * self.r_g[k];
+        for ((((w, r), z), (&g2, &pre)), &phi) in self
+            .w_g
+            .iter_mut()
+            .zip(&mut self.r_g)
+            .zip(&mut self.z_g)
+            .zip(self.engine.g2.iter().zip(&self.precond))
+            .zip(out_phi_g.iter())
+        {
+            *w += g2 * phi;
+            *r -= *w;
+            *z = pre * *r;
         }
         if !has_kappa && s_norm2 > 0.0 {
             let mut sr_loc = 0.0_f64;
             let mut sz_loc = 0.0_f64;
-            for k in 0..ll {
-                let s = self.aux_g[k];
-                let r = self.r_g[k];
-                let z = self.z_g[k];
+            for ((&s, &r), &z) in self.aux_g.iter().zip(&self.r_g).zip(&self.z_g) {
                 sr_loc += s.re * r.re + s.im * r.im;
                 sz_loc += s.re * z.re + s.im * z.im;
             }
@@ -1200,18 +1447,16 @@ impl PdeSolver {
             comm.tree_sum_f64(&[sr_loc, sz_loc], &mut proj)?;
             let cr = (volume * proj[0]) / s_norm2;
             let cz = (volume * proj[1]) / s_norm2;
-            for k in 0..ll {
-                self.r_g[k] -= cr * self.aux_g[k];
-                self.z_g[k] -= cz * self.aux_g[k];
+            for ((r, z), &s) in self.r_g.iter_mut().zip(&mut self.z_g).zip(&self.aux_g) {
+                *r -= cr * s;
+                *z -= cz * s;
             }
         }
 
         let mut r_norm2_loc = 0.0_f64;
         let mut rz_loc = 0.0_f64;
-        for k in 0..ll {
-            let r = self.r_g[k];
-            let z = self.z_g[k];
-            self.p_g[k] = z;
+        for ((p, &r), &z) in self.p_g.iter_mut().zip(&self.r_g).zip(&self.z_g) {
+            *p = z;
             r_norm2_loc += r.norm_sqr();
             rz_loc += r.re * z.re + r.im * z.im;
         }
@@ -1235,10 +1480,14 @@ impl PdeSolver {
                 fft_count += 2;
 
                 let mut pap_loc = 0.0_f64;
-                for k in 0..ll {
-                    let w = self.w_g[k] + self.engine.g2[k] * self.p_g[k];
-                    self.w_g[k] = w;
-                    let p = self.p_g[k];
+                for ((w_dst, &g2), &p) in self
+                    .w_g
+                    .iter_mut()
+                    .zip(&self.engine.g2)
+                    .zip(&self.p_g)
+                {
+                    let w = *w_dst + g2 * p;
+                    *w_dst = w;
                     pap_loc += p.re * w.re + p.im * w.im;
                 }
                 comm.tree_sum_f64(&[pap_loc], &mut pap_glob)?;
@@ -1255,19 +1504,22 @@ impl PdeSolver {
                     ));
                 }
 
-                for k in 0..ll {
-                    out_phi_g[k] += alpha * self.p_g[k];
-                    let r = self.r_g[k] - alpha * self.w_g[k];
-                    self.r_g[k] = r;
-                    self.z_g[k] = self.precond[k] * r;
+                for ((((phi, r_dst), z_dst), (&p, &w)), &pre) in out_phi_g
+                    .iter_mut()
+                    .zip(&mut self.r_g)
+                    .zip(&mut self.z_g)
+                    .zip(self.p_g.iter().zip(&self.w_g))
+                    .zip(&self.precond)
+                {
+                    *phi += alpha * p;
+                    let r = *r_dst - alpha * w;
+                    *r_dst = r;
+                    *z_dst = pre * r;
                 }
                 if !has_kappa && s_norm2 > 0.0 {
                     let mut sr_loc = 0.0_f64;
                     let mut sz_loc = 0.0_f64;
-                    for k in 0..ll {
-                        let s = self.aux_g[k];
-                        let r = self.r_g[k];
-                        let z = self.z_g[k];
+                    for ((&s, &r), &z) in self.aux_g.iter().zip(&self.r_g).zip(&self.z_g) {
                         sr_loc += s.re * r.re + s.im * r.im;
                         sz_loc += s.re * z.re + s.im * z.im;
                     }
@@ -1275,17 +1527,15 @@ impl PdeSolver {
                     comm.tree_sum_f64(&[sr_loc, sz_loc], &mut proj)?;
                     let cr = (volume * proj[0]) / s_norm2;
                     let cz = (volume * proj[1]) / s_norm2;
-                    for k in 0..ll {
-                        self.r_g[k] -= cr * self.aux_g[k];
-                        self.z_g[k] -= cz * self.aux_g[k];
+                    for ((r, z), &s) in self.r_g.iter_mut().zip(&mut self.z_g).zip(&self.aux_g) {
+                        *r -= cr * s;
+                        *z -= cz * s;
                     }
                 }
 
                 let mut r_norm2_loc = 0.0_f64;
                 let mut rz_new_loc = 0.0_f64;
-                for k in 0..ll {
-                    let r = self.r_g[k];
-                    let z = self.z_g[k];
+                for (&r, &z) in self.r_g.iter().zip(&self.z_g) {
                     r_norm2_loc += r.norm_sqr();
                     rz_new_loc += r.re * z.re + r.im * z.im;
                 }
@@ -1305,8 +1555,8 @@ impl PdeSolver {
                     ));
                 }
                 let beta = rz_new / rz;
-                for k in 0..ll {
-                    self.p_g[k] = self.z_g[k] + beta * self.p_g[k];
+                for (p, &z) in self.p_g.iter_mut().zip(&self.z_g) {
+                    *p = z + beta * *p;
                 }
                 rz = rz_new;
             }
@@ -1322,8 +1572,8 @@ impl PdeSolver {
         // Reconstruct phi(r) = phi_tilde(r) / sqrt(eps(r)) and transform back to G-space (2 FFTs).
         self.engine
             .inverse_to_real(comm, out_phi_g, &mut self.work_r2)?;
-        for j in 0..pp {
-            self.work_r2[j] /= self.work_r0[j];
+        for (dst, &s) in self.work_r2.iter_mut().zip(&self.work_r0) {
+            *dst /= s;
         }
         self.engine.forward_real(comm, &self.work_r2, out_phi_g)?;
         fft_count += 2;
@@ -1362,15 +1612,19 @@ impl PdeSolver {
         let m = config.diis_history;
         self.ensure_diis_capacity(m)?;
         let ll = self.engine.local_len();
-        let pp = self.engine.plane_points();
         let volume = self.engine.volume;
 
         // Setup (4 FFTs):
         //   work_r0 = D_x(ln eps), work_r1 = D_y(ln eps), work_r2 = D_z(ln eps), work_r3 = b / eps
         let mut kap_over_eps_loc = 0.0_f64;
-        for j in 0..pp {
-            self.work_r0[j] = eps_planes[j].ln();
-            kap_over_eps_loc += kappa2_planes[j] / eps_planes[j];
+        for ((r0, &e), &k2) in self
+            .work_r0
+            .iter_mut()
+            .zip(eps_planes)
+            .zip(kappa2_planes)
+        {
+            *r0 = e.ln();
+            kap_over_eps_loc += k2 / e;
         }
         let mut kap_glob = [0.0_f64];
         comm.tree_sum_f64(&[kap_over_eps_loc], &mut kap_glob)?;
@@ -1382,12 +1636,16 @@ impl PdeSolver {
         // Paired np = 2 inverse FFT:
         //   slot 0: Re = D_x(ln eps), Im = D_y(ln eps)
         //   slot 1: Re = D_z(ln eps), Im = b(r)
-        for k in 0..ll {
-            let [gx, gy, gz] = self.engine.g_cart[k];
-            let le = self.aux_g[k];
-            self.engine.batch_g[k] = Complex64::new(-gy, gx) * le;
-            self.engine.batch_g[ll + k] = Complex64::new(0.0, gz) * le
-                + Complex64::new(0.0, 1.0) * self.rhs_eff_g[k];
+        let (b0, b1) = self.engine.batch_g[..2 * ll].split_at_mut(ll);
+        for ((((d0, d1), &[gx, gy, gz]), &le), &rhs) in b0
+            .iter_mut()
+            .zip(b1.iter_mut())
+            .zip(&self.engine.g_cart)
+            .zip(&self.aux_g)
+            .zip(&self.rhs_eff_g)
+        {
+            *d0 = Complex64::new(-gy, gx) * le;
+            *d1 = Complex64::new(0.0, gz) * le + Complex64::new(0.0, 1.0) * rhs;
         }
         self.engine
             .fft
@@ -1396,20 +1654,30 @@ impl PdeSolver {
         let plane_count = self.engine.fft.plane_count();
         for i in 0..plane_count {
             let off = i * slab_len;
+            let range = off..off + slab_len;
             self.engine.fft.to_real_plane_in(0, 2, i)?;
             {
                 let slab = self.engine.fft.plane();
-                for j in 0..slab_len {
-                    self.work_r0[off + j] = slab[j].re;
-                    self.work_r1[off + j] = slab[j].im;
+                for ((r0, r1), s) in self.work_r0[range.clone()]
+                    .iter_mut()
+                    .zip(&mut self.work_r1[range.clone()])
+                    .zip(slab)
+                {
+                    *r0 = s.re;
+                    *r1 = s.im;
                 }
             }
             self.engine.fft.to_real_plane_in(1, 2, i)?;
             {
                 let slab = self.engine.fft.plane();
-                for j in 0..slab_len {
-                    self.work_r2[off + j] = slab[j].re;
-                    self.work_r3[off + j] = slab[j].im / eps_planes[off + j];
+                for (((r2, r3), &e), s) in self.work_r2[range.clone()]
+                    .iter_mut()
+                    .zip(&mut self.work_r3[range.clone()])
+                    .zip(&eps_planes[range])
+                    .zip(slab)
+                {
+                    *r2 = s.re;
+                    *r3 = s.im / e;
                 }
             }
         }
@@ -1419,12 +1687,15 @@ impl PdeSolver {
         self.engine.forward_real(comm, &self.work_r3, &mut self.aux_g)?;
         fft_count += 1;
 
-        for k in 0..ll {
-            let g2 = self.engine.g2[k];
-            out_phi_g[k] = if !has_kappa && g2 == 0.0 {
+        for ((phi, &g2), &aux) in out_phi_g
+            .iter_mut()
+            .zip(&self.engine.g2)
+            .zip(&self.aux_g)
+        {
+            *phi = if !has_kappa && g2 == 0.0 {
                 Complex64::default()
             } else {
-                self.aux_g[k] / (g2 + kappa2_eff_bar)
+                aux / (g2 + kappa2_eff_bar)
             };
         }
 
@@ -1435,11 +1706,15 @@ impl PdeSolver {
             // Fixed-point map (3 FFTs):
             //   (L_0 + kappa2_eff_bar) y = b/eps + (D ln eps).(D x)
             //                              - (kappa2/eps - kappa2_eff_bar) x
-            for k in 0..ll {
-                let [gx, gy, gz] = self.engine.g_cart[k];
-                let x = out_phi_g[k];
-                self.engine.batch_g[k] = Complex64::new(-gy, gx) * x;
-                self.engine.batch_g[ll + k] = Complex64::new(0.0, gz + 1.0) * x;
+            let (b0, b1) = self.engine.batch_g[..2 * ll].split_at_mut(ll);
+            for (((d0, d1), &[gx, gy, gz]), &x) in b0
+                .iter_mut()
+                .zip(b1.iter_mut())
+                .zip(&self.engine.g_cart)
+                .zip(out_phi_g.iter())
+            {
+                *d0 = Complex64::new(-gy, gx) * x;
+                *d1 = Complex64::new(0.0, gz + 1.0) * x;
             }
             self.engine
                 .fft
@@ -1447,27 +1722,35 @@ impl PdeSolver {
 
             for i in 0..plane_count {
                 let off = i * slab_len;
+                let range = off..off + slab_len;
                 self.engine.fft.to_real_plane_in(0, 2, i)?;
                 {
                     let slab = self.engine.fft.plane();
-                    for j in 0..slab_len {
-                        let idx = off + j;
-                        self.engine.slab_r0[j] = self.work_r3[idx]
-                            + self.work_r0[idx] * slab[j].re
-                            + self.work_r1[idx] * slab[j].im;
+                    for ((((s0, &r3), &r0), &r1), s) in self
+                        .engine
+                        .slab_r0
+                        .iter_mut()
+                        .zip(&self.work_r3[range.clone()])
+                        .zip(&self.work_r0[range.clone()])
+                        .zip(&self.work_r1[range.clone()])
+                        .zip(slab)
+                    {
+                        *s0 = r3 + r0 * s.re + r1 * s.im;
                     }
                 }
                 self.engine.fft.to_real_plane_in(1, 2, i)?;
                 {
                     let slab = self.engine.fft.plane_mut();
-                    for j in 0..slab_len {
-                        let idx = off + j;
-                        let dz = slab[j].re;
-                        let x_r = slab[j].im;
-                        let scr_shift = kappa2_planes[idx] / eps_planes[idx] - kappa2_eff_bar;
-                        let rhs_tot =
-                            self.engine.slab_r0[j] + self.work_r2[idx] * dz - scr_shift * x_r;
-                        slab[j] = Complex64::new(rhs_tot, 0.0);
+                    for ((((s, &s0), &r2), &k2), &e) in slab
+                        .iter_mut()
+                        .zip(&self.engine.slab_r0)
+                        .zip(&self.work_r2[range.clone()])
+                        .zip(&kappa2_planes[range.clone()])
+                        .zip(&eps_planes[range])
+                    {
+                        let scr_shift = k2 / e - kappa2_eff_bar;
+                        let rhs_tot = s0 + r2 * s.re - scr_shift * s.im;
+                        *s = Complex64::new(rhs_tot, 0.0);
                     }
                 }
                 self.engine.fft.to_reciprocal_plane_in(0, 1, i)?;
@@ -1476,16 +1759,21 @@ impl PdeSolver {
             fft_count += 3;
 
             let mut r_norm2_loc = 0.0_f64;
-            for k in 0..ll {
-                let g2 = self.engine.g2[k];
+            for (((r_dst, &g2), &w), &phi) in self
+                .r_g
+                .iter_mut()
+                .zip(&self.engine.g2)
+                .zip(&self.w_g)
+                .zip(out_phi_g.iter())
+            {
                 if !has_kappa && g2 == 0.0 {
-                    self.r_g[k] = Complex64::default();
+                    *r_dst = Complex64::default();
                     continue;
                 }
                 let denom = g2 + kappa2_eff_bar;
-                let r_scaled = self.w_g[k] - denom * out_phi_g[k];
+                let r_scaled = w - denom * phi;
                 r_norm2_loc += r_scaled.norm_sqr();
-                self.r_g[k] = self.w_g[k] / denom - out_phi_g[k];
+                *r_dst = w / denom - phi;
             }
             comm.tree_sum_f64(&[r_norm2_loc], &mut r_norm2_glob)?;
             let res_est = eps_max * (volume * r_norm2_glob[0]).sqrt();
@@ -1509,14 +1797,20 @@ impl PdeSolver {
             if iter == 1 {
                 self.diis_prev_x.copy_from_slice(out_phi_g);
                 self.diis_prev_f.copy_from_slice(&self.r_g);
-                for k in 0..ll {
-                    out_phi_g[k] += 0.5 * self.r_g[k];
+                for (phi, &r) in out_phi_g.iter_mut().zip(&self.r_g) {
+                    *phi += 0.5 * r;
                 }
             } else {
                 let slot = (iter - 2) % m;
-                for k in 0..ll {
-                    self.diis_dx[slot][k] = out_phi_g[k] - self.diis_prev_x[k];
-                    self.diis_df[slot][k] = self.r_g[k] - self.diis_prev_f[k];
+                for ((((dx, df), &phi), &px), (&r, &pf)) in self.diis_dx[slot]
+                    .iter_mut()
+                    .zip(&mut self.diis_df[slot])
+                    .zip(out_phi_g.iter())
+                    .zip(&self.diis_prev_x)
+                    .zip(self.r_g.iter().zip(&self.diis_prev_f))
+                {
+                    *dx = phi - px;
+                    *df = r - pf;
                 }
                 self.diis_prev_x.copy_from_slice(out_phi_g);
                 self.diis_prev_f.copy_from_slice(&self.r_g);
@@ -1526,20 +1820,17 @@ impl PdeSolver {
                 for i in 0..p {
                     for j in 0..=i {
                         let mut dot = 0.0_f64;
-                        let df_i = &self.diis_df[i];
-                        let df_j = &self.diis_df[j];
-                        for k in 0..ll {
-                            dot += df_i[k].re * df_j[k].re + df_i[k].im * df_j[k].im;
+                        for (&a, &b) in self.diis_df[i].iter().zip(&self.diis_df[j]) {
+                            dot += a.re * b.re + a.im * b.im;
                         }
                         self.diis_forms_loc[form_idx] = dot;
                         form_idx += 1;
                     }
                 }
-                for i in 0..p {
+                for df_i in &self.diis_df[..p] {
                     let mut dot = 0.0_f64;
-                    let df_i = &self.diis_df[i];
-                    for k in 0..ll {
-                        dot += df_i[k].re * self.r_g[k].re + df_i[k].im * self.r_g[k].im;
+                    for (&a, &b) in df_i.iter().zip(&self.r_g) {
+                        dot += a.re * b.re + a.im * b.im;
                     }
                     self.diis_forms_loc[form_idx] = dot;
                     form_idx += 1;
@@ -1582,22 +1873,25 @@ impl PdeSolver {
                             proj += self.diis_q[(i, j)] * rhs_i;
                         }
                         let scale = proj / eig;
-                        for i in 0..p {
-                            self.diis_gamma[i] += self.diis_q[(i, j)] * scale;
+                        for (i, gamma) in self.diis_gamma[..p].iter_mut().enumerate() {
+                            *gamma += self.diis_q[(i, j)] * scale;
                         }
                     }
                 }
 
                 const MIX_BETA: f64 = 0.7;
-                for k in 0..ll {
-                    let mut x_bar = out_phi_g[k];
-                    let mut f_bar = self.r_g[k];
-                    for i in 0..p {
-                        let g = self.diis_gamma[i];
-                        x_bar -= g * self.diis_dx[i][k];
-                        f_bar -= g * self.diis_df[i][k];
+                for (k, (phi, &r)) in out_phi_g.iter_mut().zip(&self.r_g).enumerate() {
+                    let mut x_bar = *phi;
+                    let mut f_bar = r;
+                    for ((&g, dx_i), df_i) in self.diis_gamma[..p]
+                        .iter()
+                        .zip(&self.diis_dx[..p])
+                        .zip(&self.diis_df[..p])
+                    {
+                        x_bar -= g * dx_i[k];
+                        f_bar -= g * df_i[k];
                     }
-                    out_phi_g[k] = x_bar + MIX_BETA * f_bar;
+                    *phi = x_bar + MIX_BETA * f_bar;
                 }
             }
 
@@ -1856,7 +2150,6 @@ impl SolvationWorkspace {
         config.validate()?;
 
         let pp = self.plane_points();
-        let ll = self.solver.engine.local_len();
         let bad_shape = density_planes.len() != pp;
         let bad_nonfinite = !bad_shape && density_planes.iter().any(|v| !v.is_finite());
         let local_n_sum = if bad_shape || bad_nonfinite {
@@ -1903,20 +2196,31 @@ impl SolvationWorkspace {
         self.solver
             .engine
             .forward_real(comm, density_planes, &mut self.eval.n_g)?;
-        for k in 0..ll {
-            self.eval.rho_sol_g[k] = self.eval.rho_ion_g[k] - self.eval.n_g[k];
+        for ((rho_sol, &rho_ion), &n) in self
+            .eval
+            .rho_sol_g
+            .iter_mut()
+            .zip(&self.eval.rho_ion_g)
+            .zip(&self.eval.n_g)
+        {
+            *rho_sol = rho_ion - n;
         }
 
         let q_ion: f64 = ions.iter().map(|ion| ion.charge).sum();
         let background_correction_ha = (q_ion - n_el) * sum_alpha_z_sm;
 
         // Exact vacuum potential with the identical skew-adjoint L_0 operator.
-        for k in 0..ll {
-            let g2 = self.solver.engine.g2[k];
-            self.eval.phi_vac_g[k] = if g2 == 0.0 {
+        for ((phi_vac, &g2), &rho_sol) in self
+            .eval
+            .phi_vac_g
+            .iter_mut()
+            .zip(&self.solver.engine.g2)
+            .zip(&self.eval.rho_sol_g)
+        {
+            *phi_vac = if g2 == 0.0 {
                 Complex64::default()
             } else {
-                (FOUR_PI / g2) * self.eval.rho_sol_g[k]
+                (FOUR_PI / g2) * rho_sol
             };
         }
 
@@ -1984,8 +2288,14 @@ impl SolvationWorkspace {
             &mut self.eval.phi_pol_g,
         )?;
 
-        for k in 0..ll {
-            self.eval.phi_solv_g[k] = self.eval.phi_vac_g[k] + self.eval.phi_pol_g[k];
+        for ((phi_solv, &phi_vac), &phi_pol) in self
+            .eval
+            .phi_solv_g
+            .iter_mut()
+            .zip(&self.eval.phi_vac_g)
+            .zip(&self.eval.phi_pol_g)
+        {
+            *phi_solv = phi_vac + phi_pol;
         }
 
         // One np = 3 inverse batch yields phi_solv, |D phi_solv|^2, and phi_pol on owned planes.
@@ -2000,9 +2310,7 @@ impl SolvationWorkspace {
 
         // Dual electrostatic solvation energy: 0.5 * Omega * sum_G Re(conj(rho_sol) * phi_pol).
         let mut es_loc = 0.0_f64;
-        for k in 0..ll {
-            let rho = self.eval.rho_sol_g[k];
-            let phi = self.eval.phi_pol_g[k];
+        for (&rho, &phi) in self.eval.rho_sol_g.iter().zip(&self.eval.phi_pol_g) {
             es_loc += rho.re * phi.re + rho.im * phi.im;
         }
         let mut es_glob = [0.0_f64];
@@ -2013,11 +2321,23 @@ impl SolvationWorkspace {
         let mut v_es_planes = vec![0.0; pp];
         let mut v_diel_planes = vec![0.0; pp];
         let mut v_scr_planes = vec![0.0; pp];
-        for j in 0..pp {
-            v_es_planes[j] = -self.eval.phi_pol[j] - bg_pot_shift;
-            v_diel_planes[j] = -INV_EIGHT_PI * self.eval.deps_dn[j] * self.eval.grad_phi_sq[j];
-            let phi_s = self.eval.phi_solv[j];
-            v_scr_planes[j] = -INV_EIGHT_PI * self.eval.dkappa2_dn[j] * phi_s * phi_s;
+        for ((((v_es, v_diel), v_scr), (&phi_pol, &phi_solv)), ((&deps, &grad2), &dkap)) in
+            v_es_planes
+                .iter_mut()
+                .zip(&mut v_diel_planes)
+                .zip(&mut v_scr_planes)
+                .zip(self.eval.phi_pol.iter().zip(&self.eval.phi_solv))
+                .zip(
+                    self.eval
+                        .deps_dn
+                        .iter()
+                        .zip(&self.eval.grad_phi_sq)
+                        .zip(&self.eval.dkappa2_dn),
+                )
+        {
+            *v_es = -phi_pol - bg_pot_shift;
+            *v_diel = -INV_EIGHT_PI * deps * grad2;
+            *v_scr = -INV_EIGHT_PI * dkap * phi_solv * phi_solv;
         }
 
         // Discrete cavitation (+ volume) energy and exact variational potential.
@@ -2038,10 +2358,12 @@ impl SolvationWorkspace {
                 &mut self.solver.w_g,
                 &mut self.solver.work_r0,
             )?;
-            for j in 0..pp {
-                let ds = self.eval.ds_dn[j];
-                v_cav_planes[j] = -params.tau_ha_bohr2 * ds * self.solver.work_r0[j]
-                    - params.beta_ha_bohr3 * ds;
+            for ((dst, &ds), &div_n) in v_cav_planes
+                .iter_mut()
+                .zip(&self.eval.ds_dn)
+                .zip(&self.solver.work_r0)
+            {
+                *dst = -params.tau_ha_bohr2 * ds * div_n - params.beta_ha_bohr3 * ds;
             }
             params.tau_ha_bohr2 * area_loc
         } else {
@@ -2057,9 +2379,14 @@ impl SolvationWorkspace {
         let cavitation_ha = self.solver.engine.dv * cav_glob[0];
 
         let mut v_total_planes = vec![0.0; pp];
-        for j in 0..pp {
-            v_total_planes[j] =
-                v_es_planes[j] + v_diel_planes[j] + v_scr_planes[j] + v_cav_planes[j];
+        for ((((dst, &v_es), &v_diel), &v_scr), &v_cav) in v_total_planes
+            .iter_mut()
+            .zip(&v_es_planes)
+            .zip(&v_diel_planes)
+            .zip(&v_scr_planes)
+            .zip(&v_cav_planes)
+        {
+            *dst = v_es + v_diel + v_scr + v_cav;
         }
 
         let ionic_forces_ha_bohr = cavity::ionic_solvation_forces(

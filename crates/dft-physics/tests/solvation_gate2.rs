@@ -1041,47 +1041,73 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             let mut max_err = 0.0_f64;
             for &idx in &probes {
                 let n_i = base_n[idx];
-                let h = if n_i < 1.0e-5 {
-                    0.20 * n_i
-                } else {
-                    match iso_params.cavity {
-                        CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
-                        CavityModel::Sccs { .. } => (1.0e-3 * n_i).min(2.0e-6),
+                let (v_fd, v_ana) = if n_i < 1.0e-5 {
+                    let h = 0.80 * n_i;
+                    assert!(n_i - h > iso_params.density_floor_bohr3);
+                    perturbed[idx] = n_i + h;
+                    let ep1 = ws
+                        .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
+                        .unwrap();
+                    perturbed[idx] = n_i - h;
+                    let em1 = ws
+                        .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
+                        .unwrap();
+                    perturbed[idx] = n_i;
+                    if iso_label == "cavitation_only" {
+                        (
+                            (ep1.cavitation_ha - em1.cavitation_ha) / (2.0 * h * dv),
+                            eval_iso.v_cav_planes[idx],
+                        )
+                    } else {
+                        (
+                            (ep1.total_ha - em1.total_ha) / (2.0 * h * dv),
+                            eval_iso.v_total_planes[idx],
+                        )
                     }
-                };
-                assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
-
-                perturbed[idx] = n_i + 2.0 * h;
-                let ep2 = ws
-                    .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
-                    .unwrap();
-                perturbed[idx] = n_i + h;
-                let ep1 = ws
-                    .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
-                    .unwrap();
-                perturbed[idx] = n_i - h;
-                let em1 = ws
-                    .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
-                    .unwrap();
-                perturbed[idx] = n_i - 2.0 * h;
-                let em2 = ws
-                    .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
-                    .unwrap();
-                perturbed[idx] = n_i;
-
-                let (v_fd, v_ana) = if iso_label == "cavitation_only" {
-                    (
-                        (-ep2.cavitation_ha + 8.0 * ep1.cavitation_ha - 8.0 * em1.cavitation_ha
-                            + em2.cavitation_ha)
-                            / (12.0 * h * dv),
-                        eval_iso.v_cav_planes[idx],
-                    )
                 } else {
-                    (
-                        (-ep2.total_ha + 8.0 * ep1.total_ha - 8.0 * em1.total_ha + em2.total_ha)
-                            / (12.0 * h * dv),
-                        eval_iso.v_total_planes[idx],
-                    )
+                    let h = if iso_label == "cavitation_only" {
+                        (5.0e-4 * n_i).min(5.0e-7)
+                    } else {
+                        match iso_params.cavity {
+                            CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
+                            CavityModel::Sccs { .. } => (1.0e-3 * n_i).min(2.0e-6),
+                        }
+                    };
+                    assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
+
+                    perturbed[idx] = n_i + 2.0 * h;
+                    let ep2 = ws
+                        .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
+                        .unwrap();
+                    perturbed[idx] = n_i + h;
+                    let ep1 = ws
+                        .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
+                        .unwrap();
+                    perturbed[idx] = n_i - h;
+                    let em1 = ws
+                        .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
+                        .unwrap();
+                    perturbed[idx] = n_i - 2.0 * h;
+                    let em2 = ws
+                        .evaluate(comm, &perturbed, &ions, &iso_params, &cfg)
+                        .unwrap();
+                    perturbed[idx] = n_i;
+
+                    if iso_label == "cavitation_only" {
+                        (
+                            (-ep2.cavitation_ha + 8.0 * ep1.cavitation_ha - 8.0 * em1.cavitation_ha
+                                + em2.cavitation_ha)
+                                / (12.0 * h * dv),
+                            eval_iso.v_cav_planes[idx],
+                        )
+                    } else {
+                        (
+                            (-ep2.total_ha + 8.0 * ep1.total_ha - 8.0 * em1.total_ha
+                                + em2.total_ha)
+                                / (12.0 * h * dv),
+                            eval_iso.v_total_planes[idx],
+                        )
+                    }
                 };
                 let abs_err = (v_fd - v_ana).abs();
                 max_err = max_err.max(abs_err);

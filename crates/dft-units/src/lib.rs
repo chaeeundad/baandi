@@ -52,6 +52,35 @@ impl From<ElectronVolt> for Hartree {
     }
 }
 
+/// Electrostatic potential `phi(r)` in Hartree per `+1e` (positive near atomic nuclei).
+///
+/// Kept distinct from [`ElectronPotentialEnergyHa`] (`U_el = -phi`) so Track B
+/// (implicit solvation, GC-DFT) and Track C (electrostatic embedding) enforce
+/// the electron charge sign `-1e` at compile time (ADR 0017 / ADR 0061).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ElectrostaticPotentialHaPerE(pub f64);
+
+/// Potential energy `U_el(r) = -phi(r)` of an electron (`-1e`) in Hartree, as
+/// added directly to BAANDI's Kohn-Sham local effective potential `V_eff(r)`.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct ElectronPotentialEnergyHa(pub f64);
+
+impl ElectrostaticPotentialHaPerE {
+    /// Convert electrostatic potential `phi` (Ha per `+1e`) to electron potential
+    /// energy `U_el = -phi` (Ha).
+    pub const fn to_electron_energy(self) -> ElectronPotentialEnergyHa {
+        ElectronPotentialEnergyHa(-self.0)
+    }
+}
+
+impl ElectronPotentialEnergyHa {
+    /// Convert electron potential energy `U_el` (Ha) to electrostatic potential
+    /// `phi = -U_el` (Ha per `+1e`).
+    pub const fn to_electrostatic_potential(self) -> ElectrostaticPotentialHaPerE {
+        ElectrostaticPotentialHaPerE(-self.0)
+    }
+}
+
 use std::{fmt, str::FromStr};
 use uom::si::{
     energy,
@@ -217,5 +246,22 @@ fn finite_result(value: f64, text: &str) -> Result<f64, UnitError> {
         Ok(value)
     } else {
         Err(error(UnitErrorKind::NonFinite, text))
+    }
+}
+
+#[cfg(test)]
+mod potential_tests {
+    use super::{ElectronPotentialEnergyHa, ElectrostaticPotentialHaPerE};
+
+    #[test]
+    fn typed_electrostatic_potential_sign_contract() {
+        let phi = ElectrostaticPotentialHaPerE(1.25);
+        let u_el = phi.to_electron_energy();
+        assert_eq!(u_el, ElectronPotentialEnergyHa(-1.25));
+        assert_eq!(u_el.to_electrostatic_potential(), phi);
+
+        // Variational energy sign preservation: rho_el * phi = (-n) * phi = n * U_el.
+        let n = 0.42;
+        assert_eq!((-n) * phi.0, n * u_el.0);
     }
 }

@@ -1957,6 +1957,22 @@ impl SolvationWorkspace {
         self.solver.engine.mirror_paired()
     }
 
+    /// Maximum real-space grid spacing `max_a |a_a| / N_a` in Bohr.
+    ///
+    /// Used to guard `SolverKind::FisicaroPcg`, whose product-rule aliasing error
+    /// decays below `1e-5 Ha` once `max_grid_spacing_bohr() <= 0.25` Bohr.
+    pub fn max_grid_spacing_bohr(&self) -> f64 {
+        let rows = self.solver.engine.cell.lattice_rows_bohr();
+        let dims = self.solver.engine.dims;
+        (0..3)
+            .map(|a| {
+                let v = rows[a];
+                let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                norm / dims[a] as f64
+            })
+            .fold(0.0_f64, f64::max)
+    }
+
     /// Global C-order grid indices of owned real-space points in exact
     /// `DistributedPairFft` plane-local order `[plane][row][z]`.
     pub fn owned_real_grid_indices(&self) -> Vec<usize> {
@@ -2086,12 +2102,45 @@ impl SolvationWorkspace {
         params: &SolvationParams,
         config: &SolverConfig,
     ) -> Result<SolvationEvaluation, SolvationError> {
+        self.evaluate_inner(comm, density_planes, None, ions, params, config)
+    }
+
+    /// Evaluates the full variational implicit solvation functional while reusing
+    /// caller-supplied reciprocal-space electron density `density_g` (in owned
+    /// `local_positions()` order), saving one full 3D forward FFT per SCF map.
+    pub fn evaluate_with_density_g<K: Collective>(
+        &mut self,
+        comm: &K,
+        density_planes: &[f64],
+        density_g: &[Complex64],
+        ions: &[IonicPseudoCharge],
+        params: &SolvationParams,
+        config: &SolverConfig,
+    ) -> Result<SolvationEvaluation, SolvationError> {
+        self.evaluate_inner(comm, density_planes, Some(density_g), ions, params, config)
+    }
+
+    fn evaluate_inner<K: Collective>(
+        &mut self,
+        comm: &K,
+        density_planes: &[f64],
+        density_g: Option<&[Complex64]>,
+        ions: &[IonicPseudoCharge],
+        params: &SolvationParams,
+        config: &SolverConfig,
+    ) -> Result<SolvationEvaluation, SolvationError> {
         params.validate()?;
         config.validate()?;
 
         let pp = self.plane_points();
-        let bad_shape = density_planes.len() != pp;
-        let bad_nonfinite = !bad_shape && density_planes.iter().any(|v| !v.is_finite());
+        let ll = self.solver.engine.local_len();
+        let bad_shape =
+            density_planes.len() != pp || density_g.is_some_and(|dg| dg.len() != ll);
+        let bad_nonfinite = !bad_shape
+            && (density_planes.iter().any(|v| !v.is_finite())
+                || density_g.is_some_and(|dg| {
+                    dg.iter().any(|z| !z.re.is_finite() || !z.im.is_finite())
+                }));
         let local_n_sum = if bad_shape || bad_nonfinite {
             0.0
         } else {
@@ -2133,9 +2182,13 @@ impl SolvationWorkspace {
             ions,
             &mut self.eval.rho_ion_g,
         )?;
-        self.solver
-            .engine
-            .forward_real(comm, density_planes, &mut self.eval.n_g)?;
+        if let Some(dg) = density_g {
+            self.eval.n_g.copy_from_slice(dg);
+        } else {
+            self.solver
+                .engine
+                .forward_real(comm, density_planes, &mut self.eval.n_g)?;
+        }
         for ((rho_sol, &rho_ion), &n) in self
             .eval
             .rho_sol_g
@@ -2221,14 +2274,33 @@ impl SolvationWorkspace {
             self.eval.b_pol_g[k] += FOUR_PI * self.eval.rho_sol_g[k];
         }
 
-        let report = self.solver.solve_pde(
+        let report = match self.solver.solve_pde(
             comm,
             &self.eval.eps,
             &self.eval.kappa2,
             &self.eval.b_pol_g,
             config,
             &mut self.eval.phi_pol_g,
-        )?;
+        ) {
+            Ok(rep) => rep,
+            Err(SolvationError::Breakdown(_)) if config.kind == SolverKind::FisicaroPcg => {
+                // Automatic guaranteed-SPD fallback when Fisicaro's product-rule
+                // operator becomes indefinite on an under-resolved cavity wall.
+                let fallback_cfg = SolverConfig {
+                    kind: SolverKind::DirectPcg,
+                    ..*config
+                };
+                self.solver.solve_pde(
+                    comm,
+                    &self.eval.eps,
+                    &self.eval.kappa2,
+                    &self.eval.b_pol_g,
+                    &fallback_cfg,
+                    &mut self.eval.phi_pol_g,
+                )?
+            }
+            Err(err) => return Err(err),
+        };
 
         for ((phi_solv, &phi_vac), &phi_pol) in self
             .eval
@@ -2281,7 +2353,9 @@ impl SolvationWorkspace {
                         .zip(&self.eval.dkappa2_dn),
                 )
         {
-            *v_es = -phi_pol - bg_pot_shift;
+            *v_es = dft_units::ElectrostaticPotentialHaPerE(phi_pol + bg_pot_shift)
+                .to_electron_energy()
+                .0;
             *v_diel = -INV_EIGHT_PI * deps * grad2;
             *v_scr = -INV_EIGHT_PI * dkap * phi_solv * phi_solv;
         }

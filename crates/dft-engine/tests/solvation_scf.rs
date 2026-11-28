@@ -22,7 +22,7 @@ use dft_engine::{
         api::{Derivatives, Request, solve},
         delivered,
         electronic::Policy,
-        profile::{Preconditioning, Profile},
+        profile::Profile,
         symmetry,
     },
     refstart::StartInput,
@@ -140,7 +140,7 @@ fn base_options(
         bands: Some(bands),
         gamma_real,
         functional,
-        start_density: StartDensity::Atomic,
+        start_density: StartDensity::Uniform,
         start_wavefunctions: StartWavefunctions::Atomic,
         max_iterations: 200,
         solvation: solvation.map(Box::new),
@@ -194,17 +194,7 @@ fn vacuum_solvation() -> SolvationConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    // Plain moderately damped Broyden (avoiding Thomas-Fermi G-space filtering,
-    // which induces negative Gibbs ringing in the empty solvent region of
-    // isolated-molecule supercells).
-    Profile {
-        beta: 0.5,
-        history: 6,
-        threshold_ry: 2.0 * threshold_ha,
-        preconditioning: Preconditioning::Plain,
-    }
-    .validate()
-    .unwrap()
+    Profile::from_standard_ha(threshold_ha).unwrap()
 }
 
 fn max_force_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
@@ -956,7 +946,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
             },
             req,
         )
-        .unwrap();
+        .unwrap_or_else(|e| panic!("L3-7 {name}: solve failed: {e:?}"));
         let f = delivered
             .derivatives
             .forces

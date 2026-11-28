@@ -58,7 +58,7 @@ pub enum SolverKind {
     /// variational operator baseline and guaranteed-SPD fallback.
     DirectPcg,
     /// High-speed continuum-equivalent Fisicaro et al. (2016) `phi_tilde = sqrt(eps) * phi`
-    /// PCG (2 FFTs/iter; 3.4x-12.1x faster than `DirectPcg` on well-resolved grids).
+    /// PCG (2 FFTs/iter; 2.7x-12.7x cold / 1.9x-2.7x adaptive warm speedup on well-resolved grids).
     FisicaroPcg,
     /// Benchmark arm: polarization-charge fixed-point iteration with Anderson/DIIS (3 FFTs/iter).
     PolarizationDiis,

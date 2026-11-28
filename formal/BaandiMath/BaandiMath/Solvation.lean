@@ -582,8 +582,8 @@ theorem vaspsolSwitch_hasDerivAt (erfc : ℝ → ℝ) (n_c sigma n : ℝ)
   have hdiv : HasDerivAt (fun x => x / n_c) (1 / n_c) n :=
     (hasDerivAt_id n).div_const n_c
   have hdiv_ne : n / n_c ≠ 0 := div_ne_zero (ne_of_gt hn) (ne_of_gt hn_c)
-  have hlog : HasDerivAt (fun x => Real.log (x / n_c)) ((n / n_c)⁻¹ * (1 / n_c)) n :=
-    (Real.hasDerivAt_log hdiv_ne).comp n hdiv
+  have hlog : HasDerivAt (fun x => Real.log (x / n_c)) ((n / n_c)⁻¹ * (1 / n_c)) n := by
+    simpa [Function.comp] using (Real.hasDerivAt_log hdiv_ne).comp n hdiv
   have hu : HasDerivAt (fun x => Real.log (x / n_c) / (sigma * Real.sqrt 2))
       (((n / n_c)⁻¹ * (1 / n_c)) / (sigma * Real.sqrt 2)) n :=
     hlog.div_const (sigma * Real.sqrt 2)
@@ -591,8 +591,8 @@ theorem vaspsolSwitch_hasDerivAt (erfc : ℝ → ℝ) (n_c sigma n : ℝ)
       (fun x => erfc (Real.log (x / n_c) / (sigma * Real.sqrt 2)))
       ((-(2 / Real.sqrt Real.pi) *
           Real.exp (-((Real.log (n / n_c) / (sigma * Real.sqrt 2)) ^ 2))) *
-        (((n / n_c)⁻¹ * (1 / n_c)) / (sigma * Real.sqrt 2))) n :=
-    herfc.comp n hu
+        (((n / n_c)⁻¹ * (1 / n_c)) / (sigma * Real.sqrt 2))) n := by
+    simpa [Function.comp] using herfc.comp n hu
   have hS : HasDerivAt (vaspsolSwitch erfc n_c sigma)
       ((1 / 2 : ℝ) *
         ((-(2 / Real.sqrt Real.pi) *

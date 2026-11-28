@@ -51,7 +51,9 @@ pub fn next_ethr_ry(previous: f64, dr2_ry: f64, electrons: f64) -> f64 {
 }
 
 /// Adaptive inner PDE tolerance ratchet for implicit solvation (ADR 0061):
-/// clamps `min(previous, 1e-2 * sqrt(max(dr2_ry, 0)))` into `[target, max(target, 1e-4)]`.
+/// clamps `min(previous, 0.05 * max(dr2_ry, 0))` into `[target, max(target, 1e-4)]`,
+/// tracking `dr2_ry` linearly (mirroring `next_ethr_ry`) so PDE solver noise never
+/// floors Broyden's secant convergence at tight SCF thresholds.
 pub fn next_solvation_tol(previous: f64, dr2_ry: f64, electrons: f64, target: f64) -> f64 {
     let _ = electrons;
     let target = if target.is_finite() && target > 0.0 {
@@ -68,5 +70,5 @@ pub fn next_solvation_tol(previous: f64, dr2_ry: f64, electrons: f64, target: f6
     } else {
         upper
     };
-    (1.0e-2 * dr2_ry.max(0.0).sqrt()).min(prev).clamp(target, upper)
+    (0.05 * dr2_ry.max(0.0)).min(prev).clamp(target, upper)
 }

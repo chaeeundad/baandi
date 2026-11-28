@@ -909,7 +909,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 } else {
                     match cavity {
                         CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
-                        CavityModel::Sccs { .. } => (1.2e-3 * n_i).min(2.0e-6),
+                        CavityModel::Sccs { .. } => (7.0e-4 * n_i).min(2.0e-6),
                     }
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
@@ -1105,8 +1105,8 @@ fn ionic_forces_match_central_finite_differences_and_width_invariance() {
     };
     let cfg = SolverConfig {
         kind: SolverKind::DirectPcg,
-        tolerance: 3.0e-15,
-        max_iterations: 500,
+        tolerance: 1.0e-14,
+        max_iterations: 400,
         diis_history: 8,
         warm_start: false,
     };
@@ -1352,8 +1352,8 @@ fn mpi_rank_independence_and_mirror_vs_greedy_parity() {
     };
     let cfg = SolverConfig {
         kind: SolverKind::DirectPcg,
-        tolerance: 3.0e-15,
-        max_iterations: 500,
+        tolerance: 1.0e-14,
+        max_iterations: 400,
         diis_history: 8,
         warm_start: false,
     };

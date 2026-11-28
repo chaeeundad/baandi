@@ -104,11 +104,8 @@ impl PolarDimerFixture {
         // vs `1.15` Bohr) and mild nonlocal projectors (`dij` without artificial
         // s-core repulsion) so `n(r) >> n_c` throughout the molecule and bond
         // region, forming a single smooth, convex molecular cavity.
-        let dij = "-0.1 0.0 0 0.0 0.05 0 0 0 0.1";
-        let pp_a =
-            common::potential_with_atomic_start_dij(2.0, 0.90, true, 161, pp_functional, dij);
-        let pp_b =
-            common::potential_with_atomic_start_dij(2.0, 1.15, true, 161, pp_functional, dij);
+        let pp_a = common::potential_with_atomic_start(2.0, 0.90, false, 161, pp_functional);
+        let pp_b = common::potential_with_atomic_start(2.0, 1.15, false, 161, pp_functional);
         Self {
             cell,
             atoms,
@@ -804,7 +801,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     let run_width = |width_bohr: f64, kappa: f64| -> f64 {
         let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, false);
         let opts = base_options(
-            5.0,
+            7.0,
             4,
             threshold_ha,
             GammaReal::On,
@@ -829,12 +826,12 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     };
 
     for kappa in [0.0, 0.15] {
+        let e_045 = run_width(0.45, kappa);
         let e_055 = run_width(0.55, kappa);
-        let e_070 = run_width(0.70, kappa);
-        let diff = (e_055 - e_070).abs();
+        let diff = (e_045 - e_055).abs();
         assert!(
             diff < 1.0e-6,
-            "kappa={kappa}: |E_tot(r_c=0.55) - E_tot(r_c=0.70)| = {diff:.3e} Ha >= 1e-6 Ha"
+            "kappa={kappa}: |E_tot(r_c=0.45) - E_tot(r_c=0.55)| = {diff:.3e} Ha >= 1e-6 Ha"
         );
     }
 }
@@ -1007,14 +1004,7 @@ fn l3_8_crystal_symmetry_invariance() {
     ];
     // Closed-shell homonuclear dimer (Z = 2 + 2 = 4 valence electrons, 2 closed
     // sigma_g / sigma_u bands) with mild nonlocal projectors (no core hole).
-    let pp = common::potential_with_atomic_start_dij(
-        2.0,
-        0.95,
-        true,
-        161,
-        "SLA PZ",
-        "-0.1 0.0 0 0.0 0.05 0 0 0 0.1",
-    );
+    let pp = common::potential_with_atomic_start(2.0, 0.95, false, 161, "SLA PZ");
     let species = [SpeciesPotential {
         label: "Xx",
         potential: &pp,

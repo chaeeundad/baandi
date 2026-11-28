@@ -846,7 +846,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             ([0.57, 0.45, 0.54], 0.25, 1.00),
         ],
         1.10,
-        5.0e-6,
+        2.0e-6,
     );
 
     let cavities = [
@@ -904,10 +904,20 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 //   (E(+3h) - 9*E(+2h) + 45*E(+h) - 45*E(-h) + 9*E(-2h) - E(-3h)) / (60 * h * dv)
                 // eliminates both O((h/n_i)^6) truncation and f64 cancellation below
                 // 1e-10 Ha while staying strictly inside SCCS piecewise-smooth intervals.
-                let h = if n_i < 1.0e-5 {
-                    0.25 * n_i
+                let (h, v_fd) = if n_i < 1.0e-5 {
+                    // Deep in bulk solvent `S(n) = 1` is flat, so E_solv(n_i) is
+                    // purely quadratic in n_i; a 2-point central difference with
+                    // larger step `0.8 * n_i` is exact with minimal f64 cancellation.
+                    let h = 0.80 * n_i;
+                    assert!(n_i - h > params.density_floor_bohr3);
+                    perturbed[idx] = n_i + h;
+                    let ep1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i - h;
+                    let em1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i;
+                    (h, (ep1.total_ha - em1.total_ha) / (2.0 * h * dv))
                 } else {
-                    match cavity {
+                    let h = match cavity {
                         CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
                         CavityModel::Sccs {
                             rho_min_bohr3,
@@ -923,29 +933,30 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                                 (1.5e-3 * n_i).min(2.0e-6).min(0.25 * margin)
                             }
                         }
-                    }
+                    };
+                    assert!(n_i - 3.0 * h > params.density_floor_bohr3);
+
+                    perturbed[idx] = n_i + 3.0 * h;
+                    let ep3 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i + 2.0 * h;
+                    let ep2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i + h;
+                    let ep1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i - h;
+                    let em1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i - 2.0 * h;
+                    let em2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i - 3.0 * h;
+                    let em3 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                    perturbed[idx] = n_i;
+
+                    let v_fd = (ep3.total_ha - 9.0 * ep2.total_ha + 45.0 * ep1.total_ha
+                        - 45.0 * em1.total_ha
+                        + 9.0 * em2.total_ha
+                        - em3.total_ha)
+                        / (60.0 * h * dv);
+                    (h, v_fd)
                 };
-                assert!(n_i - 3.0 * h > params.density_floor_bohr3);
-
-                perturbed[idx] = n_i + 3.0 * h;
-                let ep3 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
-                perturbed[idx] = n_i + 2.0 * h;
-                let ep2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
-                perturbed[idx] = n_i + h;
-                let ep1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
-                perturbed[idx] = n_i - h;
-                let em1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
-                perturbed[idx] = n_i - 2.0 * h;
-                let em2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
-                perturbed[idx] = n_i - 3.0 * h;
-                let em3 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
-                perturbed[idx] = n_i;
-
-                let v_fd = (ep3.total_ha - 9.0 * ep2.total_ha + 45.0 * ep1.total_ha
-                    - 45.0 * em1.total_ha
-                    + 9.0 * em2.total_ha
-                    - em3.total_ha)
-                    / (60.0 * h * dv);
                 let v_ana = eval0.v_total_planes[idx];
                 let abs_err = (v_fd - v_ana).abs();
                 let tol = 1.0e-10_f64.max(1.0e-9 * v_ana.abs());

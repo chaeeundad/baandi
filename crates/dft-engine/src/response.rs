@@ -36,6 +36,7 @@ use dft_response::{
 use dft_units::Hartree;
 
 pub mod rpa;
+pub mod subspace;
 
 /// Settings of [`dielectric_with`] (Hartree atomic units).
 #[derive(Clone, Copy, Debug)]

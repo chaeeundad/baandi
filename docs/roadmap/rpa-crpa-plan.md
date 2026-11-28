@@ -503,7 +503,7 @@ two k meshes about 4 to 8 h per material; ABINIT comparable.
 
 ### R4: projection and Wannier subspace
 
-Status 2026-11-28: next stage (ticket to be written; R1 is its prerequisite).
+Status 2026-11-28: **R4a implemented and internal gates verified** (`RPA-R4A-ATOMIC-PROJECTION`, ADR 0059 proposed): `dft_response::subspace`, `dft_engine::response::subspace`, `baandi subspace` / `[task] type = "subspace"` / `[subspace]`. External dev08 oracle runs (`projwfc.x` and Wannier90 3.x) documented in `tests/reference/response/r4/README.md` (pending). Next: **R4b** (Wannier90 `.win/.amn/.mmn/.eig` export and `_u.mat`/`_u_dis.mat` import).
 
 R4a: atomic projection with Loewdin, band window, hoppings in real space.
 R4b: Wannier90 file export and import of gauge matrices.

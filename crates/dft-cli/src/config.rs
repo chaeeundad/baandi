@@ -72,6 +72,8 @@ pub struct Config {
     pub response: Option<Response>,
     /// R3: RPA correlation energy (`baandi rpa`; uses `[response]` too).
     pub rpa: Option<Rpa>,
+    /// R4a: atomic-orbital subspace projection (`baandi subspace`, ADR 0059).
+    pub subspace: Option<Subspace>,
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
     /// D3-DISPERSION (ADR 0048): Grimme D3 correction evaluated once per
@@ -2024,6 +2026,50 @@ pub struct Rpa {
     /// Response sphere at finite q: "q+G" (default, |q+G|^2/2 <= ecut_chi)
     /// or "G" (one Miller set |G|^2/2 <= ecut_chi for every q; oracle matching).
     pub response_sphere: Option<String>,
+}
+/// `[subspace]` (R4a, `docs/roadmap/rpa-crpa-plan.md` 2.8, 3.6; ADR 0059):
+/// atomic-orbital projection onto a band window with Loewdin
+/// orthonormalization and Wigner-Seitz real-space hoppings.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Subspace {
+    /// "atomic-projection" (R4a default; "wannier90" added in R4b).
+    pub method: Option<String>,
+    /// Gamma-centred uniform k mesh; defaults to `[response].k_mesh` if present.
+    pub k_mesh: Option<[usize; 3]>,
+    /// NSCF bands per k; default max(occupied + 8, occupied + n_orb).
+    pub bands: Option<usize>,
+    /// "dense" (default) | "davidson" | "chebyshev".
+    pub band_solver: Option<String>,
+    /// NSCF residual certificate (Ha), default 1e-6.
+    pub eigen_tolerance_ha: Option<f64>,
+    /// Energy window [min, max] in Ha relative to the reference energy (VBM).
+    pub window_ha: Option<[f64; 2]>,
+    /// Explicit 1-based inclusive band index range [first, last].
+    pub band_range: Option<[usize; 2]>,
+    /// Minimum acceptable overlap eigenvalue of S = A^H A (default 1e-10).
+    pub singular_tolerance: Option<f64>,
+    /// Single-selector shorthand (plan 3.6): species label.
+    pub species: Option<String>,
+    /// Optional 0-based atom indices matching `species`.
+    pub atoms: Option<Vec<usize>>,
+    /// Optional angular momentum `l in 0..=3`.
+    pub l: Option<usize>,
+    /// Optional UPF PSWFC channel label.
+    pub channel: Option<String>,
+    /// Orbital names or shorthands (e.g. `["dxy", "dyz", "dxz"]`, `["sp3"]`).
+    pub orbitals: Option<Vec<String>>,
+    /// Multi-selector projection list (alternative to shorthand keys).
+    pub projections: Vec<SubspaceProjection>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubspaceProjection {
+    pub species: String,
+    pub atoms: Option<Vec<usize>>,
+    pub l: Option<usize>,
+    pub channel: Option<String>,
+    pub orbitals: Option<Vec<String>>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

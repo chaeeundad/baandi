@@ -44,11 +44,23 @@
 - **Rationale**: Subtractive/ONIOM/$\Delta$-ML QM/MLIP (e.g., BAANDI + SevenNet/MACE) requires zero Rust SCF core changes and belongs in the adapter/workflow layer (`baandi-py` / `python/baandi/ase.py`), whereas electrostatic QM/MM and polarizable QM/MLIP reuse the exact same typed `ExternalEnvironment` seam as Track B.
 
 ### D-006 — Gate 1 Entry Track Selection (2026-11-28)
-- **Status**: **Pending User Approval**
-- **Recommended Option (Option 1 — Track B First: Implicit Solvation + Typed Electrostatic Seam → GC-DFT & Track C Reuse)**:
-  - **Gate 1 (Autonomous after approval)**: Full 12-item theory document `implicit-solvation-theory.md` (with GC-DFT readiness hooks), exact variational energy/potential/force derivation (including ionic Gaussian pseudo-charge reconciliation and NLCC core-cavity force analysis), SCCS vs. VASPsol/LPB comparison, generalized Poisson PCG vs. direct-minimization algorithm comparison (`algorithm-comparison.md`), and `dev08` external-oracle audit.
-  - **Gate 2 (Autonomous after approval)**: Isolated numerical prototype of the distributed FFT-preconditioned generalized Poisson / LPB solver + independent verification suite (Level-1 MMS $< 10^{-12}$, Born/Debye–Hückel analytic limits, exact $\epsilon_b = 1$ vacuum reduction, MPI rank independence) → `feasibility-report.md` with Go/Revise/Hold/Stop decision.
-- **Alternative Option (Option 2 — Track C First)**:
-  - Broaden `baandi-py`/`ase.py` ($k$-points, spin, FD) + typed fixed-$U_{\mathrm{ext}}$ / GEEP point-charge QM/MM seam + subtractive QM/MLIP prototype (SevenNet/MACE).
-- **Alternative Option (Option 3 — Track A First)**:
-  - Isolated mixed-basis (PW+AO) or adaptive orthogonalized local enrichment prototype crate outside `refscf` hot paths.
+- **Status**: **Approved by Research Lead (2026-11-28)** — Option 1 selected, with explicit directive to engineer high performance directly into new paths rather than merely defending against regression.
+- **Approved Scope**: Track B Phase B1 (Typed Electrostatic Seam + Density-Dependent Implicit Solvation via Generalized Poisson / LPB, with Phase B2 GC-DFT and Track C electrostatic readiness). Autonomous execution through Gate 1 → Gate 2 per Directive Section 10.1 using parallel subagents.
+
+### D-007 — Polarization-Potential Split & Exact $G=0$ Background Correction (2026-11-28)
+- **Status**: Adopted (Gate 1)
+- **Decision**: Keep BAANDI's `state.ionic`, `hartree.rs`, and `ewald.rs` unmodified; formulate solvation via the dual variational polarization-potential split $\Delta\phi_{\mathrm{pol}} = \phi_{\mathrm{solv}} - \phi_{\mathrm{vac}}$ plus exact background-uncompensation correction $E_{\mathrm{bg,corr}} = +(Q_{\mathrm{ion}} - N_e)\sum_I \alpha_{Z,I}^{\mathrm{sm}}$ (active gauge shift $-\sum_I \alpha_{Z,I}^{\mathrm{sm}}$ when $\kappa > 0$), using BAANDI's skew-adjoint Nyquist-zeroed derivative $D_a$ (`gga/distributed.rs`) for both $A$ and $L_0$.
+- **Rationale**: Proves zero double counting, exact $r_{c,I}$-invariance for neutral and charged cells, exact bit-identical vacuum reduction at $\epsilon_b = 1, \kappa = 0, \tau = 0$, and exact $\phi_{\mathrm{bulk}} = 0$ potential alignment for GC-DFT. See [implicit-solvation-theory.md](implicit-solvation-theory.md#4-mathematical-derivation-exact-baandi-conventions).
+
+### D-008 — Primary Solver Selection: Direct G-Space PCG with Real-Space & Mirror Pairing (2026-11-28)
+- **Status**: Adopted for Gate 2 Primary Arm (with Alg 2 & Alg 3 benchmarked alongside)
+- **Decision**: Select Direct G-space PCG (`SolverKind::DirectPcg`) with `np = 2` real-space complex pairing and BAANDI's default `mirror` stick unpacking (4 FFTs/iter, 0 setup FFTs/SCF step, strictly SPD, $\kappa_2(M^{-1}A) \le \epsilon_b$), plus 0-FFT bulk-delta warm-starting and adaptive inner tolerance. Implement `FisicaroPcg` (Alg 2) and `PolarizationDiis` (Alg 3) in the Gate 2 prototype for empirical head-to-head comparison on sharp $\epsilon_b = 78.4$ cavities.
+- **Evidence**: [algorithm-comparison.md](algorithm-comparison.md).
+
+### D-009 — Gate 2 Prototype Isolation Boundary (2026-11-28)
+- **Status**: Adopted (Gate 1 → Gate 2)
+- **Decision**: Develop the Gate 2 numerical prototype on an independent research branch (`research/track-b-gate2-proto`) inside an isolated submodule `crates/dft-physics/src/solvation/` with zero changes to `ownership.toml`, `Cargo.toml`, `dft-solvers`, or `dft-engine` (preserving pure-PW paths and `--no-default-features` green).
+
+### D-010 — External Solvation Oracle Status on `dev08` (2026-11-28)
+- **Status**: Recorded (Gate 1)
+- **Fact**: Direct inspection of `dev08` (`/scr/mino/oracles/`) confirmed QE 7.6 (`environ_api_stub.f90` only — Environ not compiled), ABINIT 10.8.3, and Yambo 5.3.0; JDFTx and GPAW are not installed. Gate 2 verification relies on independent L1/L2 exact mathematical, MMS, Born/Debye–Hückel, finite-difference, and MPI-parity oracles with pre-declared tolerances in [implicit-solvation-theory.md](implicit-solvation-theory.md#9-verification-plan-levels-15-pre-declared-tolerances).

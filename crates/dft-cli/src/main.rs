@@ -12,6 +12,8 @@ mod refscf_map;
 mod rpa;
 #[path = "subspace.rs"]
 mod subspace;
+#[path = "wannier.rs"]
+mod wannier;
 use dft_cli::checkpoint_io;
 #[path = "pseudo.rs"]
 mod pseudo;
@@ -173,6 +175,20 @@ enum Command {
         input: PathBuf,
         #[arg(long)]
         output_dir: Option<PathBuf>,
+    },
+    /// SCF followed by Wannier90 file export ([subspace] table; R4b): writes
+    /// <seedname>.win, .eig, .amn and .mmn with automatic B1 neighbor shells
+    /// or an optional external .nnkp file.
+    WannierExport {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        /// Wannier90 seedname (overrides [subspace].seedname; default "baandi").
+        #[arg(long)]
+        seedname: Option<String>,
+        /// Optional external <seedname>.nnkp neighbor list from `wannier90.x -pp`.
+        #[arg(long)]
+        nnkp: Option<PathBuf>,
     },
     /// SCF followed by a weighted fixed-density Gaussian density of states.
     Dos {
@@ -390,6 +406,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Dielectric { .. }
         | Command::Rpa { .. }
         | Command::Subspace { .. }
+        | Command::WannierExport { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -419,6 +436,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Dielectric { .. }
         | Command::Rpa { .. }
         | Command::Subspace { .. }
+        | Command::WannierExport { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
@@ -606,6 +624,12 @@ fn single_entry(cli: Cli, mpi: bool) -> Result<Resolved, String> {
             input,
             output_dir: None,
         },
+        task::TaskType::WannierExport => Command::WannierExport {
+            input,
+            output_dir: None,
+            seedname: None,
+            nnkp: None,
+        },
     };
     Ok(Resolved {
         command,
@@ -637,6 +661,9 @@ fn progress_session(
             input, output_dir, ..
         } => (input, output_dir.as_ref(), "rpa"),
         Command::Subspace { input, output_dir } => (input, output_dir.as_ref(), "subspace"),
+        Command::WannierExport {
+            input, output_dir, ..
+        } => (input, output_dir.as_ref(), "wannier-export"),
         _ => return Ok(None),
     };
     if no_progress || dft_cli::parallel::rank() > 0 {
@@ -677,6 +704,7 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
         | Command::Dielectric { input, .. }
         | Command::Rpa { input, .. }
         | Command::Subspace { input, .. }
+        | Command::WannierExport { input, .. }
         | Command::Dos { input, .. }
         | Command::Run { input, .. }
         | Command::Validate { input, .. }
@@ -742,6 +770,17 @@ fn dispatch(command: Command) -> (u8, Option<String>) {
         Command::Subspace { input, output_dir } => {
             Some(subspace::execute(input, output_dir.as_deref()))
         }
+        Command::WannierExport {
+            input,
+            output_dir,
+            seedname,
+            nnkp,
+        } => Some(wannier::execute(
+            input,
+            output_dir.as_deref(),
+            seedname.as_deref(),
+            nnkp.as_deref(),
+        )),
         Command::Nscf {
             input,
             output_dir,

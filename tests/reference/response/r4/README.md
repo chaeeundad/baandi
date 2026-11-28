@@ -25,6 +25,19 @@ window and orbital selectors).
 - Projected orbital populations versus QE `projwfc.x` within `1e-3` electrons.
 - Real-space hoppings `subspace_hr.dat` vs Wannier90 (with `num_iter = 0`, projection-only) within `1 meV`.
 
+## R4b: Wannier90 export (`.win/.eig/.amn/.mmn`) and gauge import (`_u.mat`/`_u_dis.mat`)
+
+### Oracle comparison (QE `pw2wannier90.x` + Wannier90 3.x on dev08)
+1. Run `baandi wannier-export <case>.toml --seedname <seed>` to generate `<seed>.win`, `<seed>.eig`, `<seed>.amn`, `<seed>.mmn`.
+2. Run `wannier90.x -pp <seed>` to generate `<seed>.nnkp`, then re-run `baandi wannier-export <case>.toml --seedname <seed> --nnkp <seed>.nnkp` so the neighbor table matches Wannier90 verbatim.
+3. Run `wannier90.x <seed>` on BAANDI's files and separately on QE `pw2wannier90.x` exports at identical cell, UPF, cutoff, k-mesh and band window.
+4. Import BAANDI's resulting `<seed>_u.mat` (+ `<seed>_u_dis.mat`) via `baandi subspace` (`[subspace] method = "wannier90"`) and verify `subspace_hr.dat` and spreads against Wannier90's `<seed>_hr.dat` and `<seed>.wout`.
+
+### Acceptance gates (plan Section 4)
+- `.amn`/`.mmn` elementwise `|M|` agreement vs QE `pw2wannier90.x` within `1e-5` (after band-phase alignment).
+- Final Wannier90 spreads within `1 %`.
+- `hr.dat` hoppings and Wannier-interpolated bands within `1 meV`.
+
 ## Status
-- **2026-11-28 (R4a)**: Numerical core (`dft_response::subspace`), engine driver (`dft_engine::response::subspace`), CLI (`baandi subspace`, `[task] type = "subspace"`) and synthetic/analytic gates implemented and verified locally on Mac. External `dev08` runs against QE `projwfc.x` and Wannier90 3.x pending.
-- **R4b** (`.win/.amn/.mmn/.eig` export and `_u.mat`/`_u_dis.mat` import): next ticket.
+- **2026-11-28 (R4a)**: Numerical core (`dft_response::subspace`), engine driver (`dft_engine::response::subspace`), CLI (`baandi subspace`, `[task] type = "subspace"`) and synthetic/analytic gates implemented and verified on dev08 (`b0967e88`, 136 binaries, 1118 passed, mpi+mkl PASS).
+- **2026-11-28 (R4b)**: Numerical core (`dft_response::wannier`), engine driver (`dft_engine::response::wannier`), CLI (`baandi wannier-export`, `[task] type = "wannier-export"`, `[subspace] method = "wannier90"`) implemented and verified. External `dev08` runs against QE `projwfc.x` / `pw2wannier90.x` and Wannier90 3.x pending.

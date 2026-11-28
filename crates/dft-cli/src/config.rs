@@ -2061,6 +2061,14 @@ pub struct Subspace {
     pub orbitals: Option<Vec<String>>,
     /// Multi-selector projection list (alternative to shorthand keys).
     pub projections: Vec<SubspaceProjection>,
+    /// R4b (`baandi wannier-export` / `method = "wannier90"`): Wannier90 seedname (default `"baandi"`).
+    pub seedname: Option<String>,
+    /// R4b (`baandi wannier-export`): optional `.nnkp` file written by `wannier90.x -pp`.
+    pub nnkp: Option<PathBuf>,
+    /// R4b (`method = "wannier90"`): directory holding `<seedname>_u.mat` (and optional `_u_dis.mat`).
+    pub wannier_dir: Option<PathBuf>,
+    /// R4b (`method = "wannier90"`): semi-unitarity tolerance `max |U^H U - I|` (default 1e-8).
+    pub gauge_tolerance: Option<f64>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -503,7 +503,7 @@ two k meshes about 4 to 8 h per material; ABINIT comparable.
 
 ### R4: projection and Wannier subspace
 
-Status 2026-11-28: **R4a implemented and internal gates verified** (`RPA-R4A-ATOMIC-PROJECTION`, ADR 0059 proposed): `dft_response::subspace`, `dft_engine::response::subspace`, `baandi subspace` / `[task] type = "subspace"` / `[subspace]`. External dev08 oracle runs (`projwfc.x` and Wannier90 3.x) documented in `tests/reference/response/r4/README.md` (pending). Next: **R4b** (Wannier90 `.win/.amn/.mmn/.eig` export and `_u.mat`/`_u_dis.mat` import).
+Status 2026-11-28: **R4a and R4b implemented and internal gates verified** (`RPA-R4A-ATOMIC-PROJECTION` ADR 0059 proposed; `RPA-R4B-WANNIER90` ADR 0060 proposed): `dft_response::{subspace,wannier}`, `dft_engine::response::{subspace,wannier}`, `baandi subspace` (`atomic-projection` and `wannier90` gauge import) and `baandi wannier-export` (`.win/.eig/.amn/.mmn`, standalone B1 shells and `--nnkp`). External dev08 oracle runs (`projwfc.x`, `pw2wannier90.x`, Wannier90 3.x) documented in `tests/reference/response/r4/README.md` (pending). Next: **R5** (cRPA).
 
 R4a: atomic projection with Loewdin, band window, hoppings in real space.
 R4b: Wannier90 file export and import of gauge matrices.

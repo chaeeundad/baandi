@@ -1078,7 +1078,9 @@ impl Solvation {
             solver: SolverConfig {
                 kind,
                 tolerance: self.tolerance.unwrap_or(defaults.solver.tolerance),
-                max_iterations: self.max_iterations.unwrap_or(defaults.solver.max_iterations),
+                max_iterations: self
+                    .max_iterations
+                    .unwrap_or(defaults.solver.max_iterations),
                 diis_history: defaults.solver.diis_history,
                 warm_start: self.warm_start.unwrap_or(defaults.solver.warm_start),
             },

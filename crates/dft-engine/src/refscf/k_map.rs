@@ -447,10 +447,10 @@ pub(super) fn evaluate<K: Collective>(
             state, comm, cell, functional, &density, cache,
         )?)
     };
-    let (hartree, xc, nlcc, out_solv) = output_fields.map_or(
-        (f64::NAN, f64::NAN, None, None),
-        |f| (f.hartree, f.xc, f.nlcc, f.solvation),
-    );
+    let (hartree, xc, nlcc, out_solv) = output_fields
+        .map_or((f64::NAN, f64::NAN, None, None), |f| {
+            (f.hartree, f.xc, f.nlcc, f.solvation)
+        });
     let ewald = state.ewald.energy.0;
     let mut band_form = band_sum - integrals[2] + hartree + xc + ewald;
     if let Some(s) = &out_solv {
@@ -585,28 +585,28 @@ pub(super) fn complete_audit<K: Collective>(
         )?;
         let fields = cached_fields(state, comm, cell, functional, &step.density, cache)?;
         let residual = residual_term(&step.solve.per_k, state, occupations);
-        let functional_difference_bound =
-            if let (Some(in_s), Some(out_s)) = (&step.input_fields.solvation, &fields.solvation) {
-                let l_solv = sum(
-                    comm,
-                    &[dv * step
-                        .density
-                        .iter()
-                        .zip(input)
-                        .zip(&in_s.v_solv)
-                        .map(|((a, b), v)| (a - b) * v)
-                        .sum::<f64>()],
-                )?[0];
-                (fields.hartree - step.input_fields.hartree - integrals[5]).abs()
-                    + (fields.xc - step.input_fields.xc - (integrals[4] - integrals[5] - l_solv))
-                        .abs()
-                    + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
-                    + residual
-            } else {
-                (fields.hartree - step.input_fields.hartree - integrals[5]).abs()
-                    + (fields.xc - step.input_fields.xc - (integrals[4] - integrals[5])).abs()
-                    + residual
-            };
+        let functional_difference_bound = if let (Some(in_s), Some(out_s)) =
+            (&step.input_fields.solvation, &fields.solvation)
+        {
+            let l_solv = sum(
+                comm,
+                &[dv * step
+                    .density
+                    .iter()
+                    .zip(input)
+                    .zip(&in_s.v_solv)
+                    .map(|((a, b), v)| (a - b) * v)
+                    .sum::<f64>()],
+            )?[0];
+            (fields.hartree - step.input_fields.hartree - integrals[5]).abs()
+                + (fields.xc - step.input_fields.xc - (integrals[4] - integrals[5] - l_solv)).abs()
+                + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
+                + residual
+        } else {
+            (fields.hartree - step.input_fields.hartree - integrals[5]).abs()
+                + (fields.xc - step.input_fields.xc - (integrals[4] - integrals[5])).abs()
+                + residual
+        };
         let e = &mut step.energy;
         e.kinetic = integrals[0];
         e.local = integrals[1];
@@ -644,30 +644,29 @@ pub(super) fn complete_audit<K: Collective>(
             ],
         )?;
         let residual = residual_term(&step.solve.per_k, state, occupations);
-        let functional_difference_bound =
-            if let (Some(in_s), Some(out_s)) = (&step.input_fields.solvation, &fields.solvation) {
-                let l_solv = sum(
-                    comm,
-                    &[dv * step
-                        .density
-                        .iter()
-                        .zip(input)
-                        .zip(&in_s.v_solv)
-                        .map(|((a, b), v)| (a - b) * v)
-                        .sum::<f64>()],
-                )?[0];
-                (fields.hartree - step.input_fields.hartree - differences[1]).abs()
-                    + (fields.xc
-                        - step.input_fields.xc
-                        - (differences[0] - differences[1] - l_solv))
-                        .abs()
-                    + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
-                    + residual
-            } else {
-                (fields.hartree - step.input_fields.hartree - differences[1]).abs()
-                    + (fields.xc - step.input_fields.xc - (differences[0] - differences[1])).abs()
-                    + residual
-            };
+        let functional_difference_bound = if let (Some(in_s), Some(out_s)) =
+            (&step.input_fields.solvation, &fields.solvation)
+        {
+            let l_solv = sum(
+                comm,
+                &[dv * step
+                    .density
+                    .iter()
+                    .zip(input)
+                    .zip(&in_s.v_solv)
+                    .map(|((a, b), v)| (a - b) * v)
+                    .sum::<f64>()],
+            )?[0];
+            (fields.hartree - step.input_fields.hartree - differences[1]).abs()
+                + (fields.xc - step.input_fields.xc - (differences[0] - differences[1] - l_solv))
+                    .abs()
+                + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
+                + residual
+        } else {
+            (fields.hartree - step.input_fields.hartree - differences[1]).abs()
+                + (fields.xc - step.input_fields.xc - (differences[0] - differences[1])).abs()
+                + residual
+        };
         let e = &mut step.energy;
         e.hartree = fields.hartree;
         e.xc = fields.xc;

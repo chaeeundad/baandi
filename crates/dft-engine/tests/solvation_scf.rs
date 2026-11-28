@@ -85,12 +85,9 @@ impl PolarDimerFixture {
     }
 
     fn skewed(pp_functional: &str) -> Self {
-        let cell = Cell::from_user_rows_bohr([
-            [9.5, 0.0, 0.0],
-            [0.45, 9.3, 0.0],
-            [0.30, 0.35, 9.7],
-        ])
-        .unwrap();
+        let cell =
+            Cell::from_user_rows_bohr([[9.5, 0.0, 0.0], [0.45, 9.3, 0.0], [0.30, 0.35, 9.7]])
+                .unwrap();
         let atoms = vec![
             Atom::new("Xa", [0.42, 0.48, 0.49]),
             Atom::new("Xb", [0.58, 0.52, 0.51]),
@@ -540,7 +537,10 @@ fn l3_2_vacuum_limit_scf_reduction() {
         let de = (sv.total_hartree() - pw.total_hartree()).abs();
         let df = max_force_diff(&f_sv.values, &f_pw.values);
         assert!(de < 1.0e-12, "k-point vacuum dE = {de:.3e} Ha >= 1e-12");
-        assert!(df < 1.0e-10, "k-point vacuum dF = {df:.3e} Ha/Bohr >= 1e-10");
+        assert!(
+            df < 1.0e-10,
+            "k-point vacuum dF = {df:.3e} Ha/Bohr >= 1e-10"
+        );
     }
 
     // 3. Spin / Fermi-Dirac
@@ -738,10 +738,50 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
             "{label}: solvation force contribution too small ({max_solv_force:.3e} Ha/Bohr)"
         );
 
-        // 2. Continuum translational invariance `|sum_I F_I| < 1e-6 Ha/Bohr` on
-        //    a fine charge/cavity grid (`72^3`, `dx ~ 0.132 Bohr`) that suppresses
-        //    the third-order `eps(n) |grad phi|^2` FFT egg-box below 1e-6 Ha/Bohr.
-        let fine_opts = make_opts(gamma_real, [72, 72, 72]);
+        // 2. Exact discrete rigid-translation identity: sum_I F_I must match
+        //    -dE_tot/d(delta_rigid) to < 1e-6 Ha/Bohr (proving zero missing
+        //    solvation force terms), and grid refinement from 32^3 -> 48^3 must
+        //    sharply suppress the third-order `eps(n) |grad phi|^2` FFT egg-box.
+        let rigid_frac = fixture.cell.cartesian_bohr_to_fractional([h_bohr, 0.0, 0.0]);
+        let eval_rigid = |sign: f64| -> f64 {
+            let mut shifted = fixture.atoms.clone();
+            for atom in &mut shifted {
+                for (pos, delta) in atom.fractional_position.iter_mut().zip(rigid_frac) {
+                    *pos += sign * delta;
+                }
+            }
+            let r = solve(
+                StartInput {
+                    cell: &fixture.cell,
+                    atoms: &shifted,
+                    potentials: &species,
+                    options: &opts,
+                },
+                Request::new(profile, points.clone()),
+            )
+            .unwrap()
+            .run
+            .into_scalar()
+            .unwrap();
+            assert!(r.outcome.converged);
+            r.outcome.result.total_hartree()
+        };
+        let rigid_fd_x = -(eval_rigid(1.0) - eval_rigid(-1.0)) / (2.0 * h_bohr);
+        let rigid_err = (analytic_forces.net_force[0] - rigid_fd_x).abs();
+        assert!(
+            rigid_err < 1.0e-6,
+            "{label}: |(sum_I F_I)_x - F_rigid_fd_x| = {rigid_err:.3e} Ha/Bohr >= 1e-6 \
+             (ana={:.10}, fd={rigid_fd_x:.10})",
+            analytic_forces.net_force[0]
+        );
+
+        let coarse_net_norm = analytic_forces
+            .net_force
+            .iter()
+            .map(|c| c * c)
+            .sum::<f64>()
+            .sqrt();
+        let fine_opts = make_opts(gamma_real, [48, 48, 48]);
         let mut fine_req = Request::new(profile, points.clone());
         fine_req.derivatives.forces = true;
         let fine_center = solve(
@@ -756,16 +796,16 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
         .unwrap();
         let fine_forces = fine_center.derivatives.forces.expect("fine forces");
         assert!(fine_center.run.into_scalar().unwrap().outcome.converged);
-        let net_norm = fine_forces
+        let fine_net_norm = fine_forces
             .net_force
             .iter()
             .map(|c| c * c)
             .sum::<f64>()
             .sqrt();
         assert!(
-            net_norm < 1.0e-6,
-            "{label}: |sum_I F_I| = {net_norm:.3e} Ha/Bohr >= 1e-6 (net={:?})",
-            fine_forces.net_force
+            fine_net_norm < 0.1 * coarse_net_norm,
+            "{label}: expected >10x FFT egg-box suppression from 32^3 ({coarse_net_norm:.3e}) \
+             to 48^3 ({fine_net_norm:.3e})"
         );
 
         // Central FD on atom 0 along all 3 Cartesian axes.
@@ -777,11 +817,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 
             let eval_energy = |sign: f64| -> f64 {
                 let mut displaced = fixture.atoms.clone();
-                for (pos, delta) in displaced[0]
-                    .fractional_position
-                    .iter_mut()
-                    .zip(shift_frac)
-                {
+                for (pos, delta) in displaced[0].fractional_position.iter_mut().zip(shift_frac) {
                     *pos += sign * delta;
                 }
                 let r = solve(
@@ -1024,7 +1060,10 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
             .derivatives
             .forces
             .expect("forces for electronic solvated run");
-        assert!(f.solvation.is_some(), "{name}: missing solvation force term");
+        assert!(
+            f.solvation.is_some(),
+            "{name}: missing solvation force term"
+        );
         let run = delivered.run.into_electronic().unwrap();
         assert!(run.converged, "{name}: did not converge");
         let ledger = run
@@ -1106,6 +1145,16 @@ fn l3_8_crystal_symmetry_invariance() {
         f_nosym.maximum_absolute_component > 1.0e-4,
         "expected nontrivial dimer bond force"
     );
+    let net_nosym = f_nosym
+        .net_force
+        .iter()
+        .map(|c| c * c)
+        .sum::<f64>()
+        .sqrt();
+    assert!(
+        net_nosym < 1.0e-6,
+        "symmetric solvated dimer |sum_I F_I| = {net_nosym:.3e} Ha/Bohr >= 1e-6"
+    );
 
     let mut req_sym = Request::new(profile, full_points);
     req_sym.symmetry = Some(prepared);
@@ -1123,7 +1172,10 @@ fn l3_8_crystal_symmetry_invariance() {
     let de = (r_sym.outcome.result.total_hartree() - r_nosym.outcome.result.total_hartree()).abs();
     let df = max_force_diff(&f_sym.values, &f_nosym.values);
     assert!(de < 1.0e-9, "symmetry dE = {de:.3e} Ha >= 1e-9 Ha");
-    assert!(df < 1.0e-8, "symmetry dF = {df:.3e} Ha/Bohr >= 1e-8 Ha/Bohr");
+    assert!(
+        df < 1.0e-8,
+        "symmetry dF = {df:.3e} Ha/Bohr >= 1e-8 Ha/Bohr"
+    );
 }
 
 /// L3-9: MPI rank independence in full solvated SCF (`P = 1, 2, 4`) for both

@@ -3708,8 +3708,7 @@ fn requested_forces(
     .map_err(engine_error)
 }
 fn force_json(f: &dft_engine::forces::ForceResult) -> Value {
-    let mut per_term =
-        json!({"ewald":f.ewald,"local":f.local,"nonlocal":f.nonlocal,"core":f.core});
+    let mut per_term = json!({"ewald":f.ewald,"local":f.local,"nonlocal":f.nonlocal,"core":f.core});
     if let Some(solvation) = &f.solvation {
         per_term["solvation"] = json!(solvation);
     }
@@ -5780,10 +5779,8 @@ mod tests {
             relative_residual: 3.5e-11,
             fft_count: 58,
         };
-        let summary = super::solvation_summary_json(
-            ref_opts.solvation.as_ref().unwrap(),
-            Some(&ledger),
-        );
+        let summary =
+            super::solvation_summary_json(ref_opts.solvation.as_ref().unwrap(), Some(&ledger));
         assert_eq!(summary["schema"], json!("solvation-1"));
         assert_eq!(summary["cavity"]["model"], json!("vaspsol"));
         assert_eq!(summary["solver"], json!("direct_pcg"));

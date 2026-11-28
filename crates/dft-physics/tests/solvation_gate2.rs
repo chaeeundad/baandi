@@ -905,7 +905,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 // eliminates both O((h/n_i)^6) truncation and f64 cancellation below
                 // 1e-10 Ha while staying strictly inside SCCS piecewise-smooth intervals.
                 let h = if n_i < 1.0e-5 {
-                    0.15 * n_i
+                    0.25 * n_i
                 } else {
                     match cavity {
                         CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
@@ -918,9 +918,8 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                                 let margin = (n_i - rho_min_bohr3).min(rho_max_bohr3 - n_i);
                                 (6.0e-3 * n_i).min(3.0e-6).min(0.25 * margin)
                             } else {
-                                let margin = (n_i - rho_min_bohr3)
-                                    .abs()
-                                    .min((n_i - rho_max_bohr3).abs());
+                                let margin =
+                                    (n_i - rho_min_bohr3).abs().min((n_i - rho_max_bohr3).abs());
                                 (1.5e-3 * n_i).min(2.0e-6).min(0.25 * margin)
                             }
                         }

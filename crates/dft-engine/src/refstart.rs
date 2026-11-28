@@ -3012,15 +3012,14 @@ pub fn start_kpoints_from_density<K: Collective>(
         WorkerPool::new(o.threads).map_err(err)?,
     )
     .map_err(err)?;
-    let solvation =
-        build_solvation_state(
-            cell,
-            dims,
-            input.atoms,
-            input.potentials,
-            o.solvation.as_deref().copied(),
-            comm,
-        )?;
+    let solvation = build_solvation_state(
+        cell,
+        dims,
+        input.atoms,
+        input.potentials,
+        o.solvation.as_deref().copied(),
+        comm,
+    )?;
     let common = StartState {
         report: StartReport {
             density: DensityStartKind::Supplied,

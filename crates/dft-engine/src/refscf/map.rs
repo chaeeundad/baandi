@@ -598,11 +598,7 @@ fn audit<K: Collective>(
     if let Some(s) = &input_fields.solvation {
         harris_foulkes += s.ledger.total_ha - s.v_solv_integral;
     }
-    let eig_bound: f64 = residuals
-        .iter()
-        .zip(occupations)
-        .map(|(r, f)| r * f)
-        .sum();
+    let eig_bound: f64 = residuals.iter().zip(occupations).map(|(r, f)| r * f).sum();
     let functional_difference_bound = if let (Some(in_s), Some(out_s)) =
         (&input_fields.solvation, &output_fields.solvation)
     {

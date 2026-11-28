@@ -5,13 +5,13 @@ pub mod model;
 pub mod oracle;
 #[cfg(feature = "strict-oracle")]
 pub mod scf;
+pub use energy::SolvationEnergyLedger;
+#[cfg(feature = "strict-oracle")]
+pub use model::SolvationConfig;
 #[cfg(not(feature = "strict-oracle"))]
 pub use model::*;
 #[cfg(feature = "strict-oracle")]
-pub use model::SolvationConfig;
-#[cfg(feature = "strict-oracle")]
 pub use scf::*;
-pub use energy::SolvationEnergyLedger;
 
 /// Stable input facade for clients; numerical implementations remain private to
 /// their owning crates. All faer calls use explicit `Par::Seq`, and FFTs are serial.

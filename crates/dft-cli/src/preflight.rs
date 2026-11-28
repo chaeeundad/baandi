@@ -635,10 +635,9 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         let dims = prepared.grid.dims();
         let max_dx = (0..3)
             .map(|a| {
-                let norm = (cols[0][a] * cols[0][a]
-                    + cols[1][a] * cols[1][a]
-                    + cols[2][a] * cols[2][a])
-                    .sqrt();
+                let norm =
+                    (cols[0][a] * cols[0][a] + cols[1][a] * cols[1][a] + cols[2][a] * cols[2][a])
+                        .sqrt();
                 norm / dims[a] as f64
             })
             .fold(0.0_f64, f64::max);

@@ -1966,10 +1966,9 @@ impl SolvationWorkspace {
         let dims = self.solver.engine.dims;
         (0..3)
             .map(|a| {
-                let norm = (cols[0][a] * cols[0][a]
-                    + cols[1][a] * cols[1][a]
-                    + cols[2][a] * cols[2][a])
-                    .sqrt();
+                let norm =
+                    (cols[0][a] * cols[0][a] + cols[1][a] * cols[1][a] + cols[2][a] * cols[2][a])
+                        .sqrt();
                 norm / dims[a] as f64
             })
             .fold(0.0_f64, f64::max)
@@ -2136,13 +2135,11 @@ impl SolvationWorkspace {
 
         let pp = self.plane_points();
         let ll = self.solver.engine.local_len();
-        let bad_shape =
-            density_planes.len() != pp || density_g.is_some_and(|dg| dg.len() != ll);
+        let bad_shape = density_planes.len() != pp || density_g.is_some_and(|dg| dg.len() != ll);
         let bad_nonfinite = !bad_shape
             && (density_planes.iter().any(|v| !v.is_finite())
-                || density_g.is_some_and(|dg| {
-                    dg.iter().any(|z| !z.re.is_finite() || !z.im.is_finite())
-                }));
+                || density_g
+                    .is_some_and(|dg| dg.iter().any(|z| !z.re.is_finite() || !z.im.is_finite())));
         let local_n_sum = if bad_shape || bad_nonfinite {
             0.0
         } else {

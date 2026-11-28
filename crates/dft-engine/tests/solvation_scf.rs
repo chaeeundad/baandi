@@ -691,9 +691,9 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
             Functional::LdaPz,
             Some(solv),
         );
-        // Well-resolved charge/cavity grid (`dx ~ 0.20 Bohr`) suppresses FFT
+        // Well-resolved charge/cavity grid (`dx ~ 0.17 Bohr`) suppresses FFT
         // egg-box below 1e-6 Ha/Bohr while keeping wavefunction Davidson fast.
-        opts.grid_override = Some([48, 48, 48]);
+        opts.grid_override = Some([56, 56, 56]);
         opts.density_tolerance = 1.0e-12;
         opts.energy_tolerance = 1.0e-13;
         opts.eigen_tolerance = 1.0e-12;
@@ -978,7 +978,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
 
     for (name, policy, bands, use_doublet) in cases {
         let opts = base_options(
-            4.0,
+            5.0,
             bands,
             threshold_ha,
             GammaReal::Off,
@@ -1061,10 +1061,10 @@ fn l3_8_crystal_symmetry_invariance() {
         "expected nontrivial symmetry operations"
     );
 
-    let threshold_ha = 5.0e-12;
+    let threshold_ha = 5.0e-14;
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
-    let opts = base_options(
+    let mut opts = base_options(
         5.0,
         4,
         threshold_ha,
@@ -1072,6 +1072,9 @@ fn l3_8_crystal_symmetry_invariance() {
         Functional::LdaPz,
         Some(solv),
     );
+    opts.density_tolerance = 1.0e-12;
+    opts.energy_tolerance = 1.0e-13;
+    opts.eigen_tolerance = 1.0e-12;
     let input = || StartInput {
         cell: &cell,
         atoms: &atoms,

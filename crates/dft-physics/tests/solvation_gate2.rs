@@ -864,8 +864,8 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
 
     let cfg = SolverConfig {
         kind: SolverKind::DirectPcg,
-        tolerance: 3.0e-15,
-        max_iterations: 500,
+        tolerance: 1.0e-15,
+        max_iterations: 600,
         diis_history: 8,
         warm_start: false,
     };
@@ -916,7 +916,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                         } => {
                             if n_i > rho_min_bohr3 && n_i < rho_max_bohr3 {
                                 let margin = (n_i - rho_min_bohr3).min(rho_max_bohr3 - n_i);
-                                (3.5e-3 * n_i).min(2.0e-6).min(0.40 * margin)
+                                (1.6e-3 * n_i).min(2.0e-6).min(0.40 * margin)
                             } else {
                                 let margin = (n_i - rho_min_bohr3)
                                     .abs()

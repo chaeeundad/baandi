@@ -16,6 +16,7 @@
 3. **Production Contract Preservation (ADR 0047)**: All production extensions target `refscf/` and `dft-physics` (or dedicated opt-in crates). Frozen `oracle/` default arithmetic is never altered, and `cargo check/clippy -p dft-engine --no-default-features` must stay green.
 4. **No Premature Universal Abstractions (Section 6.6)**: Do not introduce a monolithic multi-track "universal engine trait" or large core refactoring before concrete vertical implementations prove the minimal shared boundary.
 5. **Independent Verification & Licensing Hygiene (Sections 7 & 9)**: Independent verification (never relying solely on the implementing agent's self-check); never relax tolerances post-hoc to manufacture a pass; never copy GPL/LGPL source code (e.g., QE, Environ, Wannier90, ABINIT, Yambo [GPL]; ASE [LGPL-2.1+]). Implement physics kernels cleanly from published mathematical formulations under `[workspace.lints.rust] unsafe_code = "deny"`.
+6. **Formal Mathematical Verification via Lean 4 + Mathlib (User Rule, 2026-11-28; `AGENTS.md`)**: Formalize and machine-check core Level-1 mathematical theorems (variational stationarity, operator SPD/self-adjointness, sign/gauge and zero-double-counting identities, limiting-case reductions) under `formal/` using Lean 4 + Mathlib (`lake build`, zero `sorry`, zero custom axioms). Formal proofs complement Level 2–5 Rust numerical verification.
 
 ---
 
@@ -64,3 +65,17 @@
 ### D-010 — External Solvation Oracle Status on `dev08` (2026-11-28)
 - **Status**: Recorded (Gate 1)
 - **Fact**: Direct inspection of `dev08` (`/scr/mino/oracles/`) confirmed QE 7.6 (`environ_api_stub.f90` only — Environ not compiled), ABINIT 10.8.3, and Yambo 5.3.0; JDFTx and GPAW are not installed. Gate 2 verification relies on independent L1/L2 exact mathematical, MMS, Born/Debye–Hückel, finite-difference, and MPI-parity oracles with pre-declared tolerances in [implicit-solvation-theory.md](implicit-solvation-theory.md#9-verification-plan-levels-15-pre-declared-tolerances).
+
+### D-011 — Adopt Lean 4 + Mathlib for Level-1 Mathematical Verification (2026-11-28)
+- **Status**: Adopted & Verified (User Directive, recorded in `AGENTS.md`)
+- **Decision**: Formalize Level-1 mathematical identities (variational stationarity, discrete skew-adjoint SPD operator $A = \sum_a D_a^\top \epsilon D_a + \kappa^2 \succeq 0$, analytic `HasDerivAt` cavity switching derivatives, algebraic $G=0$ double-counting/width-invariance cancellation, and Bregman/spin-chain-rule identities) in Lean 4 + Mathlib under `formal/BaandiMath/`.
+- **Evidence**: `elan` + Lean `v4.36.0` + Lake `v5.0.0` provisioned on `dev08`; all 24 theorems in `formal/BaandiMath/BaandiMath/Solvation.lean` pass `lake build` (`exit 0`, zero `sorry`, `#print axioms` strictly `[propext, Classical.choice, Quot.sound]`).
+
+### D-012 — Track B Gate 2 Exit Decision: `Revise` Cycle Completed → Go to Gate 3 with Dual-Solver Strategy (2026-11-28)
+- **Status**: Executed (Autonomous within approved Track B scope per Directive Section 10.1; independently audited by `Gate 2 Quality Auditor`)
+- **Decision**: **Go → Gate 3 (Architecture Proposal)** with explicit waiver of Gate 1 Criterion 2–3 standalone iteration targets (`<= 35` cold / `<= 10` warm) following a completed `Revise` exploration (`M_split^{-1}` and single-shot `HybridFisicaroDirect` negative results). Adopt `DirectPcg` as the default exact discrete variational solver (strictly SPD, `< 1e-10 Ha` FD variational derivatives on every grid, `1.5e-16 Ha` MPI parity, `0.3 mHa` grid accuracy already at `32^3`) and retain `FisicaroPcg` as a grid-resolution-guarded (`max_dx <= 0.25 Bohr`) high-speed opt-in accelerator (2.74×–5.27× cold / 1.85×–2.70× adaptive warm speedup on sharp cavities, 7.9×–12.7× on smooth MMS, 2 FFTs/iter, automatic `DirectPcg` fallback on breakdown). Real-SCF-map `< 5%` wall-time verification and Flexible-PCG acceleration R&D are assigned to Gate 4.
+- **Evidence**: [feasibility-report.md](feasibility-report.md), `research/track-b-gate2-proto` (`ee0a183a` full `dev08` `gate.sh`: `GATE_DONE check_rc=0 hard=0 known_platform=0 new=0`, `140 binaries, 1134 passed`; strict audit-hardened `bf8e8c3f`: 24/24 Lean 4 theorems, 3/3 unit + 8/8 independent L1/L2 tests passing all exact pre-declared tolerances with zero relaxation).
+
+### D-013 — Track B Gate 3 Architecture Approval (Autonomous Progression to Gate 4 Research Branch) (2026-11-28)
+- **Status**: Executed (Autonomous within approved Track B scope per Directive Section 10.1; Gate 5 production merge still requires Research Lead sign-off)
+- **Decision**: Advance to **Gate 4 (Experimental SCF Integration)** on isolated research branch `research/track-b-gate4-scf` following [architecture-proposal.md](architecture-proposal.md), [verification-plan.md](verification-plan.md), [benchmark-plan.md](benchmark-plan.md), and draft [ADR 0061](../../decisions/0061-typed-electrostatics-and-solvation-seam.md). Enforce zero changes to `ownership.toml`, `Cargo.toml`, `Distributed*Hamiltonian::apply_block`, `ref_davidson*`, and `oracle/`, fail-closed Phase B1 stress, and bit-identical pure-PW off-path execution.

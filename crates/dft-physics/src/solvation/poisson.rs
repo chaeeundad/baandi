@@ -1962,12 +1962,14 @@ impl SolvationWorkspace {
     /// Used to guard `SolverKind::FisicaroPcg`, whose product-rule aliasing error
     /// decays below `1e-5 Ha` once `max_grid_spacing_bohr() <= 0.25` Bohr.
     pub fn max_grid_spacing_bohr(&self) -> f64 {
-        let rows = self.solver.engine.cell.lattice_rows_bohr();
+        let cols = self.solver.engine.cell.lattice_columns_bohr();
         let dims = self.solver.engine.dims;
         (0..3)
             .map(|a| {
-                let v = rows[a];
-                let norm = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                let norm = (cols[0][a] * cols[0][a]
+                    + cols[1][a] * cols[1][a]
+                    + cols[2][a] * cols[2][a])
+                    .sqrt();
                 norm / dims[a] as f64
             })
             .fold(0.0_f64, f64::max)

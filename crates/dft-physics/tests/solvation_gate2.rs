@@ -907,7 +907,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let h = if n_i < 5.0e-5 {
                     (0.20 * n_i).min(4.0e-6)
                 } else {
-                    2.5e-6
+                    (2.0e-3 * n_i).min(2.0e-6)
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
@@ -1010,7 +1010,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let h = if n_i < 5.0e-5 {
                     (0.20 * n_i).min(4.0e-6)
                 } else {
-                    2.5e-6
+                    (2.0e-3 * n_i).min(2.0e-6)
                 };
                 assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
 

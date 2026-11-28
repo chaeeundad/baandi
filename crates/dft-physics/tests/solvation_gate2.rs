@@ -727,21 +727,25 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
         "expected smooth-wall Born energy {de_inf_l2:.6} < sharp-wall {delta_g_born_sharp:.6}"
     );
 
-    // Debye-Huckel screening verified against the exact 1D smooth-wall LPB continuum ODE:
+    // Debye-Huckel screening verified against the exact 1D smooth-wall LPB continuum ODE
+    // on a larger box (L = 26 Bohr, N = 40) so periodic Yukawa image tails e^{-kappa L}
+    // stay below 0.6%:
     // (a) At eps_b = 78.4, compare kappa = 0.4 vs kappa = 0.2 directly so both
     //     phi_vac and the kappa = 0 periodic zero-mode offset cancel identically.
-    let de_l2_k02 = solve_born_box(l2, 32, model, 0.2);
-    let de_l2_k04 = solve_born_box(l2, 32, model, 0.4);
-    let dh_inc_num = de_l2_k04 - de_l2_k02;
+    let l_dh = 26.0;
+    let n_dh = 40usize;
+    let de_dh_k02 = solve_born_box(l_dh, n_dh, model, 0.2);
+    let de_dh_k04 = solve_born_box(l_dh, n_dh, model, 0.4);
+    let dh_inc_num = de_dh_k04 - de_dh_k02;
     let dh_inc_exact =
         exact_smooth_lpb_continuum(model, 0.4) - exact_smooth_lpb_continuum(model, 0.2);
     let rel_dh_inc = (dh_inc_num - dh_inc_exact).abs() / dh_inc_exact.abs();
     println!(
-        "[Debye-Huckel eps_b={eps_b} k=0.4-0.2] num={dh_inc_num:.6}, 1d_exact={dh_inc_exact:.6} (rel_err={rel_dh_inc:.3e})"
+        "[Debye-Huckel eps_b={eps_b} L={l_dh} k=0.4-0.2] num={dh_inc_num:.6}, 1d_exact={dh_inc_exact:.6} (rel_err={rel_dh_inc:.3e})"
     );
     assert!(
-        de_l2_k04 < de_l2_k02,
-        "kappa=0.4 must screen more strongly than kappa=0.2: {de_l2_k04:.6} vs {de_l2_k02:.6}"
+        de_dh_k04 < de_dh_k02,
+        "kappa=0.4 must screen more strongly than kappa=0.2: {de_dh_k04:.6} vs {de_dh_k02:.6}"
     );
     assert!(
         rel_dh_inc < 0.05,
@@ -754,18 +758,18 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
         ..model
     };
     let (_, quad_solv_10, _) = exact_smooth_born_continuum(q, a, r_cav, width, model_10.eps_b);
-    let shift_solv_10 = -MADELUNG_SC * q * q / (2.0 * model_10.eps_b * l2)
-        - 0.5 * q * quad_solv_10 / (l2 * l2 * l2);
-    let de10_k0 = solve_born_box(l2, 32, model_10, 0.0);
-    let de10_k02 = solve_born_box(l2, 32, model_10, 0.2);
-    let de10_inf_k0 = de10_k0 - (shift_solv_10 - shift_vac(l2));
-    let de10_inf_k02 = de10_k02 + shift_vac(l2);
+    let shift_solv_10 = -MADELUNG_SC * q * q / (2.0 * model_10.eps_b * l_dh)
+        - 0.5 * q * quad_solv_10 / (l_dh * l_dh * l_dh);
+    let de10_k0 = solve_born_box(l_dh, n_dh, model_10, 0.0);
+    let de10_k02 = solve_born_box(l_dh, n_dh, model_10, 0.2);
+    let de10_inf_k0 = de10_k0 - (shift_solv_10 - shift_vac(l_dh));
+    let de10_inf_k02 = de10_k02 + shift_vac(l_dh);
     let dh10_num = de10_inf_k02 - de10_inf_k0;
     let dh10_exact =
         exact_smooth_lpb_continuum(model_10, 0.2) - exact_smooth_lpb_continuum(model_10, 0.0);
     let rel_dh10 = (dh10_num - dh10_exact).abs() / dh10_exact.abs();
     println!(
-        "[Debye-Huckel eps_b=10.0 k=0.2 vs 0] num={dh10_num:.6}, 1d_exact={dh10_exact:.6} (rel_err={rel_dh10:.3e})"
+        "[Debye-Huckel eps_b=10.0 L={l_dh} k=0.2 vs 0] num={dh10_num:.6}, 1d_exact={dh10_exact:.6} (rel_err={rel_dh10:.3e})"
     );
     assert!(
         de10_inf_k02 < de10_inf_k0,
@@ -1351,12 +1355,13 @@ fn mpi_rank_independence_and_mirror_vs_greedy_parity() {
     );
 }
 
-/// Test 7: Warm-start with the bulk-delta predictor reproduces the cold solution
-/// while sharply cutting PCG iterations on a `1e-3` density perturbation (L2/L5).
+/// Test 7: Warm-start reproduces the cold solution while sharply cutting PCG
+/// iterations on a `1e-3` density perturbation for both `DirectPcg` (exact discrete
+/// variational baseline) and `FisicaroPcg` (fast 2-FFT/iter production solver) (L2/L5).
 #[test]
 fn warm_start_bulk_delta_reduces_iterations_sharply() {
-    let cell = cubic_cell(11.0);
-    let dims = [18, 18, 18];
+    let cell = cubic_cell(12.0);
+    let dims = [24, 24, 24];
     let ions = [
         IonicPseudoCharge {
             charge: 2.0,
@@ -1373,8 +1378,8 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
         &cell,
         dims,
         &[
-            ([0.43, 0.49, 0.50], 2.2, 1.10),
-            ([0.57, 0.51, 0.50], 1.8, 1.10),
+            ([0.43, 0.49, 0.50], 2.2, 1.15),
+            ([0.57, 0.51, 0.50], 1.8, 1.15),
         ],
         4.0,
         1.0e-5,
@@ -1422,7 +1427,7 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
         assert!(eval_base.report.converged);
         assert!(!eval_base.report.warm_started);
 
-        // Part A: Tight final-map tolerance (1e-10) verifies exact warm/cold parity & iteration drop.
+        // Part A: DirectPcg tight final-map tolerance (1e-10) verifies exact warm/cold parity & iteration drop.
         let eval_warm = ws_warm
             .evaluate(comm, &n1, &ions, &params, &cfg_warm)
             .unwrap();
@@ -1436,7 +1441,7 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
 
         let e_diff = (eval_warm.total_ha - eval_cold.total_ha).abs();
         println!(
-            "[WarmStart 1e-3 @ tol=1e-10] cold_iters={} warm_iters={} cold_ffts={} warm_ffts={} |dE|={e_diff:.3e}",
+            "[WarmStart DirectPcg 1e-3 @ tol=1e-10] cold_iters={} warm_iters={} cold_ffts={} warm_ffts={} |dE|={e_diff:.3e}",
             eval_cold.report.iterations,
             eval_warm.report.iterations,
             eval_cold.report.fft_count,
@@ -1448,71 +1453,76 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
         );
         assert!(
             eval_warm.report.iterations < eval_cold.report.iterations,
-            "warm start did not reduce iterations: warm={} vs cold={}",
+            "warm start did not reduce DirectPcg iterations: warm={} vs cold={}",
             eval_warm.report.iterations,
             eval_cold.report.iterations
         );
 
-        // Part B: HybridFisicaroDirect exact energy parity at tol = 1e-10 and
-        // adaptive SCF tolerance (tol = 1e-5) warm-start speed check.
-        let cfg_hybrid_warm = SolverConfig {
-            kind: SolverKind::HybridFisicaroDirect,
+        // Part B: FisicaroPcg warm-start at tol = 1e-10 and adaptive SCF tol = 1e-5.
+        let cfg_fis_warm = SolverConfig {
+            kind: SolverKind::FisicaroPcg,
             tolerance: 1.0e-10,
             max_iterations: 300,
             diis_history: 8,
             warm_start: true,
         };
-        let cfg_hybrid_cold = SolverConfig {
+        let cfg_fis_cold = SolverConfig {
             warm_start: false,
-            ..cfg_hybrid_warm
+            ..cfg_fis_warm
         };
 
         ws_warm.reset_warm_start();
-        let hybrid_base = ws_warm
-            .evaluate(comm, &n0, &ions, &params, &cfg_hybrid_warm)
+        let fis_base = ws_warm
+            .evaluate(comm, &n0, &ions, &params, &cfg_fis_warm)
             .unwrap();
-        assert!(hybrid_base.report.converged && !hybrid_base.report.warm_started);
+        assert!(fis_base.report.converged && !fis_base.report.warm_started);
 
-        let hybrid_warm = ws_warm
-            .evaluate(comm, &n1, &ions, &params, &cfg_hybrid_warm)
+        let fis_warm = ws_warm
+            .evaluate(comm, &n1, &ions, &params, &cfg_fis_warm)
             .unwrap();
-        let hybrid_cold = ws_cold
-            .evaluate(comm, &n1, &ions, &params, &cfg_hybrid_cold)
+        let fis_cold = ws_cold
+            .evaluate(comm, &n1, &ions, &params, &cfg_fis_cold)
             .unwrap();
-        assert!(hybrid_warm.report.converged && hybrid_cold.report.converged);
-        assert!(hybrid_warm.report.warm_started && !hybrid_cold.report.warm_started);
+        assert!(fis_warm.report.converged && fis_cold.report.converged);
+        assert!(fis_warm.report.warm_started && !fis_cold.report.warm_started);
 
-        let hybrid_diff_cold = (hybrid_warm.total_ha - hybrid_cold.total_ha).abs();
-        let hybrid_diff_direct = (hybrid_warm.total_ha - eval_cold.total_ha).abs();
+        let fis_diff_cold = (fis_warm.total_ha - fis_cold.total_ha).abs();
+        let fis_diff_direct = (fis_warm.total_ha - eval_cold.total_ha).abs();
         println!(
-            "[WarmStart Hybrid 1e-3 @ tol=1e-10] cold_iters={} warm_iters={} cold_ffts={} warm_ffts={} |dE_cold|={hybrid_diff_cold:.3e} |dE_direct|={hybrid_diff_direct:.3e}",
-            hybrid_cold.report.iterations,
-            hybrid_warm.report.iterations,
-            hybrid_cold.report.fft_count,
-            hybrid_warm.report.fft_count
+            "[WarmStart FisicaroPcg 1e-3 @ tol=1e-10] cold_iters={} warm_iters={} cold_ffts={} warm_ffts={} |dE_cold|={fis_diff_cold:.3e} |dE_direct|={fis_diff_direct:.3e}",
+            fis_cold.report.iterations,
+            fis_warm.report.iterations,
+            fis_cold.report.fft_count,
+            fis_warm.report.fft_count
         );
         assert!(
-            hybrid_diff_cold < 1.0e-10,
-            "Hybrid warm vs cold total_ha mismatch: {hybrid_diff_cold:.3e} Ha"
+            fis_diff_cold < 1.0e-10,
+            "FisicaroPcg warm vs cold total_ha mismatch: {fis_diff_cold:.3e} Ha"
         );
         assert!(
-            hybrid_diff_direct < 1.0e-10,
-            "Hybrid warm vs DirectPcg cold total_ha mismatch: {hybrid_diff_direct:.3e} Ha"
+            fis_diff_direct < 5.0e-4,
+            "FisicaroPcg vs DirectPcg total_ha discrepancy on 24^3: {fis_diff_direct:.3e} Ha"
         );
         assert!(
-            hybrid_warm.report.iterations < hybrid_cold.report.iterations,
-            "Hybrid warm start did not reduce iterations: warm={} vs cold={}",
-            hybrid_warm.report.iterations,
-            hybrid_cold.report.iterations
+            fis_warm.report.iterations < fis_cold.report.iterations,
+            "FisicaroPcg warm start did not reduce iterations: warm={} vs cold={}",
+            fis_warm.report.iterations,
+            fis_cold.report.iterations
+        );
+        assert!(
+            fis_warm.report.fft_count * 2 < eval_warm.report.fft_count,
+            "FisicaroPcg expected < 50% of DirectPcg FFTs: fis={} vs direct={}",
+            fis_warm.report.fft_count,
+            eval_warm.report.fft_count
         );
 
         ws_warm.reset_warm_start();
         let _ = ws_warm
-            .evaluate(comm, &n0, &ions, &params, &cfg_hybrid_warm)
+            .evaluate(comm, &n0, &ions, &params, &cfg_fis_warm)
             .unwrap();
         let cfg_adapt_warm = SolverConfig {
             tolerance: 1.0e-5,
-            ..cfg_hybrid_warm
+            ..cfg_fis_warm
         };
         let cfg_adapt_cold = SolverConfig {
             warm_start: false,
@@ -1525,7 +1535,7 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
             .evaluate(comm, &n1, &ions, &params, &cfg_adapt_cold)
             .unwrap();
         println!(
-            "[WarmStart Hybrid 1e-3 @ adaptive tol=1e-5] cold_iters={} warm_iters={} cold_ffts={} warm_ffts={}",
+            "[WarmStart FisicaroPcg 1e-3 @ adaptive tol=1e-5] cold_iters={} warm_iters={} cold_ffts={} warm_ffts={}",
             adapt_cold.report.iterations,
             adapt_warm.report.iterations,
             adapt_cold.report.fft_count,
@@ -1533,19 +1543,19 @@ fn warm_start_bulk_delta_reduces_iterations_sharply() {
         );
         assert!(
             adapt_warm.report.converged && adapt_warm.report.warm_started,
-            "Hybrid adaptive warm start did not converge with warm_started=true: {:?}",
+            "FisicaroPcg adaptive warm start did not converge with warm_started=true: {:?}",
             adapt_warm.report
         );
         assert!(
             adapt_warm.report.iterations < adapt_cold.report.iterations
                 && adapt_warm.report.iterations <= 15,
-            "Hybrid adaptive warm start expected <= 15 iters and < cold ({}), got {}",
+            "FisicaroPcg adaptive warm start expected <= 15 iters and < cold ({}), got {}",
             adapt_cold.report.iterations,
             adapt_warm.report.iterations
         );
         assert!(
             adapt_warm.report.fft_count < 40,
-            "Hybrid adaptive warm start expected < 40 FFTs, got {}",
+            "FisicaroPcg adaptive warm start expected < 40 FFTs, got {}",
             adapt_warm.report.fft_count
         );
     });

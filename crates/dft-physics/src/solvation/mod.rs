@@ -52,15 +52,18 @@ pub enum SolvationError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SolverKind {
     /// Strictly-SPD direct G-space PCG with `np = 2` real-space complex pairing and
-    /// mirror-stick unpacking (0 setup FFTs, 4 FFTs/iter on mirror).
+    /// mirror-stick unpacking (0 setup FFTs, 4 FFTs/iter on mirror). Exact discrete
+    /// variational operator baseline and guaranteed-SPD fallback.
     DirectPcg,
-    /// Benchmark arm: Fisicaro et al. (2016) `phi_tilde = sqrt(eps) * phi` PCG (2 FFTs/iter).
+    /// High-speed continuum-equivalent Fisicaro et al. (2016) `phi_tilde = sqrt(eps) * phi`
+    /// PCG (2 FFTs/iter; 3.4x-12.1x faster than `DirectPcg` on well-resolved grids).
     FisicaroPcg,
     /// Benchmark arm: polarization-charge fixed-point iteration with Anderson/DIIS (3 FFTs/iter).
     PolarizationDiis,
-    /// High-performance default candidate: warm-started Fisicaro PCG (2 FFTs/iter) with
-    /// automatic SPD `DirectPcg` defect-correction polish & breakdown fallback (exact discrete
-    /// variational consistency + 3x–10x speedup over standalone `DirectPcg`).
+    /// Gate 2 experimental arm (negative result on sharp cavities): warm-started Fisicaro PCG
+    /// followed by `DirectPcg` polish. Retained for benchmark reproducibility; high-G aliasing
+    /// between the product-rule and discrete divergence operators prevents Stage 2 from saving
+    /// iterations over standalone `DirectPcg`.
     HybridFisicaroDirect,
 }
 

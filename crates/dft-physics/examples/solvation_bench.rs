@@ -248,6 +248,8 @@ fn benchmark_vaspsol_grid(n_axis: usize) {
             let n_1e3 = perturb_density(&n0, &owned, dims, 1.0e-3);
             let n_1e5 = perturb_density(&n0, &owned, dims, 1.0e-5);
 
+            let mut direct_cold_ha: Option<f64> = None;
+
             for kind in solvers {
                 ws.reset_warm_start();
                 let cfg_cold = SolverConfig {
@@ -258,15 +260,26 @@ fn benchmark_vaspsol_grid(n_axis: usize) {
                     warm_start: false,
                 };
                 let t0 = Instant::now();
-                let cold_outcome = ws
-                    .evaluate(comm, &n0, &ions, &params, &cfg_cold)
-                    .map(|e| e.report);
+                let cold_eval = ws.evaluate(comm, &n0, &ions, &params, &cfg_cold);
                 let cold_ms = t0.elapsed().as_secs_f64() * 1.0e3;
+                if let Ok(ref ev) = cold_eval {
+                    if kind == SolverKind::DirectPcg {
+                        direct_cold_ha = Some(ev.total_ha);
+                    } else if let Some(ref_ha) = direct_cold_ha {
+                        let d_ha = (ev.total_ha - ref_ha).abs();
+                        eprintln!(
+                            "[OperatorParity {n_axis}^3 kappa={kappa:.2} {}] E={:.10} Ha, |E - E_direct|={d_ha:.3e} Ha",
+                            solver_label(kind),
+                            ev.total_ha
+                        );
+                    }
+                }
+                let cold_outcome = cold_eval.map(|e| e.report);
                 println!(
                     "{}",
                     format_report_row(
                         n_axis,
-                        "VASPsol(water)",
+                        "VASPsol-erfc(water)",
                         kappa,
                         kind,
                         "cold",
@@ -283,19 +296,32 @@ fn benchmark_vaspsol_grid(n_axis: usize) {
                         diis_history: 8,
                         warm_start: true,
                     };
-                    for (mode, n_pert) in [("warm(1e-3)", &n_1e3), ("warm(1e-5)", &n_1e5)] {
+                    for (mode, n_pert, tol) in [
+                        ("warm(1e-3)", &n_1e3, 1.0e-10),
+                        ("warm(1e-5)", &n_1e5, 1.0e-10),
+                        ("warm(1e-3)@1e-5", &n_1e3, 1.0e-5),
+                    ] {
+                        if tol > 1.0e-9
+                            && !matches!(kind, SolverKind::DirectPcg | SolverKind::FisicaroPcg)
+                        {
+                            continue;
+                        }
                         ws.reset_warm_start();
                         if ws.evaluate(comm, &n0, &ions, &params, &cfg_warm).is_ok() {
+                            let cfg_run = SolverConfig {
+                                tolerance: tol,
+                                ..cfg_warm
+                            };
                             let tw = Instant::now();
                             let w_res = ws
-                                .evaluate(comm, n_pert, &ions, &params, &cfg_warm)
+                                .evaluate(comm, n_pert, &ions, &params, &cfg_run)
                                 .map(|e| e.report);
                             let w_ms = tw.elapsed().as_secs_f64() * 1.0e3;
                             println!(
                                 "{}",
                                 format_report_row(
                                     n_axis,
-                                    "VASPsol(water)",
+                                    "VASPsol-erfc(water)",
                                     kappa,
                                     kind,
                                     mode,
@@ -314,7 +340,7 @@ fn benchmark_vaspsol_grid(n_axis: usize) {
 fn benchmark_mpi_scaling(grids: &[usize]) {
     println!();
     println!(
-        "## Simulated MPI Scaling & Parity (`DirectPcg` & `HybridFisicaroDirect`, VASPsol water, `kappa = 0.15`)"
+        "## Simulated MPI Scaling & Parity (`DirectPcg` & `FisicaroPcg`, VASPsol-erfc water, `kappa = 0.15`)"
     );
     println!();
     println!(
@@ -346,7 +372,7 @@ fn benchmark_mpi_scaling(grids: &[usize]) {
         let dims = [n_axis, n_axis, n_axis];
         let global_n0 = build_global_molecular_density(&cell, dims, 4.0);
 
-        for kind in [SolverKind::DirectPcg, SolverKind::HybridFisicaroDirect] {
+        for kind in [SolverKind::DirectPcg, SolverKind::FisicaroPcg] {
             let cfg = SolverConfig {
                 kind,
                 tolerance: 1.0e-10,

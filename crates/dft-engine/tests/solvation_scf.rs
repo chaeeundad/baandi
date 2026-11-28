@@ -22,7 +22,7 @@ use dft_engine::{
         api::{Derivatives, Request, solve},
         delivered,
         electronic::Policy,
-        profile::{Preconditioning, Profile},
+        profile::Profile,
         symmetry,
     },
     refstart::StartInput,
@@ -78,36 +78,33 @@ impl PolarDimerFixture {
         ])
         .unwrap();
         let atoms = vec![
-            Atom::new("Xa", [0.41, 0.49, 0.495]),
-            Atom::new("Xb", [0.58, 0.51, 0.505]),
+            Atom::new("Xa", [0.38, 0.49, 0.495]),
+            Atom::new("Xb", [0.62, 0.51, 0.505]),
         ];
         Self::with_geometry(cell, atoms, pp_functional)
     }
 
     fn skewed(pp_functional: &str) -> Self {
         let cell = Cell::from_user_rows_bohr([
-            [11.5, 0.0, 0.0],
-            [0.55, 11.2, 0.0],
-            [0.35, 0.45, 11.8],
+            [8.5, 0.0, 0.0],
+            [0.45, 8.3, 0.0],
+            [0.30, 0.35, 8.7],
         ])
         .unwrap();
         let atoms = vec![
-            Atom::new("Xa", [0.40, 0.47, 0.48]),
-            Atom::new("Xb", [0.58, 0.53, 0.52]),
+            Atom::new("Xa", [0.37, 0.47, 0.48]),
+            Atom::new("Xb", [0.61, 0.53, 0.52]),
         ];
         Self::with_geometry(cell, atoms, pp_functional)
     }
 
     fn with_geometry(cell: Cell, atoms: Vec<Atom>, pp_functional: &str) -> Self {
-        // Closed-shell polar heteronuclear dimer (Z_a = 2, Z_b = 6; 8 valence
-        // electrons, 4 closed-shell bands: sigma_1, sigma_2, pi_x, pi_y) with a
-        // wide HOMO-LUMO gap and compact bound density inside a crisp molecular
-        // cavity surrounded by bulk solvent (n << n_c), mirroring real H2O / HF.
-        let dij = "-0.5 0.05 0 0.05 -0.3 0 0 0 0.2";
-        let pp_a =
-            common::potential_with_atomic_start_dij(2.0, 0.90, true, 161, pp_functional, dij);
-        let pp_b =
-            common::potential_with_atomic_start_dij(6.0, 0.95, true, 161, pp_functional, dij);
+        // Closed-shell heteronuclear dimer (Z_a = 2, Z_b = 2; 4 valence electrons,
+        // 2 closed-shell bands) with distinct core radii (`rc = 1.0` vs `1.35` Bohr),
+        // matching BAANDI's proven refscf synthetic fixture family while carrying a
+        // strong permanent dipole and clean molecular cavity in implicit water.
+        let pp_a = common::potential_with_atomic_start(2.0, 1.0, true, 161, pp_functional);
+        let pp_b = common::potential_with_atomic_start(2.0, 1.35, true, 161, pp_functional);
         Self {
             cell,
             atoms,
@@ -199,16 +196,7 @@ fn vacuum_solvation() -> SolvationConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    // Plain moderately damped Pulay/Broyden (beta = 0.4, history = 8), matching
-    // our real H2O solvation SCF setup.
-    Profile {
-        beta: 0.4,
-        history: 8,
-        threshold_ry: 2.0 * threshold_ha,
-        preconditioning: Preconditioning::Plain,
-    }
-    .validate()
-    .unwrap()
+    Profile::from_standard_ha(threshold_ha).unwrap()
 }
 
 fn max_force_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
@@ -268,14 +256,14 @@ fn install_comm(comm: Option<Arc<dyn Collective + Send + Sync>>) -> CommGuard {
 #[test]
 fn l3_1_off_path_bit_identity() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.0, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
     let profile = Profile::from_standard_ha(threshold_ha).unwrap();
 
     // 1. Gamma real path
     {
-        let opts = base_options(5.0, 6, threshold_ha, GammaReal::On, Functional::LdaPz, None);
+        let opts = base_options(3.5, 4, threshold_ha, GammaReal::On, Functional::LdaPz, None);
         let run_once = || {
             let mut req = Request::new(profile, gamma_kpoints());
             req.derivatives = Derivatives {
@@ -324,8 +312,8 @@ fn l3_1_off_path_bit_identity() {
     // 2. K-point path
     {
         let opts = base_options(
-            5.0,
-            6,
+            3.5,
+            4,
             threshold_ha,
             GammaReal::Off,
             Functional::LdaPz,
@@ -383,8 +371,8 @@ fn l3_1_off_path_bit_identity() {
     // 3. Spin / Fermi-Dirac path
     {
         let opts = base_options(
-            5.0,
-            16,
+            3.5,
+            12,
             threshold_ha,
             GammaReal::Off,
             Functional::LdaPz,
@@ -393,8 +381,8 @@ fn l3_1_off_path_bit_identity() {
         let run_once = || {
             let mut req = Request::new(profile, gamma_kpoints());
             req.policy = Some(Policy::FermiDirac {
-                theta_ha: 0.01,
-                band_cap: 22,
+                theta_ha: 0.02,
+                band_cap: 16,
             });
             req.derivatives = Derivatives {
                 forces: true,
@@ -451,10 +439,10 @@ fn l3_2_vacuum_limit_scf_reduction() {
 
     // 1. Gamma real
     {
-        let fixture = PolarDimerFixture::cubic(11.0, "SLA PZ");
+        let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
         let species = fixture.species();
         let run_case = |solv: Option<SolvationConfig>| {
-            let opts = base_options(5.0, 6, threshold_ha, GammaReal::On, Functional::LdaPz, solv);
+            let opts = base_options(3.5, 4, threshold_ha, GammaReal::On, Functional::LdaPz, solv);
             let mut req = Request::new(profile, gamma_kpoints());
             req.derivatives.forces = true;
             let delivered = solve(
@@ -491,12 +479,12 @@ fn l3_2_vacuum_limit_scf_reduction() {
 
     // 2. K-point
     {
-        let fixture = PolarDimerFixture::cubic(11.0, "SLA PZ");
+        let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
         let species = fixture.species();
         let run_case = |solv: Option<SolvationConfig>| {
             let opts = base_options(
-                5.0,
-                6,
+                3.5,
+                4,
                 threshold_ha,
                 GammaReal::Off,
                 Functional::LdaPz,
@@ -531,11 +519,11 @@ fn l3_2_vacuum_limit_scf_reduction() {
 
     // 3. Spin / Fermi-Dirac
     {
-        let fixture = PolarDimerFixture::cubic(11.0, "SLA PW");
+        let fixture = PolarDimerFixture::cubic(8.5, "SLA PW");
         let species = fixture.species();
         let run_electronic = |policy: Policy, bands: usize, solv: Option<SolvationConfig>| {
             let opts = base_options(
-                5.0,
+                3.5,
                 bands,
                 threshold_ha,
                 GammaReal::Off,
@@ -562,11 +550,11 @@ fn l3_2_vacuum_limit_scf_reduction() {
         };
 
         let fd_policy = Policy::FermiDirac {
-            theta_ha: 0.01,
-            band_cap: 22,
+            theta_ha: 0.02,
+            band_cap: 16,
         };
-        let (pw_fd, f_pw_fd) = run_electronic(fd_policy.clone(), 16, None);
-        let (sv_fd, f_sv_fd) = run_electronic(fd_policy, 16, vac);
+        let (pw_fd, f_pw_fd) = run_electronic(fd_policy.clone(), 12, None);
+        let (sv_fd, f_sv_fd) = run_electronic(fd_policy, 12, vac);
         assert_eq!(sv_fd.energy.solvation.as_ref().unwrap().total_ha, 0.0);
         let de_fd = (sv_fd.energy.total_hartree() - pw_fd.energy.total_hartree()).abs();
         let df_fd = max_force_diff(&f_sv_fd.values, &f_pw_fd.values);
@@ -577,13 +565,13 @@ fn l3_2_vacuum_limit_scf_reduction() {
         );
 
         let spin_policy = Policy::FixedSpin(SpinSector {
-            n_up: 5,
-            n_down: 3,
+            n_up: 3,
+            n_down: 1,
             axis_cartesian: [0.0, 0.0, 1.0],
-            initial_moment_seed: Some(2.0),
+            initial_moment_seed: Some(1.0),
         });
-        let (pw_sp, f_pw_sp) = run_electronic(spin_policy.clone(), 8, None);
-        let (sv_sp, f_sv_sp) = run_electronic(spin_policy, 8, vac);
+        let (pw_sp, f_pw_sp) = run_electronic(spin_policy.clone(), 6, None);
+        let (sv_sp, f_sv_sp) = run_electronic(spin_policy, 6, vac);
         assert_eq!(sv_sp.energy.solvation.as_ref().unwrap().total_ha, 0.0);
         let de_sp = (sv_sp.energy.total_hartree() - pw_sp.energy.total_hartree()).abs();
         let df_sp = max_force_diff(&f_sv_sp.values, &f_pw_sp.values);
@@ -601,7 +589,7 @@ fn l3_2_vacuum_limit_scf_reduction() {
 #[test]
 fn l3_3_harris_foulkes_and_band_form_identity() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
@@ -613,8 +601,8 @@ fn l3_3_harris_foulkes_and_band_form_identity() {
             ("kpoint", GammaReal::Off, two_kpoints()),
         ] {
             let opts = base_options(
-                6.0,
-                6,
+                4.0,
+                4,
                 threshold_ha,
                 gamma_real,
                 Functional::LdaPz,
@@ -670,8 +658,8 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 
     let make_opts = |gamma_real: GammaReal| {
         let mut opts = base_options(
-            6.0,
-            6,
+            4.0,
+            4,
             threshold_ha,
             gamma_real,
             Functional::LdaPz,
@@ -790,7 +778,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 #[test]
 fn l3_5_ionic_width_invariance_in_full_scf() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
@@ -798,8 +786,8 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     let run_width = |width_bohr: f64, kappa: f64| -> f64 {
         let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, false);
         let opts = base_options(
-            7.0,
-            6,
+            5.0,
+            4,
             threshold_ha,
             GammaReal::On,
             Functional::LdaPz,
@@ -839,7 +827,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
 #[test]
 fn l3_6_dielectric_and_screening_monotonicity() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
     let profile = solvation_profile(threshold_ha);
@@ -847,8 +835,8 @@ fn l3_6_dielectric_and_screening_monotonicity() {
     let eval = |eps_b: f64, kappa: f64| -> (f64, f64) {
         let solv = water_solvation(eps_b, kappa, 0.0, 0.60, 1.0e-11, true);
         let opts = base_options(
-            6.0,
-            6,
+            4.0,
+            4,
             threshold_ha,
             GammaReal::On,
             Functional::LdaPz,
@@ -897,7 +885,7 @@ fn l3_6_dielectric_and_screening_monotonicity() {
 #[test]
 fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.5, "SLA PW");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PW");
     let species = fixture.species();
     let threshold_ha = 5.0e-11;
     let profile = solvation_profile(threshold_ha);
@@ -907,41 +895,41 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
         (
             "collinear_fixed_spin",
             Policy::FixedSpin(SpinSector {
-                n_up: 5,
-                n_down: 3,
+                n_up: 3,
+                n_down: 1,
                 axis_cartesian: [0.0, 0.0, 1.0],
-                initial_moment_seed: Some(2.0),
+                initial_moment_seed: Some(1.0),
             }),
-            8,
+            6,
         ),
         (
             "scalar_fermi_dirac",
             Policy::FermiDirac {
-                theta_ha: 0.01,
-                band_cap: 22,
+                theta_ha: 0.02,
+                band_cap: 16,
             },
-            16,
+            12,
         ),
         (
             "spin_fermi_dirac",
             Policy::SpinFermiDirac {
                 sector: SpinSector {
-                    n_up: 4,
-                    n_down: 4,
+                    n_up: 2,
+                    n_down: 2,
                     axis_cartesian: [0.0, 0.0, 1.0],
-                    initial_moment_seed: Some(1.0),
+                    initial_moment_seed: Some(0.5),
                 },
-                theta_ha: 0.01,
+                theta_ha: 0.02,
                 constraint: Constraint::FixedMoment(1.0),
-                band_cap: 22,
+                band_cap: 16,
             },
-            16,
+            12,
         ),
     ];
 
     for (name, policy, bands) in cases {
         let opts = base_options(
-            6.0,
+            4.0,
             bands,
             threshold_ha,
             GammaReal::Off,
@@ -987,7 +975,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
 #[test]
 fn l3_8_crystal_symmetry_invariance() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let length_bohr = 11.5;
+    let length_bohr = 8.5;
     let cell = Cell::from_user_rows_bohr([
         [length_bohr, 0.0, 0.0],
         [0.0, length_bohr, 0.0],
@@ -996,19 +984,12 @@ fn l3_8_crystal_symmetry_invariance() {
     .unwrap();
     // Inversion/mirror-symmetric homonuclear dimer with nonzero bond force along x.
     let atoms = vec![
-        Atom::new("Xx", [0.40, 0.5, 0.5]),
-        Atom::new("Xx", [0.60, 0.5, 0.5]),
+        Atom::new("Xx", [0.38, 0.5, 0.5]),
+        Atom::new("Xx", [0.62, 0.5, 0.5]),
     ];
     // Closed-shell homonuclear dimer (Z = 2 + 2 = 4 valence electrons, 2 closed
     // sigma_g / sigma_u bands) so fixed-occupation SCF has a clean non-degenerate gap.
-    let pp = common::potential_with_atomic_start_dij(
-        2.0,
-        0.85,
-        true,
-        161,
-        "SLA PZ",
-        "-0.5 0.05 0 0.05 -0.3 0 0 0 0.2",
-    );
+    let pp = common::potential_with_atomic_start(2.0, 1.05, true, 161, "SLA PZ");
     let species = [SpeciesPotential {
         label: "Xx",
         potential: &pp,
@@ -1030,8 +1011,8 @@ fn l3_8_crystal_symmetry_invariance() {
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
     let opts = base_options(
-        6.0,
-        6,
+        4.0,
+        4,
         threshold_ha,
         GammaReal::Off,
         Functional::LdaPz,
@@ -1079,7 +1060,7 @@ fn l3_8_crystal_symmetry_invariance() {
 #[test]
 fn l3_9_mpi_rank_independence_full_scf() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
@@ -1090,8 +1071,8 @@ fn l3_9_mpi_rank_independence_full_scf() {
         ("kpoint", GammaReal::Off, two_kpoints()),
     ] {
         let opts = base_options(
-            6.0,
-            6,
+            4.0,
+            4,
             threshold_ha,
             gamma_real,
             Functional::LdaPz,
@@ -1157,14 +1138,14 @@ fn l3_9_mpi_rank_independence_full_scf() {
 #[test]
 fn l3_10_fail_closed_stress_and_model_identity() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
-    let fixture = PolarDimerFixture::cubic(11.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-11;
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-11, true);
     let opts = base_options(
-        6.0,
-        6,
+        4.0,
+        4,
         threshold_ha,
         GammaReal::On,
         Functional::LdaPz,

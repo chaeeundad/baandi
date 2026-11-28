@@ -900,12 +900,12 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             let mut perturbed = base_n.clone();
             for &idx in &probes {
                 let n_i = base_n[idx];
-                // 4th-order Richardson central difference:
-                //   (-E(+2h) + 8*E(+h) - 8*E(-h) + E(-2h)) / (12 * h * dv)
-                // keeps both truncation O((h/n_i)^4) and f64 rounding below 1e-11 Ha
-                // while staying strictly inside SCCS piecewise-smooth intervals.
+                // 6th-order Richardson central difference:
+                //   (E(+3h) - 9*E(+2h) + 45*E(+h) - 45*E(-h) + 9*E(-2h) - E(-3h)) / (60 * h * dv)
+                // eliminates both O((h/n_i)^6) truncation and f64 cancellation below
+                // 1e-10 Ha while staying strictly inside SCCS piecewise-smooth intervals.
                 let h = if n_i < 1.0e-5 {
-                    0.20 * n_i
+                    0.15 * n_i
                 } else {
                     match cavity {
                         CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
@@ -916,18 +916,20 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                         } => {
                             if n_i > rho_min_bohr3 && n_i < rho_max_bohr3 {
                                 let margin = (n_i - rho_min_bohr3).min(rho_max_bohr3 - n_i);
-                                (1.0e-3 * n_i).min(2.0e-6).min(0.40 * margin)
+                                (6.0e-3 * n_i).min(3.0e-6).min(0.25 * margin)
                             } else {
                                 let margin = (n_i - rho_min_bohr3)
                                     .abs()
                                     .min((n_i - rho_max_bohr3).abs());
-                                (1.5e-3 * n_i).min(2.0e-6).min(0.40 * margin)
+                                (1.5e-3 * n_i).min(2.0e-6).min(0.25 * margin)
                             }
                         }
                     }
                 };
-                assert!(n_i - 2.0 * h > params.density_floor_bohr3);
+                assert!(n_i - 3.0 * h > params.density_floor_bohr3);
 
+                perturbed[idx] = n_i + 3.0 * h;
+                let ep3 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i + 2.0 * h;
                 let ep2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i + h;
@@ -936,10 +938,15 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let em1 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i - 2.0 * h;
                 let em2 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
+                perturbed[idx] = n_i - 3.0 * h;
+                let em3 = ws.evaluate(comm, &perturbed, &ions, &params, &cfg).unwrap();
                 perturbed[idx] = n_i;
 
-                let v_fd = (-ep2.total_ha + 8.0 * ep1.total_ha - 8.0 * em1.total_ha + em2.total_ha)
-                    / (12.0 * h * dv);
+                let v_fd = (ep3.total_ha - 9.0 * ep2.total_ha + 45.0 * ep1.total_ha
+                    - 45.0 * em1.total_ha
+                    + 9.0 * em2.total_ha
+                    - em3.total_ha)
+                    / (60.0 * h * dv);
                 let v_ana = eval0.v_total_planes[idx];
                 let abs_err = (v_fd - v_ana).abs();
                 let tol = 1.0e-10_f64.max(1.0e-9 * v_ana.abs());

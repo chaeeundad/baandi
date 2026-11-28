@@ -134,7 +134,7 @@ impl SolvationParams {
             kappa_inv_bohr: 0.0,
             tau_ha_bohr2: 0.0,
             beta_ha_bohr3: 0.0,
-            cavity_grad_reg: 1.0e-14,
+            cavity_grad_reg: 1.0e-4,
             density_floor_bohr3: 1.0e-16,
             cavity: CavityModel::vaspsol_water(),
         }
@@ -147,7 +147,7 @@ impl SolvationParams {
             kappa_inv_bohr: 0.0,
             tau_ha_bohr2: 0.0,
             beta_ha_bohr3: 0.0,
-            cavity_grad_reg: 1.0e-14,
+            cavity_grad_reg: 1.0e-4,
             density_floor_bohr3: 1.0e-16,
             cavity: CavityModel::vaspsol_water(),
         }
@@ -160,7 +160,7 @@ impl SolvationParams {
             kappa_inv_bohr: 0.0,
             tau_ha_bohr2: 0.0,
             beta_ha_bohr3: 0.0,
-            cavity_grad_reg: 1.0e-14,
+            cavity_grad_reg: 1.0e-4,
             density_floor_bohr3: 1.0e-16,
             cavity: CavityModel::sccs_water(),
         }

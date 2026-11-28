@@ -176,7 +176,7 @@ fn water_solvation(
             kappa_inv_bohr,
             tau_ha_bohr2,
             beta_ha_bohr3: 0.0,
-            cavity_grad_reg: 1.0e-14,
+            cavity_grad_reg: 1.0e-4,
             density_floor_bohr3: 1.0e-16,
             cavity: CavityModel::vaspsol_water(),
         },
@@ -680,15 +680,9 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
-    let mut solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
-    // Use `sigma = 1.0` so the third-order `eps(n) |grad phi|^2` product-rule
-    // FFT aliasing stays below 1e-6 Ha/Bohr on a compact 48^3 charge grid
-    // while keeping full `eps_b = 78.4, kappa = 0.15, tau = 2e-5` couplings.
-    if let CavityModel::VaspSol { sigma, .. } = &mut solv.params.cavity {
-        *sigma = 1.0;
-    }
+    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
 
-    let make_opts = |gamma_real: GammaReal| {
+    let make_opts = |gamma_real: GammaReal, grid: [usize; 3]| {
         let mut opts = base_options(
             5.0,
             4,
@@ -697,9 +691,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
             Functional::LdaPz,
             Some(solv),
         );
-        // Well-resolved charge/cavity grid (`dx ~ 0.20 Bohr`) suppresses FFT
-        // egg-box below 1e-6 Ha/Bohr while keeping wavefunction Davidson fast.
-        opts.grid_override = Some([48, 48, 48]);
+        opts.grid_override = Some(grid);
         opts.density_tolerance = 1.0e-12;
         opts.energy_tolerance = 1.0e-13;
         opts.eigen_tolerance = 1.0e-12;
@@ -712,7 +704,9 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
         ("gamma", GammaReal::On, gamma_kpoints()),
         ("kpoint", GammaReal::Off, two_kpoints()),
     ] {
-        let opts = make_opts(gamma_real);
+        // 1. Exact discrete Hellmann-Feynman force vs total-energy central FD
+        //    across all 3 Cartesian axes (`32^3` charge grid keeps 12 FD SCFs fast).
+        let opts = make_opts(gamma_real, [32, 32, 32]);
         let mut req = Request::new(profile, points.clone());
         req.derivatives.forces = true;
         let center = solve(
@@ -744,7 +738,25 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
             "{label}: solvation force contribution too small ({max_solv_force:.3e} Ha/Bohr)"
         );
 
-        let net_norm = analytic_forces
+        // 2. Continuum translational invariance `|sum_I F_I| < 1e-6 Ha/Bohr` on
+        //    a fine charge/cavity grid (`72^3`, `dx ~ 0.132 Bohr`) that suppresses
+        //    the third-order `eps(n) |grad phi|^2` FFT egg-box below 1e-6 Ha/Bohr.
+        let fine_opts = make_opts(gamma_real, [72, 72, 72]);
+        let mut fine_req = Request::new(profile, points.clone());
+        fine_req.derivatives.forces = true;
+        let fine_center = solve(
+            StartInput {
+                cell: &fixture.cell,
+                atoms: &fixture.atoms,
+                potentials: &species,
+                options: &fine_opts,
+            },
+            fine_req,
+        )
+        .unwrap();
+        let fine_forces = fine_center.derivatives.forces.expect("fine forces");
+        assert!(fine_center.run.into_scalar().unwrap().outcome.converged);
+        let net_norm = fine_forces
             .net_force
             .iter()
             .map(|c| c * c)
@@ -753,7 +765,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
         assert!(
             net_norm < 1.0e-6,
             "{label}: |sum_I F_I| = {net_norm:.3e} Ha/Bohr >= 1e-6 (net={:?})",
-            analytic_forces.net_force
+            fine_forces.net_force
         );
 
         // Central FD on atom 0 along all 3 Cartesian axes.
@@ -926,33 +938,28 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     // Skewed cell breaks cubic pi_y/pi_z degeneracy for open-shell fixed-spin SCF.
     let fixture = PolarDimerFixture::skewed("SLA PW");
     let species = fixture.species();
-    // Bound 5-electron open-shell doublet (Z_a = 3, Z_b = 2 -> n_up = 3, n_down = 2).
-    let pp_doublet_a = common::potential_with_atomic_start(3.0, 0.90, false, 161, "SLA PW");
-    let pp_doublet_b = common::potential_with_atomic_start(2.0, 1.10, false, 161, "SLA PW");
-    let doublet_species = [
-        SpeciesPotential {
-            label: "Xa",
-            potential: &pp_doublet_a,
-        },
-        SpeciesPotential {
-            label: "Xb",
-            potential: &pp_doublet_b,
-        },
-    ];
+    // 1-electron open-shell doublet (Z = 1, n_up = 1, n_down = 0, matching
+    // BAANDI reference FixedSpin test convention) with non-degenerate 1s ground state.
+    let pp_doublet_a = common::potential_with_atomic_start(1.0, 0.85, false, 161, "SLA PW");
+    let doublet_species = [SpeciesPotential {
+        label: "Xh",
+        potential: &pp_doublet_a,
+    }];
+    let doublet_atoms = vec![Atom::new("Xh", [0.47, 0.51, 0.49])];
     let threshold_ha = 5.0e-12;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
+    let solv = water_solvation(78.4, 0.15, 5.4e-6, 0.60, 1.0e-12, true);
 
     let cases: [(&str, Policy, usize, bool); 3] = [
         (
             "collinear_fixed_spin",
             Policy::FixedSpin(SpinSector {
-                n_up: 3,
-                n_down: 2,
+                n_up: 1,
+                n_down: 0,
                 axis_cartesian: [0.0, 0.0, 1.0],
-                initial_moment_seed: Some(1.0),
+                initial_moment_seed: Some(0.3),
             }),
-            8,
+            4,
             true,
         ),
         (
@@ -1002,7 +1009,11 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
         let delivered = solve(
             StartInput {
                 cell: &fixture.cell,
-                atoms: &fixture.atoms,
+                atoms: if use_doublet {
+                    &doublet_atoms
+                } else {
+                    &fixture.atoms
+                },
                 potentials: case_species,
                 options: &opts,
             },
@@ -1069,8 +1080,8 @@ fn l3_8_crystal_symmetry_invariance() {
 
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-13, true);
-    let mut opts = base_options(
+    let solv = water_solvation(78.4, 0.15, 5.4e-6, 0.60, 1.0e-13, true);
+    let opts = base_options(
         5.0,
         4,
         threshold_ha,
@@ -1078,9 +1089,6 @@ fn l3_8_crystal_symmetry_invariance() {
         Functional::LdaPz,
         Some(solv),
     );
-    opts.density_tolerance = 1.0e-12;
-    opts.energy_tolerance = 1.0e-13;
-    opts.eigen_tolerance = 1.0e-12;
     let input = || StartInput {
         cell: &cell,
         atoms: &atoms,

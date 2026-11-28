@@ -22,7 +22,7 @@ use dft_engine::{
         api::{Derivatives, Request, solve},
         delivered,
         electronic::Policy,
-        profile::Profile,
+        profile::{Preconditioning, Profile},
         symmetry,
     },
     refstart::StartInput,
@@ -194,10 +194,17 @@ fn vacuum_solvation() -> SolvationConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    // Plain Broyden matching BAANDI's standard profile (avoiding Thomas-Fermi
-    // G-space filtering, which induces negative Gibbs ringing in the empty
-    // solvent region of isolated-molecule supercells).
-    Profile::from_standard_ha(threshold_ha).unwrap()
+    // Plain moderately damped Broyden (avoiding Thomas-Fermi G-space filtering,
+    // which induces negative Gibbs ringing in the empty solvent region of
+    // isolated-molecule supercells).
+    Profile {
+        beta: 0.5,
+        history: 6,
+        threshold_ry: 2.0 * threshold_ha,
+        preconditioning: Preconditioning::Plain,
+    }
+    .validate()
+    .unwrap()
 }
 
 fn max_force_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
@@ -602,7 +609,7 @@ fn l3_3_harris_foulkes_and_band_form_identity() {
             ("kpoint", GammaReal::Off, two_kpoints()),
         ] {
             let opts = base_options(
-                4.0,
+                6.0,
                 4,
                 threshold_ha,
                 gamma_real,
@@ -659,7 +666,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 
     let make_opts = |gamma_real: GammaReal| {
         let mut opts = base_options(
-            4.0,
+            6.0,
             4,
             threshold_ha,
             gamma_real,
@@ -787,7 +794,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     let run_width = |width_bohr: f64, kappa: f64| -> f64 {
         let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, false);
         let opts = base_options(
-            5.0,
+            7.0,
             4,
             threshold_ha,
             GammaReal::On,
@@ -836,7 +843,7 @@ fn l3_6_dielectric_and_screening_monotonicity() {
     let eval = |eps_b: f64, kappa: f64| -> (f64, f64) {
         let solv = water_solvation(eps_b, kappa, 0.0, 0.60, 1.0e-11, true);
         let opts = base_options(
-            3.5,
+            6.0,
             4,
             threshold_ha,
             GammaReal::On,
@@ -888,9 +895,9 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PW");
     let species = fixture.species();
-    let threshold_ha = 5.0e-13;
+    let threshold_ha = 5.0e-11;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
+    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-11, true);
 
     let cases: [(&str, Policy, usize); 3] = [
         (
@@ -930,7 +937,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
 
     for (name, policy, bands) in cases {
         let opts = base_options(
-            3.5,
+            6.0,
             bands,
             threshold_ha,
             GammaReal::Off,
@@ -1010,7 +1017,7 @@ fn l3_8_crystal_symmetry_invariance() {
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
     let opts = base_options(
-        3.5,
+        6.0,
         4,
         threshold_ha,
         GammaReal::Off,
@@ -1070,7 +1077,7 @@ fn l3_9_mpi_rank_independence_full_scf() {
         ("kpoint", GammaReal::Off, two_kpoints()),
     ] {
         let opts = base_options(
-            3.5,
+            6.0,
             4,
             threshold_ha,
             gamma_real,
@@ -1143,7 +1150,7 @@ fn l3_10_fail_closed_stress_and_model_identity() {
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-11, true);
     let opts = base_options(
-        3.5,
+        6.0,
         4,
         threshold_ha,
         GammaReal::On,

@@ -907,7 +907,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let h = if n_i < 5.0e-5 {
                     (0.20 * n_i).min(4.0e-6)
                 } else {
-                    (2.0e-3 * n_i).min(2.0e-6)
+                    (1.0e-3 * n_i).min(2.0e-6)
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
 
@@ -1010,7 +1010,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 let h = if n_i < 5.0e-5 {
                     (0.20 * n_i).min(4.0e-6)
                 } else {
-                    (2.0e-3 * n_i).min(2.0e-6)
+                    (1.0e-3 * n_i).min(2.0e-6)
                 };
                 assert!(n_i - 2.0 * h > iso_params.density_floor_bohr3);
 
@@ -1445,7 +1445,10 @@ fn mpi_rank_independence_and_mirror_vs_greedy_parity() {
 #[test]
 fn warm_start_bulk_delta_reduces_iterations_sharply() {
     let cell = cubic_cell(12.0);
-    let dims = [24, 24, 24];
+    // `dx = 0.25 Bohr` matches ADR 0061's FisicaroPcg resolution threshold so
+    // Part B exercises FisicaroPcg directly without triggering the coarse-grid
+    // DirectPcg breakdown fallback.
+    let dims = [48, 48, 48];
     let ions = [
         IonicPseudoCharge {
             charge: 2.0,

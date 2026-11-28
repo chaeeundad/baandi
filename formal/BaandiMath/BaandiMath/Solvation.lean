@@ -948,7 +948,7 @@ theorem full_electrostatic_width_invariance {n : ℕ} (dv pi_val : ℝ)
     have h_vac_term :
         wdot dv phi_tilde (gpOp D eps k2 phi_vac1) =
           4 * pi_val * wdot dv (fun i => rho2 i - rho1 i) phi_vac1 := by
-      rw [gpOp_symmetric dv D hskew phi_tilde phi_vac1]
+      rw [gpOp_symmetric dv D hskew eps k2 phi_tilde phi_vac1]
       have hfun : gpOp D eps k2 phi_tilde =
           fun i => 4 * pi_val * (rho2 i - rho1 i) :=
         funext h_gp_tilde
@@ -985,7 +985,7 @@ theorem full_electrostatic_width_invariance {n : ℕ} (dv pi_val : ℝ)
                 funext (fun i => (h_gp_tilde i).symm)
               rw [hfun]
         _ = wdot dv phi_tilde (gpOp D eps k2 phi_pol1) :=
-              (gpOp_symmetric dv D hskew phi_tilde phi_pol1).symm
+              (gpOp_symmetric dv D hskew eps k2 phi_tilde phi_pol1).symm
         _ = 4 * pi_val * wdot dv phi_tilde rho1 -
               wdot dv phi_tilde (gpOp D eps k2 phi_vac1) := h_rhs
         _ = 4 * pi_val *

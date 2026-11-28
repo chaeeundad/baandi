@@ -22,7 +22,7 @@ use dft_engine::{
         api::{Derivatives, Request, solve},
         delivered,
         electronic::Policy,
-        profile::Profile,
+        profile::{Preconditioning, Profile},
         symmetry,
     },
     refstart::StartInput,
@@ -78,37 +78,37 @@ impl PolarDimerFixture {
         ])
         .unwrap();
         let atoms = vec![
-            Atom::new("Xa", [0.38, 0.49, 0.495]),
-            Atom::new("Xb", [0.62, 0.51, 0.505]),
+            Atom::new("Xa", [0.42, 0.49, 0.495]),
+            Atom::new("Xb", [0.58, 0.51, 0.505]),
         ];
         Self::with_geometry(cell, atoms, pp_functional)
     }
 
     fn skewed(pp_functional: &str) -> Self {
         let cell = Cell::from_user_rows_bohr([
-            [8.5, 0.0, 0.0],
-            [0.45, 8.3, 0.0],
-            [0.30, 0.35, 8.7],
+            [9.5, 0.0, 0.0],
+            [0.45, 9.3, 0.0],
+            [0.30, 0.35, 9.7],
         ])
         .unwrap();
         let atoms = vec![
-            Atom::new("Xa", [0.37, 0.47, 0.48]),
-            Atom::new("Xb", [0.61, 0.53, 0.52]),
+            Atom::new("Xa", [0.42, 0.48, 0.49]),
+            Atom::new("Xb", [0.58, 0.52, 0.51]),
         ];
         Self::with_geometry(cell, atoms, pp_functional)
     }
 
     fn with_geometry(cell: Cell, atoms: Vec<Atom>, pp_functional: &str) -> Self {
-        // Closed-shell heteronuclear dimer (Z_a = 2, Z_b = 2; 4 valence electrons,
-        // 2 closed-shell bands) with distinct core radii (`rc = 1.0` vs `1.35` Bohr)
-        // and modest nonlocal projectors (`dij` without the artificial +6 Ry s-core
-        // repulsion of `DEFAULT_DIJ`, which would otherwise hollow out `n(R_I) < n_c`
-        // and let continuum solvent penetrate the ionic core).
-        let dij = "0.15 0.02 0 0.02 0.20 0 0 0 0.30";
+        // Closed-shell compact heteronuclear dimer (Z_a = 2, Z_b = 2; 4 valence
+        // electrons, 2 closed-shell bands) with distinct core radii (`rc = 0.90`
+        // vs `1.15` Bohr) and mild nonlocal projectors (`dij` without artificial
+        // s-core repulsion) so `n(r) >> n_c` throughout the molecule and bond
+        // region, forming a single smooth, convex molecular cavity.
+        let dij = "-0.1 0.0 0 0.0 0.05 0 0 0 0.1";
         let pp_a =
-            common::potential_with_atomic_start_dij(2.0, 1.0, true, 161, pp_functional, dij);
+            common::potential_with_atomic_start_dij(2.0, 0.90, true, 161, pp_functional, dij);
         let pp_b =
-            common::potential_with_atomic_start_dij(2.0, 1.35, true, 161, pp_functional, dij);
+            common::potential_with_atomic_start_dij(2.0, 1.15, true, 161, pp_functional, dij);
         Self {
             cell,
             atoms,
@@ -207,7 +207,14 @@ fn test_run_config() -> RunConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    Profile::from_standard_ha(threshold_ha).unwrap()
+    Profile {
+        beta: 0.4,
+        history: 8,
+        threshold_ry: 2.0 * threshold_ha,
+        preconditioning: Preconditioning::Plain,
+    }
+    .validate()
+    .unwrap()
 }
 
 fn max_force_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
@@ -669,7 +676,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 
     let make_opts = |gamma_real: GammaReal| {
         let mut opts = base_options(
-            4.0,
+            8.0,
             4,
             threshold_ha,
             gamma_real,
@@ -896,11 +903,11 @@ fn l3_6_dielectric_and_screening_monotonicity() {
 #[test]
 fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     let _scope = test_run_config().enter();
-    let fixture = PolarDimerFixture::cubic(8.5, "SLA PW");
+    let fixture = PolarDimerFixture::cubic(9.5, "SLA PW");
     let species = fixture.species();
-    let threshold_ha = 5.0e-11;
+    let threshold_ha = 5.0e-12;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-11, true);
+    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
 
     let cases: [(&str, Policy, usize); 3] = [
         (
@@ -986,7 +993,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
 #[test]
 fn l3_8_crystal_symmetry_invariance() {
     let _scope = test_run_config().enter();
-    let length_bohr = 8.5;
+    let length_bohr = 9.5;
     let cell = Cell::from_user_rows_bohr([
         [length_bohr, 0.0, 0.0],
         [0.0, length_bohr, 0.0],
@@ -995,18 +1002,18 @@ fn l3_8_crystal_symmetry_invariance() {
     .unwrap();
     // Inversion/mirror-symmetric homonuclear dimer with nonzero bond force along x.
     let atoms = vec![
-        Atom::new("Xx", [0.38, 0.5, 0.5]),
-        Atom::new("Xx", [0.62, 0.5, 0.5]),
+        Atom::new("Xx", [0.42, 0.5, 0.5]),
+        Atom::new("Xx", [0.58, 0.5, 0.5]),
     ];
     // Closed-shell homonuclear dimer (Z = 2 + 2 = 4 valence electrons, 2 closed
-    // sigma_g / sigma_u bands) with modest nonlocal projectors (no core hole).
+    // sigma_g / sigma_u bands) with mild nonlocal projectors (no core hole).
     let pp = common::potential_with_atomic_start_dij(
         2.0,
-        1.05,
+        0.95,
         true,
         161,
         "SLA PZ",
-        "0.15 0.02 0 0.02 0.20 0 0 0 0.30",
+        "-0.1 0.0 0 0.0 0.05 0 0 0 0.1",
     );
     let species = [SpeciesPotential {
         label: "Xx",

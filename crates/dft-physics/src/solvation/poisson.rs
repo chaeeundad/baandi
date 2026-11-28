@@ -28,6 +28,7 @@ struct FftEngine {
     dv: f64,
     g_cart: Vec<[f64; 3]>,
     g2: Vec<f64>,
+    g2_precond: Vec<f64>,
     g2_min: f64,
     zero_g2_indices: Vec<usize>,
     mirror_idx: Option<Vec<usize>>,
@@ -89,6 +90,7 @@ impl FftEngine {
         let local_pos = fft.local_positions();
         let mut g_cart = Vec::with_capacity(ll);
         let mut g2 = Vec::with_capacity(ll);
+        let mut g2_precond = Vec::with_capacity(ll);
         let mut zero_g2_indices = Vec::new();
         let mut local_g2_min = f64::INFINITY;
         for (k, &g_idx) in local_pos.iter().enumerate() {
@@ -98,8 +100,37 @@ impl FftEngine {
             g2.push(norm2);
             if norm2 == 0.0 {
                 zero_g2_indices.push(k);
-            } else if norm2 < local_g2_min {
-                local_g2_min = norm2;
+                if g_idx == 0 {
+                    g2_precond.push(0.0);
+                } else {
+                    // Canonical nonzero |G|^2 on the 7 even-Nyquist corner modes prevents
+                    // amplifying high-frequency checkerboard modes by 1/kappa2_bar.
+                    let ijk = [
+                        g_idx / (dims[1] * dims[2]),
+                        (g_idx / dims[2]) % dims[1],
+                        g_idx % dims[2],
+                    ];
+                    let m = [0, 1, 2].map(|a| {
+                        if ijk[a] <= (dims[a] - 1) / 2 {
+                            ijk[a] as f64
+                        } else {
+                            ijk[a] as f64 - dims[a] as f64
+                        }
+                    });
+                    let g_can = [0, 1, 2].map(|axis| {
+                        recip_cols[axis][0] * m[0]
+                            + recip_cols[axis][1] * m[1]
+                            + recip_cols[axis][2] * m[2]
+                    });
+                    g2_precond.push(
+                        g_can[0].mul_add(g_can[0], g_can[1].mul_add(g_can[1], g_can[2] * g_can[2])),
+                    );
+                }
+            } else {
+                g2_precond.push(norm2);
+                if norm2 < local_g2_min {
+                    local_g2_min = norm2;
+                }
             }
         }
 
@@ -156,6 +187,7 @@ impl FftEngine {
             dv: volume / total_points as f64,
             g_cart,
             g2,
+            g2_precond,
             g2_min,
             zero_g2_indices,
             mirror_idx,
@@ -663,37 +695,6 @@ impl FftEngine {
         self.inverse_to_real(comm, div_g_scratch, div_n_planes)?;
         Ok(local_area_sum)
     }
-
-    /// Applies the strictly-SPD symmetric split preconditioner in place:
-    ///   v <- P_0 F[ inv_sqrt_eps * F^{-1}[ K * F[ inv_sqrt_eps * F^{-1}[ P_0 v ] ] ] ]
-    /// (with `P_0 = I` when `has_kappa == true`). Uses 4 FFTs and zero heap allocations.
-    fn apply_split_precond_in_place<K: Collective>(
-        &mut self,
-        comm: &K,
-        inv_sqrt_eps_planes: &[f64],
-        kernel_g: &[f64],
-        has_kappa: bool,
-        vec_g: &mut [Complex64],
-    ) -> Result<usize, SolvationError> {
-        if !has_kappa {
-            for &k in &self.zero_g2_indices {
-                vec_g[k] = Complex64::default();
-            }
-        }
-        self.fft
-            .apply_local_batch_planes(comm, vec_g, inv_sqrt_eps_planes, 1)?;
-        for (v, &k_val) in vec_g.iter_mut().zip(kernel_g) {
-            *v *= k_val;
-        }
-        self.fft
-            .apply_local_batch_planes(comm, vec_g, inv_sqrt_eps_planes, 1)?;
-        if !has_kappa {
-            for &k in &self.zero_g2_indices {
-                vec_g[k] = Complex64::default();
-            }
-        }
-        Ok(4)
-    }
 }
 
 /// Inner PDE solver state and preallocated scratch buffers (separated from `EvalScratch`
@@ -819,8 +820,8 @@ impl PdeSolver {
             || kappa2_planes.len() != pp
             || rhs_g.len() != ll
             || out_phi_g.len() != ll;
-        let (nonfinite, bad_eps, bad_kappa, local_kappa2_sum) = if bad_shape {
-            (false, false, false, 0.0)
+        let (nonfinite, bad_eps, bad_kappa, local_kappa2_sum, local_eps_sum) = if bad_shape {
+            (false, false, false, 0.0, 0.0)
         } else {
             let nf_eps = eps_planes.iter().any(|v| !v.is_finite());
             let nf_kap = kappa2_planes.iter().any(|v| !v.is_finite());
@@ -833,9 +834,14 @@ impl PdeSolver {
             } else {
                 kappa2_planes.iter().copied().sum::<f64>()
             };
-            (nonfinite, bad_eps, bad_kappa, kap_sum)
+            let eps_sum = if nf_eps {
+                0.0
+            } else {
+                eps_planes.iter().copied().sum::<f64>()
+            };
+            (nonfinite, bad_eps, bad_kappa, kap_sum, eps_sum)
         };
-        let mut checks = [0.0_f64; 5];
+        let mut checks = [0.0_f64; 6];
         comm.tree_sum_f64(
             &[
                 f64::from(bad_shape),
@@ -843,6 +849,7 @@ impl PdeSolver {
                 f64::from(bad_eps),
                 f64::from(bad_kappa),
                 local_kappa2_sum,
+                local_eps_sum,
             ],
             &mut checks,
         )?;
@@ -865,8 +872,8 @@ impl PdeSolver {
 
         let has_kappa = checks[4] > 0.0;
         let kappa2_bar = checks[4] / self.engine.total_points as f64;
-        let (eps_min, eps_max) = self.engine.global_min_max(comm, eps_planes)?;
-        let eps_bar = (eps_min * eps_max).sqrt();
+        let eps_mean = checks[5] / self.engine.total_points as f64;
+        let (_eps_min, eps_max) = self.engine.global_min_max(comm, eps_planes)?;
 
         // Prepare effective RHS (projected onto range(A) when kappa = 0).
         self.rhs_eff_g.copy_from_slice(rhs_g);
@@ -908,9 +915,7 @@ impl PdeSolver {
                 eps_planes,
                 kappa2_planes,
                 has_kappa,
-                eps_min,
-                eps_max,
-                eps_bar,
+                eps_mean,
                 kappa2_bar,
                 b_scale,
                 tol_abs,
@@ -949,9 +954,7 @@ impl PdeSolver {
         eps_planes: &[f64],
         kappa2_planes: &[f64],
         has_kappa: bool,
-        eps_min: f64,
-        eps_max: f64,
-        eps_bar: f64,
+        eps_mean: f64,
         kappa2_bar: f64,
         b_scale: f64,
         tol_abs: f64,
@@ -959,80 +962,25 @@ impl PdeSolver {
         out_phi_g: &mut [Complex64],
     ) -> Result<SolveReport, SolvationError> {
         let volume = self.engine.volume;
-        let use_split = eps_max / eps_min > 1.0001;
 
-        if use_split {
-            let mut kap_over_eps_loc = 0.0_f64;
-            for ((inv_s, &e), &k2) in self
-                .work_r0
-                .iter_mut()
-                .zip(eps_planes)
-                .zip(kappa2_planes)
-            {
-                *inv_s = 1.0 / e.sqrt();
-                kap_over_eps_loc += k2 / e;
-            }
-            let q_bar = if has_kappa {
-                let mut kap_glob = [0.0_f64];
-                comm.tree_sum_f64(&[kap_over_eps_loc], &mut kap_glob)?;
-                kap_glob[0] / self.engine.total_points as f64
-            } else {
+        // 0-FFT strictly-SPD G-space preconditioner matched to the bulk Helmholtz ratio
+        // `kappa2_bar / eps_mean`, using canonical nonzero |G|^2 on the 7 even-Nyquist
+        // corner modes so high-frequency checkerboard modes are never amplified by 1/kappa2_bar.
+        for ((p, &g2), &g2p) in self
+            .precond
+            .iter_mut()
+            .zip(&self.engine.g2)
+            .zip(&self.engine.g2_precond)
+        {
+            *p = if !has_kappa && g2 == 0.0 {
                 0.0
+            } else {
+                1.0 / (eps_mean * g2p + kappa2_bar)
             };
-            for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
-                *p = if !has_kappa && g2 == 0.0 {
-                    0.0
-                } else {
-                    1.0 / (g2 + q_bar)
-                };
-            }
-        } else {
-            for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
-                *p = if !has_kappa && g2 == 0.0 {
-                    0.0
-                } else {
-                    1.0 / (eps_bar * g2 + kappa2_bar)
-                };
-            }
         }
 
-        let mut fft_count = 0usize;
         let warm_started = config.warm_start && self.has_prev && self.prev_has_kappa == has_kappa;
-        if use_split {
-            if warm_started {
-                for ((dst, &rhs), &prev_rhs) in self
-                    .z_g
-                    .iter_mut()
-                    .zip(&self.rhs_eff_g)
-                    .zip(&self.prev_rhs_g)
-                {
-                    *dst = rhs - prev_rhs;
-                }
-                fft_count += self.engine.apply_split_precond_in_place(
-                    comm,
-                    &self.work_r0,
-                    &self.precond,
-                    has_kappa,
-                    &mut self.z_g,
-                )?;
-                for ((phi, &prev_phi), &delta_phi) in out_phi_g
-                    .iter_mut()
-                    .zip(&self.prev_phi_g)
-                    .zip(&self.z_g)
-                {
-                    *phi = prev_phi + delta_phi;
-                }
-            } else {
-                out_phi_g.copy_from_slice(&self.rhs_eff_g);
-                fft_count += self.engine.apply_split_precond_in_place(
-                    comm,
-                    &self.work_r0,
-                    &self.precond,
-                    has_kappa,
-                    out_phi_g,
-                )?;
-            }
-        } else if warm_started {
+        if warm_started {
             for (((phi, &prev_phi), &pre), (&rhs, &prev_rhs)) in out_phi_g
                 .iter_mut()
                 .zip(&self.prev_phi_g)
@@ -1056,7 +1004,7 @@ impl PdeSolver {
             }
         }
 
-        fft_count += self.engine.apply_operator(
+        let mut fft_count = self.engine.apply_operator(
             comm,
             eps_planes,
             kappa2_planes,
@@ -1070,77 +1018,28 @@ impl PdeSolver {
             }
         }
 
+        let mut r_norm2_loc = 0.0_f64;
+        let mut rz_loc = 0.0_f64;
+        for ((((r_dst, z_dst), p_dst), (&rhs, &w)), &pre) in self
+            .r_g
+            .iter_mut()
+            .zip(&mut self.z_g)
+            .zip(&mut self.p_g)
+            .zip(self.rhs_eff_g.iter().zip(&self.w_g))
+            .zip(&self.precond)
+        {
+            let r = rhs - w;
+            let z = pre * r;
+            *r_dst = r;
+            *z_dst = z;
+            *p_dst = z;
+            r_norm2_loc += r.norm_sqr();
+            rz_loc += r.re * z.re + r.im * z.im;
+        }
         let mut sums = [0.0_f64; 2];
-        let (mut r_norm, mut rz) = if use_split {
-            let mut r_norm2_loc = 0.0_f64;
-            for ((r_dst, &rhs), &w) in self
-                .r_g
-                .iter_mut()
-                .zip(&self.rhs_eff_g)
-                .zip(&self.w_g)
-            {
-                let r = rhs - w;
-                *r_dst = r;
-                r_norm2_loc += r.norm_sqr();
-            }
-            let mut r_glob = [0.0_f64];
-            comm.tree_sum_f64(&[r_norm2_loc], &mut r_glob)?;
-            let r_norm = (volume * r_glob[0]).sqrt();
-            if !r_norm.is_finite() {
-                return Err(SolvationError::NonFinite);
-            }
-            if r_norm <= tol_abs {
-                self.save_warm_start(out_phi_g, has_kappa);
-                return Ok(SolveReport {
-                    kind: SolverKind::DirectPcg,
-                    iterations: 0,
-                    converged: true,
-                    residual_norm: r_norm,
-                    relative_residual: r_norm / b_scale,
-                    fft_count,
-                    mirror_paired: self.engine.mirror_paired(),
-                    warm_started,
-                });
-            }
-            self.z_g.copy_from_slice(&self.r_g);
-            fft_count += self.engine.apply_split_precond_in_place(
-                comm,
-                &self.work_r0,
-                &self.precond,
-                has_kappa,
-                &mut self.z_g,
-            )?;
-            let mut rz_loc = 0.0_f64;
-            for ((p_dst, &r), &z) in self.p_g.iter_mut().zip(&self.r_g).zip(&self.z_g) {
-                *p_dst = z;
-                rz_loc += r.re * z.re + r.im * z.im;
-            }
-            let mut rz_glob = [0.0_f64];
-            comm.tree_sum_f64(&[rz_loc], &mut rz_glob)?;
-            (r_norm, volume * rz_glob[0])
-        } else {
-            let mut r_norm2_loc = 0.0_f64;
-            let mut rz_loc = 0.0_f64;
-            for ((((r_dst, z_dst), p_dst), (&rhs, &w)), &pre) in self
-                .r_g
-                .iter_mut()
-                .zip(&mut self.z_g)
-                .zip(&mut self.p_g)
-                .zip(self.rhs_eff_g.iter().zip(&self.w_g))
-                .zip(&self.precond)
-            {
-                let r = rhs - w;
-                let z = pre * r;
-                *r_dst = r;
-                *z_dst = z;
-                *p_dst = z;
-                r_norm2_loc += r.norm_sqr();
-                rz_loc += r.re * z.re + r.im * z.im;
-            }
-            comm.tree_sum_f64(&[r_norm2_loc, rz_loc], &mut sums)?;
-            ((volume * sums[0]).sqrt(), volume * sums[1])
-        };
-
+        comm.tree_sum_f64(&[r_norm2_loc, rz_loc], &mut sums)?;
+        let mut r_norm = (volume * sums[0]).sqrt();
+        let mut rz = volume * sums[1];
         if !r_norm.is_finite() || !rz.is_finite() {
             return Err(SolvationError::NonFinite);
         }
@@ -1187,77 +1086,26 @@ impl PdeSolver {
                 ));
             }
 
-            let rz_new = if use_split {
-                let mut r_norm2_loc = 0.0_f64;
-                for ((phi, r_dst), (&p, &w)) in out_phi_g
-                    .iter_mut()
-                    .zip(&mut self.r_g)
-                    .zip(self.p_g.iter().zip(&self.w_g))
-                {
-                    *phi += alpha * p;
-                    let r = *r_dst - alpha * w;
-                    *r_dst = r;
-                    r_norm2_loc += r.norm_sqr();
-                }
-                comm.tree_sum_f64(&[r_norm2_loc], &mut scalar_glob)?;
-                r_norm = (volume * scalar_glob[0]).sqrt();
-                if !r_norm.is_finite() {
-                    return Err(SolvationError::NonFinite);
-                }
-                if r_norm <= tol_abs {
-                    if !has_kappa {
-                        for &k in &self.engine.zero_g2_indices {
-                            out_phi_g[k] = Complex64::default();
-                        }
-                    }
-                    self.save_warm_start(out_phi_g, has_kappa);
-                    return Ok(SolveReport {
-                        kind: SolverKind::DirectPcg,
-                        iterations: iter,
-                        converged: true,
-                        residual_norm: r_norm,
-                        relative_residual: r_norm / b_scale,
-                        fft_count,
-                        mirror_paired: self.engine.mirror_paired(),
-                        warm_started,
-                    });
-                }
-                self.z_g.copy_from_slice(&self.r_g);
-                fft_count += self.engine.apply_split_precond_in_place(
-                    comm,
-                    &self.work_r0,
-                    &self.precond,
-                    has_kappa,
-                    &mut self.z_g,
-                )?;
-                let mut rz_new_loc = 0.0_f64;
-                for (&r, &z) in self.r_g.iter().zip(&self.z_g) {
-                    rz_new_loc += r.re * z.re + r.im * z.im;
-                }
-                comm.tree_sum_f64(&[rz_new_loc], &mut scalar_glob)?;
-                volume * scalar_glob[0]
-            } else {
-                let mut r_norm2_loc = 0.0_f64;
-                let mut rz_new_loc = 0.0_f64;
-                for ((((phi, r_dst), z_dst), (&p, &w)), &pre) in out_phi_g
-                    .iter_mut()
-                    .zip(&mut self.r_g)
-                    .zip(&mut self.z_g)
-                    .zip(self.p_g.iter().zip(&self.w_g))
-                    .zip(&self.precond)
-                {
-                    *phi += alpha * p;
-                    let r = *r_dst - alpha * w;
-                    let z = pre * r;
-                    *r_dst = r;
-                    *z_dst = z;
-                    r_norm2_loc += r.norm_sqr();
-                    rz_new_loc += r.re * z.re + r.im * z.im;
-                }
-                comm.tree_sum_f64(&[r_norm2_loc, rz_new_loc], &mut sums)?;
-                r_norm = (volume * sums[0]).sqrt();
-                volume * sums[1]
-            };
+            let mut r_norm2_loc = 0.0_f64;
+            let mut rz_new_loc = 0.0_f64;
+            for ((((phi, r_dst), z_dst), (&p, &w)), &pre) in out_phi_g
+                .iter_mut()
+                .zip(&mut self.r_g)
+                .zip(&mut self.z_g)
+                .zip(self.p_g.iter().zip(&self.w_g))
+                .zip(&self.precond)
+            {
+                *phi += alpha * p;
+                let r = *r_dst - alpha * w;
+                let z = pre * r;
+                *r_dst = r;
+                *z_dst = z;
+                r_norm2_loc += r.norm_sqr();
+                rz_new_loc += r.re * z.re + r.im * z.im;
+            }
+            comm.tree_sum_f64(&[r_norm2_loc, rz_new_loc], &mut sums)?;
+            r_norm = (volume * sums[0]).sqrt();
+            let rz_new = volume * sums[1];
 
             if !r_norm.is_finite() || !rz_new.is_finite() {
                 return Err(SolvationError::NonFinite);

@@ -1,4 +1,4 @@
-import Mathlib.Data.Real.Basic
+import Mathlib.Basic.Real.Basic
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
 import Mathlib.Analysis.SpecialFunctions.ExpDeriv
 import Mathlib.Analysis.SpecialFunctions.Log.Basic
@@ -230,7 +230,7 @@ theorem gpOp_spd {n : ℕ} (dv : ℝ)
 
 /-- Dual variational electrostatic functional
 `E_dual[rho, phi] = ⟨rho, phi⟩ - (1 / (8 * pi)) * ⟨phi, A phi⟩`. -/
-def dualEnergy {n : ℕ} (dv pi_val : ℝ)
+noncomputable def dualEnergy {n : ℕ} (dv pi_val : ℝ)
     (A : (Fin n → ℝ) → (Fin n → ℝ)) (rho phi : Fin n → ℝ) : ℝ :=
   wdot dv rho phi - (1 / (8 * pi_val)) * wdot dv phi (A phi)
 

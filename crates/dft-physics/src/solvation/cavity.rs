@@ -313,10 +313,7 @@ pub fn ionic_solvation_forces<K: Collective>(
         return Err(SolvationError::NonFinite);
     }
 
-    Ok(global_forces
-        .chunks_exact(3)
-        .map(|chunk| [chunk[0], chunk[1], chunk[2]])
-        .collect())
+    Ok(global_forces.as_chunks::<3>().0.to_vec())
 }
 
 #[cfg(test)]
@@ -551,7 +548,7 @@ mod tests {
                 .filter(|&idx| idx % size == rank)
                 .collect();
             let local_phi: Vec<Complex64> = local_pos.iter().map(|&idx| phi_pol_g[idx]).collect();
-            ionic_solvation_forces(&comm, &cell, dims, &local_pos, &ions, &local_phi).unwrap()
+            ionic_solvation_forces(comm, &cell, dims, &local_pos, &ions, &local_phi).unwrap()
         });
         for rank_forces in distributed {
             for (a, b) in analytic.iter().zip(&rank_forces) {

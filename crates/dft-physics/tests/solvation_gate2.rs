@@ -909,11 +909,19 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 } else {
                     match cavity {
                         CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
-                        CavityModel::Sccs { .. } => {
-                            if n_i < 6.0e-4 {
-                                7.0e-4 * n_i
+                        CavityModel::Sccs {
+                            rho_min_bohr3,
+                            rho_max_bohr3,
+                            ..
+                        } => {
+                            if n_i > rho_min_bohr3 && n_i < rho_max_bohr3 {
+                                let margin = (n_i - rho_min_bohr3).min(rho_max_bohr3 - n_i);
+                                (3.5e-3 * n_i).min(2.0e-6).min(0.40 * margin)
                             } else {
-                                (1.5e-3 * n_i).min(2.0e-6)
+                                let margin = (n_i - rho_min_bohr3)
+                                    .abs()
+                                    .min((n_i - rho_max_bohr3).abs());
+                                (1.5e-3 * n_i).min(2.0e-6).min(0.40 * margin)
                             }
                         }
                     }

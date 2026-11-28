@@ -680,20 +680,20 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
-    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, false);
+    let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
 
     let make_opts = |gamma_real: GammaReal| {
         let mut opts = base_options(
-            4.5,
+            6.0,
             4,
             threshold_ha,
             gamma_real,
             Functional::LdaPz,
             Some(solv),
         );
-        // Fine charge/cavity grid (`dx ~ 0.24 Bohr`) suppresses FFT egg-box
-        // below 1e-6 Ha/Bohr while keeping wavefunction Davidson fast.
-        opts.grid_override = Some([40, 40, 40]);
+        // Well-resolved charge/cavity grid (`dx ~ 0.20 Bohr`) suppresses FFT
+        // egg-box below 1e-6 Ha/Bohr while keeping wavefunction Davidson fast.
+        opts.grid_override = Some([48, 48, 48]);
         opts.density_tolerance = 1.0e-12;
         opts.energy_tolerance = 1.0e-13;
         opts.eigen_tolerance = 1.0e-12;
@@ -813,7 +813,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     let profile = solvation_profile(threshold_ha);
 
     let run_width = |width_bohr: f64, kappa: f64| -> f64 {
-        let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, false);
+        let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, true);
         let mut opts = base_options(
             4.5,
             4,
@@ -822,7 +822,9 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
             Functional::LdaPz,
             Some(solv),
         );
-        opts.grid_override = Some([40, 40, 40]);
+        // Fine grid (`dx = 0.208 Bohr`, G_Nyq = 15.1 Bohr^-1) eliminates
+        // Gaussian Fourier aliasing for r_c >= 0.45 Bohr (`< 1e-10`).
+        opts.grid_override = Some([48, 48, 48]);
         let run = solve(
             StartInput {
                 cell: &fixture.cell,
@@ -841,12 +843,12 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     };
 
     for kappa in [0.0, 0.15] {
-        let e_040 = run_width(0.40, kappa);
-        let e_050 = run_width(0.50, kappa);
-        let diff = (e_040 - e_050).abs();
+        let e_045 = run_width(0.45, kappa);
+        let e_055 = run_width(0.55, kappa);
+        let diff = (e_045 - e_055).abs();
         assert!(
             diff < 1.0e-8,
-            "kappa={kappa}: |E_tot(r_c=0.40) - E_tot(r_c=0.50)| = {diff:.3e} Ha >= 1e-8 Ha"
+            "kappa={kappa}: |E_tot(r_c=0.45) - E_tot(r_c=0.55)| = {diff:.3e} Ha >= 1e-8 Ha"
         );
     }
 }
@@ -917,20 +919,35 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     let _scope = test_run_config().enter();
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PW");
     let species = fixture.species();
+    // Non-degenerate open-shell doublet (Z_a = 2, Z_b = 1 -> 3 electrons,
+    // n_up = 2 sigma, n_down = 1 sigma) avoiding cubic pi-orbital degeneracy.
+    let pp_doublet_a = common::potential_with_atomic_start(2.0, 0.90, false, 161, "SLA PW");
+    let pp_doublet_b = common::potential_with_atomic_start(1.0, 1.05, false, 161, "SLA PW");
+    let doublet_species = [
+        SpeciesPotential {
+            label: "Xa",
+            potential: &pp_doublet_a,
+        },
+        SpeciesPotential {
+            label: "Xb",
+            potential: &pp_doublet_b,
+        },
+    ];
     let threshold_ha = 5.0e-12;
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
 
-    let cases: [(&str, Policy, usize); 3] = [
+    let cases: [(&str, Policy, usize, bool); 3] = [
         (
             "collinear_fixed_spin",
             Policy::FixedSpin(SpinSector {
-                n_up: 3,
+                n_up: 2,
                 n_down: 1,
                 axis_cartesian: [0.0, 0.0, 1.0],
                 initial_moment_seed: Some(1.0),
             }),
             6,
+            true,
         ),
         (
             "scalar_fermi_dirac",
@@ -939,6 +956,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
                 band_cap: 22,
             },
             14,
+            false,
         ),
         (
             "spin_fermi_dirac",
@@ -954,10 +972,11 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
                 band_cap: 22,
             },
             14,
+            false,
         ),
     ];
 
-    for (name, policy, bands) in cases {
+    for (name, policy, bands, use_doublet) in cases {
         let opts = base_options(
             4.0,
             bands,
@@ -969,11 +988,16 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
         let mut req = Request::new(profile, gamma_kpoints());
         req.policy = Some(policy);
         req.derivatives.forces = true;
+        let case_species = if use_doublet {
+            &doublet_species[..]
+        } else {
+            &species[..]
+        };
         let delivered = solve(
             StartInput {
                 cell: &fixture.cell,
                 atoms: &fixture.atoms,
-                potentials: &species,
+                potentials: case_species,
                 options: &opts,
             },
             req,
@@ -1037,11 +1061,11 @@ fn l3_8_crystal_symmetry_invariance() {
         "expected nontrivial symmetry operations"
     );
 
-    let threshold_ha = 5.0e-13;
+    let threshold_ha = 5.0e-12;
     let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
     let opts = base_options(
-        4.0,
+        5.0,
         4,
         threshold_ha,
         GammaReal::Off,

@@ -100,11 +100,15 @@ impl PolarDimerFixture {
 
     fn with_geometry(cell: Cell, atoms: Vec<Atom>, pp_functional: &str) -> Self {
         // Closed-shell heteronuclear dimer (Z_a = 2, Z_b = 2; 4 valence electrons,
-        // 2 closed-shell bands) with distinct core radii (`rc = 1.0` vs `1.35` Bohr),
-        // matching BAANDI's proven refscf synthetic fixture family while carrying a
-        // strong permanent dipole and clean molecular cavity in implicit water.
-        let pp_a = common::potential_with_atomic_start(2.0, 1.0, true, 161, pp_functional);
-        let pp_b = common::potential_with_atomic_start(2.0, 1.35, true, 161, pp_functional);
+        // 2 closed-shell bands) with distinct core radii (`rc = 1.0` vs `1.35` Bohr)
+        // and modest nonlocal projectors (`dij` without the artificial +6 Ry s-core
+        // repulsion of `DEFAULT_DIJ`, which would otherwise hollow out `n(R_I) < n_c`
+        // and let continuum solvent penetrate the ionic core).
+        let dij = "0.15 0.02 0 0.02 0.20 0 0 0 0.30";
+        let pp_a =
+            common::potential_with_atomic_start_dij(2.0, 1.0, true, 161, pp_functional, dij);
+        let pp_b =
+            common::potential_with_atomic_start_dij(2.0, 1.35, true, 161, pp_functional, dij);
         Self {
             cell,
             atoms,
@@ -389,7 +393,7 @@ fn l3_1_off_path_bit_identity() {
             let mut req = Request::new(profile, gamma_kpoints());
             req.policy = Some(Policy::FermiDirac {
                 theta_ha: 0.02,
-                band_cap: 16,
+                band_cap: 22,
             });
             req.derivatives = Derivatives {
                 forces: true,
@@ -558,7 +562,7 @@ fn l3_2_vacuum_limit_scf_reduction() {
 
         let fd_policy = Policy::FermiDirac {
             theta_ha: 0.02,
-            band_cap: 16,
+            band_cap: 22,
         };
         let (pw_fd, f_pw_fd) = run_electronic(fd_policy.clone(), 12, None);
         let (sv_fd, f_sv_fd) = run_electronic(fd_policy, 12, vac);
@@ -913,9 +917,9 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
             "scalar_fermi_dirac",
             Policy::FermiDirac {
                 theta_ha: 0.02,
-                band_cap: 16,
+                band_cap: 22,
             },
-            12,
+            14,
         ),
         (
             "spin_fermi_dirac",
@@ -928,9 +932,9 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
                 },
                 theta_ha: 0.02,
                 constraint: Constraint::FixedMoment(1.0),
-                band_cap: 16,
+                band_cap: 22,
             },
-            12,
+            14,
         ),
     ];
 
@@ -995,8 +999,15 @@ fn l3_8_crystal_symmetry_invariance() {
         Atom::new("Xx", [0.62, 0.5, 0.5]),
     ];
     // Closed-shell homonuclear dimer (Z = 2 + 2 = 4 valence electrons, 2 closed
-    // sigma_g / sigma_u bands) so fixed-occupation SCF has a clean non-degenerate gap.
-    let pp = common::potential_with_atomic_start(2.0, 1.05, true, 161, "SLA PZ");
+    // sigma_g / sigma_u bands) with modest nonlocal projectors (no core hole).
+    let pp = common::potential_with_atomic_start_dij(
+        2.0,
+        1.05,
+        true,
+        161,
+        "SLA PZ",
+        "0.15 0.02 0 0.02 0.20 0 0 0 0.30",
+    );
     let species = [SpeciesPotential {
         label: "Xx",
         potential: &pp,

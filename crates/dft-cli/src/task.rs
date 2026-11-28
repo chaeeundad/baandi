@@ -34,6 +34,8 @@ pub enum TaskType {
     Rpa,
     /// SCF followed by atomic-orbital subspace projection (`baandi subspace`, R4a).
     Subspace,
+    /// SCF followed by Wannier90 `.win/.eig/.amn/.mmn` export (`baandi wannier-export`, R4b).
+    WannierExport,
 }
 impl TaskType {
     pub fn name(self) -> &'static str {
@@ -47,6 +49,7 @@ impl TaskType {
             Self::Dielectric => "dielectric",
             Self::Rpa => "rpa",
             Self::Subspace => "subspace",
+            Self::WannierExport => "wannier-export",
         }
     }
     /// The alias subcommand that runs this task.
@@ -60,6 +63,7 @@ impl TaskType {
             Self::Dielectric => "dielectric",
             Self::Rpa => "rpa",
             Self::Subspace => "subspace",
+            Self::WannierExport => "wannier-export",
         }
     }
 }
@@ -149,6 +153,9 @@ pub fn resolve_text(input: &Path, text: &str) -> Result<Resolved, String> {
         TaskType::Subspace if value.get("subspace").is_none() => {
             return Err("task.type = \"subspace\" requires a [subspace] table".into());
         }
+        TaskType::WannierExport if value.get("subspace").is_none() => {
+            return Err("task.type = \"wannier-export\" requires a [subspace] table".into());
+        }
         TaskType::Scf if relax.is_some() => {
             return Err(if explicit {
                 "task.type = \"scf\" with a [relax] table: remove [relax] or set task.type = \"relax\" / \"cell-relax\"".into()
@@ -225,6 +232,11 @@ mod tests {
                 TaskType::Subspace,
                 "subspace",
             ),
+            (
+                "[task]\ntype='wannier-export'\n[subspace]\n",
+                TaskType::WannierExport,
+                "wannier-export",
+            ),
         ];
         for (extra, task, alias) in cases {
             let r = resolve(extra).unwrap_or_else(|e| panic!("{extra}: {e}"));
@@ -255,6 +267,7 @@ mod tests {
             ("[task]\ntype='dielectric'\n", "[response]"),
             ("[task]\ntype='rpa'\n[rpa]\n", "[response]"),
             ("[task]\ntype='subspace'\n", "[subspace]"),
+            ("[task]\ntype='wannier-export'\n", "[subspace]"),
             ("[task]\ntype='phonon'\n", "unknown variant"),
             (
                 "[task]\ntype='scf'\nresume=true\n",

@@ -61,6 +61,11 @@ Diagnostic switch `BAANDI_RESPONSE_VELOCITY=full|local|sp|no-g0|no-g0-all` (engi
   `p_mk`, projected populations, exact Wigner-Seitz supercell lattice points
   and degeneracies for arbitrary skewed cells, real-space hoppings `H(R)` and
   Wannier band interpolation. Internal oracles: `cargo test -p dft-response --test subspace`.
+- `wannier` (R4b, ADR 0060): Marzari-Vanderbilt B1 finite-difference neighbor
+  shells (`find_bvector_shells`), Bloch overlaps `M_mn^(k,b) = <u_mk | u_{n,k+b}>`,
+  Marzari-Vanderbilt spread decomposition (`Omega_I`, `Omega_tilde`, `Omega`,
+  centers) and imported Wannier90 gauge projection (`project_with_gauge`).
+  Internal oracles: `cargo test -p dft-response --test wannier`.
 
 Pair fields, products, the scaled GEMM operand and the N_G^2 product are
 reused scratch; the velocity matrices and the frequency worker threads are

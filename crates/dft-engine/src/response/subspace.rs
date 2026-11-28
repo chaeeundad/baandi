@@ -18,10 +18,10 @@ use dft_geometry::{Atom, Cell, kpoints::KPoint};
 use dft_mpi::Collective;
 use dft_numerics::linalg::ComplexMatrix;
 use dft_physics::data::{Array3, Complex64};
-pub use dft_response::subspace::DEFAULT_SINGULAR_TOLERANCE;
+pub use dft_response::subspace::{DEFAULT_SINGULAR_TOLERANCE, RealSpaceHamiltonian};
 use dft_response::subspace::{
-    KProjection, RealSpaceHamiltonian, build_real_space_hamiltonian, project_k,
-    projected_populations, raw_overlap_all_bands,
+    KProjection, build_real_space_hamiltonian, project_k, projected_populations,
+    raw_overlap_all_bands,
 };
 use dft_upf::{
     AtomicWavefunction, Pseudopotential,

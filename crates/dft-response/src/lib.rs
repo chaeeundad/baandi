@@ -29,6 +29,7 @@ pub mod pair;
 pub mod subspace;
 pub mod transitions;
 pub mod velocity;
+pub mod wannier;
 
 pub use num_complex::Complex64;
 

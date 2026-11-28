@@ -37,6 +37,7 @@ use dft_units::Hartree;
 
 pub mod rpa;
 pub mod subspace;
+pub mod wannier;
 
 /// Settings of [`dielectric_with`] (Hartree atomic units).
 #[derive(Clone, Copy, Debug)]

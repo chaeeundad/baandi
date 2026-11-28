@@ -62,6 +62,11 @@ pub fn derivative_ledger() -> Vec<DerivativeEntry> {
             "engine::occupations",
             "stationary free energy at fixed theta,N,M",
         ),
+        (
+            "solvation",
+            "physics::solvation",
+            "analytic Gaussian ionic solvation force",
+        ),
     ]
     .into_iter()
     .map(|(term_id, owner, reason)| DerivativeEntry {
@@ -106,6 +111,7 @@ pub struct ForceResult {
     pub local: Vec<[f64; 3]>,
     pub nonlocal: Vec<[f64; 3]>,
     pub core: Vec<[f64; 3]>,
+    pub solvation: Option<Vec<[f64; 3]>>,
     pub net_force: [f64; 3],
     pub maximum_absolute_component: f64,
     pub elapsed: std::time::Duration,
@@ -472,8 +478,39 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     )?;
     band_passes += blocks.iter().map(|b| b.2.len()).sum::<usize>();
     lap("nonlocal", &mut timings);
+    let mut solvation = if let Some(config) = &state.options.solvation {
+        let solv_ions: Vec<_> = state
+            .atoms
+            .iter()
+            .zip(&species)
+            .map(|(a, s)| dft_physics::solvation::IonicPseudoCharge {
+                charge: s.potential.z_valence(),
+                fractional_position: a.fractional_position,
+                width_bohr: config.ionic_width_bohr,
+            })
+            .collect();
+        let forces = if let Some(comm) = crate::parallel::SharedComm::active() {
+            evaluate_solvation_forces(&comm, state.cell, dims, &density, &solv_ions, config)?
+        } else {
+            evaluate_solvation_forces(
+                &crate::refscf::metric::Serial,
+                state.cell,
+                dims,
+                &density,
+                &solv_ions,
+                config,
+            )?
+        };
+        lap("solvation", &mut timings);
+        Some(forces)
+    } else {
+        None
+    };
     let symmetrize_clock = std::time::Instant::now();
     for term in [&mut ewald, &mut local, &mut nonlocal, &mut core] {
+        symmetrize(state.cell, term, state.symmetry)?;
+    }
+    if let Some(term) = &mut solvation {
         symmetrize(state.cell, term, state.symmetry)?;
     }
     let mut result = assemble(
@@ -486,6 +523,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         local,
         nonlocal,
         core,
+        solvation,
         band_passes,
         timings,
         start,
@@ -496,6 +534,26 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     Ok(result)
 }
 
+fn evaluate_solvation_forces<K: dft_mpi::Collective>(
+    comm: &K,
+    cell: &Cell,
+    dims: [usize; 3],
+    density: &Array3<f64>,
+    ions: &[dft_physics::solvation::IonicPseudoCharge],
+    config: &crate::model::SolvationConfig,
+) -> Result<Vec<[f64; 3]>, ScfError> {
+    config.validate()?;
+    let mut ws = dft_physics::solvation::SolvationWorkspace::new(cell, dims, comm)?;
+    let indices = ws.owned_real_grid_indices();
+    let full: Vec<f64> = density.iter().copied().collect();
+    let density_planes: Vec<f64> = indices.iter().map(|&idx| full[idx]).collect();
+    let mut solver_cfg = config.solver;
+    solver_cfg.tolerance = solver_cfg.tolerance.min(1.0e-11);
+    solver_cfg.warm_start = false;
+    let eval = ws.evaluate(comm, &density_planes, ions, &config.params, &solver_cfg)?;
+    Ok(eval.ionic_forces_ha_bohr)
+}
+
 /// Total forces of the symmetrized terms and the force record.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble(
@@ -504,6 +562,7 @@ pub(crate) fn assemble(
     local: Vec<[f64; 3]>,
     nonlocal: Vec<[f64; 3]>,
     core: Vec<[f64; 3]>,
+    solvation: Option<Vec<[f64; 3]>>,
     band_passes: usize,
     timings: Vec<(&'static str, f64)>,
     start: std::time::Instant,
@@ -513,8 +572,22 @@ pub(crate) fn assemble(
         ledger,
         quantity,
     } = validated;
+    if let Some(s) = &solvation
+        && s.len() != ewald.len()
+    {
+        return Err(ScfError::InvalidInput("forces.solvation: atom count"));
+    }
     let values: Vec<[f64; 3]> = (0..ewald.len())
-        .map(|i| std::array::from_fn(|a| ewald[i][a] + local[i][a] + nonlocal[i][a] + core[i][a]))
+        .map(|i| {
+            std::array::from_fn(|a| {
+                let base = ewald[i][a] + local[i][a] + nonlocal[i][a] + core[i][a];
+                if let Some(solv) = &solvation {
+                    base + solv[i][a]
+                } else {
+                    base
+                }
+            })
+        })
         .collect();
     if values.iter().flatten().any(|f| !f.is_finite()) {
         return Err(ScfError::NonFinite);
@@ -534,6 +607,7 @@ pub(crate) fn assemble(
         local,
         nonlocal,
         core,
+        solvation,
         net_force,
         maximum_absolute_component,
         elapsed: start.elapsed(),
@@ -1168,6 +1242,7 @@ pub(crate) fn validate(state: &ForceState<'_>) -> Result<Validated, ScfError> {
     let crate::energy::EnergyAudit {
         xc_floor: _,
         nlcc,
+        solvation,
         kinetic,
         local,
         local_zero_mode: _,
@@ -1181,6 +1256,11 @@ pub(crate) fn validate(state: &ForceState<'_>) -> Result<Validated, ScfError> {
         harris_foulkes: _,
         functional_difference_bound: _,
     } = energy;
+    if state.options.solvation.is_some() != solvation.is_some() {
+        return Err(ScfError::InvalidInput(
+            "observables.forces: solvation energy audit does not match model configuration",
+        ));
+    }
     let mut ledger = derivative_ledger();
     for entry in &mut ledger {
         entry.energy_ha = Some(match entry.term_id {
@@ -1200,6 +1280,10 @@ pub(crate) fn validate(state: &ForceState<'_>) -> Result<Validated, ScfError> {
                 entry.included_in = "audit_only";
                 entry.dependencies.push("xc");
                 nlcc.as_ref().map_or(0.0, |c| c.core_potential_integral_ha)
+            }
+            "solvation" => {
+                entry.active = solvation.is_some();
+                solvation.as_ref().map_or(0.0, |s| s.total_ha)
             }
             _ => unreachable!("closed NC ledger"),
         });

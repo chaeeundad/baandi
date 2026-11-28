@@ -1,9 +1,48 @@
 //! Shared SCF options and occupation contracts.
-use super::{StandardProfile, Verification};
+use super::{ScfError, StandardProfile, Verification};
 use crate::Functional;
 use dft_basis::PlaneWaveBasis;
 use dft_geometry::Cell;
 use dft_physics::data::Hartree;
+
+/// Implicit continuum solvation configuration (Track B Phase B1, ADR 0061).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SolvationConfig {
+    pub params: dft_physics::solvation::SolvationParams,
+    pub solver: dft_physics::solvation::SolverConfig,
+    pub ionic_width_bohr: f64,
+    pub adaptive_tolerance: bool,
+}
+
+impl Default for SolvationConfig {
+    fn default() -> Self {
+        Self {
+            params: dft_physics::solvation::SolvationParams::vaspsol_water(),
+            solver: dft_physics::solvation::SolverConfig {
+                kind: dft_physics::solvation::SolverKind::DirectPcg,
+                tolerance: 1.0e-10,
+                max_iterations: 300,
+                diis_history: 8,
+                warm_start: true,
+            },
+            ionic_width_bohr: 0.60,
+            adaptive_tolerance: true,
+        }
+    }
+}
+
+impl SolvationConfig {
+    pub fn validate(&self) -> Result<(), ScfError> {
+        self.params.validate()?;
+        self.solver.validate()?;
+        if !self.ionic_width_bohr.is_finite() || self.ionic_width_bohr <= 0.0 {
+            return Err(ScfError::InvalidInput(
+                "solvation ionic_width_bohr must be finite and > 0.0",
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Mixing {
@@ -105,6 +144,9 @@ pub struct ScfOptions {
     pub seed: u64,
     pub divergence_factor: f64,
     pub divergence_patience: usize,
+    /// Optional implicit continuum solvation model (ADR 0061). `None` keeps
+    /// pure-PW execution bit-identical with zero allocations or extra FFTs.
+    pub solvation: Option<SolvationConfig>,
 }
 impl ScfOptions {
     pub(crate) fn basis(
@@ -192,6 +234,7 @@ impl ScfOptions {
             seed: 2026,
             divergence_factor: 20.0,
             divergence_patience: 3,
+            solvation: None,
         }
     }
     /// Host default that mirrors the reference switch of the CLI:

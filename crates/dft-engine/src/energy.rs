@@ -10,6 +10,9 @@ pub struct EnergyAudit {
     /// Explicit audit-only core contribution; XC energy includes core, all band
     /// double counting excludes it. None preserves the legacy model/ledger.
     pub nlcc: Option<CoreXcLedger>,
+    /// Implicit continuum solvation energy ledger (ADR 0061). `None` preserves
+    /// bit-identical pure-PW summation.
+    pub solvation: Option<SolvationEnergyLedger>,
     pub kinetic: f64,
     pub local: f64,
     pub local_zero_mode: f64,
@@ -20,12 +23,24 @@ pub struct EnergyAudit {
     pub band_sum: f64,
     /// Integral n_out (V_H[n_in]+V_xc[n_in]) d^3r.
     pub double_counting: f64,
-    /// E_band - double_counting + E_H[n_out] + E_xc[n_out] + E_ewald.
+    /// E_band - double_counting + E_H[n_out] + E_xc[n_out] + E_ewald (+ E_solv[n_out]).
     pub band_form: f64,
     pub harris_foulkes: f64,
     /// Bound using exact Hartree remainder, absolute XC remainder, and
     /// sum f_b ||H c_b-eps_b c_b|| (normalized orbitals).
     pub functional_difference_bound: f64,
+}
+/// Implicit continuum solvation energy breakdown and inner-solver telemetry (ADR 0061).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SolvationEnergyLedger {
+    pub electrostatic_ha: f64,
+    pub background_correction_ha: f64,
+    pub cavitation_ha: f64,
+    pub total_ha: f64,
+    pub potential_integral_ha: f64,
+    pub iterations: usize,
+    pub relative_residual: f64,
+    pub fft_count: usize,
 }
 /// B2 consistency report at the final state: the nonlocal energy from the
 /// band-sum identity against the explicit audit on the same orbitals (Ha).
@@ -70,7 +85,12 @@ pub(crate) fn core_ledger(
 }
 impl EnergyAudit {
     pub fn total_hartree(&self) -> f64 {
-        self.kinetic + self.local + self.nonlocal + self.hartree + self.xc + self.ewald
+        let base = self.kinetic + self.local + self.nonlocal + self.hartree + self.xc + self.ewald;
+        if let Some(s) = &self.solvation {
+            base + s.total_ha
+        } else {
+            base
+        }
     }
     pub fn total_rydberg(&self) -> f64 {
         2.0 * self.total_hartree()
@@ -366,6 +386,7 @@ pub(crate) fn evaluate_with_core_xc(
     let audit = EnergyAudit {
         xc_floor: None,
         nlcc: core_ledger(core, n, x, volume),
+        solvation: None,
         kinetic,
         local,
         local_zero_mode: charge * a.ionic_g[[0, 0, 0]].re,
@@ -616,6 +637,7 @@ pub(crate) fn evaluate_shared_with_kinetic(
     let audit = EnergyAudit {
         xc_floor: None,
         nlcc: shared.nlcc.clone(),
+        solvation: None,
         kinetic,
         local: shared.local,
         local_zero_mode: shared.local_zero_mode,
@@ -657,6 +679,7 @@ pub(crate) fn weighted_audits(audits: &[(f64, EnergyAudit)]) -> EnergyAudit {
     EnergyAudit {
         xc_floor: None,
         nlcc: audits.first().and_then(|(_, a)| a.nlcc.clone()),
+        solvation: None,
         kinetic: sum!(kinetic),
         local: sum!(local),
         local_zero_mode: sum!(local_zero_mode),

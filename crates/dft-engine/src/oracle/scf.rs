@@ -3237,6 +3237,7 @@ mod tests {
             hartree: 0.0,
             xc: 0.0,
             nlcc: None,
+            solvation: None,
             ewald: 0.0,
             band_sum: 0.0,
             double_counting: 0.0,

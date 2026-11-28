@@ -406,6 +406,7 @@ impl<'a> Exchange<'a> {
 record!(crate::energy::EnergyAudit {
     xc_floor,
     nlcc,
+    solvation,
     kinetic,
     local,
     local_zero_mode,
@@ -418,6 +419,16 @@ record!(crate::energy::EnergyAudit {
     band_form,
     harris_foulkes,
     functional_difference_bound
+});
+record!(crate::energy::SolvationEnergyLedger {
+    electrostatic_ha,
+    background_correction_ha,
+    cavitation_ha,
+    total_ha,
+    potential_integral_ha,
+    iterations,
+    relative_residual,
+    fft_count
 });
 record!(crate::energy::XcFloorAudit {
     density_floor,

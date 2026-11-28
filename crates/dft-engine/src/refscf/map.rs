@@ -14,11 +14,18 @@ use dft_solvers::ref_davidson;
 use std::{f64::consts::PI, time::Instant};
 
 #[derive(Clone)]
+pub(super) struct SolvationFieldSummary {
+    pub ledger: crate::energy::SolvationEnergyLedger,
+    pub v_solv: Vec<f64>,
+    pub v_solv_integral: f64,
+}
+#[derive(Clone)]
 pub(super) struct Fields {
     pub hartree: f64,
     pub xc: f64,
     pub xc_integral: f64,
     pub nlcc: Option<crate::energy::CoreXcLedger>,
+    pub solvation: Option<SolvationFieldSummary>,
     pub hxc: Vec<f64>,
     pub vh: Vec<f64>,
 }
@@ -99,6 +106,20 @@ pub(super) fn fields<K: Collective>(
     } else {
         None
     };
+    let solvation_eval = if let Some(solv) = &mut state.solvation {
+        let mut tol_cfg = solv.config.solver;
+        tol_cfg.tolerance = solv.current_tolerance;
+        Some(solv.workspace.evaluate_with_density_g(
+            comm,
+            density,
+            &coeff,
+            &solv.ions,
+            &solv.config.params,
+            &tol_cfg,
+        )?)
+    } else {
+        None
+    };
     let b = cell.reciprocal_columns_inverse_bohr();
     for (v, &g) in coeff.iter_mut().zip(state.fields.reciprocal_indices()) {
         let ijk = [g / (dims[1] * dims[2]), g / dims[2] % dims[1], g % dims[2]];
@@ -170,6 +191,34 @@ pub(super) fn fields<K: Collective>(
     for (h, x) in hxc.iter_mut().zip(vxc) {
         *h += x;
     }
+    let solvation = if let Some(eval) = solvation_eval {
+        for (h, &vs) in hxc.iter_mut().zip(&eval.v_total_planes) {
+            *h += vs;
+        }
+        let local_vs = dv
+            * density
+                .iter()
+                .zip(&eval.v_total_planes)
+                .map(|(n, v)| n * v)
+                .sum::<f64>();
+        let v_solv_integral = sum(comm, &[local_vs])?[0];
+        Some(SolvationFieldSummary {
+            ledger: crate::energy::SolvationEnergyLedger {
+                electrostatic_ha: eval.electrostatic_ha,
+                background_correction_ha: eval.background_correction_ha,
+                cavitation_ha: eval.cavitation_ha,
+                total_ha: eval.total_ha,
+                potential_integral_ha: v_solv_integral,
+                iterations: eval.report.iterations,
+                relative_residual: eval.report.relative_residual,
+                fft_count: eval.report.fft_count,
+            },
+            v_solv: eval.v_total_planes,
+            v_solv_integral,
+        })
+    } else {
+        None
+    };
     // GS1D-B: the Hartree part is invariant already; XC on a grid that some
     // operation does not permute is not, so project the sum (ADR 0049).
     if let Some(p) = &mut state.potential_symmetry {
@@ -189,6 +238,7 @@ pub(super) fn fields<K: Collective>(
     });
     Ok(Fields {
         nlcc,
+        solvation,
         hartree: e[0],
         xc: e[1],
         xc_integral: e[2],
@@ -393,11 +443,18 @@ pub(super) fn cached_fields<K: Collective>(
     density: &[f64],
     cache: &mut Option<(Vec<f64>, Fields)>,
 ) -> Result<Fields, ScfError> {
-    let hit = cache.as_ref().is_some_and(|(n, _)| {
-        n.len() == density.len()
+    let hit = cache.as_ref().is_some_and(|(n, fields)| {
+        let density_eq = n.len() == density.len()
             && n.iter()
                 .zip(density)
-                .all(|(a, b)| a.to_bits() == b.to_bits())
+                .all(|(a, b)| a.to_bits() == b.to_bits());
+        let solv_tol_ok = state.solvation.as_ref().is_none_or(|solv| {
+            fields
+                .solvation
+                .as_ref()
+                .is_some_and(|s| s.ledger.relative_residual <= solv.current_tolerance)
+        });
+        density_eq && solv_tol_ok
     });
     if sum(comm, &[f64::from(!hit)])?[0] == 0. {
         return Ok(cache.as_ref().expect("global cache hit").1.clone());
@@ -405,7 +462,13 @@ pub(super) fn cached_fields<K: Collective>(
     let value = fields(state, comm, cell, functional, density)?;
     *cache = Some((density.to_vec(), value.clone()));
     let (n, v) = cache.as_ref().expect("installed fields");
-    observe(Mem::FieldCache, bytes(n) + bytes(&v.hxc) + bytes(&v.vh));
+    observe(
+        Mem::FieldCache,
+        bytes(n)
+            + bytes(&v.hxc)
+            + bytes(&v.vh)
+            + v.solvation.as_ref().map_or(0, |s| bytes(&s.v_solv)),
+    );
     Ok(value)
 }
 
@@ -446,9 +509,15 @@ fn audit<K: Collective>(
             .map(|(e, f)| e * f)
             .sum();
         let ewald = state.ewald.energy.0;
+        let mut harris_foulkes =
+            band_sum - input_fields.hartree + input_fields.xc - input_fields.xc_integral + ewald;
+        if let Some(s) = &input_fields.solvation {
+            harris_foulkes += s.ledger.total_ha - s.v_solv_integral;
+        }
         return Ok(EnergyAudit {
             xc_floor: None,
             nlcc: None,
+            solvation: None,
             kinetic: f64::NAN,
             local: f64::NAN,
             nonlocal: f64::NAN,
@@ -459,9 +528,7 @@ fn audit<K: Collective>(
             band_sum,
             double_counting: dc,
             band_form: f64::NAN,
-            harris_foulkes: band_sum - input_fields.hartree + input_fields.xc
-                - input_fields.xc_integral
-                + ewald,
+            harris_foulkes,
             functional_difference_bound: f64::NAN,
         });
     }
@@ -522,9 +589,45 @@ fn audit<K: Collective>(
         .map(|(e, f)| e * f)
         .sum();
     let ewald = state.ewald.energy.0;
+    let mut band_form = band_sum - integrals[2] + output_fields.hartree + output_fields.xc + ewald;
+    if let Some(s) = &output_fields.solvation {
+        band_form += s.ledger.total_ha;
+    }
+    let mut harris_foulkes =
+        band_sum - input_fields.hartree + input_fields.xc - input_fields.xc_integral + ewald;
+    if let Some(s) = &input_fields.solvation {
+        harris_foulkes += s.ledger.total_ha - s.v_solv_integral;
+    }
+    let eig_bound: f64 = residuals
+        .iter()
+        .zip(occupations)
+        .map(|(r, f)| r * f)
+        .sum();
+    let functional_difference_bound = if let (Some(in_s), Some(out_s)) =
+        (&input_fields.solvation, &output_fields.solvation)
+    {
+        let l_solv = sum(
+            comm,
+            &[dv * density
+                .iter()
+                .zip(input)
+                .zip(&in_s.v_solv)
+                .map(|((o, i), v)| (o - i) * v)
+                .sum::<f64>()],
+        )?[0];
+        (output_fields.hartree - input_fields.hartree - integrals[5]).abs()
+            + (output_fields.xc - input_fields.xc - (integrals[4] - integrals[5] - l_solv)).abs()
+            + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
+            + eig_bound
+    } else {
+        (output_fields.hartree - input_fields.hartree - integrals[5]).abs()
+            + (output_fields.xc - input_fields.xc - (integrals[4] - integrals[5])).abs()
+            + eig_bound
+    };
     let energy = EnergyAudit {
         xc_floor: None,
         nlcc: output_fields.nlcc.clone(),
+        solvation: output_fields.solvation.as_ref().map(|s| s.ledger.clone()),
         kinetic: integrals[0],
         local: integrals[1],
         nonlocal,
@@ -534,18 +637,9 @@ fn audit<K: Collective>(
         ewald,
         band_sum,
         double_counting: integrals[2],
-        band_form: band_sum - integrals[2] + output_fields.hartree + output_fields.xc + ewald,
-        harris_foulkes: band_sum - input_fields.hartree + input_fields.xc
-            - input_fields.xc_integral
-            + ewald,
-        functional_difference_bound: (output_fields.hartree - input_fields.hartree - integrals[5])
-            .abs()
-            + (output_fields.xc - input_fields.xc - (integrals[4] - integrals[5])).abs()
-            + residuals
-                .iter()
-                .zip(occupations)
-                .map(|(r, f)| r * f)
-                .sum::<f64>(),
+        band_form,
+        harris_foulkes,
+        functional_difference_bound,
     };
     Ok(energy)
 }
@@ -772,11 +866,17 @@ impl super::checkpoint::Codec for Solution {
         })
     }
 }
+super::checkpoint::record!(SolvationFieldSummary {
+    ledger,
+    v_solv,
+    v_solv_integral
+});
 super::checkpoint::record!(Fields {
     hartree,
     xc,
     xc_integral,
     nlcc,
+    solvation,
     hxc,
     vh
 });
@@ -798,6 +898,12 @@ impl Fields {
             || !self.hartree.is_finite()
             || !self.xc.is_finite()
             || !self.xc_integral.is_finite()
+            || self.solvation.as_ref().is_some_and(|s| {
+                s.v_solv.len() != planes
+                    || s.v_solv.iter().any(|v| !v.is_finite())
+                    || !s.v_solv_integral.is_finite()
+                    || !s.ledger.total_ha.is_finite()
+            })
         {
             return Err(super::checkpoint::invalid("cached field shape/values"));
         }

@@ -22,6 +22,12 @@ pub(super) fn execute(
     // ADR 0043 / review F01-F02: `single_path`, `execution`, `parallel` keys.
     path_record: Value,
 ) -> Result<RunReport, RunError> {
+    if config.solvation.is_some() || opts.solvation.is_some() {
+        return Err(error(
+            1,
+            "solvation: the legacy finite-temperature driver does not support implicit solvation; use the production reference path",
+        ));
+    }
     let cap = config
         .fd_channel_target(target)
         .and_then(|n| config.fd_band_count(n))

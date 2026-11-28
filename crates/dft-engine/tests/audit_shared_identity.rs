@@ -23,6 +23,7 @@ fn identical(a: &EnergyAudit, b: &EnergyAudit) {
     let EnergyAudit {
         xc_floor,
         nlcc,
+        solvation,
         kinetic,
         local,
         local_zero_mode,
@@ -75,6 +76,20 @@ fn identical(a: &EnergyAudit, b: &EnergyAudit) {
             );
         }
         _ => panic!("core presence"),
+    }
+    match (solvation, &b.solvation) {
+        (None, None) => (),
+        (Some(a), Some(b)) => {
+            bit!(a.electrostatic_ha, b.electrostatic_ha);
+            bit!(a.background_correction_ha, b.background_correction_ha);
+            bit!(a.cavitation_ha, b.cavitation_ha);
+            bit!(a.total_ha, b.total_ha);
+            bit!(a.potential_integral_ha, b.potential_integral_ha);
+            assert_eq!(a.iterations, b.iterations);
+            bit!(a.relative_residual, b.relative_residual);
+            assert_eq!(a.fft_count, b.fft_count);
+        }
+        _ => panic!("solvation presence"),
     }
 }
 

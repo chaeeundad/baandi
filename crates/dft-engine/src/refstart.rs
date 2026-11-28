@@ -121,6 +121,52 @@ fn orbital_kind(columns: usize, bands: usize) -> OrbitalStartKind {
     }
 }
 
+/// Owned implicit-solvation workspace and configuration attached to `StartState`
+/// (and shared by `KStartState` via `DerefMut`). Allocated only when
+/// `ScfOptions::solvation` is `Some`.
+pub struct SolvationState {
+    pub workspace: dft_physics::solvation::SolvationWorkspace,
+    pub config: crate::model::SolvationConfig,
+    pub ions: Vec<dft_physics::solvation::IonicPseudoCharge>,
+    pub current_tolerance: f64,
+}
+
+fn build_solvation_state<K: Collective>(
+    cell: &Cell,
+    dims: [usize; 3],
+    atoms: &[Atom],
+    potentials: &[SpeciesPotential<'_>],
+    config: Option<crate::model::SolvationConfig>,
+    comm: &K,
+) -> Result<Option<Box<SolvationState>>, ScfError> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    config.validate()?;
+    let mut ions = Vec::with_capacity(atoms.len());
+    for atom in atoms {
+        let pot = potentials
+            .iter()
+            .find(|p| p.label == atom.species)
+            .ok_or(ScfError::InvalidInput("unknown species"))?;
+        if atom.fractional_position.iter().any(|r| !r.is_finite()) {
+            return Err(ScfError::NonFinite);
+        }
+        ions.push(dft_physics::solvation::IonicPseudoCharge {
+            charge: pot.potential.z_valence(),
+            fractional_position: atom.fractional_position,
+            width_bohr: config.ionic_width_bohr,
+        });
+    }
+    let workspace = dft_physics::solvation::SolvationWorkspace::new(cell, dims, comm)?;
+    Ok(Some(Box::new(SolvationState {
+        workspace,
+        config,
+        ions,
+        current_tolerance: config.solver.tolerance,
+    })))
+}
+
 /// Owned values at the first Davidson boundary. `density_g` is forward
 /// normalized on `fields.reciprocal_indices()` (full FFT sticks, zeros/high-G
 /// ringing included). G=0 is exactly N_el/Omega. `density` and `potential` use
@@ -155,6 +201,9 @@ pub struct StartState {
     /// built by the reference maps when some symmetry operation does not
     /// permute the FFT grid. None otherwise (unchanged arithmetic).
     pub potential_symmetry: Option<crate::refscf::symmetry::PotentialProjector>,
+    /// Optional implicit continuum solvation state (ADR 0061). `None` allocates
+    /// zero heap memory and zero FFT plans.
+    pub solvation: Option<Box<SolvationState>>,
 }
 
 /// Owned NLCC inputs for PBE. The core coefficients are prepared once from
@@ -469,6 +518,9 @@ fn start_inner<K: Collective>(
         options: o,
     } = input;
     validate_strain_grid(o)?;
+    if let Some(solv) = &o.solvation {
+        solv.validate()?;
+    }
     if comm.size() == 0
         || comm.rank() >= comm.size()
         || atoms.is_empty()
@@ -948,6 +1000,7 @@ fn start_inner<K: Collective>(
         legacy_principal_peak_bound_bytes,
         legacy_idle_band_density_bytes,
     };
+    let solvation = build_solvation_state(cell, grid.dims(), atoms, potentials, o.solvation, comm)?;
     Ok(StartState {
         report,
         setup,
@@ -970,6 +1023,7 @@ fn start_inner<K: Collective>(
         ewald,
         memory,
         potential_symmetry: None,
+        solvation,
     })
 }
 
@@ -2015,6 +2069,9 @@ fn start_kpoints_inner<K: Collective>(
     let cell = input.cell;
     // Check the caller's grid before common_options installs the k-union grid.
     validate_strain_grid(o)?;
+    if let Some(solv) = &o.solvation {
+        solv.validate()?;
+    }
     let bases_clock = Instant::now();
     let db = o.basis(cell, [0.; 3], 4.)?;
     // GK18: without a strain reference the k bases are first known by their
@@ -2091,7 +2148,12 @@ fn start_kpoints_inner<K: Collective>(
     common_options.gamma_real = crate::model::GammaReal::On;
     common_options.grid_override = Some(dims);
     let mut commons = Vec::with_capacity(channels);
-    for _ in 0..channels.max(1) {
+    for c in 0..channels.max(1) {
+        let mut channel_options = common_options.clone();
+        // Electronic maps evaluate spin-independent solvation once on channel 0.
+        if c > 0 {
+            channel_options.solvation = None;
+        }
         let common_clock = Instant::now();
         let timed = TimedCollective::new(comm);
         let mut common = start_inner(
@@ -2099,7 +2161,7 @@ fn start_kpoints_inner<K: Collective>(
                 cell,
                 atoms: input.atoms,
                 potentials: input.potentials,
-                options: &common_options,
+                options: &channel_options,
             },
             &timed,
             None,
@@ -2752,6 +2814,9 @@ pub fn start_kpoints_from_density<K: Collective>(
     let o = input.options;
     let cell = input.cell;
     dft_geometry::kpoints::validate(points).map_err(err)?;
+    if let Some(solv) = &o.solvation {
+        solv.validate()?;
+    }
     if comm.size() == 0
         || comm.rank() >= comm.size()
         || input.atoms.is_empty()
@@ -2940,6 +3005,8 @@ pub fn start_kpoints_from_density<K: Collective>(
         WorkerPool::new(o.threads).map_err(err)?,
     )
     .map_err(err)?;
+    let solvation =
+        build_solvation_state(cell, dims, input.atoms, input.potentials, o.solvation, comm)?;
     let common = StartState {
         report: StartReport {
             density: DensityStartKind::Supplied,
@@ -3006,6 +3073,7 @@ pub fn start_kpoints_from_density<K: Collective>(
             ..Default::default()
         },
         potential_symmetry: None,
+        solvation,
     };
     let mut state = KStartState {
         initial_h_columns: 0,

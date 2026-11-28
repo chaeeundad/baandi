@@ -358,6 +358,7 @@ pub(super) struct Fields {
     xc_integral: f64,
     vh: Vec<f64>,
     nlcc: Option<crate::energy::CoreXcLedger>,
+    solvation: Option<super::map::SolvationFieldSummary>,
 }
 pub(super) fn fields<K: Collective>(
     workspace: &mut Workspace,
@@ -391,6 +392,7 @@ pub(super) fn fields<K: Collective>(
             xc: scalar.xc,
             xc_integral: scalar.xc_integral,
             nlcc: scalar.nlcc,
+            solvation: scalar.solvation,
         });
     }
     let screening = dft_physics::xc::screen_negative();
@@ -448,6 +450,13 @@ pub(super) fn fields<K: Collective>(
             .iter()
             .map(|v| v.iter().zip(&scalar.vh).map(|(x, h)| x + h).collect())
             .collect();
+        if let Some(s) = &scalar.solvation {
+            for potential in &mut potentials {
+                for (v, &vs) in potential.iter_mut().zip(&s.v_solv) {
+                    *v += vs;
+                }
+            }
+        }
         if let Some(p) = &mut state.common.potential_symmetry {
             for v in &mut potentials {
                 p.apply(&mut state.common.fields, comm, v)?;
@@ -464,6 +473,7 @@ pub(super) fn fields<K: Collective>(
                 core_potential_integral_ha: values[2],
                 valence_potential_integral_ha: values[1],
             }),
+            solvation: scalar.solvation,
         });
     }
     // LDA is point-local. Evaluate the existing polarized adapter on owned
@@ -514,6 +524,11 @@ pub(super) fn fields<K: Collective>(
         for (v, h) in potential.iter_mut().zip(&scalar.vh) {
             *v += h;
         }
+        if let Some(s) = &scalar.solvation {
+            for (v, &vs) in potential.iter_mut().zip(&s.v_solv) {
+                *v += vs;
+            }
+        }
     }
     if let Some(p) = &mut state.common.potential_symmetry {
         for v in &mut potentials {
@@ -534,6 +549,7 @@ pub(super) fn fields<K: Collective>(
                 core_potential_integral_ha: values[2],
                 valence_potential_integral_ha: values[1],
             }),
+        solvation: scalar.solvation,
     })
 }
 /// The FD empty-state coverage rejection (criterion: top-band occupation
@@ -1007,9 +1023,25 @@ pub(super) fn evaluate<K: Collective>(
         ],
     )?;
     let output = fields_output(workspace, &mut states[0], comm, cell, functional, &density)?;
+    let l_solv = if let Some(in_s) = &fields.solvation {
+        Some(
+            sum(
+                comm,
+                &[dv * total
+                    .iter()
+                    .enumerate()
+                    .zip(&in_s.v_solv)
+                    .map(|((i, n), v)| (n - input.iter().map(|c| c[i]).sum::<f64>()) * v)
+                    .sum::<f64>()],
+            )?[0],
+        )
+    } else {
+        None
+    };
     // Diagnose the complete functional along the actual map displacement.
     // These potentials already include PBE's gradient/divergence response;
-    // subtract Hartree before contracting each channel, without cancellation.
+    // subtract Hartree (and solvation when active) before contracting each channel,
+    // without cancellation.
     let response_diagnostics = response_diagnostics
         && functional == Functional::Pbe
         && matches!(
@@ -1030,8 +1062,15 @@ pub(super) fn evaluate<K: Collective>(
                         .zip(b)
                         .enumerate()
                         .map(|(i, (a, b))| {
-                            let dvxc = (output.hxc[s][i] - output.vh[i])
-                                - (fields.hxc[s][i] - fields.vh[i]);
+                            let dvxc = if let (Some(out_s), Some(in_s)) =
+                                (&output.solvation, &fields.solvation)
+                            {
+                                (output.hxc[s][i] - output.vh[i] - out_s.v_solv[i])
+                                    - (fields.hxc[s][i] - fields.vh[i] - in_s.v_solv[i])
+                            } else {
+                                (output.hxc[s][i] - output.vh[i])
+                                    - (fields.hxc[s][i] - fields.vh[i])
+                            };
                             ((a - b) * dvxc).abs()
                         })
                         .sum::<f64>()
@@ -1070,19 +1109,40 @@ pub(super) fn evaluate<K: Collective>(
                         .sum::<f64>()
                 })
                 .sum::<f64>();
-            (
-                0.5 * dv * values[0],
-                (output.xc - fields.xc - (remainder[0] - remainder[1])).abs(),
-                slope,
-                values[1] as usize,
-            )
+            let xc_rem = if let Some(l_s) = l_solv {
+                (output.xc - fields.xc - (remainder[0] - remainder[1] - l_s)).abs()
+            } else {
+                (output.xc - fields.xc - (remainder[0] - remainder[1])).abs()
+            };
+            (0.5 * dv * values[0], xc_rem, slope, values[1] as usize)
         } else {
             (0., 0., 0., 0)
         };
     let ewald = states[0].ewald.energy.0;
+    let mut band_form = band_sum - integral[2] + output.hartree + output.xc + ewald;
+    if let Some(s) = &output.solvation {
+        band_form += s.ledger.total_ha;
+    }
+    let mut harris_foulkes = band_sum - fields.hartree + fields.xc - fields.xc_integral + ewald;
+    if let Some(s) = &fields.solvation {
+        harris_foulkes += s.ledger.total_ha - s.v_solv_integral;
+    }
+    let functional_difference_bound = if let (Some(in_s), Some(out_s), Some(l_s)) =
+        (&fields.solvation, &output.solvation, l_solv)
+    {
+        (output.hartree - fields.hartree - remainder[1]).abs()
+            + (output.xc - fields.xc - (remainder[0] - remainder[1] - l_s)).abs()
+            + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_s).abs()
+            + residual_bound
+    } else {
+        (output.hartree - fields.hartree - remainder[1]).abs()
+            + (output.xc - fields.xc - (remainder[0] - remainder[1])).abs()
+            + residual_bound
+    };
     let energy = EnergyAudit {
         xc_floor: None,
         nlcc: output.nlcc,
+        solvation: output.solvation.map(|s| s.ledger),
         kinetic: integral[0],
         local: integral[1],
         nonlocal,
@@ -1092,11 +1152,9 @@ pub(super) fn evaluate<K: Collective>(
         ewald,
         band_sum,
         double_counting: integral[2],
-        band_form: band_sum - integral[2] + output.hartree + output.xc + ewald,
-        harris_foulkes: band_sum - fields.hartree + fields.xc - fields.xc_integral + ewald,
-        functional_difference_bound: (output.hartree - fields.hartree - remainder[1]).abs()
-            + (output.xc - fields.xc - (remainder[0] - remainder[1])).abs()
-            + residual_bound,
+        band_form,
+        harris_foulkes,
+        functional_difference_bound,
     };
     if !energy.total_hartree().is_finite() {
         return Err(ScfError::NonFinite);

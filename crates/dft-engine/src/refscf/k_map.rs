@@ -397,11 +397,18 @@ pub(super) fn evaluate<K: Collective>(
         }
         if lean {
             let ewald = state.ewald.energy.0;
+            let mut harris_foulkes = band_sum - input_fields.hartree + input_fields.xc
+                - input_fields.xc_integral
+                + ewald;
+            if let Some(s) = &input_fields.solvation {
+                harris_foulkes += s.ledger.total_ha - s.v_solv_integral;
+            }
             // NaN is an unavailable audit slot (JSON null), never a stop input;
             // `complete_audit` fills every slot before delivery.
             let energy = EnergyAudit {
                 xc_floor: None,
                 nlcc: None,
+                solvation: None,
                 kinetic: f64::NAN,
                 local: f64::NAN,
                 nonlocal: f64::NAN,
@@ -412,9 +419,7 @@ pub(super) fn evaluate<K: Collective>(
                 band_sum,
                 double_counting: total[r],
                 band_form: f64::NAN,
-                harris_foulkes: band_sum - input_fields.hartree + input_fields.xc
-                    - input_fields.xc_integral
-                    + ewald,
+                harris_foulkes,
                 functional_difference_bound: f64::NAN,
             };
             timings.energy = clock.elapsed();
@@ -442,12 +447,44 @@ pub(super) fn evaluate<K: Collective>(
             state, comm, cell, functional, &density, cache,
         )?)
     };
-    let (hartree, xc, nlcc) =
-        output_fields.map_or((f64::NAN, f64::NAN, None), |f| (f.hartree, f.xc, f.nlcc));
+    let (hartree, xc, nlcc, out_solv) = output_fields.map_or(
+        (f64::NAN, f64::NAN, None, None),
+        |f| (f.hartree, f.xc, f.nlcc, f.solvation),
+    );
     let ewald = state.ewald.energy.0;
+    let mut band_form = band_sum - integrals[2] + hartree + xc + ewald;
+    if let Some(s) = &out_solv {
+        band_form += s.ledger.total_ha;
+    }
+    let mut harris_foulkes =
+        band_sum - input_fields.hartree + input_fields.xc - input_fields.xc_integral + ewald;
+    if let Some(s) = &input_fields.solvation {
+        harris_foulkes += s.ledger.total_ha - s.v_solv_integral;
+    }
+    let functional_difference_bound =
+        if let (Some(in_s), Some(out_s)) = (&input_fields.solvation, &out_solv) {
+            let l_solv = sum(
+                comm,
+                &[dv * density
+                    .iter()
+                    .zip(input)
+                    .zip(&in_s.v_solv)
+                    .map(|((a, b), v)| (a - b) * v)
+                    .sum::<f64>()],
+            )?[0];
+            (hartree - input_fields.hartree - integrals[5]).abs()
+                + (xc - input_fields.xc - (integrals[4] - integrals[5] - l_solv)).abs()
+                + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
+                + residual_bound
+        } else {
+            (hartree - input_fields.hartree - integrals[5]).abs()
+                + (xc - input_fields.xc - (integrals[4] - integrals[5])).abs()
+                + residual_bound
+        };
     let energy = EnergyAudit {
         xc_floor: None,
         nlcc,
+        solvation: out_solv.map(|s| s.ledger),
         kinetic: integrals[0],
         local: integrals[1],
         nonlocal,
@@ -457,13 +494,9 @@ pub(super) fn evaluate<K: Collective>(
         ewald,
         band_sum,
         double_counting: integrals[2],
-        band_form: band_sum - integrals[2] + hartree + xc + ewald,
-        harris_foulkes: band_sum - input_fields.hartree + input_fields.xc
-            - input_fields.xc_integral
-            + ewald,
-        functional_difference_bound: (hartree - input_fields.hartree - integrals[5]).abs()
-            + (xc - input_fields.xc - (integrals[4] - integrals[5])).abs()
-            + residual_bound,
+        band_form,
+        harris_foulkes,
+        functional_difference_bound,
     };
     timings.energy = clock.elapsed();
     Ok(Map {
@@ -552,6 +585,28 @@ pub(super) fn complete_audit<K: Collective>(
         )?;
         let fields = cached_fields(state, comm, cell, functional, &step.density, cache)?;
         let residual = residual_term(&step.solve.per_k, state, occupations);
+        let functional_difference_bound =
+            if let (Some(in_s), Some(out_s)) = (&step.input_fields.solvation, &fields.solvation) {
+                let l_solv = sum(
+                    comm,
+                    &[dv * step
+                        .density
+                        .iter()
+                        .zip(input)
+                        .zip(&in_s.v_solv)
+                        .map(|((a, b), v)| (a - b) * v)
+                        .sum::<f64>()],
+                )?[0];
+                (fields.hartree - step.input_fields.hartree - integrals[5]).abs()
+                    + (fields.xc - step.input_fields.xc - (integrals[4] - integrals[5] - l_solv))
+                        .abs()
+                    + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
+                    + residual
+            } else {
+                (fields.hartree - step.input_fields.hartree - integrals[5]).abs()
+                    + (fields.xc - step.input_fields.xc - (integrals[4] - integrals[5])).abs()
+                    + residual
+            };
         let e = &mut step.energy;
         e.kinetic = integrals[0];
         e.local = integrals[1];
@@ -561,10 +616,11 @@ pub(super) fn complete_audit<K: Collective>(
         e.xc = fields.xc;
         e.nlcc = fields.nlcc;
         e.band_form = e.band_sum - e.double_counting + e.hartree + e.xc + e.ewald;
-        e.functional_difference_bound = (e.hartree - step.input_fields.hartree - integrals[5])
-            .abs()
-            + (e.xc - step.input_fields.xc - (integrals[4] - integrals[5])).abs()
-            + residual;
+        if let Some(s) = &fields.solvation {
+            e.band_form += s.ledger.total_ha;
+        }
+        e.solvation = fields.solvation.map(|s| s.ledger);
+        e.functional_difference_bound = functional_difference_bound;
     } else if step.energy.hartree.is_nan() {
         let fields = cached_fields(state, comm, cell, functional, &step.density, cache)?;
         let dv = cell.volume_bohr3() / state.grid.dims().iter().product::<usize>() as f64;
@@ -588,15 +644,40 @@ pub(super) fn complete_audit<K: Collective>(
             ],
         )?;
         let residual = residual_term(&step.solve.per_k, state, occupations);
+        let functional_difference_bound =
+            if let (Some(in_s), Some(out_s)) = (&step.input_fields.solvation, &fields.solvation) {
+                let l_solv = sum(
+                    comm,
+                    &[dv * step
+                        .density
+                        .iter()
+                        .zip(input)
+                        .zip(&in_s.v_solv)
+                        .map(|((a, b), v)| (a - b) * v)
+                        .sum::<f64>()],
+                )?[0];
+                (fields.hartree - step.input_fields.hartree - differences[1]).abs()
+                    + (fields.xc
+                        - step.input_fields.xc
+                        - (differences[0] - differences[1] - l_solv))
+                        .abs()
+                    + (out_s.ledger.total_ha - in_s.ledger.total_ha - l_solv).abs()
+                    + residual
+            } else {
+                (fields.hartree - step.input_fields.hartree - differences[1]).abs()
+                    + (fields.xc - step.input_fields.xc - (differences[0] - differences[1])).abs()
+                    + residual
+            };
         let e = &mut step.energy;
         e.hartree = fields.hartree;
         e.xc = fields.xc;
         e.nlcc = fields.nlcc;
         e.band_form = e.band_sum - e.double_counting + e.hartree + e.xc + e.ewald;
-        e.functional_difference_bound = (e.hartree - step.input_fields.hartree - differences[1])
-            .abs()
-            + (e.xc - step.input_fields.xc - (differences[0] - differences[1])).abs()
-            + residual;
+        if let Some(s) = &fields.solvation {
+            e.band_form += s.ledger.total_ha;
+        }
+        e.solvation = fields.solvation.map(|s| s.ledger);
+        e.functional_difference_bound = functional_difference_bound;
     }
     if !step.energy.total_hartree().is_finite() {
         return Err(ScfError::NonFinite);

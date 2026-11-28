@@ -464,6 +464,7 @@ impl CollinearProblem {
                     core_potential_integral_ha: self.output_xc.core_potential_integral_ha,
                     valence_potential_integral_ha: self.output_xc.valence_potential_integral_ha,
                 }),
+            solvation: None,
             ewald,
             band_sum,
             double_counting: dc,

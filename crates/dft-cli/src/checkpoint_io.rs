@@ -197,6 +197,15 @@ pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
             "checkpoint v1 cannot preserve frozen-Miller strain reference",
         ));
     }
+    if checkpoint
+        .continuation
+        .as_ref()
+        .is_some_and(|c| c.options.solvation.is_some())
+    {
+        return Err(invalid(
+            "checkpoint v1 cannot preserve implicit solvation configuration",
+        ));
+    }
     if checkpoint.continuation.as_ref().is_some_and(|c| {
         c.options.spectral_guard == dft_engine::SpectralGuard::Final
             || c.options.locking != dft_engine::Locking::Off
@@ -318,7 +327,7 @@ use dft_engine::checkpoint::PulayState;
 use dft_engine::checkpoint::RmmDiis;
 use dft_engine::checkpoint::RuntimeCheckpoint;
 use dft_engine::checkpoint::SolverChoice;
-use dft_engine::energy::EnergyAudit;
+use dft_engine::energy::{EnergyAudit, SolvationEnergyLedger};
 use dft_engine::events::ExecutionConfig;
 use dft_engine::events::ExecutionMode;
 use dft_engine::policy::PolicyChange;
@@ -750,7 +759,7 @@ wire_struct!(ScfOptions, WScfOptions {
     seed: u64,
     divergence_factor: f64,
     divergence_patience: usize,
-} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, });
+} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, solvation: None, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WSolverChoice {
@@ -1025,9 +1034,24 @@ wire_struct!(IterationRecord, WIterationRecord {
     fixed_point_certificate: Option<FixedPointCertificate>,
     timings: PhaseTimings,
 } defaults { pulay: None, });
+wire_struct!(
+    SolvationEnergyLedger,
+    WSolvationEnergyLedger {
+        electrostatic_ha: f64,
+        background_correction_ha: f64,
+        cavitation_ha: f64,
+        total_ha: f64,
+        potential_integral_ha: f64,
+        iterations: usize,
+        relative_residual: f64,
+        fft_count: usize,
+    }
+);
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WEnergyAudit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    solvation: <Option<SolvationEnergyLedger> as Wire>::Repr,
     kinetic: <f64 as Wire>::Repr,
     local: <f64 as Wire>::Repr,
     local_zero_mode: <f64 as Wire>::Repr,
@@ -1048,6 +1072,7 @@ impl Wire for EnergyAudit {
             return Err(invalid("checkpoint v1 does not carry NLCC ledger"));
         }
         Ok(WEnergyAudit {
+            solvation: self.solvation.encode(bytes)?,
             kinetic: self.kinetic.encode(bytes)?,
             local: self.local.encode(bytes)?,
             local_zero_mode: self.local_zero_mode.encode(bytes)?,
@@ -1066,6 +1091,7 @@ impl Wire for EnergyAudit {
         Ok(Self {
             nlcc: None,
             xc_floor: None,
+            solvation: Wire::decode(w.solvation, bytes, cursor)?,
             kinetic: f64::decode(w.kinetic, bytes, cursor)?,
             local: f64::decode(w.local, bytes, cursor)?,
             local_zero_mode: f64::decode(w.local_zero_mode, bytes, cursor)?,

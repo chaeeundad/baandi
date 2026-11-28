@@ -133,6 +133,11 @@ fn preconditions(state: &StressState<'_>) -> Result<(), ScfError> {
             "research pseudo conventions do not support analytic derivatives",
         ));
     }
+    if state.options.solvation.is_some() {
+        return Err(ScfError::InvalidInput(
+            "observables.stress: incomplete derivative coverage: solvation",
+        ));
+    }
     Ok(())
 }
 
@@ -443,6 +448,7 @@ fn frozen_pass(
             local,
             nonlocal,
             core,
+            None,
             band_passes,
             timings.clone(),
             start,
@@ -451,7 +457,7 @@ fn frozen_pass(
     };
     let mut ledger = validated.ledger;
     for entry in &mut ledger {
-        entry.stress_available = true;
+        entry.stress_available = entry.term_id != "solvation";
         entry.owner = match entry.term_id {
             "local" | "nonlocal" | "core" | "hartree" => "physics::stress",
             "xc" => "physics::xc/gga/spin",
@@ -459,9 +465,22 @@ fn frozen_pass(
         };
         entry.reason = if entry.term_id == "entropy" {
             "stationary F at fixed theta,N,M: no explicit entropy strain term"
+        } else if entry.term_id == "solvation" {
+            "analytic solvation stress unavailable in Phase B1"
         } else {
             "complete NC frozen-Miller strain derivative"
         };
+    }
+    let missing: Vec<_> = ledger
+        .iter()
+        .filter(|e| e.active && !e.stress_available)
+        .map(|e| e.term_id)
+        .collect();
+    if !missing.is_empty() {
+        return Err(ScfError::Numerical(format!(
+            "observables.stress: incomplete derivative coverage: {}",
+            missing.join(", ")
+        )));
     }
     Ok((
         StressResult {

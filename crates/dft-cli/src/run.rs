@@ -271,6 +271,14 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
         ));
     }
     let points = config.resolved_points().map_err(|e| error(1, e))?;
+    let solvation = config
+        .solvation
+        .as_ref()
+        .map(|solv| {
+            solv.to_engine_config()
+                .map_err(|e| error(1, format!("solvation: {e}")))
+        })
+        .transpose()?;
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
             dft_engine::CompatMode::Reference
@@ -309,6 +317,7 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
             beta: profile.beta,
             history: profile.history,
         },
+        solvation,
         ..ScfOptions::default()
     };
     if let Some(s) = s {
@@ -346,6 +355,12 @@ pub fn options_with_reference(
     }
 }
 fn oracle_options(config: &Config, path: crate::config::ScfPath) -> Result<ScfOptions, RunError> {
+    if config.solvation.is_some() {
+        return Err(error(
+            1,
+            "solvation: implicit solvation is only supported on the production reference SCF path; unset BAANDI_REFERENCE_STRICT or remove [solvation]",
+        ));
+    }
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
             dft_engine::CompatMode::Reference
@@ -1236,7 +1251,75 @@ fn energy_json(e: &EnergyAudit) -> Value {
     if let Some(core) = &e.nlcc {
         m.insert("nlcc".into(), json!({"core_electrons":core.core_electrons,"core_potential_integral_ha":core.core_potential_integral_ha,"valence_potential_integral_ha":core.valence_potential_integral_ha,"energy_convention":"xc_includes_core; Hartree_and_band_double_counting_valence_only","force_stress":"unavailable"}));
     }
+    if let Some(solv) = &e.solvation {
+        m.insert(
+            "solvation".into(),
+            json!({
+                "electrostatic_ha": solv.electrostatic_ha,
+                "background_correction_ha": solv.background_correction_ha,
+                "cavitation_ha": solv.cavitation_ha,
+                "total_ha": solv.total_ha,
+                "potential_integral_ha": solv.potential_integral_ha,
+                "iterations": solv.iterations,
+                "relative_residual": solv.relative_residual,
+                "fft_count": solv.fft_count,
+            }),
+        );
+    }
     Value::Object(m)
+}
+fn solvation_summary_json(
+    cfg: &dft_engine::SolvationConfig,
+    ledger: Option<&dft_engine::SolvationEnergyLedger>,
+) -> Value {
+    let cavity = match cfg.params.cavity {
+        dft_physics::solvation::CavityModel::VaspSol { nc_bohr3, sigma } => json!({
+            "model": "vaspsol",
+            "nc_bohr3": nc_bohr3,
+            "sigma": sigma,
+        }),
+        dft_physics::solvation::CavityModel::Sccs {
+            rho_min_bohr3,
+            rho_max_bohr3,
+            log_epsilon,
+        } => json!({
+            "model": "sccs",
+            "rho_min_bohr3": rho_min_bohr3,
+            "rho_max_bohr3": rho_max_bohr3,
+            "log_epsilon": log_epsilon,
+        }),
+    };
+    let solver = match cfg.solver.kind {
+        dft_physics::solvation::SolverKind::DirectPcg => "direct_pcg",
+        dft_physics::solvation::SolverKind::FisicaroPcg => "fisicaro_pcg",
+        dft_physics::solvation::SolverKind::PolarizationDiis => "polarization_diis",
+        dft_physics::solvation::SolverKind::HybridFisicaroDirect => "hybrid_fisicaro_direct",
+    };
+    let mut summary = json!({
+        "schema": "solvation-1",
+        "cavity": cavity,
+        "epsilon_bulk": cfg.params.epsilon_bulk,
+        "kappa_inv_bohr": cfg.params.kappa_inv_bohr,
+        "tau_ha_bohr2": cfg.params.tau_ha_bohr2,
+        "beta_ha_bohr3": cfg.params.beta_ha_bohr3,
+        "ionic_width_bohr": cfg.ionic_width_bohr,
+        "solver": solver,
+        "tolerance": cfg.solver.tolerance,
+        "max_iterations": cfg.solver.max_iterations,
+        "warm_start": cfg.solver.warm_start,
+        "adaptive_tolerance": cfg.adaptive_tolerance,
+    });
+    if let Some(l) = ledger {
+        summary["electrostatic_ha"] = json!(l.electrostatic_ha);
+        summary["background_correction_ha"] = json!(l.background_correction_ha);
+        summary["cavitation_ha"] = json!(l.cavitation_ha);
+        summary["total_ha"] = json!(l.total_ha);
+        summary["potential_integral_ha"] = json!(l.potential_integral_ha);
+        summary["iterations"] = json!(l.iterations);
+        summary["relative_residual"] = json!(l.relative_residual);
+        summary["fft_count"] = json!(l.fft_count);
+    }
+    summary
 }
 fn phase_json(t: &PhaseTimings) -> Value {
     json!({"potential_s":t.potential.as_secs_f64(),"diagonalization_s":t.diagonalization.as_secs_f64(),"density_s":t.density.as_secs_f64(),"total_energy_s":t.energy.as_secs_f64(),"mixing_s":t.mixing.as_secs_f64()})
@@ -1694,6 +1777,18 @@ fn execute_mode_inner(
         return Err(error(
             1,
             "dispersion: the strict-oracle spin/Fermi-Dirac drivers do not carry the D3 term; use the default (reference) path",
+        ));
+    }
+    if config.solvation.is_some()
+        && (config.collinear()
+            || config
+                .finite_temperature()
+                .map_err(|e| error(1, e))?
+                .is_some())
+    {
+        return Err(error(
+            1,
+            "solvation: the legacy strict-oracle spin/Fermi-Dirac drivers do not support implicit solvation; use the production reference path",
         ));
     }
     if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
@@ -2694,6 +2789,11 @@ fn execute_mode_inner(
     if let Some(d) = &dispersion {
         add_dispersion_energy(&mut result, d);
     }
+    if config.solvation.is_some()
+        && let Some(solv_cfg) = &opts.solvation
+    {
+        result["solvation"] = solvation_summary_json(solv_cfg, r.energy.solvation.as_ref());
+    }
     if config.output.as_ref().is_some_and(|o| o.forces) || config.wants_stress() {
         write_early_record(&out, &result, &console)?;
     }
@@ -3280,6 +3380,11 @@ fn reference_electronic_run(
     if let Some(d) = &dispersion {
         add_dispersion_energy(&mut result, d);
     }
+    if config.solvation.is_some()
+        && let Some(solv_cfg) = &opts.solvation
+    {
+        result["solvation"] = solvation_summary_json(solv_cfg, r.energy.solvation.as_ref());
+    }
     let forces_requested = config.output.as_ref().is_some_and(|o| o.forces);
     let stress_requested = config.output.as_ref().is_some_and(|o| o.stress);
     if forces_requested || stress_requested {
@@ -3602,10 +3707,15 @@ fn requested_forces(
     .map_err(engine_error)
 }
 fn force_json(f: &dft_engine::forces::ForceResult) -> Value {
+    let mut per_term =
+        json!({"ewald":f.ewald,"local":f.local,"nonlocal":f.nonlocal,"core":f.core});
+    if let Some(solvation) = &f.solvation {
+        per_term["solvation"] = json!(solvation);
+    }
     json!({"status":"available", "units":f.units,"frame":"cartesian_input_atom_order",
         "quantity":f.quantity,"values":f.values,
         "preconditions":{"convergence_profile":"strict","converged":true,"fixed_point_certificate_passed":true},
-        "derivative_ledger":f.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"active":e.active,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"force_capability":if e.active {"available"} else {"not_applicable"},"stress_capability":"unavailable","reason":e.reason})).collect::<Vec<_>>(),"per_term":{"ewald":f.ewald,"local":f.local,"nonlocal":f.nonlocal,"core":f.core},
+        "derivative_ledger":f.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"active":e.active,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"force_capability":if e.active {"available"} else {"not_applicable"},"stress_capability":"unavailable","reason":e.reason})).collect::<Vec<_>>(),"per_term":per_term,
         "net_force":f.net_force,"maximum_absolute_component":f.maximum_absolute_component,
         "elapsed_seconds":f.elapsed.as_secs_f64(),"stage_seconds":f.timings.iter().map(|(n,t)|json!([n,t])).collect::<Vec<_>>(),"band_passes":f.band_passes,"unavailable_terms":[]})
 }
@@ -5099,6 +5209,7 @@ mod tests {
         let energy = dft_engine::energy::EnergyAudit {
             xc_floor: None,
             nlcc: None,
+            solvation: None,
             kinetic: f64::NAN,
             local: f64::NAN,
             local_zero_mode: f64::NAN,
@@ -5619,6 +5730,104 @@ mod tests {
         );
         assert_eq!(parallel_model(8, 12, true, None), ("mpi_stick_rows", None));
         assert_eq!(parallel_model(8, 12, false, None), ("mpi_row_block", None));
+    }
+
+    #[test]
+    fn solvation_options_and_json_are_additive_and_fail_closed() {
+        let base = include_str!("../../../examples/si_lda.toml");
+        let off_cfg = Config::parse(base).unwrap();
+        assert!(reference_options(&off_cfg).unwrap().solvation.is_none());
+
+        let on_cfg = Config::parse(&format!("{base}\n[solvation]\nepsilon_bulk = 78.4\n")).unwrap();
+        let ref_opts = reference_options(&on_cfg).unwrap();
+        assert!(ref_opts.solvation.is_some());
+        let strict_path = on_cfg.scf_path_with(true).unwrap();
+        let err = oracle_options(&on_cfg, strict_path).unwrap_err();
+        assert!(
+            err.cause.contains("production reference"),
+            "unexpected oracle solvation rejection: {}",
+            err.cause
+        );
+
+        let mut energy = dft_engine::energy::EnergyAudit {
+            xc_floor: None,
+            nlcc: None,
+            solvation: None,
+            kinetic: 1.0,
+            local: -2.0,
+            local_zero_mode: 0.0,
+            nonlocal: 0.5,
+            hartree: 0.4,
+            xc: -0.3,
+            ewald: -0.1,
+            band_sum: -0.2,
+            double_counting: 0.2,
+            band_form: -0.5,
+            harris_foulkes: -0.5,
+            functional_difference_bound: 1e-12,
+        };
+        let off_energy_json = super::energy_json(&energy);
+        assert!(off_energy_json.get("solvation").is_none());
+
+        let ledger = dft_engine::SolvationEnergyLedger {
+            electrostatic_ha: -0.012,
+            background_correction_ha: 0.0,
+            cavitation_ha: 0.001,
+            total_ha: -0.011,
+            potential_integral_ha: -0.025,
+            iterations: 14,
+            relative_residual: 3.5e-11,
+            fft_count: 58,
+        };
+        let summary = super::solvation_summary_json(
+            ref_opts.solvation.as_ref().unwrap(),
+            Some(&ledger),
+        );
+        assert_eq!(summary["schema"], json!("solvation-1"));
+        assert_eq!(summary["cavity"]["model"], json!("vaspsol"));
+        assert_eq!(summary["solver"], json!("direct_pcg"));
+        assert_eq!(summary["iterations"], json!(14));
+        assert_eq!(summary["fft_count"], json!(58));
+
+        energy.solvation = Some(ledger);
+        let on_energy_json = super::energy_json(&energy);
+        let solv_obj = on_energy_json["solvation"].as_object().unwrap();
+        assert_eq!(solv_obj.len(), 8);
+        assert_eq!(solv_obj["electrostatic_ha"], json!(-0.012));
+        assert_eq!(solv_obj["background_correction_ha"], json!(0.0));
+        assert_eq!(solv_obj["cavitation_ha"], json!(0.001));
+        assert_eq!(solv_obj["total_ha"], json!(-0.011));
+        assert_eq!(solv_obj["potential_integral_ha"], json!(-0.025));
+        assert_eq!(solv_obj["iterations"], json!(14));
+        assert_eq!(solv_obj["relative_residual"], json!(3.5e-11));
+        assert_eq!(solv_obj["fft_count"], json!(58));
+
+        let mut force = dft_engine::forces::ForceResult {
+            verification: "strict",
+            ledger: Vec::new(),
+            units: "Ha/Bohr",
+            quantity: "E",
+            values: vec![[0.1, -0.2, 0.3]],
+            ewald: vec![[0.0; 3]],
+            local: vec![[0.0; 3]],
+            nonlocal: vec![[0.0; 3]],
+            core: vec![[0.0; 3]],
+            solvation: None,
+            net_force: [0.1, -0.2, 0.3],
+            maximum_absolute_component: 0.3,
+            elapsed: std::time::Duration::ZERO,
+            band_passes: 1,
+            timings: Vec::new(),
+        };
+        let off_force_json = super::force_json(&force);
+        assert!(off_force_json["per_term"].get("solvation").is_none());
+
+        force.solvation = Some(vec![[0.1, -0.2, 0.3]]);
+        let on_force_json = super::force_json(&force);
+        assert_eq!(
+            on_force_json["per_term"]["solvation"],
+            json!([[0.1, -0.2, 0.3]])
+        );
     }
 }
 

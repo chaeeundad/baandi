@@ -13,7 +13,7 @@ use super::{
     map,
     metric::{Metric, Serial},
     numerical,
-    profile::{Profile, next_ethr_ry},
+    profile::{Profile, next_ethr_ry, next_solvation_tol},
     record::{CorrectionRecord, Record, SolveRecord, VerificationCost},
 };
 use crate::Functional;
@@ -557,6 +557,12 @@ async fn run_stage<K: Collective>(
                     io.value(&mut predictor.last_skip_dr2)?;
                 }
                 io.value(&mut field_cache)?;
+                if let Some(solv) = &mut state.solvation {
+                    io.value(&mut solv.current_tolerance)?;
+                    if io.loading() {
+                        solv.workspace.reset_warm_start();
+                    }
+                }
                 io.value(&mut pending)?;
                 super::checkpoint::cached_fields(&field_cache, n.len())?;
                 if let Some((map, _, _)) = &pending {
@@ -597,6 +603,24 @@ async fn run_stage<K: Collective>(
                     last_dr2,
                     state.electrons,
                 );
+                if let Some(solv) = &mut state.solvation {
+                    solv.current_tolerance = if solv.config.adaptive_tolerance {
+                        next_solvation_tol(
+                            solv.current_tolerance,
+                            last_dr2,
+                            state.electrons,
+                            solv.config.solver.tolerance,
+                        )
+                    } else {
+                        solv.config.solver.tolerance
+                    };
+                }
+            } else if let Some(solv) = &mut state.solvation {
+                solv.current_tolerance = if solv.config.adaptive_tolerance {
+                    1.0e-4_f64.max(solv.config.solver.tolerance)
+                } else {
+                    solv.config.solver.tolerance
+                };
             }
         }
         let requested = ethr;
@@ -655,6 +679,18 @@ async fn run_stage<K: Collective>(
                 reported_columns = report.h_columns;
                 boundary.emit(report).await;
                 ethr = next_ethr_ry(ethr, dr2, state.electrons);
+                if let Some(solv) = &mut state.solvation {
+                    solv.current_tolerance = if solv.config.adaptive_tolerance {
+                        next_solvation_tol(
+                            solv.current_tolerance,
+                            dr2,
+                            state.electrons,
+                            solv.config.solver.tolerance,
+                        )
+                    } else {
+                        solv.config.solver.tolerance
+                    };
+                }
                 redo = true;
                 kept.invalidate();
                 state.orbitals = step.solve.eigenvectors;
@@ -691,6 +727,9 @@ async fn run_stage<K: Collective>(
         if ((stopped && !skipped) || iteration == o.max_iterations) && step.energy.kinetic.is_nan()
         {
             let clock = Instant::now();
+            if let Some(solv) = &mut state.solvation {
+                solv.current_tolerance = solv.config.solver.tolerance;
+            }
             map::complete_audit(
                 &mut step,
                 &mut state,
@@ -734,6 +773,9 @@ async fn run_stage<K: Collective>(
             let clock = Instant::now();
             state.orbitals = step.solve.eigenvectors.clone();
             let tol = next_ethr_ry(ethr, dr2, state.electrons);
+            if let Some(solv) = &mut state.solvation {
+                solv.current_tolerance = solv.config.solver.tolerance;
+            }
             let mut t = PhaseTimings::default();
             let first_call = verification_calls.len();
 
@@ -844,6 +886,7 @@ async fn run_stage<K: Collective>(
         let (mut mixing_s, mut correction_s, mut descf) = (0., 0., 0.);
         let mut variational = step.energy.band_form;
         let (mut vh, mut vx) = (step.energy.hartree, step.energy.xc);
+        let mut vs = step.energy.solvation.as_ref().map(|s| s.total_ha);
         let mut failure = None;
         let mut fused_local = None;
         if !finish {
@@ -911,16 +954,23 @@ async fn run_stage<K: Collective>(
                 }
                 vh = fields.hartree;
                 vx = fields.xc;
+                vs = fields.solvation.as_ref().map(|s| s.ledger.total_ha);
                 variational = step.energy.band_sum - step.energy.double_counting
                     + vh
                     + vx
                     + step.energy.ewald
                     + descf;
+                if let Some(v) = vs {
+                    variational += v;
+                }
                 correction_s = clock.elapsed().as_secs_f64();
             }
         }
         if failure.is_some() && step.energy.kinetic.is_nan() {
             let clock = Instant::now();
+            if let Some(solv) = &mut state.solvation {
+                solv.current_tolerance = solv.config.solver.tolerance;
+            }
             map::complete_audit(
                 &mut step,
                 &mut state,
@@ -954,6 +1004,9 @@ async fn run_stage<K: Collective>(
                 + vx
                 + step.energy.ewald
                 + descf;
+            if let Some(v) = vs {
+                variational += v;
+            }
             correction_s += clock.elapsed().as_secs_f64();
         } else {
             comm.tree_sum_f64(

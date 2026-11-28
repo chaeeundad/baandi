@@ -49,6 +49,61 @@ fn species(potentials: &[SpeciesPotential<'_>]) -> Arc<[PseudoIdentity]> {
     result.into()
 }
 #[derive(Clone, PartialEq)]
+enum CavityIdentity {
+    VaspSol {
+        nc_bohr3: u64,
+        sigma: u64,
+    },
+    Sccs {
+        rho_min_bohr3: u64,
+        rho_max_bohr3: u64,
+        log_epsilon: bool,
+    },
+}
+#[derive(Clone, PartialEq)]
+struct SolvationIdentity {
+    epsilon_bulk: u64,
+    kappa_inv_bohr: u64,
+    tau_ha_bohr2: u64,
+    beta_ha_bohr3: u64,
+    cavity_grad_reg: u64,
+    density_floor_bohr3: u64,
+    cavity: CavityIdentity,
+    solver_kind: dft_physics::solvation::SolverKind,
+    ionic_width_bohr: u64,
+}
+impl SolvationIdentity {
+    fn from_config(s: crate::model::SolvationConfig) -> Self {
+        Self {
+            epsilon_bulk: s.params.epsilon_bulk.to_bits(),
+            kappa_inv_bohr: s.params.kappa_inv_bohr.to_bits(),
+            tau_ha_bohr2: s.params.tau_ha_bohr2.to_bits(),
+            beta_ha_bohr3: s.params.beta_ha_bohr3.to_bits(),
+            cavity_grad_reg: s.params.cavity_grad_reg.to_bits(),
+            density_floor_bohr3: s.params.density_floor_bohr3.to_bits(),
+            cavity: match s.params.cavity {
+                dft_physics::solvation::CavityModel::VaspSol { nc_bohr3, sigma } => {
+                    CavityIdentity::VaspSol {
+                        nc_bohr3: nc_bohr3.to_bits(),
+                        sigma: sigma.to_bits(),
+                    }
+                }
+                dft_physics::solvation::CavityModel::Sccs {
+                    rho_min_bohr3,
+                    rho_max_bohr3,
+                    log_epsilon,
+                } => CavityIdentity::Sccs {
+                    rho_min_bohr3: rho_min_bohr3.to_bits(),
+                    rho_max_bohr3: rho_max_bohr3.to_bits(),
+                    log_epsilon,
+                },
+            },
+            solver_kind: s.solver.kind,
+            ionic_width_bohr: s.ionic_width_bohr.to_bits(),
+        }
+    }
+}
+#[derive(Clone, PartialEq)]
 pub(crate) struct ModelDescription {
     cell: [[u64; 3]; 3],
     atoms: Vec<(String, [u64; 3])>,
@@ -59,6 +114,7 @@ pub(crate) struct ModelDescription {
     pw92_prefactor: crate::Pw92Prefactor,
     local_mesh: crate::LocalMesh,
     radial_even_rule: crate::RadialEvenRule,
+    solvation: Option<SolvationIdentity>,
     pub(crate) grid: [usize; 3],
     pub(crate) floor: Option<f64>,
     pub(crate) symmetry: Vec<SymmetryOperation>,
@@ -115,6 +171,7 @@ impl ModelDescription {
             pw92_prefactor: options.pw92_prefactor,
             local_mesh: options.local_mesh,
             radial_even_rule: options.radial_even_rule,
+            solvation: options.solvation.map(SolvationIdentity::from_config),
             grid,
             floor: None,
             symmetry: Vec::new(),

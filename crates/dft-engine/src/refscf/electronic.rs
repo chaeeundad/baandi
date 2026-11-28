@@ -7,7 +7,7 @@ use super::{
     electronic_map::{self as map, Map},
     k_kept::KeptHx,
     metric::{Metric, Serial},
-    profile::{Profile, next_ethr_ry},
+    profile::{Profile, next_ethr_ry, next_solvation_tol},
     record::SolveRecord,
 };
 use crate::{
@@ -1073,6 +1073,12 @@ pub(super) async fn run_continuation<K: Collective>(
                         io.value(&mut predictor.last_skip_dr2)?;
                     }
                 }
+                if let Some(solv) = &mut states[0].solvation {
+                    io.value(&mut solv.current_tolerance)?;
+                    if io.loading() {
+                        solv.workspace.reset_warm_start();
+                    }
+                }
                 super::checkpoint::counters(
                     completed,
                     opts.max_iterations,
@@ -1114,6 +1120,24 @@ pub(super) async fn run_continuation<K: Collective>(
                 previous,
                 electrons,
             );
+            if let Some(solv) = &mut states[0].solvation {
+                solv.current_tolerance = if solv.config.adaptive_tolerance {
+                    next_solvation_tol(
+                        solv.current_tolerance,
+                        previous,
+                        electrons,
+                        solv.config.solver.tolerance,
+                    )
+                } else {
+                    solv.config.solver.tolerance
+                };
+            }
+        } else if let Some(solv) = &mut states[0].solvation {
+            solv.current_tolerance = if solv.config.adaptive_tolerance {
+                1.0e-4_f64.max(solv.config.solver.tolerance)
+            } else {
+                solv.config.solver.tolerance
+            };
         }
         let mut calls = Vec::new();
         let mut redo = false;
@@ -1250,6 +1274,18 @@ pub(super) async fn run_continuation<K: Collective>(
                 reported_columns = report.h_columns;
                 boundary.emit(report).await;
                 ethr = next_ethr_ry(ethr, dr2, electrons);
+                if let Some(solv) = &mut states[0].solvation {
+                    solv.current_tolerance = if solv.config.adaptive_tolerance {
+                        next_solvation_tol(
+                            solv.current_tolerance,
+                            dr2,
+                            electrons,
+                            solv.config.solver.tolerance,
+                        )
+                    } else {
+                        solv.config.solver.tolerance
+                    };
+                }
                 redo = true;
                 warm(&mut states, &step);
                 // GF1: the redo solves the same input potential from the
@@ -1303,6 +1339,9 @@ pub(super) async fn run_continuation<K: Collective>(
                 cache.preserve_input(true);
             }
             let tolerance = next_ethr_ry(ethr, dr2, electrons);
+            if let Some(solv) = &mut states[0].solvation {
+                solv.current_tolerance = solv.config.solver.tolerance;
+            }
             if let Some(s) = &mut workspace.symmetry {
                 s.verification = true;
             }

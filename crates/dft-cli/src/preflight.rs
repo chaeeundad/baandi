@@ -43,6 +43,15 @@ fn chemical(s: &str) -> bool {
     "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og".split_whitespace().any(|x| x == s)
 }
 
+/// Implicit continuum solvation validation (Track B Phase B1, ADR 0061).
+fn solvation_check(config: &Config) -> Result<(), ConfigError> {
+    if let Some(s) = &config.solvation {
+        s.to_engine_config()
+            .map_err(|e| fail("solvation", e, "correct the [solvation] table"))?;
+    }
+    Ok(())
+}
+
 /// D3-DISPERSION (ADR 0048): `[dispersion]` needs the `dftd3` build, a valid
 /// method and parameter set for the functional, a loadable library of the 1.x
 /// series, and a run model the term is wired into.
@@ -277,6 +286,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let span = profile.map(|p| p.span(IC::InitStructureCalls, IC::InitStructureNanos));
     let (mut findings, metrics) = structure::review(config)?;
     drop(span);
+    solvation_check(config)?;
     config.validate()?;
     if config.system.atoms.is_empty() {
         return Err(fail(

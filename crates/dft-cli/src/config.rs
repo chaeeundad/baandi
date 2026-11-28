@@ -79,6 +79,9 @@ pub struct Config {
     /// D3-DISPERSION (ADR 0048): Grimme D3 correction evaluated once per
     /// geometry after the SCF; absent = no code path runs.
     pub dispersion: Option<Dispersion>,
+    /// Implicit continuum solvation (Track B Phase B1, ADR 0061); absent = zero
+    /// solvation work and byte-identical pure-PW behavior.
+    pub solvation: Option<Solvation>,
     /// RUN-CONFIG: switch values by registry name (`m2_grid = "on"`); see
     /// `crate::run_config` (environment > input > default).
     #[serde(default)]
@@ -970,6 +973,125 @@ pub struct Dispersion {
     pub library: Option<PathBuf>,
 }
 
+/// `[solvation]` (Track B Phase B1, ADR 0061): implicit continuum solvation
+/// (generalized Poisson / linearized Poisson-Boltzmann). Absent = zero
+/// solvation work and byte-identical pure-PW behavior.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Solvation {
+    pub model: Option<String>,
+    pub epsilon_bulk: Option<f64>,
+    pub nc_bohr3: Option<f64>,
+    pub sigma: Option<f64>,
+    pub rho_min_bohr3: Option<f64>,
+    pub rho_max_bohr3: Option<f64>,
+    pub log_epsilon: Option<bool>,
+    pub kappa_inv_bohr: Option<f64>,
+    pub tau_ha_bohr2: Option<f64>,
+    pub beta_ha_bohr3: Option<f64>,
+    pub solver: Option<String>,
+    pub tolerance: Option<f64>,
+    pub max_iterations: Option<usize>,
+    pub warm_start: Option<bool>,
+    pub adaptive_tolerance: Option<bool>,
+    pub ionic_width_bohr: Option<f64>,
+}
+
+impl Solvation {
+    pub fn to_engine_config(&self) -> Result<dft_engine::SolvationConfig, String> {
+        use dft_physics::solvation::{CavityModel, SolvationParams, SolverConfig, SolverKind};
+        let defaults = dft_engine::SolvationConfig::default();
+        let model = self.model.as_deref().unwrap_or("vaspsol");
+        let mut params = match model {
+            "vaspsol" => {
+                if self.rho_min_bohr3.is_some()
+                    || self.rho_max_bohr3.is_some()
+                    || self.log_epsilon.is_some()
+                {
+                    return Err(
+                        "solvation.rho_min_bohr3, rho_max_bohr3, and log_epsilon are SCCS-only keys and cannot be used with model = \"vaspsol\""
+                            .into(),
+                    );
+                }
+                let mut p = SolvationParams::vaspsol_water();
+                let CavityModel::VaspSol { nc_bohr3, sigma } = p.cavity else {
+                    unreachable!();
+                };
+                p.cavity = CavityModel::VaspSol {
+                    nc_bohr3: self.nc_bohr3.unwrap_or(nc_bohr3),
+                    sigma: self.sigma.unwrap_or(sigma),
+                };
+                p
+            }
+            "sccs" => {
+                if self.nc_bohr3.is_some() || self.sigma.is_some() {
+                    return Err(
+                        "solvation.nc_bohr3 and sigma are VASPsol-only keys and cannot be used with model = \"sccs\""
+                            .into(),
+                    );
+                }
+                let mut p = SolvationParams::sccs_water();
+                let CavityModel::Sccs {
+                    rho_min_bohr3,
+                    rho_max_bohr3,
+                    log_epsilon,
+                } = p.cavity
+                else {
+                    unreachable!();
+                };
+                p.cavity = CavityModel::Sccs {
+                    rho_min_bohr3: self.rho_min_bohr3.unwrap_or(rho_min_bohr3),
+                    rho_max_bohr3: self.rho_max_bohr3.unwrap_or(rho_max_bohr3),
+                    log_epsilon: self.log_epsilon.unwrap_or(log_epsilon),
+                };
+                p
+            }
+            other => {
+                return Err(format!(
+                    "unknown solvation.model {other:?}; expected \"vaspsol\" or \"sccs\""
+                ));
+            }
+        };
+        if let Some(eps) = self.epsilon_bulk {
+            params.epsilon_bulk = eps;
+        }
+        if let Some(kappa) = self.kappa_inv_bohr {
+            params.kappa_inv_bohr = kappa;
+        }
+        if let Some(tau) = self.tau_ha_bohr2 {
+            params.tau_ha_bohr2 = tau;
+        }
+        if let Some(beta) = self.beta_ha_bohr3 {
+            params.beta_ha_bohr3 = beta;
+        }
+        let kind = match self.solver.as_deref().unwrap_or("direct_pcg") {
+            "direct_pcg" => SolverKind::DirectPcg,
+            "fisicaro_pcg" => SolverKind::FisicaroPcg,
+            other => {
+                return Err(format!(
+                    "unknown solvation.solver {other:?}; expected \"direct_pcg\" or \"fisicaro_pcg\""
+                ));
+            }
+        };
+        let cfg = dft_engine::SolvationConfig {
+            params,
+            solver: SolverConfig {
+                kind,
+                tolerance: self.tolerance.unwrap_or(defaults.solver.tolerance),
+                max_iterations: self.max_iterations.unwrap_or(defaults.solver.max_iterations),
+                diis_history: defaults.solver.diis_history,
+                warm_start: self.warm_start.unwrap_or(defaults.solver.warm_start),
+            },
+            ionic_width_bohr: self.ionic_width_bohr.unwrap_or(defaults.ionic_width_bohr),
+            adaptive_tolerance: self
+                .adaptive_tolerance
+                .unwrap_or(defaults.adaptive_tolerance),
+        };
+        cfg.validate().map_err(|e| e.to_string())?;
+        Ok(cfg)
+    }
+}
+
 /// Output paths resolve against the process working directory.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1523,6 +1645,10 @@ impl Config {
         if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {
             v.validate()?;
         }
+        if let Some(s) = &self.solvation {
+            s.to_engine_config()
+                .map_err(|e| ConfigError::Invalid(format!("solvation: {e}")))?;
+        }
         Ok(())
     }
     /// SI1: add `structure` (the structure the run used, after any symmetry
@@ -1952,6 +2078,74 @@ mod tests {
             assert!(Config::parse(&format!("{EXAMPLE}\n[scf]\nthreads = {invalid}\n")).is_err());
         }
         assert!(Config::parse(EXAMPLE).unwrap().scf.is_none());
+    }
+    #[test]
+    fn solvation_input_validation() {
+        assert!(Config::parse(EXAMPLE).unwrap().solvation.is_none());
+
+        // Empty `[solvation]` resolves to VASPsol water + DirectPcg defaults.
+        let default_cfg = Config::parse(&format!("{EXAMPLE}\n[solvation]\n")).unwrap();
+        let eng = default_cfg
+            .solvation
+            .as_ref()
+            .unwrap()
+            .to_engine_config()
+            .unwrap();
+        assert_eq!(eng, dft_engine::SolvationConfig::default());
+
+        // SCCS + FisicaroPcg + custom physical/solver overrides.
+        let sccs_cfg = Config::parse(&format!(
+            "{EXAMPLE}\n[solvation]\nmodel = 'sccs'\nepsilon_bulk = 42.0\nrho_min_bohr3 = 2e-4\nrho_max_bohr3 = 2e-3\nlog_epsilon = false\nkappa_inv_bohr = 0.05\ntau_ha_bohr2 = 1e-5\nbeta_ha_bohr3 = -1e-6\nsolver = 'fisicaro_pcg'\ntolerance = 1e-11\nmax_iterations = 400\nwarm_start = false\nadaptive_tolerance = false\nionic_width_bohr = 0.55\n"
+        ))
+        .unwrap();
+        let eng = sccs_cfg
+            .solvation
+            .as_ref()
+            .unwrap()
+            .to_engine_config()
+            .unwrap();
+        assert_eq!(eng.params.epsilon_bulk, 42.0);
+        assert_eq!(eng.params.kappa_inv_bohr, 0.05);
+        assert_eq!(eng.params.tau_ha_bohr2, 1e-5);
+        assert_eq!(eng.params.beta_ha_bohr3, -1e-6);
+        assert_eq!(
+            eng.params.cavity,
+            dft_physics::solvation::CavityModel::Sccs {
+                rho_min_bohr3: 2e-4,
+                rho_max_bohr3: 2e-3,
+                log_epsilon: false,
+            }
+        );
+        assert_eq!(
+            eng.solver.kind,
+            dft_physics::solvation::SolverKind::FisicaroPcg
+        );
+        assert_eq!(eng.solver.tolerance, 1e-11);
+        assert_eq!(eng.solver.max_iterations, 400);
+        assert!(!eng.solver.warm_start);
+        assert!(!eng.adaptive_tolerance);
+        assert_eq!(eng.ionic_width_bohr, 0.55);
+
+        // Reject unknown fields, unknown models/solvers, cross-model keys, and invalid values.
+        for bad in [
+            "[solvation]\nunknown_key = 1\n",
+            "[solvation]\nmodel = 'pcm'\n",
+            "[solvation]\nsolver = 'hybrid_fisicaro_direct'\n",
+            "[solvation]\nrho_min_bohr3 = 1e-4\n",
+            "[solvation]\nmodel = 'vaspsol'\nlog_epsilon = true\n",
+            "[solvation]\nmodel = 'sccs'\nnc_bohr3 = 0.0025\n",
+            "[solvation]\nmodel = 'sccs'\nsigma = 0.6\n",
+            "[solvation]\nepsilon_bulk = 0.5\n",
+            "[solvation]\nionic_width_bohr = 0.0\n",
+            "[solvation]\ntolerance = 0.0\n",
+            "[solvation]\nmax_iterations = 0\n",
+            "[solvation]\nmodel = 'sccs'\nrho_min_bohr3 = 2e-3\nrho_max_bohr3 = 1e-3\n",
+        ] {
+            assert!(
+                Config::parse(&format!("{EXAMPLE}\n{bad}")).is_err(),
+                "expected invalid solvation config to be rejected: {bad}"
+            );
+        }
     }
 }
 

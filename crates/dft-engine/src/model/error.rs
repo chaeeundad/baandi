@@ -72,3 +72,14 @@ impl From<dft_solvers::SolverError> for ScfError {
         }
     }
 }
+impl From<dft_physics::solvation::SolvationError> for ScfError {
+    fn from(e: dft_physics::solvation::SolvationError) -> Self {
+        match e {
+            dft_physics::solvation::SolvationError::InvalidParameter(msg) => {
+                Self::InvalidInput(msg)
+            }
+            dft_physics::solvation::SolvationError::NonFinite => Self::NonFinite,
+            other => Self::Numerical(other.to_string()),
+        }
+    }
+}

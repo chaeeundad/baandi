@@ -125,10 +125,11 @@ fn solve_small_linear(a: &[Vec<f64>], rhs: &[f64]) -> Option<Vec<f64>> {
         }
         m.swap(col, pivot);
         let diag = m[col][col];
-        for r in (col + 1)..n {
-            let factor = m[r][col] / diag;
-            for c in col..=n {
-                m[r][c] -= factor * m[col][c];
+        let pivot_row = m[col].clone();
+        for row in m.iter_mut().skip(col + 1) {
+            let factor = row[col] / diag;
+            for (dst, &src) in row.iter_mut().zip(&pivot_row).skip(col) {
+                *dst -= factor * src;
             }
         }
     }
@@ -159,15 +160,9 @@ fn solve_b1_least_squares(cols: &[[f64; 6]]) -> Option<(Vec<f64>, f64)> {
     let mut ata = vec![vec![0.0_f64; ns]; ns];
     let mut rhs = vec![0.0_f64; ns];
     for j in 0..ns {
-        for r in 0..6 {
-            rhs[j] += cols[j][r] * target[r];
-        }
+        rhs[j] = cols[j].iter().zip(&target).map(|(c, t)| c * t).sum();
         for k in 0..ns {
-            let mut s = 0.0;
-            for r in 0..6 {
-                s += cols[j][r] * cols[k][r];
-            }
-            ata[j][k] = s;
+            ata[j][k] = cols[j].iter().zip(&cols[k]).map(|(a, b)| a * b).sum();
         }
     }
     let w = solve_small_linear(&ata, &rhs)?;
@@ -497,8 +492,8 @@ pub fn evaluate_spreads(
                 let diag = m[(n, n)];
                 let phase = diag.im.atan2(diag.re);
                 let factor = -inv_nk * bv.weight * phase;
-                for a in 0..3 {
-                    center[a] += factor * bv.cartesian[a];
+                for (c, &b) in center.iter_mut().zip(&bv.cartesian) {
+                    *c += factor * b;
                 }
             }
         }

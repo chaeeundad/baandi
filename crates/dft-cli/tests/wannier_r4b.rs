@@ -324,7 +324,7 @@ fn wannier_export_nnkp_and_gauge_import_roundtrip() {
     // Single entry [task] type = "wannier-export".
     let single = case.input(
         "single",
-        "[task]\ntype='wannier-export'\n[output]\ndirectory='single_w90'\n[subspace]\nk_mesh=[2,2,2]\nbands=4\nseedname='s1'\nspecies='Xx'\nl=0\n",
+        "[task]\ntype='wannier-export'\n[output]\ndirectory='single_w90'\n[subspace]\nk_mesh=[2,2,2]\nbands=6\nseedname='s1'\nspecies='Xx'\nl=0\n",
     );
     ok(&case.command().arg("-i").arg(&single).output().unwrap());
     assert!(case.0.join("single_w90/s1.win").is_file());

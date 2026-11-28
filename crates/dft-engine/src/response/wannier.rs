@@ -523,8 +523,8 @@ pub fn subspace_from_wannier_with<K: Collective>(
             .map_err(|e| ScfError::Numerical(format!("subspace(wannier90) k={k}: {e}")))?;
         let wk = points[k].weight;
         for m in 0..occupied {
-            for j in 0..num_wann {
-                populations[j] += 2.0 * wk * proj.gauge[(m, j)].norm_sqr();
+            for (j, pop) in populations.iter_mut().enumerate() {
+                *pop += 2.0 * wk * proj.gauge[(m, j)].norm_sqr();
             }
         }
         hamiltonians_k.push(proj.hamiltonian_k.clone());

@@ -75,19 +75,18 @@ fn bvector_shells_satisfy_b1_completeness_for_five_bravais_families() {
             // Explicitly re-check sum_b w_b b_a b_c = delta_ac
             let mut tensor = [[0.0_f64; 3]; 3];
             for bv in &bset.vectors {
-                for a in 0..3 {
-                    for c in 0..3 {
-                        tensor[a][c] += bv.weight * bv.cartesian[a] * bv.cartesian[c];
+                for (row, &ba) in tensor.iter_mut().zip(&bv.cartesian) {
+                    for (entry, &bc) in row.iter_mut().zip(&bv.cartesian) {
+                        *entry += bv.weight * ba * bc;
                     }
                 }
             }
-            for a in 0..3 {
-                for c in 0..3 {
+            for (a, row) in tensor.iter().enumerate() {
+                for (c, &val) in row.iter().enumerate() {
                     let target = if a == c { 1.0 } else { 0.0 };
                     assert!(
-                        (tensor[a][c] - target).abs() < 1e-11,
-                        "cell {idx} mesh {mesh:?} ({a},{c}) = {}",
-                        tensor[a][c]
+                        (val - target).abs() < 1e-11,
+                        "cell {idx} mesh {mesh:?} ({a},{c}) = {val}"
                     );
                 }
             }

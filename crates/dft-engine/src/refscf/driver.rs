@@ -913,6 +913,18 @@ async fn run_stage<K: Collective>(
             }
             mixing_s = clock.elapsed().as_secs_f64();
             if failure.is_none() {
+                if let Some(solv) = &mut state.solvation {
+                    solv.current_tolerance = if solv.config.adaptive_tolerance {
+                        next_solvation_tol(
+                            solv.current_tolerance,
+                            dr2,
+                            state.electrons,
+                            solv.config.solver.tolerance,
+                        )
+                    } else {
+                        solv.config.solver.tolerance
+                    };
+                }
                 let clock = Instant::now();
                 let fields = map::cached_fields(
                     &mut state,

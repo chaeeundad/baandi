@@ -5802,7 +5802,7 @@ mod tests {
 
         let mut force = dft_engine::forces::ForceResult {
             verification: "strict",
-            ledger: Vec::new(),
+            ledger: dft_engine::forces::derivative_ledger(),
             units: "Ha/Bohr",
             quantity: "E",
             values: vec![[0.1, -0.2, 0.3]],
@@ -5819,13 +5819,36 @@ mod tests {
         };
         let off_force_json = super::force_json(&force);
         assert!(off_force_json["per_term"].get("solvation").is_none());
+        let off_ledger = off_force_json["derivative_ledger"]
+            .as_array()
+            .expect("derivative_ledger array");
+        assert_eq!(off_ledger.len(), 8);
+        assert!(off_ledger.iter().all(|e| e["term_id"] != "solvation"));
 
         force.solvation = Some(vec![[0.1, -0.2, 0.3]]);
+        force.ledger.push(dft_engine::forces::DerivativeEntry {
+            term_id: "solvation",
+            owner: "physics::solvation",
+            active: true,
+            energy_ha: Some(-0.011),
+            included_in: "E",
+            dependencies: Vec::new(),
+            force_available: true,
+            stress_available: false,
+            reason: "analytic Gaussian ionic solvation force",
+        });
         let on_force_json = super::force_json(&force);
         assert_eq!(
             on_force_json["per_term"]["solvation"],
             json!([[0.1, -0.2, 0.3]])
         );
+        let on_ledger = on_force_json["derivative_ledger"]
+            .as_array()
+            .expect("derivative_ledger array");
+        assert_eq!(on_ledger.len(), 9);
+        assert!(on_ledger
+            .iter()
+            .any(|e| e["term_id"] == "solvation" && e["active"] == json!(true)));
     }
 }
 

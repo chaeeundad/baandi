@@ -94,13 +94,13 @@ We keep BAANDI's `state.ionic`, `hartree`, and `ewald` **100% unmodified** and d
    Solving directly for $\Delta\phi_{\mathrm{pol}}$ avoids $O(Z/r_c)$ core-peak subtraction cancellation in $\Delta E_{\mathrm{es}}$, and at $\epsilon_b = 1, \kappa = 0, \tau = 0, Q_{\mathrm{net}} = 0$ the RHS is identically zero ($\Delta\phi_{\mathrm{pol}} \equiv 0$, exact vacuum reduction). Total $\phi_{\mathrm{solv}} = \phi_{\mathrm{vac}} + \Delta\phi_{\mathrm{pol}}$ is then reconstructed for the nonlinear cavity derivatives below.
 4. **Regularized discrete cavitation energy**:
    $$E_{\mathrm{cav}} = \tau\,\Delta V \sum_{\mathbf{r}}\left(\sqrt{\sum_{a=1}^3 (D_a S(\mathbf{r}))^2 + \delta_S^2} - \delta_S\right) + \beta\,\Delta V\sum_{\mathbf{r}}\big(1 - S(\mathbf{r})\big),$$
-   with tiny regularization $\delta_S > 0$ (e.g., $10^{-14}\,\mathrm{Bohr}^{-1}$) ensuring smooth differentiability everywhere ($E_{\mathrm{cav}} = 0$ at $\tau = \beta = 0$).
+   with smooth regularization $\delta_S > 0$ ensuring differentiability everywhere ($E_{\mathrm{cav}} = 0$ at $\tau = \beta = 0$). *(Gate 4 numerical note: default $\delta_S = 10^{-4}\,\mathrm{Bohr}^{-1}$ replaces the initial $10^{-14}$ draft because $\delta_S = 10^{-14}$ amplified IEEE-754 FFT rounding noise in $\mathbf{D}S$ by $10^{14}$ into $O(10^{-3}\,\mathrm{Ha})$ asymmetric noise in $V_{\mathrm{cav}}$, whereas $\delta_S = 10^{-4}$ suppresses noise to $< 10^{-11}\,\mathrm{Ha}$ while changing $E_{\mathrm{cav}}$ by $< 2\times 10^{-8}\,\mathrm{Ha}$.)*
 
 ### 4.3 Variational Potential $V_{\mathrm{solv}} = \delta E_{\mathrm{solv}}/\delta n$
 By stationarity of the dual Lagrangian w.r.t. $\phi_{\mathrm{solv}}$ and $\phi_{\mathrm{vac}}$, implicit $\delta\phi/\delta n$ terms vanish identically:
 $$V_{\mathrm{solv}}(\mathbf{r}) = V_{\mathrm{es}}^{\mathrm{solv}}(\mathbf{r}) + V_{\mathrm{diel}}(\mathbf{r}) + V_{\mathrm{scr}}(\mathbf{r}) + V_{\mathrm{cav}}(\mathbf{r}),$$
 where:
-- $V_{\mathrm{es}}^{\mathrm{solv}}(\mathbf{r}) = -\Delta\phi_{\mathrm{pol}}(\mathbf{r}) - \delta_{\kappa>0}\sum_I \alpha_{Z,I}^{\mathrm{sm}}$
+- $V_{\mathrm{es}}^{\mathrm{solv}}(\mathbf{r}) = -\Delta\phi_{\mathrm{pol}}(\mathbf{r}) - \sum_I \alpha_{Z,I}^{\mathrm{sm}}$ *(exact variational derivative of $\Delta E_{\mathrm{es}} + E_{\mathrm{bg,corr}}$ w.r.t. $n$; `0` on the neutral vacuum fast path)*
 - $V_{\mathrm{diel}}(\mathbf{r}) = -\frac{1}{8\pi}\frac{d\epsilon}{dn_{\mathrm{cav}}}\sum_a (D_a \phi_{\mathrm{solv}})^2 \ge 0$
 - $V_{\mathrm{scr}}(\mathbf{r}) = -\frac{\epsilon_b\kappa^2}{8\pi}\frac{d\lambda}{dn_{\mathrm{cav}}}\phi_{\mathrm{solv}}^2 \ge 0$
 - $V_{\mathrm{cav}}(\mathbf{r}) = -\tau\,S'(n_{\mathrm{cav}})\sum_a D_a\!\left(\frac{D_a S}{\sqrt{|\mathbf{D}S|^2 + \delta_S^2}}\right) - \beta\,S'(n_{\mathrm{cav}})$
@@ -139,7 +139,7 @@ Three distributed G-space solvers for $A\,\phi = b$ on BAANDI's `DistributedPair
 
 Let $N = N_0 N_1 N_2$ be the density FFT grid size, $P$ the MPI rank count, and $K_{\mathrm{PCG}}$ the inner PCG iterations per SCF step:
 - **Per PCG iteration**: $O\!\left(\frac{N}{P}\log N\right)$ FFT arithmetic + 2 batched `alltoall_f64` (payload $4U$ for mirror-paired Alg 1) + 2 tiny `tree_sum_f64` (1 and 2 `f64` scalars).
-- **Per SCF step with warm-start** (0-FFT bulk-delta predictor + adaptive inner tolerance $\tau_{\mathrm{inner}} \propto \sqrt{\mathrm{dr2\_ry}}$): $K_{\mathrm{PCG}} \approx 2\text{–}6$ iterations $\implies$ **8–24 full-grid FFTs/SCF step**, versus 200–500 full-grid FFT equivalents in Davidson + GEMMs for typical 64–128 band / multi-$k$ runs (**< 3–5% SCF wall-time overhead**, and **0% when disabled**).
+- **Per SCF step with warm-start** (0-FFT bulk-delta predictor + adaptive linear inner tolerance ratchet $\tau_{\mathrm{inner}} \propto 0.05\,\mathrm{dr2\_ry}$, tightened to exact target on final verification): $K_{\mathrm{PCG}} \approx 2\text{–}6$ iterations $\implies$ **8–24 full-grid FFTs/SCF step**, versus 200–500 full-grid FFT equivalents in Davidson + GEMMs for typical 64–128 band / multi-$k$ runs (**< 3–5% SCF wall-time overhead**, and **0% when disabled**).
 - **Memory footprint**: $\sim 128\text{–}176\,(N/P)$ bytes/rank for Alg 1 workspace (e.g., $\sim 20\text{–}25$ MB/rank on a $100^3$ grid at $P=8$), allocated once per run; zero heap allocations in inner iterations.
 
 ---

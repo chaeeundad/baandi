@@ -62,11 +62,6 @@ pub fn derivative_ledger() -> Vec<DerivativeEntry> {
             "engine::occupations",
             "stationary free energy at fixed theta,N,M",
         ),
-        (
-            "solvation",
-            "physics::solvation",
-            "analytic Gaussian ionic solvation force",
-        ),
     ]
     .into_iter()
     .map(|(term_id, owner, reason)| DerivativeEntry {
@@ -1281,11 +1276,20 @@ pub(crate) fn validate(state: &ForceState<'_>) -> Result<Validated, ScfError> {
                 entry.dependencies.push("xc");
                 nlcc.as_ref().map_or(0.0, |c| c.core_potential_integral_ha)
             }
-            "solvation" => {
-                entry.active = solvation.is_some();
-                solvation.as_ref().map_or(0.0, |s| s.total_ha)
-            }
             _ => unreachable!("closed NC ledger"),
+        });
+    }
+    if let Some(s) = solvation {
+        ledger.push(DerivativeEntry {
+            term_id: "solvation",
+            owner: "physics::solvation",
+            active: true,
+            energy_ha: Some(s.total_ha),
+            included_in: "E",
+            dependencies: Vec::new(),
+            force_available: true,
+            stress_available: false,
+            reason: "analytic Gaussian ionic solvation force",
         });
     }
     require_complete(&ledger).map_err(ScfError::Numerical)?;

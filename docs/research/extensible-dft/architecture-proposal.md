@@ -11,7 +11,7 @@
 ## 1. Architectural Objectives & Invariants
 
 1. **Zero Pure-PW Regression (Bit-Identical Off-Path)**: When `ScfOptions::solvation` is `None`, zero solvation allocations, zero extra FFT plans, zero extra MPI collectives, zero branches inside `DistributedRealHamiltonian::apply_block`, `DistributedComplexHamiltonian::apply_block`, `ref_davidson`, or `ref_davidson_complex`, and zero new JSON keys are emitted.
-2. **ADR 0047 Single-Path Compliance**: Integrate strictly into the production `refscf/` driver family (`driver`, `k_driver`, `electronic`) and `refstart.rs`. Frozen `oracle/` (`strict-oracle` feature) remains untouched, and `cargo check/clippy -p dft-engine --no-default-features` stays green.
+2. **ADR 0047 Single-Path Compliance**: Integrate strictly into the production `refscf/` driver family (`driver`, `k_driver`, `electronic`) and `refstart.rs`. Frozen `oracle/` (`strict-oracle` feature) has zero behavioral changes (only two mechanical `solvation: None` struct-literal completions in `oracle/collinear.rs` and `oracle/scf.rs`), and `cargo check/clippy -p dft-engine --no-default-features` stays green.
 3. **Zero Crate-Graph Churn**: No changes to `ownership.toml` or workspace `Cargo.toml` dependencies (`dft-units` → `dft-physics` → `dft-engine` → `dft-cli` edges already exist).
 4. **Compile-Time Electrostatic Sign Safety (ADR 0017 / `D-003`)**: Eliminate $\phi \leftrightarrow U_{\mathrm{el}} = -\phi$ sign confusion across Track B (solvation, GC-DFT) and Track C (QM/MM, polarizable MLIP) via explicit scalar newtypes in `dft-units`.
 5. **Fail-Closed Derivative Coverage**: Phase B1 provides analytic Gaussian ionic solvation forces (plus NLCC core-cavity forces when core density enters the cavity) and explicitly marks solvation stress `stress_available = false` so stress requests fail closed until Phase B1b/B2 implements analytic solvation stress.
@@ -62,8 +62,9 @@ Carry the Gate 2 verified module (`mod.rs`, `cavity.rs`, `poisson.rs`) forward w
      - Automatic fallback to `DirectPcg` on `SolvationError::Breakdown(_)`,
      - Gate 4 R&D experiment (`solvation_suite_c.rs`): evaluated consistent $A_{\mathrm{Fis}}\phi_{\mathrm{vac}}$ polarization RHS and inexact Fisicaro preconditioning inside Flexible PCG (documented as a Gate 4 negative result for replacing `DirectPcg`/`FisicaroPcg`; see ADR 0061 and `D-014`).
    - Remove `HybridFisicaroDirect` from the production CLI enum (retained only in Gate 2 benchmarks/docs as a documented negative result).
-3. **Ionic pseudo-charge construction helper**:
-   - Provide `ionic_pseudo_charges_from_atoms(atoms, species_z_val, width_bohr) -> Vec<IonicPseudoCharge>` with default `width_bohr = 0.60 Bohr` (verified width-invariant in Lean 4 via `bg_offset_algebraic_cancellation` and PDE-level `full_electrostatic_width_invariance`, plus Rust FD tests).
+3. **Ionic pseudo-charge construction & cavitation regularization**:
+   - Construct `Vec<IonicPseudoCharge>` directly from `(atoms, species_z_val, width_bohr)` in `refstart.rs` and `forces.rs` with default `width_bohr = 0.60 Bohr` (verified width-invariant in Lean 4 via `bg_offset_algebraic_cancellation` and PDE-level `full_electrostatic_width_invariance`, plus Rust FD tests).
+   - Default `cavity_grad_reg = 1.0e-4 Bohr^-1` in `SolvationParams` (`vacuum()`, `vaspsol_water()`, `sccs_water()`): avoids amplifying IEEE-754 FP64 FFT rounding noise (`~1e-15`) in $|\mathbf{D}S|$ into `O(1e-3 Ha)` asymmetric noise in $V_{\mathrm{cav}}$, while perturbing $E_{\mathrm{cav}}$ by `< 2e-8 Ha` and preserving exact discrete variational consistency.
 
 ### 2.3 Engine Options, State & Identity (`crates/dft-engine/src/`)
 
@@ -99,10 +100,10 @@ Carry the Gate 2 verified module (`mod.rs`, `cavity.rs`, `poisson.rs`) forward w
 ### 2.5 Forces & Fail-Closed Stress (`forces.rs`, `stress.rs`)
 
 - **`forces.rs`**:
-  - Append `"solvation"` to `derivative_ledger()` (`owner: "physics::solvation"`, `force_available: true`, `stress_available: false`, `included_in: "E"`).
+  - Keep base `derivative_ledger()` unchanged (8 base NC entries for pure-PW runs) and append `"solvation"` (`owner: "physics::solvation"`, `force_available: true`, `stress_available: false`, `included_in: "E"`) inside `validate()` only when `audit.solvation.is_some()` (preserving bit-identical off-path `ForceResult::ledger` and `results.json`).
   - Add `pub solvation: Option<Vec<[f64; 3]>>` to `ForceResult`.
   - In `forces()`, when `state.options.solvation.is_some()`, evaluate exact ionic solvation forces on the converged density at tight tolerance (`<= 1e-11`), symmetrize alongside `[ewald, local, nonlocal, core]` (L476), and accumulate into `ForceResult::values`.
-  - In `validate()` (L1168), mark `"solvation"` active iff `audit.solvation.is_some()` and verify `require_complete(&ledger)`.
+  - In `validate()`, verify `require_complete(&ledger)` after appending active `"solvation"`.
 - **`stress.rs` (Phase B1 Fail-Closed)**:
   - Reject in `preconditions()` (`stress.rs:114`) when `state.options.solvation.is_some()` with `"observables.stress: incomplete derivative coverage: solvation"`.
   - Guard `frozen_pass()` (`stress.rs:454`) so `entry.stress_available = entry.term_id != "solvation"` and enforce `require_stress_complete(&ledger)`.

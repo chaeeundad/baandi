@@ -312,6 +312,10 @@ fn l3_1_off_path_bit_identity() {
         let sa = a.derivatives.stress.as_ref().unwrap();
         let sb = b.derivatives.stress.as_ref().unwrap();
         assert!(fa.solvation.is_none() && fb.solvation.is_none());
+        assert_eq!(fa.ledger.len(), 8);
+        assert!(fa.ledger.iter().all(|e| e.term_id != "solvation"));
+        assert_eq!(sa.ledger.len(), 8);
+        assert!(sa.ledger.iter().all(|e| e.term_id != "solvation"));
         let ra = a.run.into_scalar().unwrap();
         let rb = b.run.into_scalar().unwrap();
         assert!(ra.outcome.converged && rb.outcome.converged);
@@ -1312,7 +1316,12 @@ fn l3_10_fail_closed_stress_and_model_identity() {
             ..Default::default()
         };
         let ok = solve(input(), req).unwrap();
-        assert!(ok.derivatives.forces.as_ref().unwrap().solvation.is_some());
+        let f_ok = ok.derivatives.forces.as_ref().unwrap();
+        assert!(f_ok.solvation.is_some());
+        assert_eq!(f_ok.ledger.len(), 9);
+        assert!(f_ok.ledger.iter().any(|e| {
+            e.term_id == "solvation" && e.active && e.force_available && !e.stress_available
+        }));
         assert!(ok.derivatives.stress.is_none());
         assert!(ok.run.into_scalar().unwrap().outcome.converged);
     }

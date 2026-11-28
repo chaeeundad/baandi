@@ -315,7 +315,7 @@ pub struct SolvationEvaluation {
     pub cavitation_ha: f64,
     /// Total solvation energy `Delta E_es + E_bg,corr + E_cav` (Ha).
     pub total_ha: f64,
-    /// Electrostatic reaction potential `V_es^solv = -Delta phi_pol - delta_{kappa>0} sum alpha_z^sm` (Ha).
+    /// Electrostatic reaction potential `V_es^solv = -Delta phi_pol - sum_I alpha_z,I^sm` (Ha; `0.0` on neutral vacuum fast path).
     pub v_es_planes: Vec<f64>,
     /// Dielectric cavity potential `V_diel = -1/(8*pi) * (d eps/dn) * |D phi_solv|^2` (Ha).
     pub v_diel_planes: Vec<f64>,

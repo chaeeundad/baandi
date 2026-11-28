@@ -31,17 +31,17 @@ Keep `state.ionic`, `hartree.rs`, and `ewald.rs` unchanged. Solve for the polari
 - Record solvation parameters in `force_identity::ModelDescription`.
 
 ### 4. Forces and Fail-Closed Stress (`forces.rs`, `stress.rs`)
-- Append `"solvation"` to `derivative_ledger()` with `force_available = true`, `stress_available = false`.
+- Keep base `derivative_ledger()` unchanged (exact 8 NC terms for pure-PW runs) and append `"solvation"` (`force_available = true`, `stress_available = false`) inside `forces::validate()` only when solvation is active.
 - Compute analytic Gaussian ionic solvation forces (plus NLCC core-cavity forces when core density enters the cavity) on the converged density and include them in `ForceResult::solvation` and `ForceResult::values`.
 - Fail closed in `stress::preconditions()` and `stress::frozen_pass()` whenever `options.solvation.is_some()` with `"observables.stress: incomplete derivative coverage: solvation"` until analytic solvation stress is implemented in a subsequent phase.
 
 ### 5. Additive CLI Input and Output (`dft-cli`)
 - Add optional `[solvation]` TOML section (`#[serde(deny_unknown_fields)]`), rejected cleanly on frozen `oracle` and legacy spin/finite-T paths.
-- Emit `"solvation"` blocks in `results.json` (`energy`, top-level telemetry, and `forces.per_term`) only when active.
+- Emit `"solvation"` blocks in `results.json` (`energy`, top-level telemetry, `forces.per_term`, and `forces.derivative_ledger`) only when active.
 
 ## Consequences
 
-- Zero changes to `ownership.toml`, workspace `Cargo.toml`, `Distributed*Hamiltonian::apply_block`, `ref_davidson*`, or `oracle/`.
+- Zero changes to `ownership.toml`, workspace `Cargo.toml`, `Distributed*Hamiltonian::apply_block`, or `ref_davidson*`, and zero behavioral changes to frozen `oracle/` (only two mechanical `solvation: None` struct-literal completions for the new `EnergyAudit` field).
 - Bit-identical pure-PW behavior and `results.json` output when `[solvation]` is absent.
 - Directly reusable electrostatic types, $\phi_{\mathrm{bulk}} = 0$ gauge, and Bregman audit seams for Track B Phase B2 (GC-DFT) and Track C (electrostatic QM/MM and polarizable MLIP).
 - Core Level-1 mathematical guarantees are formally machine-checked under `formal/BaandiMath/` via Lean 4 + Mathlib (`bash scripts/check_lean.sh`, zero `sorry`, standard axioms only), with hypothesis-by-hypothesis Rust traceability in `docs/research/extensible-dft/formal-verification-map.md`.

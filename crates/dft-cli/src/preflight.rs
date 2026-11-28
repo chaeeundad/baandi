@@ -628,6 +628,26 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             prepared.grid.dims().iter().product(),
         );
     }
+    if let Some(solv_cfg) = &options.solvation
+        && solv_cfg.solver.kind == dft_physics::solvation::SolverKind::FisicaroPcg
+    {
+        let cols = prepared.cell.lattice_columns_bohr();
+        let dims = prepared.grid.dims();
+        let max_dx = (0..3)
+            .map(|a| {
+                let norm = (cols[0][a] * cols[0][a]
+                    + cols[1][a] * cols[1][a]
+                    + cols[2][a] * cols[2][a])
+                    .sqrt();
+                norm / dims[a] as f64
+            })
+            .fold(0.0_f64, f64::max);
+        if max_dx > 0.25 {
+            warnings.push(format!(
+                "solvation.solver=fisicaro_pcg: max FFT grid spacing {max_dx:.3} Bohr exceeds 0.25 Bohr (ADR 0061); coarse-grid product-rule aliasing may exceed 1e-5 Ha; increase ecutwfc_ry or use solver = \"direct_pcg\""
+            ));
+        }
+    }
     let points = config.resolved_points()?;
     if let Some(symmetry) = config.prepared_symmetry()? {
         let map = symmetry.map();

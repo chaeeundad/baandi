@@ -51,7 +51,7 @@ pub fn next_ethr_ry(previous: f64, dr2_ry: f64, electrons: f64) -> f64 {
 }
 
 /// Adaptive inner PDE tolerance ratchet for implicit solvation (ADR 0061):
-/// clamps `1e-2 * min(sqrt(max(dr2_ry, 0)), previous)` into `[target, max(target, 1e-4)]`.
+/// clamps `min(previous, 1e-2 * sqrt(max(dr2_ry, 0)))` into `[target, max(target, 1e-4)]`.
 pub fn next_solvation_tol(previous: f64, dr2_ry: f64, electrons: f64, target: f64) -> f64 {
     let _ = electrons;
     let target = if target.is_finite() && target > 0.0 {
@@ -68,5 +68,5 @@ pub fn next_solvation_tol(previous: f64, dr2_ry: f64, electrons: f64, target: f6
     } else {
         upper
     };
-    (1.0e-2 * dr2_ry.max(0.0).sqrt().min(prev)).clamp(target, upper)
+    (1.0e-2 * dr2_ry.max(0.0).sqrt()).min(prev).clamp(target, upper)
 }

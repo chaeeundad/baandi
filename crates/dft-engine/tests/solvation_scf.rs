@@ -101,8 +101,8 @@ impl PolarDimerFixture {
     fn with_geometry(cell: Cell, atoms: Vec<Atom>, pp_functional: &str) -> Self {
         // Heteronuclear pair: Z_a = 1, Z_b = 3 (4 valence electrons total) with
         // distinct core radii so the dimer carries a strong permanent dipole.
-        let pp_a = common::potential_with_atomic_start(1.0, 1.2, true, 161, pp_functional);
-        let pp_b = common::potential_with_atomic_start(3.0, 1.6, true, 161, pp_functional);
+        let pp_a = common::potential_with_atomic_start(1.0, 1.5, true, 161, pp_functional);
+        let pp_b = common::potential_with_atomic_start(3.0, 1.9, true, 161, pp_functional);
         Self {
             cell,
             atoms,
@@ -194,14 +194,14 @@ fn vacuum_solvation() -> SolvationConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    // Thomas-Fermi (Kerker) preconditioned Broyden with beta = 0.3 damps
-    // long-wavelength charge sloshing across the sharp dielectric cavity wall
-    // (mirroring VASPsol AMIX = 0.2 / Environ Kerker mixing recommendations).
+    // Plain damped Broyden (avoiding Thomas-Fermi G-space filtering, which
+    // induces negative Gibbs ringing in the large empty solvent region of
+    // isolated-molecule supercells).
     Profile {
-        beta: 0.3,
-        history: 6,
+        beta: 0.35,
+        history: 5,
         threshold_ry: 2.0 * threshold_ha,
-        preconditioning: Preconditioning::ThomasFermi,
+        preconditioning: Preconditioning::Plain,
     }
     .validate()
     .unwrap()

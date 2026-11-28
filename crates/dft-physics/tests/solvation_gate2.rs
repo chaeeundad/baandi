@@ -1095,7 +1095,8 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
 
                     if iso_label == "cavitation_only" {
                         (
-                            (-ep2.cavitation_ha + 8.0 * ep1.cavitation_ha - 8.0 * em1.cavitation_ha
+                            (-ep2.cavitation_ha + 8.0 * ep1.cavitation_ha
+                                - 8.0 * em1.cavitation_ha
                                 + em2.cavitation_ha)
                                 / (12.0 * h * dv),
                             eval_iso.v_cav_planes[idx],

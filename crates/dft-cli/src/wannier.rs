@@ -247,15 +247,10 @@ fn format_win(ctx: &Context, res: &WannierExportResult, sub: &dft_cli::config::S
     writeln!(out, "begin unit_cell_cart").unwrap();
     writeln!(out, "Ang").unwrap();
     let cols = ctx.cell.lattice_columns_bohr();
-    for j in 0..3 {
-        writeln!(
-            out,
-            "  {:>16.10} {:>16.10} {:>16.10}",
-            ang(cols[0][j]),
-            ang(cols[1][j]),
-            ang(cols[2][j])
-        )
-        .unwrap();
+    let vecs: [[f64; 3]; 3] = std::array::from_fn(|j| [cols[0][j], cols[1][j], cols[2][j]]);
+    for v in vecs {
+        let [x, y, z] = v.map(ang);
+        writeln!(out, "  {x:>16.10} {y:>16.10} {z:>16.10}").unwrap();
     }
     writeln!(out, "end unit_cell_cart").unwrap();
     writeln!(out).unwrap();

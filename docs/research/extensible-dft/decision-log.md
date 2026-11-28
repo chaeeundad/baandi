@@ -16,6 +16,7 @@
 3. **Production Contract Preservation (ADR 0047)**: All production extensions target `refscf/` and `dft-physics` (or dedicated opt-in crates). Frozen `oracle/` default arithmetic is never altered, and `cargo check/clippy -p dft-engine --no-default-features` must stay green.
 4. **No Premature Universal Abstractions (Section 6.6)**: Do not introduce a monolithic multi-track "universal engine trait" or large core refactoring before concrete vertical implementations prove the minimal shared boundary.
 5. **Independent Verification & Licensing Hygiene (Sections 7 & 9)**: Independent verification (never relying solely on the implementing agent's self-check); never relax tolerances post-hoc to manufacture a pass; never copy GPL/LGPL source code (e.g., QE, Environ, Wannier90, ABINIT, Yambo [GPL]; ASE [LGPL-2.1+]). Implement physics kernels cleanly from published mathematical formulations under `[workspace.lints.rust] unsafe_code = "deny"`.
+6. **Formal Mathematical Verification via Lean 4 + Mathlib (User Rule, 2026-11-28; `AGENTS.md`)**: Formalize and machine-check core Level-1 mathematical theorems (variational stationarity, operator SPD/self-adjointness, sign/gauge and zero-double-counting identities, limiting-case reductions) under `formal/` using Lean 4 + Mathlib (`lake build`, zero `sorry`, zero custom axioms). Formal proofs complement Level 2–5 Rust numerical verification.
 
 ---
 
@@ -64,3 +65,8 @@
 ### D-010 — External Solvation Oracle Status on `dev08` (2026-11-28)
 - **Status**: Recorded (Gate 1)
 - **Fact**: Direct inspection of `dev08` (`/scr/mino/oracles/`) confirmed QE 7.6 (`environ_api_stub.f90` only — Environ not compiled), ABINIT 10.8.3, and Yambo 5.3.0; JDFTx and GPAW are not installed. Gate 2 verification relies on independent L1/L2 exact mathematical, MMS, Born/Debye–Hückel, finite-difference, and MPI-parity oracles with pre-declared tolerances in [implicit-solvation-theory.md](implicit-solvation-theory.md#9-verification-plan-levels-15-pre-declared-tolerances).
+
+### D-011 — Adopt Lean 4 + Mathlib for Level-1 Mathematical Verification (2026-11-28)
+- **Status**: Adopted (User Directive, recorded in `AGENTS.md`)
+- **Decision**: Formalize Level-1 mathematical identities (variational stationarity, discrete skew-adjoint SPD operator $A = \sum_a D_a^\top \epsilon D_a + \kappa^2 \succeq 0$, polarization-potential zero-double-counting cancellation, exact vacuum reduction, and grand-potential identities) in Lean 4 + Mathlib under `formal/` once the Lean toolchain is provisioned.
+- **Environment Fact (verified 2026-11-28)**: `elan` + Lean 4 (`v4.36.0`) + Lake (`v5.0.0`) installed on `dev08` (`~/.elan/bin`) with user approval; formal projects under `formal/BaandiMath/` pin a Mathlib-cached `lean-toolchain` and verify via `lake build` on `dev08`.

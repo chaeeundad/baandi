@@ -78,5 +78,5 @@ fn orbitals(
 mod tests;
 
 pub mod occupations;
-
 pub mod pbe_pw92;
+pub mod solvation;

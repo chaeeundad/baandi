@@ -28,7 +28,6 @@ struct FftEngine {
     dv: f64,
     g_cart: Vec<[f64; 3]>,
     g2: Vec<f64>,
-    g2_precond: Vec<f64>,
     g2_min: f64,
     zero_g2_indices: Vec<usize>,
     mirror_idx: Option<Vec<usize>>,
@@ -90,7 +89,6 @@ impl FftEngine {
         let local_pos = fft.local_positions();
         let mut g_cart = Vec::with_capacity(ll);
         let mut g2 = Vec::with_capacity(ll);
-        let mut g2_precond = Vec::with_capacity(ll);
         let mut zero_g2_indices = Vec::new();
         let mut local_g2_min = f64::INFINITY;
         for (k, &g_idx) in local_pos.iter().enumerate() {
@@ -100,37 +98,8 @@ impl FftEngine {
             g2.push(norm2);
             if norm2 == 0.0 {
                 zero_g2_indices.push(k);
-                if g_idx == 0 {
-                    g2_precond.push(0.0);
-                } else {
-                    // Canonical nonzero |G|^2 on the 7 even-Nyquist corner modes prevents
-                    // amplifying high-frequency checkerboard modes by 1/kappa2_bar.
-                    let ijk = [
-                        g_idx / (dims[1] * dims[2]),
-                        (g_idx / dims[2]) % dims[1],
-                        g_idx % dims[2],
-                    ];
-                    let m = [0, 1, 2].map(|a| {
-                        if ijk[a] <= (dims[a] - 1) / 2 {
-                            ijk[a] as f64
-                        } else {
-                            ijk[a] as f64 - dims[a] as f64
-                        }
-                    });
-                    let g_can = [0, 1, 2].map(|axis| {
-                        recip_cols[axis][0] * m[0]
-                            + recip_cols[axis][1] * m[1]
-                            + recip_cols[axis][2] * m[2]
-                    });
-                    g2_precond.push(
-                        g_can[0].mul_add(g_can[0], g_can[1].mul_add(g_can[1], g_can[2] * g_can[2])),
-                    );
-                }
-            } else {
-                g2_precond.push(norm2);
-                if norm2 < local_g2_min {
-                    local_g2_min = norm2;
-                }
+            } else if norm2 < local_g2_min {
+                local_g2_min = norm2;
             }
         }
 
@@ -187,7 +156,6 @@ impl FftEngine {
             dv: volume / total_points as f64,
             g_cart,
             g2,
-            g2_precond,
             g2_min,
             zero_g2_indices,
             mirror_idx,
@@ -873,7 +841,8 @@ impl PdeSolver {
         let has_kappa = checks[4] > 0.0;
         let kappa2_bar = checks[4] / self.engine.total_points as f64;
         let eps_mean = checks[5] / self.engine.total_points as f64;
-        let (_eps_min, eps_max) = self.engine.global_min_max(comm, eps_planes)?;
+        let (eps_min, eps_max) = self.engine.global_min_max(comm, eps_planes)?;
+        let eps_bar = (eps_min * eps_max).sqrt();
 
         // Prepare effective RHS (projected onto range(A) when kappa = 0).
         self.rhs_eff_g.copy_from_slice(rhs_g);
@@ -915,6 +884,7 @@ impl PdeSolver {
                 eps_planes,
                 kappa2_planes,
                 has_kappa,
+                eps_bar,
                 eps_mean,
                 kappa2_bar,
                 b_scale,
@@ -954,6 +924,7 @@ impl PdeSolver {
         eps_planes: &[f64],
         kappa2_planes: &[f64],
         has_kappa: bool,
+        eps_bar: f64,
         eps_mean: f64,
         kappa2_bar: f64,
         b_scale: f64,
@@ -963,31 +934,33 @@ impl PdeSolver {
     ) -> Result<SolveReport, SolvationError> {
         let volume = self.engine.volume;
 
-        // 0-FFT strictly-SPD G-space preconditioner matched to the bulk Helmholtz ratio
-        // `kappa2_bar / eps_mean`, using canonical nonzero |G|^2 on the 7 even-Nyquist
-        // corner modes so high-frequency checkerboard modes are never amplified by 1/kappa2_bar.
-        for ((p, &g2), &g2p) in self
-            .precond
-            .iter_mut()
-            .zip(&self.engine.g2)
-            .zip(&self.engine.g2_precond)
-        {
+        // 0-FFT strictly-SPD G-space preconditioner with optimal geometric-mean `eps_bar`
+        // (minimizing kappa_2(M^{-1} A) <= eps_max/eps_min) and exact `g2` (including the
+        // 7 even-Nyquist corner modes where D_a = 0 so A acts solely via kappa2).
+        for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
             *p = if !has_kappa && g2 == 0.0 {
                 0.0
             } else {
-                1.0 / (eps_mean * g2p + kappa2_bar)
+                1.0 / (eps_bar * g2 + kappa2_bar)
             };
         }
 
+        // Warm-start predictor uses `eps_mean` (matching bulk dielectric screening without
+        // overshooting by sqrt(eps_b) in the solvent bulk).
         let warm_started = config.warm_start && self.has_prev && self.prev_has_kappa == has_kappa;
         if warm_started {
-            for (((phi, &prev_phi), &pre), (&rhs, &prev_rhs)) in out_phi_g
+            for (((phi, &prev_phi), &g2), (&rhs, &prev_rhs)) in out_phi_g
                 .iter_mut()
                 .zip(&self.prev_phi_g)
-                .zip(&self.precond)
+                .zip(&self.engine.g2)
                 .zip(self.rhs_eff_g.iter().zip(&self.prev_rhs_g))
             {
-                *phi = prev_phi + pre * (rhs - prev_rhs);
+                let bulk_pre = if !has_kappa && g2 == 0.0 {
+                    0.0
+                } else {
+                    1.0 / (eps_mean * g2 + kappa2_bar)
+                };
+                *phi = prev_phi + bulk_pre * (rhs - prev_rhs);
             }
         } else {
             for ((phi, &pre), &rhs) in out_phi_g

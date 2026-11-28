@@ -367,7 +367,7 @@ fn mms_variable_dielectric_and_lpb_cubic_and_skewed_all_solvers() {
 
                 let cfg = SolverConfig {
                     kind: SolverKind::DirectPcg,
-                    tolerance: 1.0e-13,
+                    tolerance: 1.0e-14,
                     max_iterations: 400,
                     diis_history: 8,
                     warm_start: false,
@@ -669,7 +669,7 @@ fn born_ion_and_debye_huckel_analytic_convergence() {
         q: 1.0,
         a: 0.7,
         r_cav: 2.5,
-        width: 0.25,
+        width: 0.45,
         eps_b: 78.4,
     };
     let BornModel {

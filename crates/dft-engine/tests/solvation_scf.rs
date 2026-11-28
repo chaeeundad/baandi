@@ -136,6 +136,16 @@ fn base_options(
     functional: Functional,
     solvation: Option<SolvationConfig>,
 ) -> ScfOptions {
+    let grid_override = solvation.as_ref().and_then(|s| {
+        if s.params.is_vacuum() {
+            None
+        } else {
+            // Resolve the implicit-solvent cavity wall (`dx ~ 0.28 Bohr`) without
+            // enlarging the wavefunction plane-wave basis, matching production
+            // dual-grid practice (`ecutrho` / `ADDGRID`).
+            Some([32, 32, 32])
+        }
+    });
     ScfOptions {
         standard: Some(StandardProfile { threshold_ha }),
         verification: Verification::FixedPoint,
@@ -146,6 +156,7 @@ fn base_options(
         start_density: StartDensity::Atomic,
         start_wavefunctions: StartWavefunctions::Atomic,
         max_iterations: 200,
+        grid_override,
         solvation: solvation.map(Box::new),
         ..ScfOptions::default()
     }
@@ -673,13 +684,16 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 
     let make_opts = |gamma_real: GammaReal| {
         let mut opts = base_options(
-            8.0,
+            4.5,
             4,
             threshold_ha,
             gamma_real,
             Functional::LdaPz,
             Some(solv),
         );
+        // Fine charge/cavity grid (`dx ~ 0.24 Bohr`) suppresses FFT egg-box
+        // below 1e-6 Ha/Bohr while keeping wavefunction Davidson fast.
+        opts.grid_override = Some([40, 40, 40]);
         opts.density_tolerance = 1.0e-12;
         opts.energy_tolerance = 1.0e-13;
         opts.eigen_tolerance = 1.0e-12;
@@ -793,21 +807,22 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
 #[test]
 fn l3_5_ionic_width_invariance_in_full_scf() {
     let _scope = test_run_config().enter();
-    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(10.0, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
     let profile = solvation_profile(threshold_ha);
 
     let run_width = |width_bohr: f64, kappa: f64| -> f64 {
         let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, false);
-        let opts = base_options(
-            7.0,
+        let mut opts = base_options(
+            4.5,
             4,
             threshold_ha,
             GammaReal::On,
             Functional::LdaPz,
             Some(solv),
         );
+        opts.grid_override = Some([40, 40, 40]);
         let run = solve(
             StartInput {
                 cell: &fixture.cell,
@@ -826,12 +841,12 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     };
 
     for kappa in [0.0, 0.15] {
-        let e_045 = run_width(0.45, kappa);
-        let e_055 = run_width(0.55, kappa);
-        let diff = (e_045 - e_055).abs();
+        let e_040 = run_width(0.40, kappa);
+        let e_050 = run_width(0.50, kappa);
+        let diff = (e_040 - e_050).abs();
         assert!(
-            diff < 1.0e-6,
-            "kappa={kappa}: |E_tot(r_c=0.45) - E_tot(r_c=0.55)| = {diff:.3e} Ha >= 1e-6 Ha"
+            diff < 1.0e-8,
+            "kappa={kappa}: |E_tot(r_c=0.40) - E_tot(r_c=0.50)| = {diff:.3e} Ha >= 1e-8 Ha"
         );
     }
 }
@@ -842,7 +857,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
 #[test]
 fn l3_6_dielectric_and_screening_monotonicity() {
     let _scope = test_run_config().enter();
-    let fixture = PolarDimerFixture::cubic(8.5, "SLA PZ");
+    let fixture = PolarDimerFixture::cubic(11.0, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
     let profile = solvation_profile(threshold_ha);

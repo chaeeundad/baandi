@@ -93,7 +93,7 @@ Carry the Gate 2 verified module (`mod.rs`, `cavity.rs`, `poisson.rs`) forward w
    - `harris_foulkes`: adds $+E_{\mathrm{solv}}[n_{\mathrm{in}}] - \langle n_{\mathrm{in}}, V_{\mathrm{solv}}[n_{\mathrm{in}}]\rangle$, matching the Lean 4 theorem `harris_foulkes_bregman_exact` (`HF = E[n_out]` at convergence).
    - `functional_difference_bound`: separates $L_{\mathrm{solv}} = \langle n_{\mathrm{out}} - n_{\mathrm{in}}, V_{\mathrm{solv}}[n_{\mathrm{in}}]\rangle$ from the XC remainder and adds $|E_{\mathrm{solv}}[n_{\mathrm{out}}] - E_{\mathrm{solv}}[n_{\mathrm{in}}] - L_{\mathrm{solv}}|$.
 5. **Adaptive Inner Tolerance Ratchet (`driver.rs`, `k_driver.rs`, `electronic.rs`)**:
-   - Early SCF iterations use ratcheted $\tau_{\mathrm{inner}}^{(t)} = \operatorname{clamp}(\min(\tau_{\mathrm{prev}}, 10^{-2}\sqrt{\max(\mathrm{dr2\_ry}, 0)}), \tau_{\mathrm{target}}, \max(\tau_{\mathrm{target}}, 10^{-4}))$ (`refscf::profile::next_solvation_tol`) with warm-start enabled.
+   - Early SCF iterations use ratcheted $\tau_{\mathrm{inner}}^{(t)} = \operatorname{clamp}(\min(\tau_{\mathrm{prev}}, 0.05\,\max(\mathrm{dr2\_ry}, 0)), \tau_{\mathrm{target}}, \max(\tau_{\mathrm{target}}, 10^{-4}))$ (`refscf::profile::next_solvation_tol`, linear in `dr2_ry` mirroring `next_ethr_ry` so PDE noise never creates a Broyden stall floor) with warm-start enabled.
    - Final verification map (`driver.rs:736`, `k_driver.rs:552`, `electronic.rs:1305`) always solves to exact `config.tolerance` (default `1e-10`).
 
 ### 2.5 Forces & Fail-Closed Stress (`forces.rs`, `stress.rs`)

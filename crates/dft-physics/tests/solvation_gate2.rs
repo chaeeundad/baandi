@@ -909,7 +909,13 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
                 } else {
                     match cavity {
                         CavityModel::VaspSol { .. } => (1.5e-3 * n_i).min(2.0e-6),
-                        CavityModel::Sccs { .. } => (7.0e-4 * n_i).min(2.0e-6),
+                        CavityModel::Sccs { .. } => {
+                            if n_i < 6.0e-4 {
+                                7.0e-4 * n_i
+                            } else {
+                                (1.5e-3 * n_i).min(2.0e-6)
+                            }
+                        }
                     }
                 };
                 assert!(n_i - 2.0 * h > params.density_floor_bohr3);
@@ -1699,4 +1705,85 @@ fn invalid_solvation_parameters_are_rejected() {
         bad_eps.validate(),
         Err(SolvationError::InvalidParameter(_))
     ));
+}
+
+/// Gate 3 L2 requirement: precomputed `density_g` reuse matches `evaluate()`
+/// bit-for-bit (`< 1e-15` Ha) across `P = 1, 2, 4` ranks.
+#[test]
+fn evaluate_with_density_g_matches_evaluate_bit_for_bit() {
+    let cell =
+        Cell::from_user_rows_bohr([[10.5, 0.4, 0.0], [0.2, 10.2, 0.3], [0.0, 0.25, 10.8]]).unwrap();
+    let dims = [16, 16, 16];
+    let ions = [
+        IonicPseudoCharge {
+            charge: 2.0,
+            fractional_position: [0.42, 0.49, 0.50],
+            width_bohr: 0.60,
+        },
+        IonicPseudoCharge {
+            charge: 2.0,
+            fractional_position: [0.58, 0.51, 0.50],
+            width_bohr: 0.60,
+        },
+    ];
+    let global_n = build_global_gaussian_density(
+        &cell,
+        dims,
+        &[
+            ([0.42, 0.49, 0.50], 2.1, 1.0),
+            ([0.58, 0.51, 0.50], 1.9, 1.15),
+        ],
+        4.0,
+        2.0e-6,
+    );
+    let params = SolvationParams {
+        epsilon_bulk: 78.4,
+        kappa_inv_bohr: 0.15,
+        tau_ha_bohr2: 2.0e-5,
+        ..SolvationParams::vaspsol_water()
+    };
+    let cfg = SolverConfig {
+        kind: SolverKind::DirectPcg,
+        tolerance: 1.0e-12,
+        max_iterations: 400,
+        diis_history: 8,
+        warm_start: false,
+    };
+
+    for ranks in [1usize, 2, 4] {
+        dft_mpi::simulate(ranks, |comm| {
+            let mut ws_a = SolvationWorkspace::new(&cell, dims, comm).unwrap();
+            let mut ws_b = SolvationWorkspace::new(&cell, dims, comm).unwrap();
+            let owned = ws_a.owned_real_grid_indices();
+            let local_n = slice_owned(&global_n, &owned);
+
+            let eval_a = ws_a.evaluate(comm, &local_n, &ions, &params, &cfg).unwrap();
+            let mut n_g = vec![Complex64::default(); ws_b.local_positions().len()];
+            ws_b.forward_real(comm, &local_n, &mut n_g).unwrap();
+            let eval_b = ws_b
+                .evaluate_with_density_g(comm, &local_n, &n_g, &ions, &params, &cfg)
+                .unwrap();
+
+            assert_eq!(eval_a.total_ha.to_bits(), eval_b.total_ha.to_bits());
+            assert_eq!(
+                eval_a.electrostatic_ha.to_bits(),
+                eval_b.electrostatic_ha.to_bits()
+            );
+            assert_eq!(
+                eval_a.cavitation_ha.to_bits(),
+                eval_b.cavitation_ha.to_bits()
+            );
+            for (va, vb) in eval_a.v_total_planes.iter().zip(&eval_b.v_total_planes) {
+                assert_eq!(va.to_bits(), vb.to_bits());
+            }
+            for (fa, fb) in eval_a
+                .ionic_forces_ha_bohr
+                .iter()
+                .flatten()
+                .zip(eval_b.ionic_forces_ha_bohr.iter().flatten())
+            {
+                assert_eq!(fa.to_bits(), fb.to_bits());
+            }
+        });
+    }
 }

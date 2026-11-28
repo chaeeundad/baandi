@@ -846,7 +846,7 @@ fn variational_potential_matches_central_finite_differences_vaspsol_and_sccs() {
             ([0.57, 0.45, 0.54], 0.25, 1.00),
         ],
         1.10,
-        2.0e-5,
+        2.0e-6,
     );
 
     let cavities = [

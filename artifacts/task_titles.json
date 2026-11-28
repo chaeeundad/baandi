@@ -263,5 +263,6 @@
  "API-SEED-GRID": "엔진 API 시드 재사용 시 FFT 격자가 달라지는 기존 버그 수정",
  "PRELAX-P2": "이온 이완 가속 2단계: 결합 기반 전처리 L-BFGS를 Rust로 직접 구현 (선택 옵션, 기본값 아님)",
  "RPA-R4A-ATOMIC-PROJECTION": "RPA 4a단계: UPF 원자 오비탈 투영·Löwdin 직교화·실공간 호핑 H(R)·Wannier 보간 구현",
- "RPA-R4B-WANNIER90": "RPA 4b단계: Wannier90(.win/.eig/.amn/.mmn) 내보내기·.nnkp 연동·_u.mat 게이지 가져오기·MV spread 구현"
+ "RPA-R4B-WANNIER90": "RPA 4b단계: Wannier90(.win/.eig/.amn/.mmn) 내보내기·.nnkp 연동·_u.mat 게이지 가져오기·MV spread 구현",
+ "EXTENSIBLE-DFT-GATE0": "확장형 전자구조·멀티스케일 연구 프로그램 Gate 0: BAANDI 저장소 정밀 진단, 10대 핵심 질문 트리아지 및 첫 수직 돌파 축 제안"
 }

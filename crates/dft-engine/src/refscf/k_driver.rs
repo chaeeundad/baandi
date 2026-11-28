@@ -398,17 +398,18 @@ pub(super) async fn run_continuation<K: Collective>(
         let reused_from = None;
         {
             if iteration > 1 {
+                let electrons = state.electrons;
                 ethr = next_ethr_ry(
                     if iteration == 2 { 1e-2 } else { ethr },
                     last_dr2,
-                    state.electrons,
+                    electrons,
                 );
                 if let Some(solv) = &mut state.solvation {
                     solv.current_tolerance = if solv.config.adaptive_tolerance {
                         next_solvation_tol(
                             solv.current_tolerance,
                             last_dr2,
-                            state.electrons,
+                            electrons,
                             solv.config.solver.tolerance,
                         )
                     } else {
@@ -492,13 +493,14 @@ pub(super) async fn run_continuation<K: Collective>(
                 report.stage = "fine";
                 reported_columns = report.h_columns;
                 boundary.emit(report).await;
-                ethr = next_ethr_ry(ethr, dr2, state.electrons);
+                let electrons = state.electrons;
+                ethr = next_ethr_ry(ethr, dr2, electrons);
                 if let Some(solv) = &mut state.solvation {
                     solv.current_tolerance = if solv.config.adaptive_tolerance {
                         next_solvation_tol(
                             solv.current_tolerance,
                             dr2,
-                            state.electrons,
+                            electrons,
                             solv.config.solver.tolerance,
                         )
                     } else {

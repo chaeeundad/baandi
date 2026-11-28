@@ -22,7 +22,7 @@ use dft_engine::{
         api::{Derivatives, Request, solve},
         delivered,
         electronic::Policy,
-        profile::Profile,
+        profile::{Preconditioning, Profile},
         symmetry,
     },
     refstart::StartInput,
@@ -193,6 +193,20 @@ fn vacuum_solvation() -> SolvationConfig {
     }
 }
 
+fn solvation_profile(threshold_ha: f64) -> Profile {
+    // Conservative Broyden beta = 0.25 (matching VASPsol AMIX = 0.2 / Environ
+    // mixing_beta = 0.2-0.3) avoids linear overshoot into negative density across
+    // the sharp n_c = 0.0025 cavity wall while converging to machine precision.
+    Profile {
+        beta: 0.25,
+        history: 6,
+        threshold_ry: 2.0 * threshold_ha,
+        preconditioning: Preconditioning::Plain,
+    }
+    .validate()
+    .unwrap()
+}
+
 fn max_force_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {
     assert_eq!(a.len(), b.len(), "force atom count mismatch");
     a.iter()
@@ -253,7 +267,7 @@ fn l3_1_off_path_bit_identity() {
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
 
     // 1. Gamma real path
     {
@@ -376,7 +390,7 @@ fn l3_1_off_path_bit_identity() {
             let mut req = Request::new(profile, gamma_kpoints());
             req.policy = Some(Policy::FermiDirac {
                 theta_ha: 0.01,
-                band_cap: 12,
+                band_cap: 18,
             });
             req.derivatives = Derivatives {
                 forces: true,
@@ -428,7 +442,7 @@ fn l3_1_off_path_bit_identity() {
 fn l3_2_vacuum_limit_scf_reduction() {
     let _scope = RunConfig::from_pairs(&[]).unwrap().enter();
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
     let vac = Some(vacuum_solvation());
 
     // 1. Gamma real
@@ -545,7 +559,7 @@ fn l3_2_vacuum_limit_scf_reduction() {
 
         let fd_policy = Policy::FermiDirac {
             theta_ha: 0.01,
-            band_cap: 12,
+            band_cap: 18,
         };
         let (pw_fd, f_pw_fd) = run_electronic(fd_policy.clone(), 12, None);
         let (sv_fd, f_sv_fd) = run_electronic(fd_policy, 12, vac);
@@ -586,7 +600,7 @@ fn l3_3_harris_foulkes_and_band_form_identity() {
     let fixture = PolarDimerFixture::cubic(10.0, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
 
     for kappa in [0.0, 0.15] {
         let solv = water_solvation(78.4, kappa, 2.0e-5, 0.60, 1.0e-12, true);
@@ -647,7 +661,7 @@ fn l3_4_self_consistent_hellmann_feynman_forces_vs_total_energy_fd() {
     let fixture = PolarDimerFixture::skewed("SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, false);
 
     let make_opts = |gamma_real: GammaReal| {
@@ -775,7 +789,7 @@ fn l3_5_ionic_width_invariance_in_full_scf() {
     let fixture = PolarDimerFixture::cubic(10.0, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
 
     let run_width = |width_bohr: f64, kappa: f64| -> f64 {
         let solv = water_solvation(78.4, kappa, 2.0e-5, width_bohr, 1.0e-12, false);
@@ -824,7 +838,7 @@ fn l3_6_dielectric_and_screening_monotonicity() {
     let fixture = PolarDimerFixture::cubic(10.0, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-12;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
 
     let eval = |eps_b: f64, kappa: f64| -> (f64, f64) {
         let solv = water_solvation(eps_b, kappa, 0.0, 0.60, 1.0e-11, true);
@@ -882,7 +896,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PW");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
 
     let cases: [(&str, Policy, usize); 3] = [
@@ -900,7 +914,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
             "scalar_fermi_dirac",
             Policy::FermiDirac {
                 theta_ha: 0.01,
-                band_cap: 14,
+                band_cap: 18,
             },
             14,
         ),
@@ -915,7 +929,7 @@ fn l3_7_collinear_spin_and_fermi_dirac_scf() {
                 },
                 theta_ha: 0.01,
                 constraint: Constraint::FixedMoment(1.0),
-                band_cap: 14,
+                band_cap: 18,
             },
             14,
         ),
@@ -1000,7 +1014,7 @@ fn l3_8_crystal_symmetry_invariance() {
     );
 
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
     let opts = base_options(
         3.5,
@@ -1055,7 +1069,7 @@ fn l3_9_mpi_rank_independence_full_scf() {
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-13;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-12, true);
 
     for (label, gamma_real, points) in [
@@ -1133,7 +1147,7 @@ fn l3_10_fail_closed_stress_and_model_identity() {
     let fixture = PolarDimerFixture::cubic(9.5, "SLA PZ");
     let species = fixture.species();
     let threshold_ha = 5.0e-11;
-    let profile = Profile::from_standard_ha(threshold_ha).unwrap();
+    let profile = solvation_profile(threshold_ha);
     let solv = water_solvation(78.4, 0.15, 2.0e-5, 0.60, 1.0e-11, true);
     let opts = base_options(
         3.5,

@@ -171,7 +171,11 @@ impl ModelDescription {
             pw92_prefactor: options.pw92_prefactor,
             local_mesh: options.local_mesh,
             radial_even_rule: options.radial_even_rule,
-            solvation: options.solvation.map(SolvationIdentity::from_config),
+            solvation: options
+                .solvation
+                .as_deref()
+                .copied()
+                .map(SolvationIdentity::from_config),
             grid,
             floor: None,
             symmetry: Vec::new(),

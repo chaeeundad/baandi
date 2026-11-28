@@ -144,9 +144,10 @@ pub struct ScfOptions {
     pub seed: u64,
     pub divergence_factor: f64,
     pub divergence_patience: usize,
-    /// Optional implicit continuum solvation model (ADR 0061). `None` keeps
-    /// pure-PW execution bit-identical with zero allocations or extra FFTs.
-    pub solvation: Option<SolvationConfig>,
+    /// Optional implicit continuum solvation model (ADR 0061). Boxed to keep
+    /// `ScfOptions` compact; `None` keeps pure-PW execution bit-identical with
+    /// zero allocations or extra FFTs.
+    pub solvation: Option<Box<SolvationConfig>>,
 }
 impl ScfOptions {
     pub(crate) fn basis(

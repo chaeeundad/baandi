@@ -1000,7 +1000,14 @@ fn start_inner<K: Collective>(
         legacy_principal_peak_bound_bytes,
         legacy_idle_band_density_bytes,
     };
-    let solvation = build_solvation_state(cell, grid.dims(), atoms, potentials, o.solvation, comm)?;
+    let solvation = build_solvation_state(
+        cell,
+        grid.dims(),
+        atoms,
+        potentials,
+        o.solvation.as_deref().copied(),
+        comm,
+    )?;
     Ok(StartState {
         report,
         setup,
@@ -3006,7 +3013,14 @@ pub fn start_kpoints_from_density<K: Collective>(
     )
     .map_err(err)?;
     let solvation =
-        build_solvation_state(cell, dims, input.atoms, input.potentials, o.solvation, comm)?;
+        build_solvation_state(
+            cell,
+            dims,
+            input.atoms,
+            input.potentials,
+            o.solvation.as_deref().copied(),
+            comm,
+        )?;
     let common = StartState {
         report: StartReport {
             density: DensityStartKind::Supplied,

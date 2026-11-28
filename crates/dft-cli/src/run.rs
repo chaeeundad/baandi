@@ -276,6 +276,7 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
         .as_ref()
         .map(|solv| {
             solv.to_engine_config()
+                .map(Box::new)
                 .map_err(|e| error(1, format!("solvation: {e}")))
         })
         .transpose()?;

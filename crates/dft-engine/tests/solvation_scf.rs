@@ -143,7 +143,7 @@ fn base_options(
         start_density: StartDensity::Atomic,
         start_wavefunctions: StartWavefunctions::Atomic,
         max_iterations: 200,
-        solvation,
+        solvation: solvation.map(Box::new),
         ..ScfOptions::default()
     }
 }
@@ -1256,7 +1256,7 @@ fn l3_10_fail_closed_stress_and_model_identity() {
 
     for (tag, bad_solv) in mismatched_configs {
         let mut bad_opts = opts.clone();
-        bad_opts.solvation = bad_solv;
+        bad_opts.solvation = bad_solv.map(Box::new);
         let bad_state = ForceState {
             cell: &fixture.cell,
             atoms: &fixture.atoms,
@@ -1298,7 +1298,7 @@ fn l3_10_fail_closed_stress_and_model_identity() {
     ];
     for bad_solv in invalid_configs {
         let mut bad_opts = opts.clone();
-        bad_opts.solvation = Some(bad_solv);
+        bad_opts.solvation = Some(Box::new(bad_solv));
         let res = solve(
             StartInput {
                 cell: &fixture.cell,

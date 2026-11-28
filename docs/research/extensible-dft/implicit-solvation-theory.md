@@ -50,7 +50,7 @@ In continuum implicit solvation, the solvent is represented by:
 Two canonical smooth cavity switching functions $S(n_{\mathrm{cav}})$ are considered:
 - **VASPsol `erfc` switching** (Mathew et al. 2014):
   $$S_{\mathrm{VASPsol}}(n) = \frac{1}{2}\operatorname{erfc}\!\left(\frac{\ln(n / n_c)}{\sigma\sqrt{2}}\right), \qquad S'_{\mathrm{VASPsol}}(n) = -\frac{1}{n\,\sigma\sqrt{2\pi}}\exp\!\left(-\frac{[\ln(n/n_c)]^2}{2\sigma^2}\right) \le 0,$$
-  with water defaults $n_c = 0.0025\,\mathrm{Bohr}^{-3}$, $\sigma = 0.6$, $\epsilon_b = 78.4$ (for $n \le n_{\mathrm{floor}}$, $S = 1, S' = 0$ smoothly to machine precision).
+  with Mathew et al. (2014) water defaults $n_c = 0.0025\,\mathrm{\AA}^{-3} = 0.0025\,a_0^3 \approx 3.7046\times 10^{-4}\,\mathrm{Bohr}^{-3}$ (via `dft_units::BOHR_IN_ANGSTROM`), $\sigma = 0.6$, $\epsilon_b = 78.4$ (for $n \le n_{\mathrm{floor}}$, $S = 1, S' = 0$ smoothly to machine precision).
 - **SCCS logarithmic-sine switching** (Andreussi et al. 2012):
   For $t(n) = \frac{\ln \rho_{\max} - \ln n}{\ln \rho_{\max} - \ln \rho_{\min}}$:
   $$S_{\mathrm{SCCS}}(n) = \begin{cases} 1, & n \le \rho_{\min}, \\ t(n) - \frac{1}{2\pi}\sin(2\pi t(n)), & \rho_{\min} < n < \rho_{\max}, \\ 0, & n \ge \rho_{\max}, \end{cases} \qquad S'_{\mathrm{SCCS}}(n) = -\frac{1 - \cos(2\pi t(n))}{n\ln(\rho_{\max}/\rho_{\min})} \le 0$$

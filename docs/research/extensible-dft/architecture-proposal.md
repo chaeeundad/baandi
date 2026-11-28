@@ -58,21 +58,21 @@ Carry the Gate 2 verified module (`mod.rs`, `cavity.rs`, `poisson.rs`) forward w
 2. **Dual-solver production policy (`D-012`)**:
    - Default solver: `SolverKind::DirectPcg` (strictly SPD, exact `< 1e-9` discrete variational consistency on all grids, `1.5e-16` Ha MPI parity, 0 setup FFTs).
    - Opt-in fast solver: `SolverKind::FisicaroPcg` (3.4×–12.7× faster, 2 FFTs/iter), with:
-     - Grid-resolution guard emitting a diagnostic warning if $\max_a \Delta x_a > 0.28\text{ Bohr}$ (where Gate 2 proved coarse-grid operator aliasing can exceed `1e-4 Ha`),
+     - Grid-resolution guard emitting a diagnostic preflight warning if $\max_a \Delta x_a > 0.25\text{ Bohr}$ (where Gate 2 proved coarse-grid operator aliasing can exceed `1e-4 Ha`; consistent with `SolvationWorkspace::max_grid_spacing_bohr()` and ADR 0061),
      - Automatic fallback to `DirectPcg` on `SolvationError::Breakdown(_)`,
-     - Gate 4 R&D experiment: test consistent $A_{\mathrm{Fis}}\phi_{\mathrm{vac}}$ polarization RHS and inexact Fisicaro preconditioning inside Flexible PCG to determine whether `DirectPcg` can be accelerated 2×–4× *without* sacrificing exact discrete variational consistency.
+     - Gate 4 R&D experiment (`solvation_suite_c.rs`): evaluated consistent $A_{\mathrm{Fis}}\phi_{\mathrm{vac}}$ polarization RHS and inexact Fisicaro preconditioning inside Flexible PCG (documented as a Gate 4 negative result for replacing `DirectPcg`/`FisicaroPcg`; see ADR 0061 and `D-014`).
    - Remove `HybridFisicaroDirect` from the production CLI enum (retained only in Gate 2 benchmarks/docs as a documented negative result).
 3. **Ionic pseudo-charge construction helper**:
-   - Provide `ionic_pseudo_charges_from_atoms(atoms, species_z_val, width_bohr) -> Vec<IonicPseudoCharge>` with default `width_bohr = 0.60 Bohr` (verified width-invariant in Lean 4 `width_invariance_arbitrary_charge` and Rust FD tests).
+   - Provide `ionic_pseudo_charges_from_atoms(atoms, species_z_val, width_bohr) -> Vec<IonicPseudoCharge>` with default `width_bohr = 0.60 Bohr` (verified width-invariant in Lean 4 via `bg_offset_algebraic_cancellation` and PDE-level `full_electrostatic_width_invariance`, plus Rust FD tests).
 
 ### 2.3 Engine Options, State & Identity (`crates/dft-engine/src/`)
 
 | File & Seam | Addition | Off-Path Behavior (`None`) |
 | --- | --- | --- |
-| `model/options.rs:49` (`ScfOptions`) | `pub solvation: Option<SolvationConfig>` (wrapping `SolvationParams`, `SolverConfig`, `ionic_width_bohr`, `adaptive_tol`) | `None` in `default()` and `strict_reference()` |
+| `model/options.rs:150` (`ScfOptions`) | `pub solvation: Option<Box<SolvationConfig>>` (boxed to keep `ScfOptions` compact; wraps `SolvationParams`, `SolverConfig`, `ionic_width_bohr`, `adaptive_tolerance`) | `None` in `default()` and `strict_reference()` |
 | `force_identity.rs:52` (`ModelDescription`) | `solvation: Option<SolvationIdentity>` (bit-encoded params, cavity model, solver kind, ionic width) | `None`; rejects mismatched solvation models on derivative calls |
 | `refstart.rs:128` (`StartState`) | `pub solvation: Option<Box<SolvationState>>` (reused by `KStartState.common` via `DerefMut` at L1811) | `None` (0 bytes heap, 0 FFT plans) |
-| `refscf/profile.rs:49` | `pub fn next_solvation_tol(previous, dr2_ry, electrons, target) -> f64` | Unused when `solvation.is_none()` |
+| `refscf/profile.rs:55` | `pub fn next_solvation_tol(previous, dr2_ry, electrons, target) -> f64` | Unused when `solvation.is_none()` |
 
 ### 2.4 Density-to-Potential Maps & `EnergyAudit` (`refscf/{map,k_map,electronic_map}.rs`, `energy.rs`)
 
@@ -93,7 +93,7 @@ Carry the Gate 2 verified module (`mod.rs`, `cavity.rs`, `poisson.rs`) forward w
    - `harris_foulkes`: adds $+E_{\mathrm{solv}}[n_{\mathrm{in}}] - \langle n_{\mathrm{in}}, V_{\mathrm{solv}}[n_{\mathrm{in}}]\rangle$, matching the Lean 4 theorem `harris_foulkes_bregman_exact` (`HF = E[n_out]` at convergence).
    - `functional_difference_bound`: separates $L_{\mathrm{solv}} = \langle n_{\mathrm{out}} - n_{\mathrm{in}}, V_{\mathrm{solv}}[n_{\mathrm{in}}]\rangle$ from the XC remainder and adds $|E_{\mathrm{solv}}[n_{\mathrm{out}}] - E_{\mathrm{solv}}[n_{\mathrm{in}}] - L_{\mathrm{solv}}|$.
 5. **Adaptive Inner Tolerance Ratchet (`driver.rs`, `k_driver.rs`, `electronic.rs`)**:
-   - Early SCF iterations use ratcheted $\tau_{\mathrm{inner}}^{(t)} = \operatorname{clamp}(10^{-2}\min(\sqrt{\mathrm{dr2\_ry}}, \tau_{\mathrm{prev}}), \tau_{\mathrm{target}}, 10^{-4})$ with warm-start enabled.
+   - Early SCF iterations use ratcheted $\tau_{\mathrm{inner}}^{(t)} = \operatorname{clamp}(\min(\tau_{\mathrm{prev}}, 10^{-2}\sqrt{\max(\mathrm{dr2\_ry}, 0)}), \tau_{\mathrm{target}}, \max(\tau_{\mathrm{target}}, 10^{-4}))$ (`refscf::profile::next_solvation_tol`) with warm-start enabled.
    - Final verification map (`driver.rs:736`, `k_driver.rs:552`, `electronic.rs:1305`) always solves to exact `config.tolerance` (default `1e-10`).
 
 ### 2.5 Forces & Fail-Closed Stress (`forces.rs`, `stress.rs`)
@@ -116,7 +116,7 @@ Additive `[solvation]` TOML table in `crates/dft-cli/src/config.rs` (`#[serde(de
 [solvation]
 model = "vaspsol"           # "vaspsol" | "sccs"
 epsilon_bulk = 78.4         # >= 1.0 (1.0 with kappa=0, tau=0, beta=0 => exact vacuum)
-nc_bohr3 = 0.0025           # VASPsol default
+nc_bohr3 = 0.0003704618     # VASPsol default (0.0025 Angstrom^-3 via dft_units::BOHR_IN_ANGSTROM)
 sigma = 0.6                 # VASPsol default
 # rho_min_bohr3 = 1e-4      # SCCS optional
 # rho_max_bohr3 = 1.5e-3    # SCCS optional
@@ -141,7 +141,7 @@ ionic_width_bohr = 0.60     # Gaussian ionic pseudo-charge width (width-invarian
 
 - **Phase B2 (Grand-Canonical DFT)**:
   - $\kappa > 0$ already pins $\phi_{\mathrm{bulk}} = 0$ uniquely, providing the exact absolute electrostatic reference needed to map $\mu_e$ to electrode potential $U_{\mathrm{SHE}}$.
-  - `SolvationState` is stateless with respect to $N_e$ (charge neutrality is NOT assumed; `E_bg,corr` is formally proven width-invariant for arbitrary $Q_{\mathrm{ion}} - N_e$ in Lean 4 `width_invariance_arbitrary_charge`).
+  - `SolvationState` is stateless with respect to $N_e$ (charge neutrality is NOT assumed; `E_bg,corr` algebraic offset cancellation and full PDE-level electrostatic width invariance for arbitrary $Q_{\mathrm{ion}} - N_e$ are formally proven in Lean 4 via `bg_offset_algebraic_cancellation` and `full_electrostatic_width_invariance`).
   - `grand_canonical_bregman_exact` is already formalized in `BaandiMath.Solvation` and plugs straight into `refscf/electronic.rs` when adding a fixed-$\mu$ outer root-finder.
 - **Track C (Electrostatic QM/MM & Polarizable MLIP)**:
   - Reuses `ElectrostaticPotentialHaPerE` / `ElectronPotentialEnergyHa` in `dft-units`, the exact `hxc` injection seam in `map.rs:170` + `electronic_map.rs:446–522`, the `EnergyAudit` additive ledger pattern, and the `derivative_ledger()` force/stress coverage contract.

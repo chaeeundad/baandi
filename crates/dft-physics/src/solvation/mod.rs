@@ -85,10 +85,13 @@ pub enum CavityModel {
 }
 
 impl CavityModel {
-    /// Standard VASPsol water cavity parameters (`n_c = 0.0025 Bohr^-3, sigma = 0.6`).
+    /// Standard VASPsol water cavity parameters (Mathew et al. 2014,
+    /// `n_c = 0.0025 Angstrom^-3 = 0.0025 * BOHR_IN_ANGSTROM^3 ≈ 3.7046e-4 Bohr^-3`,
+    /// `sigma = 0.6`).
     pub fn vaspsol_water() -> Self {
+        let bohr_in_angstrom = dft_units::BOHR_IN_ANGSTROM;
         Self::VaspSol {
-            nc_bohr3: 0.0025,
+            nc_bohr3: 0.0025 * bohr_in_angstrom * bohr_in_angstrom * bohr_in_angstrom,
             sigma: 0.6,
         }
     }

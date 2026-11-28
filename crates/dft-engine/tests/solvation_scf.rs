@@ -22,7 +22,7 @@ use dft_engine::{
         api::{Derivatives, Request, solve},
         delivered,
         electronic::Policy,
-        profile::{Preconditioning, Profile},
+        profile::Profile,
         symmetry,
     },
     refstart::StartInput,
@@ -194,17 +194,10 @@ fn vacuum_solvation() -> SolvationConfig {
 }
 
 fn solvation_profile(threshold_ha: f64) -> Profile {
-    // Plain damped Broyden (avoiding Thomas-Fermi G-space filtering, which
-    // induces negative Gibbs ringing in the large empty solvent region of
-    // isolated-molecule supercells).
-    Profile {
-        beta: 0.35,
-        history: 5,
-        threshold_ry: 2.0 * threshold_ha,
-        preconditioning: Preconditioning::Plain,
-    }
-    .validate()
-    .unwrap()
+    // Plain Broyden matching BAANDI's standard profile (avoiding Thomas-Fermi
+    // G-space filtering, which induces negative Gibbs ringing in the empty
+    // solvent region of isolated-molecule supercells).
+    Profile::from_standard_ha(threshold_ha).unwrap()
 }
 
 fn max_force_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> f64 {

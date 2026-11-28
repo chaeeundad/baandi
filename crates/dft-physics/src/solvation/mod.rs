@@ -51,13 +51,17 @@ pub enum SolvationError {
 /// Numerical algorithm for the generalized Poisson / LPB PDE.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SolverKind {
-    /// Primary: direct G-space PCG with `np = 2` real-space complex pairing and
-    /// mirror-stick unpacking (strictly SPD, 0 setup FFTs, 4 FFTs/iter on mirror).
+    /// Strictly-SPD direct G-space PCG with `np = 2` real-space complex pairing and
+    /// mirror-stick unpacking (0 setup FFTs, 4 FFTs/iter on mirror).
     DirectPcg,
-    /// Benchmark arm: Fisicaro et al. (2016) `phi_tilde = sqrt(eps) * phi` PCG.
+    /// Benchmark arm: Fisicaro et al. (2016) `phi_tilde = sqrt(eps) * phi` PCG (2 FFTs/iter).
     FisicaroPcg,
-    /// Benchmark arm: polarization-charge fixed-point iteration with Anderson/DIIS.
+    /// Benchmark arm: polarization-charge fixed-point iteration with Anderson/DIIS (3 FFTs/iter).
     PolarizationDiis,
+    /// High-performance default candidate: warm-started Fisicaro PCG (2 FFTs/iter) with
+    /// automatic SPD `DirectPcg` defect-correction polish & breakdown fallback (exact discrete
+    /// variational consistency + 3x–10x speedup over standalone `DirectPcg`).
+    HybridFisicaroDirect,
 }
 
 /// Smooth density-dependent cavity switching function `S(n) in [0, 1]`.

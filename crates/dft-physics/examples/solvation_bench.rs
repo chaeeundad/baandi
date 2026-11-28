@@ -125,6 +125,7 @@ fn solver_label(kind: SolverKind) -> &'static str {
         SolverKind::DirectPcg => "DirectPcg",
         SolverKind::FisicaroPcg => "FisicaroPcg",
         SolverKind::PolarizationDiis => "PolarizationDiis",
+        SolverKind::HybridFisicaroDirect => "HybridFisicaroDirect",
     }
 }
 
@@ -172,6 +173,7 @@ fn benchmark_mms_grid(n_axis: usize) {
         SolverKind::DirectPcg,
         SolverKind::FisicaroPcg,
         SolverKind::PolarizationDiis,
+        SolverKind::HybridFisicaroDirect,
     ];
 
     for kappa in [0.0_f64, 0.15_f64] {
@@ -228,6 +230,7 @@ fn benchmark_vaspsol_grid(n_axis: usize) {
         SolverKind::DirectPcg,
         SolverKind::FisicaroPcg,
         SolverKind::PolarizationDiis,
+        SolverKind::HybridFisicaroDirect,
     ];
 
     for kappa in [0.0_f64, 0.15_f64] {
@@ -310,12 +313,14 @@ fn benchmark_vaspsol_grid(n_axis: usize) {
 
 fn benchmark_mpi_scaling(grids: &[usize]) {
     println!();
-    println!("## Simulated MPI Scaling & Parity (`DirectPcg`, VASPsol water, `kappa = 0.15`)");
+    println!(
+        "## Simulated MPI Scaling & Parity (`DirectPcg` & `HybridFisicaroDirect`, VASPsol water, `kappa = 0.15`)"
+    );
     println!();
     println!(
-        "| Grid | Ranks | Mode | Mirror | Iters | FFTs | Wall (ms) | Total (Ha) | `|E(P) - E(1)|` |"
+        "| Grid | Solver | Ranks | Mode | Mirror | Iters | FFTs | Wall (ms) | Total (Ha) | `|E(P) - E(1)|` |"
     );
-    println!("| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |");
+    println!("| --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |");
 
     let ions = [
         IonicPseudoCharge {
@@ -335,71 +340,76 @@ fn benchmark_mpi_scaling(grids: &[usize]) {
         tau_ha_bohr2: 2.0e-5,
         ..SolvationParams::vaspsol_water()
     };
-    let cfg = SolverConfig {
-        kind: SolverKind::DirectPcg,
-        tolerance: 1.0e-10,
-        max_iterations: 300,
-        diis_history: 8,
-        warm_start: true,
-    };
 
     for &n_axis in grids {
         let cell = cubic_cell(16.0);
         let dims = [n_axis, n_axis, n_axis];
         let global_n0 = build_global_molecular_density(&cell, dims, 4.0);
-        let mut ref_cold_ha: Option<f64> = None;
-        let mut ref_warm_ha: Option<f64> = None;
 
-        for ranks in [1usize, 2, 4] {
-            let runs = dft_mpi::simulate(ranks, |comm| {
-                let mut ws = SolvationWorkspace::new(&cell, dims, comm).unwrap();
-                let owned = ws.owned_real_grid_indices();
-                let n0: Vec<f64> = owned.iter().map(|&idx| global_n0[idx]).collect();
-                let n1 = perturb_density(&n0, &owned, dims, 1.0e-3);
+        for kind in [SolverKind::DirectPcg, SolverKind::HybridFisicaroDirect] {
+            let cfg = SolverConfig {
+                kind,
+                tolerance: 1.0e-10,
+                max_iterations: 300,
+                diis_history: 8,
+                warm_start: true,
+            };
+            let mut ref_cold_ha: Option<f64> = None;
+            let mut ref_warm_ha: Option<f64> = None;
 
-                let tc = Instant::now();
-                let cold = ws.evaluate(comm, &n0, &ions, &params, &cfg).unwrap();
-                let cold_ms = tc.elapsed().as_secs_f64() * 1.0e3;
+            for ranks in [1usize, 2, 4] {
+                let runs = dft_mpi::simulate(ranks, |comm| {
+                    let mut ws = SolvationWorkspace::new(&cell, dims, comm).unwrap();
+                    let owned = ws.owned_real_grid_indices();
+                    let n0: Vec<f64> = owned.iter().map(|&idx| global_n0[idx]).collect();
+                    let n1 = perturb_density(&n0, &owned, dims, 1.0e-3);
 
-                let tw = Instant::now();
-                let warm = ws.evaluate(comm, &n1, &ions, &params, &cfg).unwrap();
-                let warm_ms = tw.elapsed().as_secs_f64() * 1.0e3;
+                    let tc = Instant::now();
+                    let cold = ws.evaluate(comm, &n0, &ions, &params, &cfg).unwrap();
+                    let cold_ms = tc.elapsed().as_secs_f64() * 1.0e3;
 
-                (
-                    cold.total_ha,
-                    cold.report,
-                    cold_ms,
-                    warm.total_ha,
-                    warm.report,
-                    warm_ms,
-                )
-            });
+                    let tw = Instant::now();
+                    let warm = ws.evaluate(comm, &n1, &ions, &params, &cfg).unwrap();
+                    let warm_ms = tw.elapsed().as_secs_f64() * 1.0e3;
 
-            let (cold_ha, cold_rep, _, warm_ha, warm_rep, _) = runs[0];
-            for r in &runs[1..] {
-                assert!((r.0 - cold_ha).abs() < 1.0e-12);
-                assert!((r.3 - warm_ha).abs() < 1.0e-12);
+                    (
+                        cold.total_ha,
+                        cold.report,
+                        cold_ms,
+                        warm.total_ha,
+                        warm.report,
+                        warm_ms,
+                    )
+                });
+
+                let (cold_ha, cold_rep, _, warm_ha, warm_rep, _) = runs[0];
+                for r in &runs[1..] {
+                    assert!((r.0 - cold_ha).abs() < 1.0e-12);
+                    assert!((r.3 - warm_ha).abs() < 1.0e-12);
+                }
+                let cold_ms = runs.iter().map(|r| r.2).fold(0.0_f64, f64::max);
+                let warm_ms = runs.iter().map(|r| r.5).fold(0.0_f64, f64::max);
+
+                let e1_cold = *ref_cold_ha.get_or_insert(cold_ha);
+                let e1_warm = *ref_warm_ha.get_or_insert(warm_ha);
+
+                println!(
+                    "| {n_axis}^3 | {} | {ranks} | cold | {} | {} | {} | {cold_ms:.2} | {cold_ha:.10} | {:.2e} |",
+                    solver_label(kind),
+                    cold_rep.mirror_paired,
+                    cold_rep.iterations,
+                    cold_rep.fft_count,
+                    (cold_ha - e1_cold).abs()
+                );
+                println!(
+                    "| {n_axis}^3 | {} | {ranks} | warm(1e-3) | {} | {} | {} | {warm_ms:.2} | {warm_ha:.10} | {:.2e} |",
+                    solver_label(kind),
+                    warm_rep.mirror_paired,
+                    warm_rep.iterations,
+                    warm_rep.fft_count,
+                    (warm_ha - e1_warm).abs()
+                );
             }
-            let cold_ms = runs.iter().map(|r| r.2).fold(0.0_f64, f64::max);
-            let warm_ms = runs.iter().map(|r| r.5).fold(0.0_f64, f64::max);
-
-            let e1_cold = *ref_cold_ha.get_or_insert(cold_ha);
-            let e1_warm = *ref_warm_ha.get_or_insert(warm_ha);
-
-            println!(
-                "| {n_axis}^3 | {ranks} | cold | {} | {} | {} | {cold_ms:.2} | {cold_ha:.10} | {:.2e} |",
-                cold_rep.mirror_paired,
-                cold_rep.iterations,
-                cold_rep.fft_count,
-                (cold_ha - e1_cold).abs()
-            );
-            println!(
-                "| {n_axis}^3 | {ranks} | warm(1e-3) | {} | {} | {} | {warm_ms:.2} | {warm_ha:.10} | {:.2e} |",
-                warm_rep.mirror_paired,
-                warm_rep.iterations,
-                warm_rep.fft_count,
-                (warm_ha - e1_warm).abs()
-            );
         }
     }
 }

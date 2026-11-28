@@ -860,7 +860,12 @@ impl PdeSolver {
         }
         if b_norm == 0.0 {
             out_phi_g.fill(Complex64::default());
-            if config.kind == SolverKind::DirectPcg {
+            if matches!(
+                config.kind,
+                SolverKind::DirectPcg
+                    | SolverKind::FisicaroPcg
+                    | SolverKind::HybridFisicaroDirect
+            ) {
                 self.save_warm_start(out_phi_g, has_kappa);
             }
             return Ok(SolveReport {
@@ -901,6 +906,7 @@ impl PdeSolver {
                 b_scale,
                 tol_abs,
                 config,
+                true,
                 out_phi_g,
             ),
             SolverKind::PolarizationDiis => self.solve_polarization_diis(
@@ -914,6 +920,32 @@ impl PdeSolver {
                 config,
                 out_phi_g,
             ),
+            SolverKind::HybridFisicaroDirect => self.solve_hybrid_fisicaro_direct(
+                comm,
+                eps_planes,
+                kappa2_planes,
+                has_kappa,
+                eps_bar,
+                eps_max,
+                kappa2_bar,
+                b_scale,
+                tol_abs,
+                config,
+                out_phi_g,
+            ),
+        }
+    }
+
+    fn fill_direct_precond(&mut self, eps_bar: f64, kappa2_bar: f64, has_kappa: bool) {
+        // 0-FFT strictly-SPD G-space preconditioner with optimal geometric-mean `eps_bar`
+        // (minimizing kappa_2(M^{-1} A) <= eps_max/eps_min) and exact `g2` (including the
+        // 7 even-Nyquist corner modes where D_a = 0 so A acts solely via kappa2).
+        for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
+            *p = if !has_kappa && g2 == 0.0 {
+                0.0
+            } else {
+                1.0 / (eps_bar * g2 + kappa2_bar)
+            };
         }
     }
 
@@ -932,18 +964,7 @@ impl PdeSolver {
         config: &SolverConfig,
         out_phi_g: &mut [Complex64],
     ) -> Result<SolveReport, SolvationError> {
-        let volume = self.engine.volume;
-
-        // 0-FFT strictly-SPD G-space preconditioner with optimal geometric-mean `eps_bar`
-        // (minimizing kappa_2(M^{-1} A) <= eps_max/eps_min) and exact `g2` (including the
-        // 7 even-Nyquist corner modes where D_a = 0 so A acts solely via kappa2).
-        for (p, &g2) in self.precond.iter_mut().zip(&self.engine.g2) {
-            *p = if !has_kappa && g2 == 0.0 {
-                0.0
-            } else {
-                1.0 / (eps_bar * g2 + kappa2_bar)
-            };
-        }
+        self.fill_direct_precond(eps_bar, kappa2_bar, has_kappa);
 
         // Warm-start predictor uses `eps_mean` (matching bulk dielectric screening without
         // overshooting by sqrt(eps_b) in the solvent bulk).
@@ -977,14 +998,48 @@ impl PdeSolver {
             }
         }
 
-        let mut fft_count = self.engine.apply_operator(
+        self.solve_direct_pcg_from_guess(
             comm,
             eps_planes,
             kappa2_planes,
             has_kappa,
+            b_scale,
+            tol_abs,
+            config.max_iterations,
+            SolverKind::DirectPcg,
+            0,
+            0,
+            warm_started,
             out_phi_g,
-            &mut self.w_g,
-        )?;
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_direct_pcg_from_guess<K: Collective>(
+        &mut self,
+        comm: &K,
+        eps_planes: &[f64],
+        kappa2_planes: &[f64],
+        has_kappa: bool,
+        b_scale: f64,
+        tol_abs: f64,
+        max_iterations: usize,
+        report_kind: SolverKind,
+        base_iterations: usize,
+        base_ffts: usize,
+        warm_started: bool,
+        out_phi_g: &mut [Complex64],
+    ) -> Result<SolveReport, SolvationError> {
+        let volume = self.engine.volume;
+        let mut fft_count = base_ffts
+            + self.engine.apply_operator(
+                comm,
+                eps_planes,
+                kappa2_planes,
+                has_kappa,
+                out_phi_g,
+                &mut self.w_g,
+            )?;
         if !has_kappa {
             for &k in &self.engine.zero_g2_indices {
                 self.w_g[k] = Complex64::default();
@@ -1019,8 +1074,8 @@ impl PdeSolver {
         if r_norm <= tol_abs {
             self.save_warm_start(out_phi_g, has_kappa);
             return Ok(SolveReport {
-                kind: SolverKind::DirectPcg,
-                iterations: 0,
+                kind: report_kind,
+                iterations: base_iterations,
                 converged: true,
                 residual_norm: r_norm,
                 relative_residual: r_norm / b_scale,
@@ -1031,7 +1086,7 @@ impl PdeSolver {
         }
 
         let mut scalar_glob = [0.0_f64];
-        for iter in 1..=config.max_iterations {
+        for iter in 1..=max_iterations {
             fft_count += self.engine.apply_operator(
                 comm,
                 eps_planes,
@@ -1091,8 +1146,8 @@ impl PdeSolver {
                 }
                 self.save_warm_start(out_phi_g, has_kappa);
                 return Ok(SolveReport {
-                    kind: SolverKind::DirectPcg,
-                    iterations: iter,
+                    kind: report_kind,
+                    iterations: base_iterations + iter,
                     converged: true,
                     residual_norm: r_norm,
                     relative_residual: r_norm / b_scale,
@@ -1114,9 +1169,74 @@ impl PdeSolver {
         }
 
         Err(SolvationError::NotConverged {
-            iterations: config.max_iterations,
+            iterations: base_iterations + max_iterations,
             residual_norm: r_norm,
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_hybrid_fisicaro_direct<K: Collective>(
+        &mut self,
+        comm: &K,
+        eps_planes: &[f64],
+        kappa2_planes: &[f64],
+        has_kappa: bool,
+        eps_bar: f64,
+        eps_max: f64,
+        kappa2_bar: f64,
+        b_scale: f64,
+        tol_abs: f64,
+        config: &SolverConfig,
+        out_phi_g: &mut [Complex64],
+    ) -> Result<SolveReport, SolvationError> {
+        let warm_started = config.warm_start && self.has_prev && self.prev_has_kappa == has_kappa;
+
+        // Stage 1: fast 2-FFT/iter warm-started Fisicaro PCG predictor.
+        let (stage1_iters, stage1_ffts) = match self.solve_fisicaro_pcg(
+            comm,
+            eps_planes,
+            kappa2_planes,
+            has_kappa,
+            eps_max,
+            b_scale,
+            tol_abs,
+            config,
+            false,
+            out_phi_g,
+        ) {
+            Ok(rep) => (rep.iterations, rep.fft_count),
+            Err(SolvationError::Breakdown(_)) | Err(SolvationError::NotConverged { .. }) => {
+                if warm_started {
+                    out_phi_g.copy_from_slice(&self.prev_phi_g);
+                } else {
+                    out_phi_g.fill(Complex64::default());
+                }
+                if !has_kappa {
+                    for &k in &self.engine.zero_g2_indices {
+                        out_phi_g[k] = Complex64::default();
+                    }
+                }
+                (0, 0)
+            }
+            Err(err) => return Err(err),
+        };
+
+        // Stage 2: exact discrete SPD DirectPcg verification & defect-correction polish.
+        self.fill_direct_precond(eps_bar, kappa2_bar, has_kappa);
+        self.solve_direct_pcg_from_guess(
+            comm,
+            eps_planes,
+            kappa2_planes,
+            has_kappa,
+            b_scale,
+            tol_abs,
+            config.max_iterations,
+            SolverKind::HybridFisicaroDirect,
+            stage1_iters,
+            stage1_ffts,
+            warm_started,
+            out_phi_g,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1130,6 +1250,7 @@ impl PdeSolver {
         b_scale: f64,
         tol_abs: f64,
         config: &SolverConfig,
+        save_warm: bool,
         out_phi_g: &mut [Complex64],
     ) -> Result<SolveReport, SolvationError> {
         let ll = self.engine.local_len();
@@ -1222,9 +1343,19 @@ impl PdeSolver {
             }
         }
 
-        // Initial guess phi_tilde_0 = M_0^{-1} b_tilde (deflated orth to sqrt(eps) if kappa=0).
-        for ((phi, &pre), &r) in out_phi_g.iter_mut().zip(&self.precond).zip(&self.r_g) {
-            *phi = pre * r;
+        // Initial guess phi_tilde_0: warm-started F[sqrt(eps) * prev_phi] or M_0^{-1} b_tilde
+        // (deflated orthogonal to sqrt(eps) when kappa = 0).
+        let warm_started = config.warm_start && self.has_prev && self.prev_has_kappa == has_kappa;
+        if warm_started {
+            out_phi_g.copy_from_slice(&self.prev_phi_g);
+            self.engine
+                .fft
+                .apply_local_batch_planes(comm, out_phi_g, &self.work_r0, 1)?;
+            fft_count += 2;
+        } else {
+            for ((phi, &pre), &r) in out_phi_g.iter_mut().zip(&self.precond).zip(&self.r_g) {
+                *phi = pre * r;
+            }
         }
         if !has_kappa && s_norm2 > 0.0 {
             let mut sp_loc = 0.0_f64;
@@ -1404,6 +1535,10 @@ impl PdeSolver {
             }
         }
 
+        if save_warm {
+            self.save_warm_start(out_phi_g, has_kappa);
+        }
+
         let res_est = r_tilde_norm * eps_max_sqrt;
         Ok(SolveReport {
             kind: SolverKind::FisicaroPcg,
@@ -1413,7 +1548,7 @@ impl PdeSolver {
             relative_residual: res_est / b_scale,
             fft_count,
             mirror_paired: self.engine.mirror_paired(),
-            warm_started: false,
+            warm_started,
         })
     }
 

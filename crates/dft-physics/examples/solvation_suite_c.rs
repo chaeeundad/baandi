@@ -25,7 +25,7 @@
 //!    - `FCG(4)` (exact `A_disc`-orthogonal truncated GCR / Flexible CG over the last 4
 //!      directions `{p_j, A p_j}`, guaranteeing monotone energy-error decrease even for
 //!      variable or coarse-grid non-SPD preconditioners)
-//!    for `inner_k in {4, 8}`, across cold (`tol = 1e-10`) and `warm(1e-3)@1e-5` modes.
+//!      for `inner_k in {4, 8}`, across cold (`tol = 1e-10`) and `warm(1e-3)@1e-5` modes.
 //!
 //! Run:
 //! `cargo run --release -p dft-physics --example solvation_suite_c`
